@@ -1,0 +1,59 @@
+version: '3.8'
+services:
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: converger_dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    ports:
+      - "16686:16686"
+      - "4317:4317"
+
+  grafana:
+    image: grafana/grafana:latest
+    volumes:
+      - ./docker/grafana/provisioning:/etc/grafana/provisioning
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    depends_on:
+      - prometheus
+      - loki
+
+  loki:
+    image: grafana/loki:latest
+    volumes:
+      - ./docker/loki/loki-config.yml:/etc/loki/local-config.yaml
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+
+  otel-collector:
+    image: otel/opentelemetry-collector:latest
+    volumes:
+      - ./docker/otel-collector/otel-config.yml:/etc/otel-collector-config.yaml
+    command: [ "--config=/etc/otel-collector-config.yaml" ]
+    ports:
+      - "4318:4318" # OTLP http receiver
+      - "8889:8889" # Prometheus exporter metrics
+    depends_on:
+      - jaeger
+
+volumes:
+  postgres_data:

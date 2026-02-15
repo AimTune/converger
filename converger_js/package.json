@@ -1,0 +1,12 @@
+{
+  "name": "converger-js",
+  "version": "1.0.0",
+  "description": "JS Client for Converger",
+  "main": "src/converger-client.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "phoenix": "^1.7.0"
+  }
+}

@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="csrf-token" content={get_csrf_token()} />
+    <.live_title suffix=" · Converger Admin">
+      <%= assigns[:page_title] || "Converger" %>
+    </.live_title>
+    <script src="https://cdn.jsdelivr.net/npm/phoenix@1.7.14/priv/static/phoenix.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/phoenix_live_view@0.20.17/priv/static/phoenix_live_view.min.js"></script>
+    <script>
+      // Initialize LiveSocket
+      let liveSocket = new window.LiveView.LiveSocket("/live", window.Phoenix.Socket, {
+        params: {_csrf_token: document.querySelector("meta[name='csrf-token']").getAttribute("content")}
+      })
+      liveSocket.connect()
+      window.liveSocket = liveSocket
+    </script>
+    <style>
+      /* Minimal CSS for Admin Panel since we have no assets pipeline */
+      body { font-family: system-ui, sans-serif; padding: 20px; background: #f0f2f5; }
+      header { background: #fff; padding: 15px; margin-bottom: 20px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+      nav a { margin-right: 15px; text-decoration: none; color: #333; font-weight: bold; }
+      nav a:hover { color: #0069d9; }
+      .card { background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 20px; }
+      table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+      th, td { text-align: left; padding: 10px; border-bottom: 1px solid #eee; }
+      th { background-color: #f8f9fa; }
+      .badge { padding: 4px 8px; border-radius: 4px; font-size: 0.8em; }
+      .badge-active { background: #d4edda; color: #155724; }
+      .badge-inactive { background: #f8d7da; color: #721c24; }
+      button { cursor: pointer; padding: 5px 10px; background: #007bff; color: white; border: none; border-radius: 4px; }
+      button:hover { background: #0056b3; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <nav>
+        <a href={~p"/admin"}>Dashboard</a>
+        <a href={~p"/admin/tenants"}>Tenants</a>
+        <a href={~p"/admin/channels"}>Channels</a>
+        <a href={~p"/admin/conversations"}>Conversations</a>
+      </nav>
+    </header>
+    <%= @inner_content %>
+  </body>
+</html>

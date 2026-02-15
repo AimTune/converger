@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Converger JS Demo</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        .input-group {
+            margin-bottom: 15px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+        }
+
+        input[type="text"] {
+            width: 100%;
+            padding: 8px;
+            box-sizing: border-box;
+        }
+
+        button {
+            padding: 8px 15px;
+            cursor: pointer;
+        }
+
+        #log {
+            border: 1px solid #ccc;
+            height: 300px;
+            overflow-y: scroll;
+            padding: 10px;
+            margin-bottom: 15px;
+            background: #f9f9f9;
+        }
+
+        .message {
+            margin-bottom: 5px;
+            padding: 5px;
+            border-bottom: 1px solid #eee;
+        }
+
+        .message .meta {
+            font-size: 0.8em;
+            color: #666;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>Converger JS Demo <small style="font-size: 0.5em; color: #666;">v2 (Token Auth)</small></h1>
+
+        <div class="input-group">
+            <label>Channel Token (from Admin Panel)</label>
+            <input type="text" id="channelToken" placeholder="JWT Token">
+        </div>
+        <div class="input-group">
+            <label>User ID (Optional)</label>
+            <input type="text" id="userId" placeholder="random if empty">
+        </div>
+
+        <div style="margin-top: 10px; margin-bottom: 20px;">
+            <button id="startBtn" style="background-color: #28a745;">Start New Conversation & Connect</button>
+            <span style="margin: 0 10px;">OR</span>
+            <button id="connectManualBtn" style="background-color: #6c757d;">Connect Manually (User Token
+                required)</button>
+        </div>
+
+        <div id="manualInput" style="display:none; border: 1px solid #ddd; padding: 10px; margin-bottom: 20px;">
+            <h3>Manual Connection</h3>
+            <div class="input-group">
+                <label>User Token</label>
+                <input type="text" id="token" placeholder="JWT Token">
+            </div>
+            <div class="input-group">
+                <label>Conversation ID</label>
+                <input type="text" id="conversationId" placeholder="UUID">
+            </div>
+            <button id="connectBtn">Connect & Join</button>
+        </div>
+
+        <hr>
+
+        <div id="status" style="margin-bottom: 10px; font-weight: bold; color: #666;">Status: Disconnected</div>
+
+        <div id="chatInterface" style="display:none;">
+            <div id="log"></div>
+            <div class="input-group" style="display: flex; gap: 10px;">
+                <input type="text" id="messageInput" placeholder="Type a message...">
+                <button id="sendBtn">Send</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Import using ES modules -->
+    <script type="module">
+        import { ConvergerClient } from './src/converger-client.js';
+    </script>
+
+    <script type="importmap">
+    {
+        "imports": {
+            "phoenix": "https://cdn.jsdelivr.net/npm/phoenix@1.7.0/+esm"
+        }
+    }
+    </script>
+
+    <script type="module">
+        import { ConvergerClient } from './src/converger-client.js';
+
+        const client = new ConvergerClient("ws://localhost:4000/socket");
+        let conversationId = null;
+
+        function updateStatus(msg, color = 'black') {
+            const statusEl = document.getElementById('status');
+            statusEl.innerText = "Status: " + msg;
+            statusEl.style.color = color;
+        }
+
+        async function createConversation(channelToken, userId) {
+            updateStatus("Creating conversation...", "#007bff");
+            // NOTE: We do NOT send channel_id in body. It is extracted from x-channel-token by the backend.
+            const url = 'http://localhost:4000/api/v1/conversations';
+            console.log("Fetching: " + url);
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'x-channel-token': channelToken
+                },
+                body: JSON.stringify({})
+            });
+
+            if (!response.ok) {
+                const err = await response.json();
+                throw new Error("Create Conversation failed: " + (err.error || response.statusText));
+            }
+
+            const data = await response.json();
+            console.log("Conversation Created:", data);
+            return data.data.id;
+        }
+
+        async function generateToken(channelToken, conversationId, userId) {
+            updateStatus("Generating user token...", "#007bff");
+            const response = await fetch('http://localhost:4000/api/v1/tokens', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'x-channel-token': channelToken
+                },
+                body: JSON.stringify({ conversation_id: conversationId, user_id: userId })
+            });
+
+            if (!response.ok) {
+                const err = await response.json();
+                throw new Error("Generate Token failed: " + (err.error || response.statusText));
+            }
+
+            const data = await response.json();
+            console.log("Token Generated:", data);
+            return data.token;
+        }
+
+        document.getElementById('connectManualBtn').addEventListener('click', () => {
+            document.getElementById('manualInput').style.display = 'block';
+        });
+
+        document.getElementById('startBtn').addEventListener('click', async () => {
+            const channelToken = document.getElementById('channelToken').value;
+            const userId = document.getElementById('userId').value || 'user_' + Math.floor(Math.random() * 10000);
+
+            if (!channelToken) {
+                alert("Please provide valid Channel Token");
+                return;
+            }
+
+            try {
+                const cid = await createConversation(channelToken, userId);
+                conversationId = cid;
+
+                // Update UI to show what happened
+                document.getElementById('conversationId').value = cid;
+
+                const token = await generateToken(channelToken, cid, userId);
+                document.getElementById('token').value = token;
+
+                connectAndJoin(token, cid);
+
+            } catch (e) {
+                console.error(e);
+                alert(e.message);
+                updateStatus("Error: " + e.message, "red");
+            }
+        });
+
+        document.getElementById('connectBtn').addEventListener('click', () => {
+            const token = document.getElementById('token').value;
+            conversationId = document.getElementById('conversationId').value;
+
+            if (!token || !conversationId) {
+                alert("Please provide Token and Conversation ID");
+                return;
+            }
+            connectAndJoin(token, conversationId);
+        });
+
+        function connectAndJoin(token, cid) {
+            try {
+                updateStatus("Connecting...", "#007bff");
+                client.connect(token);
+                client.joinConversation(cid);
+
+                client.onActivity((payload) => {
+                    const log = document.getElementById('log');
+                    const el = document.createElement('div');
+                    el.className = 'message';
+                    el.innerHTML = `
+                        <div class="meta">${payload.sender || 'Unknown'} - ${payload.inserted_at || new Date().toISOString()}</div>
+                        <div>${payload.text}</div>
+                    `;
+                    log.appendChild(el);
+                    log.scrollTop = log.scrollHeight;
+                });
+
+                document.getElementById('chatInterface').style.display = 'block';
+                document.getElementById('startBtn').disabled = true;
+                document.getElementById('connectBtn').disabled = true;
+                updateStatus("Connected", "green");
+
+            } catch (e) {
+                console.error(e);
+                alert("Connection failed: " + e.message);
+                updateStatus("Connection Failed", "red");
+            }
+        }
+
+        document.getElementById('sendBtn').addEventListener('click', sendMessage);
+        document.getElementById('messageInput').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') sendMessage();
+        });
+
+        function sendMessage() {
+            const input = document.getElementById('messageInput');
+            const text = input.value;
+            if (!text) return;
+
+            client.sendMessage(text);
+            input.value = '';
+        }
+    </script>
+</body>
+
+</html>

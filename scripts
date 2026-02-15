@@ -1,0 +1,1 @@
+PROMETHEUS_PORT=9571 MIX_ENV=dev mix run -e "Path.wildcard(\"test/support/fixtures/*.ex\") |> Enum.each(&Code.require_file/1); Code.require_file(\"test/load/performance_test.exs\"); Converger.PerformanceTest.run(connections: 1000, messages: 100, live: true, max_concurrency: 100)"
