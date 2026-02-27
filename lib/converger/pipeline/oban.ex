@@ -20,25 +20,21 @@ defmodule Converger.Pipeline.Oban do
 
   @impl true
   def process(activity) do
-    # 1. Broadcast to WebSocket clients (inline - fast)
     Converger.Pipeline.broadcast(activity)
 
-    # 2. Enqueue delivery to external channels (via Oban job)
-    case Converger.Pipeline.resolve_delivery_channel(activity) do
-      nil ->
-        :ok
+    channels = Converger.Pipeline.resolve_delivery_channels(activity)
 
-      channel ->
-        %{activity_id: activity.id, channel_id: channel.id}
-        |> Converger.Workers.ActivityDeliveryWorker.new()
-        |> Oban.insert()
+    Enum.each(channels, fn channel ->
+      %{activity_id: activity.id, channel_id: channel.id}
+      |> Converger.Workers.ActivityDeliveryWorker.new()
+      |> Oban.insert()
 
-        Logger.debug("Delivery enqueued via Oban",
-          activity_id: activity.id,
-          channel_id: channel.id
-        )
+      Logger.debug("Delivery enqueued via Oban",
+        activity_id: activity.id,
+        channel_id: channel.id
+      )
+    end)
 
-        :ok
-    end
+    :ok
   end
 end

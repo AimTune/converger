@@ -58,16 +58,42 @@ defmodule Converger.Pipeline do
 
   @external_delivery_types ~w(webhook whatsapp_meta whatsapp_infobip)
 
-  @doc "Enqueue delivery to external channel if applicable. Returns channel or nil."
-  def resolve_delivery_channel(activity) do
+  @doc """
+  Resolve all channels that should receive a delivery for this activity.
+  Returns a list of Channel structs (may be empty).
+  Includes: primary channel (if external) + routing rule targets (if external and active).
+  """
+  def resolve_delivery_channels(activity) do
     conversation = Converger.Conversations.get_conversation!(activity.conversation_id)
-    channel = Converger.Channels.get_channel!(conversation.channel_id)
+    primary_channel = Converger.Channels.get_channel!(conversation.channel_id)
 
-    if channel.type in @external_delivery_types do
-      channel
-    else
-      nil
-    end
+    primary =
+      if primary_channel.type in @external_delivery_types,
+        do: [primary_channel],
+        else: []
+
+    target_ids =
+      Converger.RoutingRules.resolve_target_channels(
+        primary_channel.id,
+        conversation.tenant_id
+      )
+
+    additional_ids = target_ids -- [primary_channel.id]
+
+    additional =
+      additional_ids
+      |> Enum.map(fn id ->
+        try do
+          Converger.Channels.get_channel!(id)
+        rescue
+          Ecto.NoResultsError -> nil
+        end
+      end)
+      |> Enum.reject(&is_nil/1)
+      |> Enum.filter(&(&1.type in @external_delivery_types))
+      |> Enum.filter(&(&1.status == "active"))
+
+    (primary ++ additional) |> Enum.uniq_by(& &1.id)
   end
 
   @doc "Execute the actual delivery via adapter + delivery tracking."

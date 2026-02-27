@@ -85,23 +85,21 @@ defmodule Converger.Pipeline.Broadway do
 
   @impl true
   def process(activity) do
-    # Broadcast inline (fast, no queuing needed)
     Converger.Pipeline.broadcast(activity)
 
-    # Push to Broadway pipeline for delivery
-    case Converger.Pipeline.resolve_delivery_channel(activity) do
-      nil ->
-        :ok
+    channels = Converger.Pipeline.resolve_delivery_channels(activity)
 
-      channel ->
-        message = %{
-          activity_id: activity.id,
-          channel_id: channel.id,
-          channel_type: channel.type
-        }
+    Enum.each(channels, fn channel ->
+      message = %{
+        activity_id: activity.id,
+        channel_id: channel.id,
+        channel_type: channel.type
+      }
 
-        push_message(message)
-    end
+      push_message(message)
+    end)
+
+    :ok
   end
 
   defp push_message(message) do

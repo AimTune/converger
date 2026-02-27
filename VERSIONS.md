@@ -83,10 +83,21 @@
 - [x] Config-driven backend selection (`config :converger, pipeline: [backend: ...]`)
 - [x] Test env uses Pipeline.Inline for deterministic testing
 
-## v2.2 — Future Enhancements (Planned)
+## v2.2 — Message Routing & Fan-Out (Completed)
 
-- [ ] Message routing rules (source channel -> target channels)
-- [ ] Multi-channel conversations (fan-out to multiple targets)
+- [x] Routing rules data model (`routing_rules` table with UUID array targets)
+- [x] RoutingRule schema + context with full CRUD
+- [x] Tenant isolation validation (all channels must belong to same tenant)
+- [x] Cycle detection (BFS-based write-time validation prevents routing loops)
+- [x] Self-reference validation (source channel cannot be in targets)
+- [x] Pipeline multi-channel fan-out (`resolve_delivery_channels` returns list)
+- [x] All 3 pipeline backends updated (Oban, Broadway, Inline)
+- [x] REST API: `GET/POST/PUT/DELETE /api/v1/routing_rules`
+- [x] Admin LiveView: `/admin/routing_rules` (create, toggle, delete with tenant-filtered dropdowns)
+- [x] Router updated with API + admin routes
+
+## v2.3 — Future Enhancements (Planned)
+
 - [ ] Media message support (images, documents, audio, video)
 - [ ] Template message support (WhatsApp HSM templates)
 - [ ] Delivery receipts / read receipts

@@ -18,28 +18,24 @@ defmodule Converger.Pipeline.Inline do
 
   @impl true
   def process(activity) do
-    # 1. Broadcast to WebSocket clients
     Converger.Pipeline.broadcast(activity)
 
-    # 2. Deliver to external channel synchronously
-    case Converger.Pipeline.resolve_delivery_channel(activity) do
-      nil ->
-        :ok
+    channels = Converger.Pipeline.resolve_delivery_channels(activity)
 
-      channel ->
-        case Converger.Pipeline.deliver(activity, channel) do
-          :ok ->
-            :ok
+    Enum.each(channels, fn channel ->
+      case Converger.Pipeline.deliver(activity, channel) do
+        :ok ->
+          :ok
 
-          {:error, reason} ->
-            Logger.warning("Inline delivery failed",
-              activity_id: activity.id,
-              channel_id: channel.id,
-              error: inspect(reason)
-            )
+        {:error, reason} ->
+          Logger.warning("Inline delivery failed",
+            activity_id: activity.id,
+            channel_id: channel.id,
+            error: inspect(reason)
+          )
+      end
+    end)
 
-            :ok
-        end
-    end
+    :ok
   end
 end

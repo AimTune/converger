@@ -27,6 +27,9 @@ defmodule ConvergerWeb.Router do
       resources "/activities", ActivityController, only: [:create, :index]
     end
 
+    resources "/routing_rules", RoutingRuleController,
+      only: [:index, :show, :create, :update, :delete]
+
     # Inbound webhook endpoints for external channel integrations
     get "/channels/:channel_id/inbound", InboundController, :verify
     post "/channels/:channel_id/inbound", InboundController, :create
@@ -40,6 +43,7 @@ defmodule ConvergerWeb.Router do
     live "/channels", ChannelLive
     live "/conversations", ConversationLive, :index
     live "/conversations/:id", ConversationLive, :show
+    live "/routing_rules", RoutingRuleLive
   end
 
   # Enable Swoosh mailbox preview in development
