@@ -30,6 +30,9 @@
       .badge { padding: 4px 8px; border-radius: 4px; font-size: 0.8em; }
       .badge-active { background: #d4edda; color: #155724; }
       .badge-inactive { background: #f8d7da; color: #721c24; }
+      .badge-inbound { background: #e3f2fd; color: #1565c0; }
+      .badge-outbound { background: #fce4ec; color: #c62828; }
+      .badge-duplex { background: #e8f5e9; color: #2e7d32; }
       button { cursor: pointer; padding: 5px 10px; background: #007bff; color: white; border: none; border-radius: 4px; }
       button:hover { background: #0056b3; }
     </style>
@@ -42,6 +45,7 @@
         <a href={~p"/admin/channels"}>Channels</a>
         <a href={~p"/admin/conversations"}>Conversations</a>
         <a href={~p"/admin/routing_rules"}>Routing Rules</a>
+        <a href={~p"/admin/audit_logs"}>Audit Logs</a>
       </nav>
     </header>
     <%= @inner_content %>

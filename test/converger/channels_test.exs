@@ -32,10 +32,6 @@ defmodule Converger.ChannelsTest do
       channel = channel_fixture(tenant)
       old_secret = channel.secret
 
-      # We don't have a specific regenerate function yet, let's see if update works
-      # Actually, the logic for autogenerating might be in the changeset.
-      # If we pass a flag or just empty secret, maybe it regenerates?
-      # Let's check the context code or just test if we can manually set it.
       assert {:ok, %Channel{} = updated_channel} =
                Channels.update_channel(channel, %{secret: "newsecret"})
 
@@ -50,6 +46,164 @@ defmodule Converger.ChannelsTest do
 
       assert Channels.list_channels_for_tenant(tenant.id) == [channel1]
       assert Channels.list_channels_for_tenant(tenant2.id) == [channel2]
+    end
+  end
+
+  describe "channel mode" do
+    alias Converger.Channels.Channel
+
+    import Converger.TenantsFixtures
+    import Converger.ChannelsFixtures
+
+    setup do
+      tenant = tenant_fixture()
+      %{tenant: tenant}
+    end
+
+    test "defaults mode to duplex for webhook", %{tenant: tenant} do
+      {:ok, channel} =
+        Channels.create_channel(%{
+          name: "test-webhook",
+          type: "webhook",
+          status: "active",
+          tenant_id: tenant.id,
+          config: %{"url" => "https://example.com"}
+        })
+
+      assert channel.mode == "duplex"
+    end
+
+    test "echo channel rejects duplex mode", %{tenant: tenant} do
+      {:error, changeset} =
+        Channels.create_channel(%{
+          name: "test-echo",
+          type: "echo",
+          mode: "duplex",
+          status: "active",
+          tenant_id: tenant.id
+        })
+
+      assert %{mode: [_]} = errors_on(changeset)
+    end
+
+    test "echo channel rejects inbound mode", %{tenant: tenant} do
+      {:error, changeset} =
+        Channels.create_channel(%{
+          name: "test-echo",
+          type: "echo",
+          mode: "inbound",
+          status: "active",
+          tenant_id: tenant.id
+        })
+
+      assert %{mode: [_]} = errors_on(changeset)
+    end
+
+    test "echo channel accepts outbound mode", %{tenant: tenant} do
+      {:ok, channel} =
+        Channels.create_channel(%{
+          name: "test-echo",
+          type: "echo",
+          mode: "outbound",
+          status: "active",
+          tenant_id: tenant.id
+        })
+
+      assert channel.mode == "outbound"
+    end
+
+    test "websocket channel only supports outbound", %{tenant: tenant} do
+      {:error, changeset} =
+        Channels.create_channel(%{
+          name: "test-ws",
+          type: "websocket",
+          mode: "duplex",
+          status: "active",
+          tenant_id: tenant.id
+        })
+
+      assert %{mode: [_]} = errors_on(changeset)
+
+      {:ok, channel} =
+        Channels.create_channel(%{
+          name: "test-ws",
+          type: "websocket",
+          mode: "outbound",
+          status: "active",
+          tenant_id: tenant.id
+        })
+
+      assert channel.mode == "outbound"
+    end
+
+    test "webhook channel supports all modes", %{tenant: tenant} do
+      for mode <- ~w(inbound outbound duplex) do
+        {:ok, channel} =
+          Channels.create_channel(%{
+            name: "test-#{mode}",
+            type: "webhook",
+            mode: mode,
+            status: "active",
+            tenant_id: tenant.id,
+            config: %{"url" => "https://example.com"}
+          })
+
+        assert channel.mode == mode
+      end
+    end
+
+    test "rejects invalid mode", %{tenant: tenant} do
+      {:error, changeset} =
+        Channels.create_channel(%{
+          name: "test",
+          type: "webhook",
+          mode: "invalid",
+          status: "active",
+          tenant_id: tenant.id,
+          config: %{"url" => "https://example.com"}
+        })
+
+      assert %{mode: [_ | _]} = errors_on(changeset)
+    end
+
+    test "list_channels_by_mode/1 filters correctly", %{tenant: tenant} do
+      _outbound = channel_fixture(tenant, %{name: "out", type: "echo", mode: "outbound"})
+
+      inbound =
+        webhook_channel_fixture(tenant, %{name: "in", mode: "inbound"})
+
+      duplex =
+        webhook_channel_fixture(tenant, %{name: "dup", mode: "duplex"})
+
+      inbound_results = Channels.list_channels_by_mode("inbound")
+      assert length(inbound_results) == 1
+      assert hd(inbound_results).id == inbound.id
+
+      duplex_results = Channels.list_channels_by_mode("duplex")
+      assert length(duplex_results) == 1
+      assert hd(duplex_results).id == duplex.id
+    end
+
+    test "list_inbound_capable_channels/1 returns inbound and duplex", %{tenant: tenant} do
+      _outbound = channel_fixture(tenant, %{name: "out", type: "echo", mode: "outbound"})
+      _inbound = webhook_channel_fixture(tenant, %{name: "in", mode: "inbound"})
+      _duplex = webhook_channel_fixture(tenant, %{name: "dup", mode: "duplex"})
+
+      results = Channels.list_inbound_capable_channels(tenant.id)
+      assert length(results) == 2
+      modes = Enum.map(results, & &1.mode) |> Enum.sort()
+      assert modes == ["duplex", "inbound"]
+    end
+
+    test "list_outbound_capable_channels/1 returns outbound and duplex", %{tenant: tenant} do
+      _outbound = channel_fixture(tenant, %{name: "out", type: "echo", mode: "outbound"})
+      _inbound = webhook_channel_fixture(tenant, %{name: "in", mode: "inbound"})
+      _duplex = webhook_channel_fixture(tenant, %{name: "dup", mode: "duplex"})
+
+      results = Channels.list_outbound_capable_channels(tenant.id)
+      assert length(results) == 2
+      modes = Enum.map(results, & &1.mode) |> Enum.sort()
+      assert modes == ["duplex", "outbound"]
     end
   end
 end

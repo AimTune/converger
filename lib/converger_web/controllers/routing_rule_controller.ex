@@ -23,7 +23,7 @@ defmodule ConvergerWeb.RoutingRuleController do
     tenant = conn.assigns.tenant
     attrs = Map.put(params, "tenant_id", tenant.id)
 
-    case RoutingRules.create_routing_rule(attrs) do
+    case RoutingRules.create_routing_rule(attrs, build_actor(conn)) do
       {:ok, rule} ->
         conn
         |> put_status(:created)
@@ -38,7 +38,7 @@ defmodule ConvergerWeb.RoutingRuleController do
     tenant = conn.assigns.tenant
     rule = RoutingRules.get_routing_rule!(id, tenant.id)
 
-    case RoutingRules.update_routing_rule(rule, params) do
+    case RoutingRules.update_routing_rule(rule, params, build_actor(conn)) do
       {:ok, rule} -> render(conn, :show, routing_rule: rule)
       {:error, changeset} -> {:error, changeset}
     end
@@ -48,7 +48,11 @@ defmodule ConvergerWeb.RoutingRuleController do
     tenant = conn.assigns.tenant
     rule = RoutingRules.get_routing_rule!(id, tenant.id)
 
-    {:ok, _} = RoutingRules.delete_routing_rule(rule)
+    {:ok, _} = RoutingRules.delete_routing_rule(rule, build_actor(conn))
     send_resp(conn, :no_content, "")
+  end
+
+  defp build_actor(conn) do
+    %{type: "tenant_api", id: conn.assigns.tenant.id}
   end
 end

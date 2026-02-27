@@ -8,6 +8,8 @@ defmodule ConvergerWeb.Admin.DashboardLive do
   alias Converger.Activities.Activity
   alias Converger.Deliveries
 
+  import Ecto.Query
+
   def mount(_params, _session, socket) do
     stats = %{
       tenants: Repo.aggregate(Tenant, :count, :id),
@@ -16,9 +18,14 @@ defmodule ConvergerWeb.Admin.DashboardLive do
       activities: Repo.aggregate(Activity, :count, :id)
     }
 
+    channel_modes =
+      from(c in Channel, group_by: c.mode, select: {c.mode, count(c.id)})
+      |> Repo.all()
+      |> Map.new()
+
     delivery_stats = Deliveries.count_by_status()
 
-    {:ok, assign(socket, stats: stats, delivery_stats: delivery_stats, page_title: "Dashboard")}
+    {:ok, assign(socket, stats: stats, channel_modes: channel_modes, delivery_stats: delivery_stats, page_title: "Dashboard")}
   end
 
   def render(assigns) do
@@ -32,6 +39,11 @@ defmodule ConvergerWeb.Admin.DashboardLive do
       <div class="card">
         <h3>Channels</h3>
         <p style="font-size: 2em; font-weight: bold;"><%= @stats.channels %></p>
+        <div style="display: flex; gap: 8px; margin-top: 8px;">
+          <span class="badge badge-inbound">← <%= Map.get(@channel_modes, "inbound", 0) %></span>
+          <span class="badge badge-outbound">→ <%= Map.get(@channel_modes, "outbound", 0) %></span>
+          <span class="badge badge-duplex">↔ <%= Map.get(@channel_modes, "duplex", 0) %></span>
+        </div>
       </div>
       <div class="card">
         <h3>Conversations</h3>

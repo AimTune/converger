@@ -49,7 +49,9 @@ defmodule ConvergerWeb.Admin.CrudTest do
 
       # Create
       assert view
-             |> form("form", channel: %{name: "New Channel", tenant_id: tenant.id})
+             |> form("form",
+               channel: %{name: "New Channel", tenant_id: tenant.id, type: "echo", mode: "outbound"}
+             )
              |> render_submit() =~ "Channel created"
 
       channel = hd(Channels.list_channels())

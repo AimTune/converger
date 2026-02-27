@@ -9,6 +9,7 @@ defmodule ConvergerWeb.Admin.RoutingRuleLive do
   def mount(_params, _session, socket) do
     tenants = Tenants.list_tenants()
     channels = Channels.list_channels()
+    actor = build_actor(socket)
 
     {:ok,
      assign(socket,
@@ -21,7 +22,8 @@ defmodule ConvergerWeb.Admin.RoutingRuleLive do
        selected_tenant_id: nil,
        selected_source_channel_id: nil,
        form: to_form(RoutingRules.change_routing_rule(%RoutingRule{})),
-       page_title: "Routing Rules"
+       page_title: "Routing Rules",
+       actor: actor
      )}
   end
 
@@ -61,7 +63,7 @@ defmodule ConvergerWeb.Admin.RoutingRuleLive do
     target_ids = Enum.reject(target_ids, &(&1 == ""))
     params = Map.put(params, "target_channel_ids", target_ids)
 
-    case RoutingRules.create_routing_rule(params) do
+    case RoutingRules.create_routing_rule(params, socket.assigns.actor) do
       {:ok, _rule} ->
         {:noreply,
          socket
@@ -84,7 +86,7 @@ defmodule ConvergerWeb.Admin.RoutingRuleLive do
   def handle_event("toggle_enabled", %{"id" => id}, socket) do
     rule = RoutingRules.get_routing_rule!(id)
 
-    case RoutingRules.toggle_routing_rule(rule) do
+    case RoutingRules.toggle_routing_rule(rule, socket.assigns.actor) do
       {:ok, _} ->
         {:noreply,
          assign(socket, routing_rules: RoutingRules.list_routing_rules())
@@ -98,7 +100,7 @@ defmodule ConvergerWeb.Admin.RoutingRuleLive do
   def handle_event("delete", %{"id" => id}, socket) do
     rule = RoutingRules.get_routing_rule!(id)
 
-    case RoutingRules.delete_routing_rule(rule) do
+    case RoutingRules.delete_routing_rule(rule, socket.assigns.actor) do
       {:ok, _} ->
         {:noreply,
          assign(socket, routing_rules: RoutingRules.list_routing_rules())
@@ -106,6 +108,13 @@ defmodule ConvergerWeb.Admin.RoutingRuleLive do
 
       {:error, _} ->
         {:noreply, put_flash(socket, :error, "Failed to delete rule")}
+    end
+  end
+
+  defp build_actor(socket) do
+    case get_connect_info(socket, :peer_data) do
+      %{address: address} -> %{type: "admin", id: address |> :inet.ntoa() |> to_string()}
+      _ -> %{type: "admin", id: "unknown"}
     end
   end
 

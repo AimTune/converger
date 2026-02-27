@@ -7,8 +7,11 @@ defmodule Converger.RoutingRules do
   """
 
   import Ecto.Query, warn: false
+  alias Ecto.Multi
   alias Converger.Repo
   alias Converger.RoutingRules.RoutingRule
+  alias Converger.AuditLogs
+  alias Converger.AuditLogs.Changes
 
   def list_routing_rules do
     RoutingRule
@@ -31,7 +34,7 @@ defmodule Converger.RoutingRules do
     Repo.get_by!(RoutingRule, id: id, tenant_id: tenant_id)
   end
 
-  def create_routing_rule(attrs) do
+  def create_routing_rule(attrs, actor \\ nil) do
     changeset =
       %RoutingRule{}
       |> RoutingRule.changeset(attrs)
@@ -39,10 +42,31 @@ defmodule Converger.RoutingRules do
       |> validate_channel_modes()
       |> validate_no_cycle()
 
-    Repo.insert(changeset)
+    if actor do
+      Multi.new()
+      |> Multi.insert(:routing_rule, changeset)
+      |> Multi.insert(:audit_log, fn %{routing_rule: rule} ->
+        AuditLogs.build_audit_log_entry(%{
+          tenant_id: rule.tenant_id,
+          actor_type: actor.type,
+          actor_id: actor.id,
+          action: "create",
+          resource_type: "routing_rule",
+          resource_id: rule.id,
+          changes: Changes.for_create(rule)
+        })
+      end)
+      |> Repo.transaction()
+      |> case do
+        {:ok, %{routing_rule: rule}} -> {:ok, rule}
+        {:error, :routing_rule, changeset, _} -> {:error, changeset}
+      end
+    else
+      Repo.insert(changeset)
+    end
   end
 
-  def update_routing_rule(%RoutingRule{} = rule, attrs) do
+  def update_routing_rule(%RoutingRule{} = rule, attrs, actor \\ nil) do
     changeset =
       rule
       |> RoutingRule.changeset(attrs)
@@ -50,13 +74,84 @@ defmodule Converger.RoutingRules do
       |> validate_channel_modes()
       |> validate_no_cycle()
 
-    Repo.update(changeset)
+    if actor do
+      Multi.new()
+      |> Multi.update(:routing_rule, changeset)
+      |> Multi.insert(:audit_log, fn %{routing_rule: updated} ->
+        AuditLogs.build_audit_log_entry(%{
+          tenant_id: rule.tenant_id,
+          actor_type: actor.type,
+          actor_id: actor.id,
+          action: "update",
+          resource_type: "routing_rule",
+          resource_id: rule.id,
+          changes: Changes.for_update(rule, updated)
+        })
+      end)
+      |> Repo.transaction()
+      |> case do
+        {:ok, %{routing_rule: updated}} -> {:ok, updated}
+        {:error, :routing_rule, changeset, _} -> {:error, changeset}
+      end
+    else
+      Repo.update(changeset)
+    end
   end
 
-  def delete_routing_rule(%RoutingRule{} = rule), do: Repo.delete(rule)
+  def delete_routing_rule(%RoutingRule{} = rule, actor \\ nil) do
+    if actor do
+      Multi.new()
+      |> Multi.insert(:audit_log, fn _ ->
+        AuditLogs.build_audit_log_entry(%{
+          tenant_id: rule.tenant_id,
+          actor_type: actor.type,
+          actor_id: actor.id,
+          action: "delete",
+          resource_type: "routing_rule",
+          resource_id: rule.id,
+          changes: Changes.for_delete(rule)
+        })
+      end)
+      |> Multi.delete(:routing_rule, rule)
+      |> Repo.transaction()
+      |> case do
+        {:ok, %{routing_rule: rule}} -> {:ok, rule}
+        {:error, :routing_rule, changeset, _} -> {:error, changeset}
+      end
+    else
+      Repo.delete(rule)
+    end
+  end
 
-  def toggle_routing_rule(%RoutingRule{} = rule) do
-    update_routing_rule(rule, %{enabled: !rule.enabled})
+  def toggle_routing_rule(%RoutingRule{} = rule, actor \\ nil) do
+    changeset =
+      rule
+      |> RoutingRule.changeset(%{enabled: !rule.enabled})
+      |> validate_tenant_isolation()
+      |> validate_no_cycle()
+
+    if actor do
+      Multi.new()
+      |> Multi.update(:routing_rule, changeset)
+      |> Multi.insert(:audit_log, fn %{routing_rule: updated} ->
+        AuditLogs.build_audit_log_entry(%{
+          tenant_id: rule.tenant_id,
+          actor_type: actor.type,
+          actor_id: actor.id,
+          action: "toggle_enabled",
+          resource_type: "routing_rule",
+          resource_id: rule.id,
+          changes: Changes.for_update(rule, updated)
+        })
+      end)
+      |> Repo.transaction()
+      |> case do
+        {:ok, %{routing_rule: updated}} -> {:ok, updated}
+        {:error, :routing_rule, changeset, _} -> {:error, changeset}
+      end
+    else
+      Repo.update(changeset)
+    end
   end
 
   def change_routing_rule(%RoutingRule{} = rule, attrs \\ %{}) do

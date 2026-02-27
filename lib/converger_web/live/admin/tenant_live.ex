@@ -7,16 +7,19 @@ defmodule ConvergerWeb.Admin.TenantLive do
   def mount(_params, _session, socket) do
     if connected?(socket), do: Phoenix.PubSub.subscribe(Converger.PubSub, "tenants")
 
+    actor = build_actor(socket)
+
     {:ok,
      assign(socket,
        tenants: list_tenants(),
        page_title: "Tenants",
-       form: to_form(Tenants.change_tenant(%Tenant{}))
+       form: to_form(Tenants.change_tenant(%Tenant{})),
+       actor: actor
      )}
   end
 
   def handle_event("save", %{"tenant" => params}, socket) do
-    case Tenants.create_tenant(params) do
+    case Tenants.create_tenant(params, socket.assigns.actor) do
       {:ok, _tenant} ->
         {:noreply,
          socket
@@ -32,7 +35,7 @@ defmodule ConvergerWeb.Admin.TenantLive do
     tenant = Tenants.get_tenant!(id)
     new_status = if tenant.status == "active", do: "inactive", else: "active"
 
-    case Tenants.update_tenant(tenant, %{status: new_status}) do
+    case Tenants.update_tenant(tenant, %{status: new_status}, socket.assigns.actor) do
       {:ok, _tenant} ->
         {:noreply, assign(socket, tenants: list_tenants()) |> put_flash(:info, "Status updated")}
 
@@ -44,7 +47,7 @@ defmodule ConvergerWeb.Admin.TenantLive do
   def handle_event("delete", %{"id" => id}, socket) do
     tenant = Tenants.get_tenant!(id)
 
-    case Tenants.delete_tenant(tenant) do
+    case Tenants.delete_tenant(tenant, socket.assigns.actor) do
       {:ok, _} ->
         {:noreply, assign(socket, tenants: list_tenants()) |> put_flash(:info, "Tenant deleted")}
 
@@ -60,6 +63,13 @@ defmodule ConvergerWeb.Admin.TenantLive do
 
   defp list_tenants do
     Tenants.list_tenants() |> Enum.sort_by(& &1.inserted_at, :desc)
+  end
+
+  defp build_actor(socket) do
+    case get_connect_info(socket, :peer_data) do
+      %{address: address} -> %{type: "admin", id: address |> :inet.ntoa() |> to_string()}
+      _ -> %{type: "admin", id: "unknown"}
+    end
   end
 
   def render(assigns) do

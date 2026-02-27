@@ -44,6 +44,7 @@ defmodule ConvergerWeb.Router do
     live "/conversations", ConversationLive, :index
     live "/conversations/:id", ConversationLive, :show
     live "/routing_rules", RoutingRuleLive
+    live "/audit_logs", AuditLogLive
   end
 
   # Enable Swoosh mailbox preview in development

@@ -9,7 +9,9 @@
       "Bash(docker compose down -v)",
       "Bash(docker compose build app)",
       "Bash(docker compose up -d app)",
-      "Bash(mix deps.get)"
+      "Bash(mix deps.get)",
+      "Bash(mix ecto.migrations)",
+      "Bash(MIX_ENV=test mix test)"
     ]
   }
 }

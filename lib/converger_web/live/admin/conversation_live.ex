@@ -53,6 +53,10 @@ defmodule ConvergerWeb.Admin.ConversationLive do
     end
   end
 
+  defp mode_arrow("inbound"), do: "←"
+  defp mode_arrow("outbound"), do: "→"
+  defp mode_arrow("duplex"), do: "↔"
+
   defp render_index(assigns) do
     ~H"""
     <h1>Conversations</h1>
@@ -75,7 +79,7 @@ defmodule ConvergerWeb.Admin.ConversationLive do
             <select name="filters[channel_id]">
               <option value="">All Channels</option>
               <option :for={c <- @channels} value={c.id} selected={@filters["channel_id"] == c.id}>
-                <%= c.name %> (<%= c.tenant.name %>)
+                <%= c.name %> (<%= c.type %> <%= mode_arrow(c.mode) %>) - <%= c.tenant.name %>
               </option>
             </select>
           </div>
@@ -110,7 +114,12 @@ defmodule ConvergerWeb.Admin.ConversationLive do
           <tr :for={c <- @conversations}>
             <td><small><%= c.id %></small></td>
             <td><%= c.tenant.name %></td>
-            <td><%= c.channel.name %></td>
+            <td>
+              <%= c.channel.name %>
+              <span class={"badge badge-#{c.channel.mode}"} style="margin-left: 4px; font-size: 0.75em;">
+                <%= mode_arrow(c.channel.mode) %>
+              </span>
+            </td>
             <td>
               <span class={"badge badge-#{c.status}"}>
                 <%= c.status %>
@@ -145,7 +154,10 @@ defmodule ConvergerWeb.Admin.ConversationLive do
         </div>
         <div>
           <label>Channel</label>
-          <p><%= @conversation.channel.name %> (<%= @conversation.channel.type %>)</p>
+          <p>
+            <%= @conversation.channel.name %> (<%= @conversation.channel.type %>)
+            <span class={"badge badge-#{@conversation.channel.mode}"}><%= mode_arrow(@conversation.channel.mode) %></span>
+          </p>
           <label>Status</label>
           <p>
             <span class={"badge badge-#{@conversation.status}"}>
