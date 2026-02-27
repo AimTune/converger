@@ -69,7 +69,7 @@ config :opentelemetry,
     {:otel_batch_processor,
      %{
        exporter:
-         {:otel_exporter_otlp,
+         {:otel_exporter_traces_otlp,
           %{
             protocol: :http_protobuf,
             endpoints: ["http://localhost:4318"]

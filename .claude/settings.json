@@ -6,7 +6,10 @@
       "Bash(mix format)",
       "Bash(mix test)",
       "Bash(docker compose up -d db)",
-      "Bash(docker compose down -v)"
+      "Bash(docker compose down -v)",
+      "Bash(docker compose build app)",
+      "Bash(docker compose up -d app)",
+      "Bash(mix deps.get)"
     ]
   }
 }

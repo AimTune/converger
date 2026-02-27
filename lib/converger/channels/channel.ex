@@ -3,12 +3,14 @@ defmodule Converger.Channels.Channel do
   import Ecto.Changeset
 
   @channel_types ~w(echo webhook websocket whatsapp_meta whatsapp_infobip)
+  @channel_modes ~w(inbound outbound duplex)
 
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
   schema "channels" do
     field :name, :string
     field :type, :string, default: "webhook"
+    field :mode, :string, default: "duplex"
     field :secret, :string
     field :status, :string, default: "active"
     field :config, :map, default: %{}
@@ -18,14 +20,17 @@ defmodule Converger.Channels.Channel do
   end
 
   def channel_types, do: @channel_types
+  def channel_modes, do: @channel_modes
 
   @doc false
   def changeset(channel, attrs) do
     channel
-    |> cast(attrs, [:name, :status, :tenant_id, :type, :secret, :config])
+    |> cast(attrs, [:name, :status, :tenant_id, :type, :mode, :secret, :config])
     |> validate_required([:name, :status, :tenant_id])
     |> validate_inclusion(:type, @channel_types)
+    |> validate_inclusion(:mode, @channel_modes)
     |> validate_channel_config()
+    |> validate_mode_compatibility()
     |> unique_constraint([:tenant_id, :name])
     |> ensure_secret()
   end
@@ -37,6 +42,19 @@ defmodule Converger.Channels.Channel do
     case Converger.Channels.Adapter.validate_config(type, config) do
       :ok -> changeset
       {:error, message} -> add_error(changeset, :config, message)
+    end
+  end
+
+  defp validate_mode_compatibility(changeset) do
+    type = get_field(changeset, :type)
+    mode = get_field(changeset, :mode) || "duplex"
+
+    supported = Converger.Channels.Adapter.supported_modes(type)
+
+    if mode in supported do
+      changeset
+    else
+      add_error(changeset, :mode, "#{type} channels only support modes: #{Enum.join(supported, ", ")}")
     end
   end
 

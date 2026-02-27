@@ -8,13 +8,13 @@ defmodule ConvergerWeb.Admin.ChannelLive do
 
   def mount(_params, _session, socket) do
     tenants = Tenants.list_tenants()
-    # If no tenants exist, we can't create channels comfortably.
 
     {:ok,
      assign(socket,
        channels: Channels.list_channels(),
        tenants: tenants,
        form: to_form(Channels.change_channel(%Channel{})),
+       mode_filter: "all",
        page_title: "Channels"
      )}
   end
@@ -26,13 +26,17 @@ defmodule ConvergerWeb.Admin.ChannelLive do
          socket
          |> put_flash(:info, "Channel created")
          |> assign(
-           channels: Channels.list_channels(),
+           channels: load_channels(socket.assigns.mode_filter),
            form: to_form(Channels.change_channel(%Channel{}))
          )}
 
       {:error, changeset} ->
         {:noreply, assign(socket, form: to_form(changeset))}
     end
+  end
+
+  def handle_event("filter_mode", %{"mode" => mode}, socket) do
+    {:noreply, assign(socket, channels: load_channels(mode), mode_filter: mode)}
   end
 
   def handle_event("toggle_status", %{"id" => id}, socket) do
@@ -42,7 +46,8 @@ defmodule ConvergerWeb.Admin.ChannelLive do
     case Channels.update_channel(channel, %{status: new_status}) do
       {:ok, _} ->
         {:noreply,
-         assign(socket, channels: Channels.list_channels()) |> put_flash(:info, "Status updated")}
+         assign(socket, channels: load_channels(socket.assigns.mode_filter))
+         |> put_flash(:info, "Status updated")}
 
       {:error, _} ->
         {:noreply, put_flash(socket, :error, "Failed to update status")}
@@ -55,12 +60,24 @@ defmodule ConvergerWeb.Admin.ChannelLive do
     case Channels.delete_channel(channel) do
       {:ok, _} ->
         {:noreply,
-         assign(socket, channels: Channels.list_channels()) |> put_flash(:info, "Channel deleted")}
+         assign(socket, channels: load_channels(socket.assigns.mode_filter))
+         |> put_flash(:info, "Channel deleted")}
 
       {:error, _} ->
         {:noreply, put_flash(socket, :error, "Failed to delete channel")}
     end
   end
+
+  defp load_channels("all"), do: Channels.list_channels()
+  defp load_channels(mode), do: Channels.list_channels_by_mode(mode)
+
+  defp mode_label("inbound"), do: "Inbound (receive only)"
+  defp mode_label("outbound"), do: "Outbound (send only)"
+  defp mode_label("duplex"), do: "Duplex (send & receive)"
+
+  defp mode_indicator("inbound"), do: "← Inbound"
+  defp mode_indicator("outbound"), do: "→ Outbound"
+  defp mode_indicator("duplex"), do: "↔ Duplex"
 
   def render(assigns) do
     ~H"""
@@ -77,13 +94,37 @@ defmodule ConvergerWeb.Admin.ChannelLive do
           <% end %>
         </select>
         <select name="channel[type]" required style="padding: 5px; margin-right: 10px;">
-          <%= for type <- Converger.Channels.Channel.channel_types() do %>
+          <%= for type <- Channel.channel_types() do %>
             <option value={type}><%= type %></option>
+          <% end %>
+        </select>
+        <select name="channel[mode]" required style="padding: 5px; margin-right: 10px;">
+          <%= for mode <- Channel.channel_modes() do %>
+            <option value={mode} selected={mode == "duplex"}><%= mode_label(mode) %></option>
           <% end %>
         </select>
         <.input field={@form[:name]} placeholder="Channel Name" />
         <button type="submit">Create</button>
       </.form>
+    </div>
+
+    <div style="margin-bottom: 15px; display: flex; gap: 8px;">
+      <button phx-click="filter_mode" phx-value-mode="all"
+        class={"badge #{if @mode_filter == "all", do: "badge-active", else: ""}"}>
+        All
+      </button>
+      <button phx-click="filter_mode" phx-value-mode="inbound"
+        class={"badge #{if @mode_filter == "inbound", do: "badge-active", else: ""}"}>
+        ← Inbound
+      </button>
+      <button phx-click="filter_mode" phx-value-mode="outbound"
+        class={"badge #{if @mode_filter == "outbound", do: "badge-active", else: ""}"}>
+        → Outbound
+      </button>
+      <button phx-click="filter_mode" phx-value-mode="duplex"
+        class={"badge #{if @mode_filter == "duplex", do: "badge-active", else: ""}"}>
+        ↔ Duplex
+      </button>
     </div>
 
     <div class="card">
@@ -94,6 +135,7 @@ defmodule ConvergerWeb.Admin.ChannelLive do
             <th>Name</th>
             <th>Token</th>
             <th>Type</th>
+            <th>Mode</th>
             <th>Tenant</th>
             <th>Status</th>
             <th>Actions</th>
@@ -112,6 +154,11 @@ defmodule ConvergerWeb.Admin.ChannelLive do
               <input type="hidden" id={"token-#{channel.id}"} value={token} />
             </td>
             <td><span class="badge"><%= channel.type %></span></td>
+            <td>
+              <span class={"badge badge-#{channel.mode}"}>
+                <%= mode_indicator(channel.mode) %>
+              </span>
+            </td>
             <td><%= if channel.tenant, do: channel.tenant.name, else: "-" %></td>
             <td>
               <span class={"badge badge-#{channel.status}"}>

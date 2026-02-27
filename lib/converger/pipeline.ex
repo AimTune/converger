@@ -68,7 +68,8 @@ defmodule Converger.Pipeline do
     primary_channel = Converger.Channels.get_channel!(conversation.channel_id)
 
     primary =
-      if primary_channel.type in @external_delivery_types,
+      if primary_channel.type in @external_delivery_types and
+           primary_channel.mode in ["outbound", "duplex"],
         do: [primary_channel],
         else: []
 
@@ -92,6 +93,7 @@ defmodule Converger.Pipeline do
       |> Enum.reject(&is_nil/1)
       |> Enum.filter(&(&1.type in @external_delivery_types))
       |> Enum.filter(&(&1.status == "active"))
+      |> Enum.filter(&(&1.mode in ["outbound", "duplex"]))
 
     (primary ++ additional) |> Enum.uniq_by(& &1.id)
   end

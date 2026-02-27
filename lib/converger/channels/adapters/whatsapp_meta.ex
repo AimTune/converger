@@ -6,6 +6,9 @@ defmodule Converger.Channels.Adapters.WhatsAppMeta do
   @graph_api_version "v18.0"
 
   @impl true
+  def supported_modes, do: ~w(inbound outbound duplex)
+
+  @impl true
   def validate_config(config) do
     required = ["phone_number_id", "access_token", "verify_token"]
     missing = Enum.filter(required, fn key -> !is_binary(config[key]) or config[key] == "" end)

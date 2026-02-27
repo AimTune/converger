@@ -66,4 +66,24 @@ defmodule Converger.Channels do
       _ -> {:error, :unauthorized}
     end
   end
+
+  def list_channels_by_mode(mode) when mode in ~w(inbound outbound duplex) do
+    from(c in Channel, where: c.mode == ^mode)
+    |> Repo.all()
+    |> Repo.preload(:tenant)
+  end
+
+  def list_inbound_capable_channels(tenant_id) do
+    from(c in Channel,
+      where: c.tenant_id == ^tenant_id and c.mode in ["inbound", "duplex"] and c.status == "active"
+    )
+    |> Repo.all()
+  end
+
+  def list_outbound_capable_channels(tenant_id) do
+    from(c in Channel,
+      where: c.tenant_id == ^tenant_id and c.mode in ["outbound", "duplex"] and c.status == "active"
+    )
+    |> Repo.all()
+  end
 end

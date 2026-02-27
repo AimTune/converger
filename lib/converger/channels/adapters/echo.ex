@@ -2,6 +2,9 @@ defmodule Converger.Channels.Adapters.Echo do
   @behaviour Converger.Channels.Adapter
 
   @impl true
+  def supported_modes, do: ~w(outbound)
+
+  @impl true
   def validate_config(_config), do: :ok
 
   @impl true

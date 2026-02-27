@@ -1,6 +1,6 @@
 ARG ELIXIR_VERSION=1.18.4
-ARG OTP_VERSION=27.3.4
-ARG DEBIAN_VERSION=bookworm-20250317-slim
+ARG OTP_VERSION=27.2
+ARG DEBIAN_VERSION=bookworm-20260223-slim
 
 ARG BUILDER_IMAGE="docker.io/hexpm/elixir:${ELIXIR_VERSION}-erlang-${OTP_VERSION}-debian-${DEBIAN_VERSION}"
 ARG RUNNER_IMAGE="docker.io/debian:${DEBIAN_VERSION}"
@@ -56,13 +56,9 @@ ENV MIX_ENV="prod"
 
 COPY --from=builder --chown=nobody:root /app/_build/${MIX_ENV}/rel/converger ./
 
-USER nobody
+RUN printf '#!/bin/sh\nset -e\n/app/bin/converger eval "Converger.Release.create_db()"\n/app/bin/converger eval "Converger.Release.migrate()"\nexec /app/bin/converger start\n' > /app/bin/entrypoint.sh \
+  && chmod +x /app/bin/entrypoint.sh
 
-COPY --chmod=755 <<'EOF' /app/bin/entrypoint.sh
-#!/bin/sh
-set -e
-/app/bin/converger eval "Converger.Release.migrate()"
-exec /app/bin/converger start
-EOF
+USER nobody
 
 ENTRYPOINT ["/app/bin/entrypoint.sh"]

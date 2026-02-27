@@ -4,6 +4,9 @@ defmodule Converger.Channels.Adapters.Webhook do
   require Logger
 
   @impl true
+  def supported_modes, do: ~w(inbound outbound duplex)
+
+  @impl true
   def validate_config(config) do
     cond do
       not is_binary(config["url"]) or config["url"] == "" ->

@@ -10,6 +10,7 @@ defmodule ConvergerWeb.InboundController do
 
   def create(conn, %{"channel_id" => channel_id} = params) do
     with {:ok, channel} <- Channels.get_active_channel(channel_id),
+         :ok <- verify_inbound_capable(channel),
          :ok <- verify_inbound_signature(conn, channel),
          {:ok, parsed} <- Adapter.parse_inbound(channel, params),
          {:ok, conversation} <- resolve_or_create_conversation(channel, params),
@@ -47,6 +48,9 @@ defmodule ConvergerWeb.InboundController do
       end
     end
   end
+
+  defp verify_inbound_capable(%{mode: mode}) when mode in ["inbound", "duplex"], do: :ok
+  defp verify_inbound_capable(_channel), do: {:error, :inbound_not_supported}
 
   defp verify_inbound_signature(conn, channel) do
     signature = get_req_header(conn, "x-converger-signature") |> List.first()

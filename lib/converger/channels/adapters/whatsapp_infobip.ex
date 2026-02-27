@@ -4,6 +4,9 @@ defmodule Converger.Channels.Adapters.WhatsAppInfobip do
   require Logger
 
   @impl true
+  def supported_modes, do: ~w(inbound outbound duplex)
+
+  @impl true
   def validate_config(config) do
     required = ["base_url", "api_key", "sender"]
     missing = Enum.filter(required, fn key -> !is_binary(config[key]) or config[key] == "" end)

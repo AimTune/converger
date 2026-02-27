@@ -36,6 +36,12 @@ defmodule ConvergerWeb.FallbackController do
     |> json(%{error: "Channel is inactive"})
   end
 
+  def call(conn, {:error, :inbound_not_supported}) do
+    conn
+    |> put_status(:bad_request)
+    |> json(%{error: "Channel does not accept inbound messages"})
+  end
+
   def call(conn, {:error, :forbidden}) do
     conn
     |> put_status(:forbidden)

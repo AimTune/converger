@@ -18,6 +18,8 @@ defmodule Converger.Channels.Adapter do
   @callback parse_inbound(channel, params :: map()) ::
               {:ok, map()} | {:error, term()}
 
+  @callback supported_modes() :: [String.t()]
+
   @doc "Resolve adapter module from channel type string."
   def adapter_for(type) do
     case type do
@@ -50,6 +52,15 @@ defmodule Converger.Channels.Adapter do
     case adapter_for(type) do
       {:ok, mod} -> mod.parse_inbound(channel, params)
       {:error, _} = err -> err
+    end
+  end
+
+  def supported_modes(nil), do: ~w(inbound outbound duplex)
+
+  def supported_modes(type) do
+    case adapter_for(type) do
+      {:ok, mod} -> mod.supported_modes()
+      {:error, _} -> []
     end
   end
 end

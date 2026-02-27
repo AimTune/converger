@@ -36,6 +36,7 @@ defmodule Converger.RoutingRules do
       %RoutingRule{}
       |> RoutingRule.changeset(attrs)
       |> validate_tenant_isolation()
+      |> validate_channel_modes()
       |> validate_no_cycle()
 
     Repo.insert(changeset)
@@ -46,6 +47,7 @@ defmodule Converger.RoutingRules do
       rule
       |> RoutingRule.changeset(attrs)
       |> validate_tenant_isolation()
+      |> validate_channel_modes()
       |> validate_no_cycle()
 
     Repo.update(changeset)
@@ -80,6 +82,59 @@ defmodule Converger.RoutingRules do
   end
 
   # --- Validations ---
+
+  defp validate_channel_modes(changeset) do
+    if changeset.valid? do
+      source_id = Ecto.Changeset.get_field(changeset, :source_channel_id)
+      target_ids = Ecto.Changeset.get_field(changeset, :target_channel_ids) || []
+
+      changeset
+      |> validate_source_mode(source_id)
+      |> validate_target_modes(target_ids)
+    else
+      changeset
+    end
+  end
+
+  defp validate_source_mode(changeset, nil), do: changeset
+
+  defp validate_source_mode(changeset, source_id) do
+    case Repo.get(Converger.Channels.Channel, source_id) do
+      %{mode: mode} when mode in ["inbound", "duplex"] ->
+        changeset
+
+      %{mode: "outbound"} ->
+        Ecto.Changeset.add_error(
+          changeset,
+          :source_channel_id,
+          "source channel is outbound-only and cannot receive inbound messages"
+        )
+
+      nil ->
+        changeset
+    end
+  end
+
+  defp validate_target_modes(changeset, []), do: changeset
+
+  defp validate_target_modes(changeset, target_ids) do
+    inbound_only =
+      from(c in Converger.Channels.Channel,
+        where: c.id in ^target_ids and c.mode == "inbound",
+        select: c.name
+      )
+      |> Repo.all()
+
+    if inbound_only == [] do
+      changeset
+    else
+      Ecto.Changeset.add_error(
+        changeset,
+        :target_channel_ids,
+        "these target channels are inbound-only and cannot deliver outbound: #{Enum.join(inbound_only, ", ")}"
+      )
+    end
+  end
 
   defp validate_tenant_isolation(changeset) do
     tenant_id = Ecto.Changeset.get_field(changeset, :tenant_id)
