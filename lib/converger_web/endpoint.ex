@@ -41,12 +41,13 @@ defmodule ConvergerWeb.Endpoint do
   plug Plug.Telemetry, event_prefix: [:phoenix, :endpoint]
 
   plug CORSPlug,
-    origin: ["http://127.0.0.1:5500", "http://localhost:5500"],
+    origin: Application.compile_env(:converger, :cors_origins, ["http://localhost:5500"]),
     headers: ["x-channel-token", "x-api-key"] ++ CORSPlug.defaults()[:headers]
 
   plug Plug.Parsers,
     parsers: [:urlencoded, :multipart, :json],
     pass: ["*/*"],
+    body_reader: {ConvergerWeb.CacheBodyReader, :read_body, []},
     json_decoder: Phoenix.json_library()
 
   plug Plug.MethodOverride

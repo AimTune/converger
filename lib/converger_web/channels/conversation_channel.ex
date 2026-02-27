@@ -1,31 +1,19 @@
 defmodule ConvergerWeb.ConversationChannel do
   use ConvergerWeb, :channel
 
-  alias Converger.Activities
+  require Logger
+
+  alias Converger.{Activities, Conversations, Channels}
+  alias Converger.Channels.Adapter
 
   @impl true
   def join("conversation:" <> conversation_id, payload, socket) do
     claims = socket.assigns[:claims] || %{}
 
     if authorized?(conversation_id, claims) do
-      # Fetch channel type to handle echo logic
-      conversation = Converger.Conversations.get_conversation!(conversation_id)
-      channel = Converger.Channels.get_channel!(conversation.channel_id)
-
-      socket = assign(socket, :channel_type, channel.type)
-
-      require Logger
-
-      Logger.info("WebSocket channel joined",
-        conversation_id: conversation_id,
-        tenant_id: conversation.tenant_id
-      )
-
       send(self(), {:after_join, payload})
       {:ok, socket}
     else
-      require Logger
-
       Logger.warning("WebSocket channel join unauthorized",
         conversation_id: conversation_id,
         claims: claims
@@ -48,16 +36,7 @@ defmodule ConvergerWeb.ConversationChannel do
 
     case Activities.create_activity(activity_params) do
       {:ok, _activity} ->
-        # If echo channel, send the same message back as 'bot'
-        if socket.assigns[:channel_type] == "echo" do
-          Activities.create_activity(%{
-            "tenant_id" => tenant_id,
-            "conversation_id" => conversation_id,
-            "text" => payload["text"],
-            "sender" => "bot"
-          })
-        end
-
+        handle_activity(socket.assigns[:channel], activity_params)
         {:reply, :ok, socket}
 
       {:error, _changeset} ->
@@ -67,12 +46,25 @@ defmodule ConvergerWeb.ConversationChannel do
 
   @impl true
   def handle_info({:after_join, payload}, socket) do
-    # Reconnection logic: send missed activities
-    if last_id = payload["last_activity_id"] do
-      "conversation:" <> conversation_id = socket.topic
-      activities = Activities.list_activities_after(conversation_id, last_id)
+    conversation_id = socket.assigns.claims["conversation_id"]
 
-      Enum.each(activities, fn activity ->
+    conversation = Conversations.get_conversation!(conversation_id)
+    channel = Channels.get_channel!(conversation.channel_id)
+
+    socket =
+      socket
+      |> assign(:channel_type, channel.type)
+      |> assign(:channel, channel)
+
+    Logger.info("WebSocket channel joined",
+      conversation_id: conversation_id,
+      tenant_id: conversation.tenant_id
+    )
+
+    if last_id = payload["last_activity_id"] do
+      conversation_id
+      |> Activities.list_activities_after(last_id)
+      |> Enum.each(fn activity ->
         push(socket, "new_activity", %{
           id: activity.id,
           text: activity.text,
@@ -83,6 +75,23 @@ defmodule ConvergerWeb.ConversationChannel do
     end
 
     {:noreply, socket}
+  end
+
+  defp handle_activity(channel, activity_params) do
+    Task.start(fn ->
+      Adapter.deliver_activity(
+        channel,
+        struct(Converger.Activities.Activity, %{
+          tenant_id: activity_params["tenant_id"],
+          conversation_id: activity_params["conversation_id"],
+          text: activity_params["text"],
+          sender: activity_params["sender"],
+          type: activity_params["type"] || "message",
+          metadata: activity_params["metadata"] || %{},
+          attachments: activity_params["attachments"] || []
+        })
+      )
+    end)
   end
 
   defp authorized?(conversation_id, %{"conversation_id" => claim_cid}) do

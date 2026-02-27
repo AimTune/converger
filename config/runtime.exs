@@ -24,6 +24,17 @@ config :converger,
        :prometheus_port,
        String.to_integer(System.get_env("PROMETHEUS_PORT") || "9568")
 
+# Configurable CORS origins and admin IP whitelist
+if cors_origins = System.get_env("CORS_ORIGINS") do
+  config :converger,
+    cors_origins: String.split(cors_origins, ",", trim: true)
+end
+
+if admin_ips = System.get_env("ADMIN_IP_WHITELIST") do
+  config :converger,
+    admin_ip_whitelist: String.split(admin_ips, ",", trim: true)
+end
+
 if config_env() == :prod do
   database_url =
     System.get_env("DATABASE_URL") ||

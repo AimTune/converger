@@ -6,9 +6,9 @@ defmodule ConvergerWeb.Admin.DashboardLive do
   alias Converger.Channels.Channel
   alias Converger.Conversations.Conversation
   alias Converger.Activities.Activity
+  alias Converger.Deliveries
 
   def mount(_params, _session, socket) do
-    # Simple stats for MVP
     stats = %{
       tenants: Repo.aggregate(Tenant, :count, :id),
       channels: Repo.aggregate(Channel, :count, :id),
@@ -16,7 +16,9 @@ defmodule ConvergerWeb.Admin.DashboardLive do
       activities: Repo.aggregate(Activity, :count, :id)
     }
 
-    {:ok, assign(socket, stats: stats, page_title: "Dashboard")}
+    delivery_stats = Deliveries.count_by_status()
+
+    {:ok, assign(socket, stats: stats, delivery_stats: delivery_stats, page_title: "Dashboard")}
   end
 
   def render(assigns) do
@@ -38,6 +40,22 @@ defmodule ConvergerWeb.Admin.DashboardLive do
       <div class="card">
         <h3>Activities</h3>
         <p style="font-size: 2em; font-weight: bold;"><%= @stats.activities %></p>
+      </div>
+    </div>
+
+    <h2 style="margin-top: 30px;">Deliveries</h2>
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px;">
+      <div class="card">
+        <h3>Pending</h3>
+        <p style="font-size: 2em; font-weight: bold;"><%= Map.get(@delivery_stats, "pending", 0) %></p>
+      </div>
+      <div class="card">
+        <h3>Delivered</h3>
+        <p style="font-size: 2em; font-weight: bold; color: green;"><%= Map.get(@delivery_stats, "delivered", 0) %></p>
+      </div>
+      <div class="card">
+        <h3>Failed</h3>
+        <p style="font-size: 2em; font-weight: bold; color: red;"><%= Map.get(@delivery_stats, "failed", 0) %></p>
       </div>
     </div>
     """

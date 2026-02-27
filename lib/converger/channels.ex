@@ -44,6 +44,22 @@ defmodule Converger.Channels do
     Channel.changeset(channel, attrs)
   end
 
+  def get_active_channel(id) do
+    case Repo.get(Channel, id) do
+      %Channel{status: "active"} = channel -> {:ok, channel}
+      %Channel{} -> {:error, :channel_inactive}
+      nil -> {:error, :not_found}
+    end
+  end
+
+  def get_active_channel(id, tenant_id) do
+    case Repo.get_by(Channel, id: id, tenant_id: tenant_id) do
+      %Channel{status: "active"} = channel -> {:ok, channel}
+      %Channel{} -> {:error, :channel_inactive}
+      nil -> {:error, :not_found}
+    end
+  end
+
   def validate_channel_secret(id, secret) do
     case Repo.get(Channel, id) do
       %Channel{secret: ^secret} = channel -> {:ok, channel}

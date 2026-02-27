@@ -22,4 +22,37 @@ defmodule ConvergerWeb.FallbackController do
     |> put_view(json: ConvergerWeb.ErrorJSON)
     |> render(:"404")
   end
+
+  def call(conn, {:error, :unauthorized}) do
+    conn
+    |> put_status(:unauthorized)
+    |> put_view(json: ConvergerWeb.ErrorJSON)
+    |> render(:"401")
+  end
+
+  def call(conn, {:error, :channel_inactive}) do
+    conn
+    |> put_status(:bad_request)
+    |> json(%{error: "Channel is inactive"})
+  end
+
+  def call(conn, {:error, :forbidden}) do
+    conn
+    |> put_status(:forbidden)
+    |> put_view(json: ConvergerWeb.ErrorJSON)
+    |> render(:"403")
+  end
+
+  def call(conn, {:error, message}) when is_binary(message) do
+    conn
+    |> put_status(:bad_request)
+    |> json(%{error: message})
+  end
+
+  def call(conn, nil) do
+    conn
+    |> put_status(:not_found)
+    |> put_view(json: ConvergerWeb.ErrorJSON)
+    |> render(:"404")
+  end
 end

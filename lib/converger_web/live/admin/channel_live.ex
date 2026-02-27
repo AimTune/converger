@@ -77,8 +77,9 @@ defmodule ConvergerWeb.Admin.ChannelLive do
           <% end %>
         </select>
         <select name="channel[type]" required style="padding: 5px; margin-right: 10px;">
-          <option value="webhook">Webhook</option>
-          <option value="echo">Echo</option>
+          <%= for type <- Converger.Channels.Channel.channel_types() do %>
+            <option value={type}><%= type %></option>
+          <% end %>
         </select>
         <.input field={@form[:name]} placeholder="Channel Name" />
         <button type="submit">Create</button>

@@ -15,15 +15,11 @@ defmodule ConvergerWeb.ActivityController do
   def index(conn, %{"conversation_id" => conversation_id}) do
     tenant = conn.assigns.tenant
 
-    # Ensure conversation belongs to tenant
     with %Conversations.Conversation{} = conversation <-
-           Conversations.get_conversation!(conversation_id, tenant.id) do
+           Conversations.get_conversation(conversation_id, tenant.id) do
       activities = Activities.list_activities_for_conversation(conversation.id)
       render(conn, :index, activities: activities)
     end
-  rescue
-    Ecto.NoResultsError ->
-      {:error, :not_found}
   end
 
   def create(conn, %{"conversation_id" => conversation_id} = activity_params) do
@@ -32,9 +28,8 @@ defmodule ConvergerWeb.ActivityController do
     # Extract idempotency key from headers
     idempotency_key = get_req_header(conn, "x-idempotency-key") |> List.first()
 
-    # Ensure conversation belongs to tenant
     with %Conversations.Conversation{} = conversation <-
-           Conversations.get_conversation!(conversation_id, tenant.id),
+           Conversations.get_conversation(conversation_id, tenant.id),
          {:ok, %Activities.Activity{} = activity} <-
            Activities.create_activity(
              activity_params
@@ -55,8 +50,5 @@ defmodule ConvergerWeb.ActivityController do
       |> put_status(:created)
       |> render(:show, activity: activity)
     end
-  rescue
-    Ecto.NoResultsError ->
-      {:error, :not_found}
   end
 end

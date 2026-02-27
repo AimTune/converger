@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mix compile)",
+      "Bash(mix compile --warnings-as-errors)",
+      "Bash(mix format)"
+    ]
+  }
+}

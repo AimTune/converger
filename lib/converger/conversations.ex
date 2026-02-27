@@ -31,6 +31,10 @@ defmodule Converger.Conversations do
 
   def get_conversation(id), do: Repo.get(Conversation, id)
 
+  def get_conversation(id, tenant_id) do
+    Repo.get_by(Conversation, id: id, tenant_id: tenant_id)
+  end
+
   def get_conversation!(id), do: Repo.get!(Conversation, id)
 
   def get_conversation!(id, tenant_id) do

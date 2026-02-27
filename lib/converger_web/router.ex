@@ -26,6 +26,10 @@ defmodule ConvergerWeb.Router do
     resources "/conversations", ConversationController, only: [:create, :show] do
       resources "/activities", ActivityController, only: [:create, :index]
     end
+
+    # Inbound webhook endpoints for external channel integrations
+    get "/channels/:channel_id/inbound", InboundController, :verify
+    post "/channels/:channel_id/inbound", InboundController, :create
   end
 
   scope "/admin", ConvergerWeb.Admin do

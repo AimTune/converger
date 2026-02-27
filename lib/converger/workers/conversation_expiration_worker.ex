@@ -1,6 +1,8 @@
 defmodule Converger.Workers.ConversationExpirationWorker do
   use Oban.Worker, queue: :default, max_attempts: 3
 
+  require Logger
+
   import Ecto.Query
   alias Converger.Repo
   alias Converger.Conversations.Conversation
@@ -27,7 +29,7 @@ defmodule Converger.Workers.ConversationExpirationWorker do
     {count, _} =
       Repo.update_all(expired_conversations_query, set: [status: "closed", updated_at: now])
 
-    IO.puts("Closed #{count} expired conversations.")
+    Logger.info("Closed #{count} expired conversations.")
     :ok
   end
 end

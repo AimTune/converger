@@ -40,26 +40,25 @@ defmodule Converger.Activities do
 
       nil ->
         # 2. Try inserting in a transaction
-        result =
-          Repo.transaction(fn ->
-            %Activity{}
-            |> Activity.changeset(attrs)
-            |> Repo.insert()
-            |> case do
-              {:ok, activity} ->
-                :telemetry.execute([:converger, :activities, :create], %{count: 1}, %{
-                  tenant_id: activity.tenant_id
-                })
+        Repo.transaction(fn ->
+          %Activity{}
+          |> Activity.changeset(attrs)
+          |> Repo.insert()
+          |> case do
+            {:ok, activity} ->
+              :telemetry.execute([:converger, :activities, :create], %{count: 1}, %{
+                tenant_id: activity.tenant_id
+              })
 
-                broadcast_activity({:ok, activity})
-                activity
+              broadcast_activity({:ok, activity})
+              enqueue_delivery(activity)
+              activity
 
-              {:error, changeset} ->
-                Repo.rollback(changeset)
-            end
-          end)
-
-        case result do
+            {:error, changeset} ->
+              Repo.rollback(changeset)
+          end
+        end)
+        |> case do
           {:ok, activity} ->
             {:ok, activity}
 
@@ -108,6 +107,21 @@ defmodule Converger.Activities do
   end
 
   defp broadcast_activity(error), do: error
+
+  @external_delivery_types ~w(webhook whatsapp_meta whatsapp_infobip)
+
+  defp enqueue_delivery(activity) do
+    conversation = Converger.Conversations.get_conversation!(activity.conversation_id)
+    channel = Converger.Channels.get_channel!(conversation.channel_id)
+
+    if channel.type in @external_delivery_types do
+      %{activity_id: activity.id, channel_id: channel.id}
+      |> Converger.Workers.ActivityDeliveryWorker.new()
+      |> Oban.insert()
+    end
+
+    :ok
+  end
 
   def update_activity(%Activity{} = activity, attrs) do
     activity

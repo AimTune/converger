@@ -7,8 +7,7 @@ defmodule ConvergerWeb.Plugs.AdminAuth do
   def call(conn, _opts) do
     remote_ip = conn.remote_ip |> :inet.ntoa() |> to_string()
 
-    # In a real app, load this from ENV. For now, localhost only.
-    whitelist = ["127.0.0.1", "::1"]
+    whitelist = Application.get_env(:converger, :admin_ip_whitelist, ["127.0.0.1", "::1"])
 
     if remote_ip in whitelist do
       conn

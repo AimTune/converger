@@ -9,7 +9,9 @@ import Config
 
 config :converger,
   ecto_repos: [Converger.Repo],
-  generators: [timestamp_type: :utc_datetime]
+  generators: [timestamp_type: :utc_datetime],
+  cors_origins: ["http://127.0.0.1:5500", "http://localhost:5500"],
+  admin_ip_whitelist: ["127.0.0.1", "::1"]
 
 # Configures the endpoint
 config :converger, ConvergerWeb.Endpoint,
@@ -50,11 +52,10 @@ config :converger, Oban,
     {Oban.Plugins.Pruner, max_age: 3600 * 24},
     {Oban.Plugins.Cron,
      crontab: [
-       {"0 * * * *", Converger.Workers.ConversationExpirationWorker},
-       {"@daily", Converger.Workers.TokenCleanupWorker}
+       {"0 * * * *", Converger.Workers.ConversationExpirationWorker}
      ]}
   ],
-  queues: [default: 10]
+  queues: [default: 10, deliveries: 20]
 
 # Configure Hammer for Rate Limiting
 config :hammer,

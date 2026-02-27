@@ -44,7 +44,7 @@ defmodule ConvergerWeb.Plugs.TenantAuth do
         unauthorized(conn, "Invalid token")
     end
   rescue
-    _ -> unauthorized(conn, "Invalid token or tenant")
+    Ecto.NoResultsError -> unauthorized(conn, "Tenant not found")
   end
 
   defp unauthorized(conn, message) do
