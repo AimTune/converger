@@ -2,10 +2,10 @@ import Config
 
 # Configure your database
 config :converger, Converger.Repo,
-  username: "postgres",
-  password: "postgres",
-  hostname: "localhost",
-  database: "converger_dev",
+  username: System.get_env("DB_USERNAME") || "postgres",
+  password: System.get_env("DB_PASSWORD") || "postgres",
+  hostname: System.get_env("DB_HOSTNAME") || "localhost",
+  database: System.get_env("DB_NAME") || "converger_dev",
   stacktrace: true,
   show_sensitive_data_on_connection_error: true,
   pool_size: 20

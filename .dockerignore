@@ -1,0 +1,15 @@
+.git
+.gitignore
+.agent
+.agents
+.claude
+_build
+deps
+node_modules
+.elixir_ls
+*.ez
+cover
+doc
+.fetch
+.formatter.exs
+.credo.exs

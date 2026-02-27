@@ -3,7 +3,10 @@
     "allow": [
       "Bash(mix compile)",
       "Bash(mix compile --warnings-as-errors)",
-      "Bash(mix format)"
+      "Bash(mix format)",
+      "Bash(mix test)",
+      "Bash(docker compose up -d db)",
+      "Bash(docker compose down -v)"
     ]
   }
 }

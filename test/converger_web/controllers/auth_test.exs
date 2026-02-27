@@ -22,7 +22,7 @@ defmodule ConvergerWeb.AuthenticationTest do
     } do
       # GET /api/v1/conversations/:id is protected by TenantAuth
       conn = get(conn, ~p"/api/v1/conversations/#{conversation.id}")
-      assert json_response(conn, 401)["error"] == "Unauthorized: Missing x-api-key header"
+      assert json_response(conn, 401)["error"] == "Unauthorized: Missing authentication headers"
     end
 
     test "returns 401 if invalid api key on protected route", %{
@@ -61,7 +61,7 @@ defmodule ConvergerWeb.AuthenticationTest do
       }
 
       conn = post(conn, ~p"/api/v1/tokens", params)
-      assert json_response(conn, 401)["error"] == "Missing x-channel-token header"
+      assert json_response(conn, 400)["error"] == "Missing x-channel-token header"
     end
 
     test "returns forbidden if channel token does not match conversation", %{
@@ -82,7 +82,7 @@ defmodule ConvergerWeb.AuthenticationTest do
       }
 
       conn = post(conn, ~p"/api/v1/tokens", params)
-      assert json_response(conn, 403)["error"] =~ "Channel Token does not match"
+      assert json_response(conn, 403)["errors"]["detail"] == "Forbidden"
     end
   end
 end

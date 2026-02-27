@@ -1,7 +1,6 @@
-version: '3.8'
 services:
   db:
-    image: postgres:15
+    image: postgres:17-alpine
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -10,6 +9,27 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "4000:4000"
+      - "9568:9568"
+    environment:
+      DATABASE_URL: ecto://postgres:postgres@db/converger_prod
+      SECRET_KEY_BASE: "hJk3F8xZq2Lm9Rn5Tp7Wv0Yd4Bg6Ai1Cj8Ek0Fl2Gn4Ho6Ip8Jq0Kr2Lt4Mu6Nv8Ow0Px2Qy4Rz6Sa8Tb0Uc2Vd4We"
+      PHX_SERVER: "true"
+      PHX_HOST: localhost
+      PORT: "4000"
+      PROMETHEUS_PORT: "9568"
 
   prometheus:
     image: prom/prometheus:latest

@@ -11,6 +11,7 @@ defmodule Converger.ChannelsFixtures do
       attrs
       |> Enum.into(%{
         name: unique_channel_name(),
+        type: "echo",
         status: "active",
         tenant_id: tenant.id
       })
