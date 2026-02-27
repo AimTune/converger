@@ -1,0 +1,98 @@
+defmodule Converger.Pipeline do
+  @moduledoc """
+  Parametric activity processing pipeline.
+
+  After an activity is persisted, it flows through the pipeline for:
+  1. Broadcasting to WebSocket clients (PubSub)
+  2. Delivering to external channels (webhook, WhatsApp, etc.)
+
+  The pipeline backend is configurable:
+
+      config :converger, :pipeline,
+        backend: Converger.Pipeline.Oban   # default - persistent job queue
+        # backend: Converger.Pipeline.GenStage  # in-memory with backpressure
+        # backend: Converger.Pipeline.Inline    # synchronous (testing/dev)
+
+  All backends receive the same activity struct and handle broadcast + delivery.
+  """
+
+  @type activity :: Converger.Activities.Activity.t()
+
+  @doc """
+  Process an activity through the pipeline after persistence.
+  Handles both PubSub broadcast and external channel delivery.
+  """
+  @callback process(activity) :: :ok | {:error, term()}
+
+  @doc """
+  Called on application start. Backends that need supervision (GenStage)
+  return child specs. Others return an empty list.
+  """
+  @callback child_specs() :: [Supervisor.child_spec()]
+
+  @doc "Dispatch activity to the configured pipeline backend."
+  def process(activity) do
+    backend().process(activity)
+  end
+
+  @doc "Get child specs for the configured backend's supervision tree."
+  def child_specs do
+    backend().child_specs()
+  end
+
+  @doc "Broadcast activity to WebSocket clients via PubSub."
+  def broadcast(activity) do
+    ConvergerWeb.Endpoint.broadcast!(
+      "conversation:#{activity.conversation_id}",
+      "new_activity",
+      %{
+        id: activity.id,
+        text: activity.text,
+        sender: activity.sender,
+        inserted_at: activity.inserted_at
+      }
+    )
+
+    :ok
+  end
+
+  @external_delivery_types ~w(webhook whatsapp_meta whatsapp_infobip)
+
+  @doc "Enqueue delivery to external channel if applicable. Returns channel or nil."
+  def resolve_delivery_channel(activity) do
+    conversation = Converger.Conversations.get_conversation!(activity.conversation_id)
+    channel = Converger.Channels.get_channel!(conversation.channel_id)
+
+    if channel.type in @external_delivery_types do
+      channel
+    else
+      nil
+    end
+  end
+
+  @doc "Execute the actual delivery via adapter + delivery tracking."
+  def deliver(activity, channel) do
+    alias Converger.{Deliveries, Channels.Adapter}
+
+    delivery = Deliveries.get_or_create_delivery(activity.id, channel.id)
+
+    case Adapter.deliver_activity(channel, activity) do
+      :ok ->
+        Deliveries.mark_delivered(delivery)
+        :ok
+
+      {:ok, response_meta} ->
+        Deliveries.mark_delivered(delivery, response_meta)
+        :ok
+
+      {:error, reason} ->
+        Deliveries.mark_attempt_failed(delivery, inspect(reason))
+        {:error, reason}
+    end
+  end
+
+  defp backend do
+    config = Application.get_env(:converger, :pipeline, [])
+    Keyword.get(config, :backend, Converger.Pipeline.Oban)
+  end
+end

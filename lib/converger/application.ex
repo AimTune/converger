@@ -10,17 +10,18 @@ defmodule Converger.Application do
     OpentelemetryPhoenix.setup(adapter: :bandit)
     OpentelemetryEcto.setup([:converger, :repo])
 
-    children = [
-      ConvergerWeb.Telemetry,
-      Converger.Repo,
-      {DNSCluster, query: Application.get_env(:converger, :dns_cluster_query) || :ignore},
-      {Phoenix.PubSub, name: Converger.PubSub},
-      {Oban, Application.fetch_env!(:converger, Oban)},
-      # Start a worker by calling: Converger.Worker.start_link(arg)
-      # {Converger.Worker, arg},
-      # Start to serve requests, typically the last entry
-      ConvergerWeb.Endpoint
-    ]
+    children =
+      [
+        ConvergerWeb.Telemetry,
+        Converger.Repo,
+        {DNSCluster, query: Application.get_env(:converger, :dns_cluster_query) || :ignore},
+        {Phoenix.PubSub, name: Converger.PubSub},
+        {Oban, Application.fetch_env!(:converger, Oban)}
+      ] ++
+        Converger.Pipeline.child_specs() ++
+        [
+          ConvergerWeb.Endpoint
+        ]
 
     # See https://hexdocs.pm/elixir/Supervisor.html
     # for other strategies and supported options

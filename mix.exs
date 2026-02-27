@@ -57,6 +57,7 @@ defmodule Converger.MixProject do
       {:floki, ">= 0.30.0", only: :test},
       {:gettext, "~> 0.20"},
       {:cors_plug, "~> 3.0"},
+      {:broadway, "~> 1.1"},
       {:hammer, "~> 6.1"},
       {:opentelemetry, "~> 1.5"},
       {:opentelemetry_exporter, "~> 1.8"},

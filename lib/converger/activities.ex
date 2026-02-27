@@ -39,32 +39,33 @@ defmodule Converger.Activities do
         {:ok, activity}
 
       nil ->
-        # 2. Try inserting in a transaction
-        Repo.transaction(fn ->
-          %Activity{}
-          |> Activity.changeset(attrs)
-          |> Repo.insert()
-          |> case do
-            {:ok, activity} ->
-              :telemetry.execute([:converger, :activities, :create], %{count: 1}, %{
-                tenant_id: activity.tenant_id
-              })
+        # 2. Try inserting in a transaction (persistence only)
+        result =
+          Repo.transaction(fn ->
+            %Activity{}
+            |> Activity.changeset(attrs)
+            |> Repo.insert()
+            |> case do
+              {:ok, activity} ->
+                :telemetry.execute([:converger, :activities, :create], %{count: 1}, %{
+                  tenant_id: activity.tenant_id
+                })
 
-              broadcast_activity({:ok, activity})
-              enqueue_delivery(activity)
-              activity
+                activity
 
-            {:error, changeset} ->
-              Repo.rollback(changeset)
-          end
-        end)
-        |> case do
+              {:error, changeset} ->
+                Repo.rollback(changeset)
+            end
+          end)
+
+        case result do
           {:ok, activity} ->
+            # 3. Pipeline processing AFTER successful commit
+            Converger.Pipeline.process(activity)
             {:ok, activity}
 
           {:error, changeset} ->
             if has_idempotency_error?(changeset) do
-              # 3. Final fetch if race condition occurred
               case fetch_existing_activity(attrs) do
                 %Activity{} = activity -> {:ok, activity}
                 nil -> {:error, changeset}
@@ -91,36 +92,6 @@ defmodule Converger.Activities do
     else
       nil
     end
-  end
-
-  defp broadcast_activity({:ok, activity}) do
-    ConvergerWeb.Endpoint.broadcast!(
-      "conversation:#{activity.conversation_id}",
-      "new_activity",
-      %{
-        id: activity.id,
-        text: activity.text,
-        sender: activity.sender,
-        inserted_at: activity.inserted_at
-      }
-    )
-  end
-
-  defp broadcast_activity(error), do: error
-
-  @external_delivery_types ~w(webhook whatsapp_meta whatsapp_infobip)
-
-  defp enqueue_delivery(activity) do
-    conversation = Converger.Conversations.get_conversation!(activity.conversation_id)
-    channel = Converger.Channels.get_channel!(conversation.channel_id)
-
-    if channel.type in @external_delivery_types do
-      %{activity_id: activity.id, channel_id: channel.id}
-      |> Converger.Workers.ActivityDeliveryWorker.new()
-      |> Oban.insert()
-    end
-
-    :ok
   end
 
   def update_activity(%Activity{} = activity, attrs) do

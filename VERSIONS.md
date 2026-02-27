@@ -68,7 +68,22 @@
 - [x] Admin panel: dynamic channel type dropdown from schema
 - [x] Updated PRD for v2.0
 
-## v2.1 — Future Enhancements (Planned)
+## v2.1 — Parametric Pipeline (Completed)
+
+- [x] Parametric activity processing pipeline (`Converger.Pipeline` behaviour)
+- [x] Pipeline.Oban backend (default — persistent job queue with Oban)
+- [x] Pipeline.Broadway backend (stream processing with configurable producers)
+  - [x] In-memory GenStage producer (MemoryProducer)
+  - [x] Kafka producer via :brod (optional dependency)
+  - [x] RabbitMQ producer via :amqp (optional dependency)
+  - [x] Custom producer support
+- [x] Pipeline.Inline backend (synchronous — for testing/development)
+- [x] Activities.create_activity refactored: broadcast+delivery moved outside DB transaction
+- [x] Pipeline child_specs integrated into Application supervision tree
+- [x] Config-driven backend selection (`config :converger, pipeline: [backend: ...]`)
+- [x] Test env uses Pipeline.Inline for deterministic testing
+
+## v2.2 — Future Enhancements (Planned)
 
 - [ ] Message routing rules (source channel -> target channels)
 - [ ] Multi-channel conversations (fan-out to multiple targets)
@@ -84,7 +99,6 @@
 
 ## v3.0 — Enterprise (Planned)
 
-- [ ] Event streaming backbone (Kafka/RabbitMQ integration)
 - [ ] Tenant sharding for horizontal data scaling
 - [ ] Multi-region replication
 - [ ] Advanced analytics dashboards
