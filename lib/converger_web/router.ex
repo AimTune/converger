@@ -56,6 +56,32 @@ defmodule ConvergerWeb.Router do
     post "/channels/:channel_id/status", InboundController, :status
   end
 
+  # Converger client API (Direct Line-inspired)
+  pipeline :converger_secret_auth do
+    plug ConvergerWeb.Plugs.ConvergerAuth, mode: :secret
+  end
+
+  pipeline :converger_token_auth do
+    plug ConvergerWeb.Plugs.ConvergerAuth, mode: :token
+  end
+
+  scope "/api/v1/converger", ConvergerWeb.ConvergerAPI do
+    pipe_through [:api, :converger_secret_auth]
+
+    post "/tokens/generate", TokenController, :generate
+  end
+
+  scope "/api/v1/converger", ConvergerWeb.ConvergerAPI do
+    pipe_through [:api, :converger_token_auth]
+
+    post "/tokens/refresh", TokenController, :refresh
+    post "/conversations", ConversationController, :create
+    get "/conversations/:id", ConversationController, :show
+    post "/conversations/:conversation_id/activities", ActivityController, :create
+    get "/conversations/:conversation_id/activities", ActivityController, :index
+    post "/conversations/:conversation_id/upload", UploadController, :create
+  end
+
   # Admin login (IP whitelist protected)
   scope "/admin", ConvergerWeb do
     pipe_through [:browser, :admin_auth, :admin_session]

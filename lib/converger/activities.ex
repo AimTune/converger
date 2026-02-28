@@ -30,6 +30,22 @@ defmodule Converger.Activities do
     end
   end
 
+  def list_activities_after_watermark(conversation_id, watermark_activity_id) do
+    case Repo.get(Activity, watermark_activity_id) do
+      %Activity{inserted_at: ts, id: wid} ->
+        from(a in Activity,
+          where:
+            a.conversation_id == ^conversation_id and
+              (a.inserted_at > ^ts or (a.inserted_at == ^ts and a.id > ^wid)),
+          order_by: [asc: a.inserted_at, asc: a.id]
+        )
+        |> Repo.all()
+
+      nil ->
+        list_activities_for_conversation(conversation_id)
+    end
+  end
+
   def get_activity!(id), do: Repo.get!(Activity, id)
 
   def create_activity(attrs \\ %{}) do

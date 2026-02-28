@@ -17,7 +17,7 @@ defmodule Converger.Auth.Token do
       "sub" => user_id
     }
 
-    generate_and_sign(claims, signer())
+    generate_and_sign(claims, Converger.Auth.Signer.signer())
   end
 
   def generate_channel_token(channel) do
@@ -27,16 +27,11 @@ defmodule Converger.Auth.Token do
       "sub" => "channel_#{channel.id}"
     }
 
-    generate_and_sign(claims, signer())
+    generate_and_sign(claims, Converger.Auth.Signer.signer())
   end
 
   def verify_token(token) do
-    verify_and_validate(token, signer())
+    verify_and_validate(token, Converger.Auth.Signer.signer())
   end
 
-  defp signer do
-    # In a real app, load this from config
-    secret = Application.get_env(:converger, ConvergerWeb.Endpoint)[:secret_key_base]
-    Joken.Signer.create("HS256", secret)
-  end
 end

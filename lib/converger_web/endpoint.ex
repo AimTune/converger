@@ -15,6 +15,10 @@ defmodule ConvergerWeb.Endpoint do
     websocket: true,
     longpoll: false
 
+  socket "/socket/converger", ConvergerWeb.ConvergerSocket,
+    websocket: true,
+    longpoll: false
+
   socket "/live", Phoenix.LiveView.Socket,
     websocket: [connect_info: [:peer_data, session: @session_options]],
     longpoll: [connect_info: [session: @session_options]]
@@ -42,7 +46,7 @@ defmodule ConvergerWeb.Endpoint do
 
   plug CORSPlug,
     origin: Application.compile_env(:converger, :cors_origins, ["http://localhost:5500"]),
-    headers: ["x-channel-token", "x-api-key"] ++ CORSPlug.defaults()[:headers]
+    headers: ["x-channel-token", "x-api-key", "authorization"] ++ CORSPlug.defaults()[:headers]
 
   plug Plug.Parsers,
     parsers: [:urlencoded, :multipart, :json],
