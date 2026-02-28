@@ -18,6 +18,22 @@ defmodule Converger.Channels.Adapter do
   @callback parse_inbound(channel, params :: map()) ::
               {:ok, map()} | {:error, term()}
 
+  @doc """
+  Parse a provider status update (delivery receipt / read receipt).
+  Returns {:ok, list_of_status_updates} or :ignore or {:error, reason}.
+
+  Each status update map contains:
+    - "provider_message_id" (required) - the provider's message ID
+    - "status" (required) - one of "sent", "delivered", "read", "failed"
+    - "timestamp" (optional) - ISO8601 or Unix timestamp from provider
+    - "recipient_id" (optional) - provider recipient identifier
+    - "error" (optional) - error details for failed status
+  """
+  @callback parse_status_update(channel, params :: map()) ::
+              {:ok, [map()]} | :ignore | {:error, term()}
+
+  @optional_callbacks [parse_status_update: 2]
+
   @callback supported_modes() :: [String.t()]
 
   @doc "Resolve adapter module from channel type string."
@@ -52,6 +68,20 @@ defmodule Converger.Channels.Adapter do
     case adapter_for(type) do
       {:ok, mod} -> mod.parse_inbound(channel, params)
       {:error, _} = err -> err
+    end
+  end
+
+  def parse_status_update(%{type: type} = channel, params) do
+    case adapter_for(type) do
+      {:ok, mod} ->
+        if function_exported?(mod, :parse_status_update, 2) do
+          mod.parse_status_update(channel, params)
+        else
+          :ignore
+        end
+
+      {:error, _} = err ->
+        err
     end
   end
 

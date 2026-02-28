@@ -79,8 +79,21 @@ defmodule ConvergerWeb.Admin.TenantLive do
     <div class="card">
       <h3>Create Tenant</h3>
       <.form for={@form} phx-submit="save">
-        <.input field={@form[:name]} placeholder="Name" />
-        <button type="submit">Create</button>
+        <div style="display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap;">
+          <div>
+            <.input field={@form[:name]} placeholder="Tenant Name" />
+          </div>
+          <div>
+            <label style="display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.85em; color: #555;">Alert Webhook URL</label>
+            <input
+              type="text"
+              name="tenant[alert_webhook_url]"
+              placeholder="https://example.com/alerts (optional)"
+              style="padding: 8px; border: 1px solid #ddd; border-radius: 4px; min-width: 300px;"
+            />
+          </div>
+          <button type="submit">Create</button>
+        </div>
       </.form>
     </div>
 
@@ -91,6 +104,7 @@ defmodule ConvergerWeb.Admin.TenantLive do
             <th>ID</th>
             <th>Name</th>
             <th>API Key</th>
+            <th>Alert Webhook</th>
             <th>Status</th>
             <th>Actions</th>
           </tr>
@@ -100,6 +114,12 @@ defmodule ConvergerWeb.Admin.TenantLive do
             <td><small><%= tenant.id %></small></td>
             <td><%= tenant.name %></td>
             <td><code style="font-size: 0.8em;"><%= tenant.api_key %></code></td>
+            <td>
+              <span :if={tenant.alert_webhook_url && tenant.alert_webhook_url != ""} style="font-size: 0.8em; color: #666;" title={tenant.alert_webhook_url}>
+                <%= String.slice(tenant.alert_webhook_url, 0, 40) %><%= if String.length(tenant.alert_webhook_url) > 40, do: "..." %>
+              </span>
+              <span :if={!tenant.alert_webhook_url || tenant.alert_webhook_url == ""} style="color: #aaa;">—</span>
+            </td>
             <td>
               <span class={"badge badge-#{tenant.status}"}>
                 <%= tenant.status %>

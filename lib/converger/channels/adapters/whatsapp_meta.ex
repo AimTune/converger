@@ -76,4 +76,36 @@ defmodule Converger.Channels.Adapters.WhatsAppMeta do
       _ -> {:error, "unable to parse WhatsApp Meta webhook payload"}
     end
   end
+
+  @impl true
+  def parse_status_update(_channel, params) do
+    with [entry | _] <- params["entry"] || [],
+         [change | _] <- entry["changes"] || [],
+         value <- change["value"],
+         statuses when is_list(statuses) and statuses != [] <- value["statuses"] do
+      updates =
+        Enum.map(statuses, fn status ->
+          %{
+            "provider_message_id" => status["id"],
+            "status" => normalize_status(status["status"]),
+            "timestamp" => status["timestamp"],
+            "recipient_id" => status["recipient_id"],
+            "error" => extract_error(status)
+          }
+        end)
+
+      {:ok, updates}
+    else
+      _ -> :ignore
+    end
+  end
+
+  defp normalize_status("sent"), do: "sent"
+  defp normalize_status("delivered"), do: "delivered"
+  defp normalize_status("read"), do: "read"
+  defp normalize_status("failed"), do: "failed"
+  defp normalize_status(_), do: "sent"
+
+  defp extract_error(%{"errors" => [%{"title" => title} | _]}), do: title
+  defp extract_error(_), do: nil
 end

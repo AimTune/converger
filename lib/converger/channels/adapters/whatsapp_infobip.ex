@@ -73,4 +73,31 @@ defmodule Converger.Channels.Adapters.WhatsAppInfobip do
       _ -> {:error, "unable to parse Infobip webhook payload"}
     end
   end
+
+  @impl true
+  def parse_status_update(_channel, params) do
+    with [result | _] <- params["results"] || [],
+         %{"groupName" => group_name} <- result["status"] do
+      updates = [
+        %{
+          "provider_message_id" => result["messageId"],
+          "status" => normalize_dlr_status(group_name),
+          "timestamp" => result["doneAt"] || result["sentAt"],
+          "recipient_id" => result["to"],
+          "error" => get_in(result, ["error", "description"])
+        }
+      ]
+
+      {:ok, updates}
+    else
+      _ -> :ignore
+    end
+  end
+
+  defp normalize_dlr_status("DELIVERED"), do: "delivered"
+  defp normalize_dlr_status("SEEN"), do: "read"
+  defp normalize_dlr_status("REJECTED"), do: "failed"
+  defp normalize_dlr_status("UNDELIVERABLE"), do: "failed"
+  defp normalize_dlr_status("PENDING"), do: "sent"
+  defp normalize_dlr_status(_), do: "sent"
 end

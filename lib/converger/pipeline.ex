@@ -106,11 +106,11 @@ defmodule Converger.Pipeline do
 
     case Adapter.deliver_activity(channel, activity) do
       :ok ->
-        Deliveries.mark_delivered(delivery)
+        Deliveries.mark_sent(delivery)
         :ok
 
       {:ok, response_meta} ->
-        Deliveries.mark_delivered(delivery, response_meta)
+        Deliveries.mark_sent(delivery, response_meta)
         :ok
 
       {:error, reason} ->

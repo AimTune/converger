@@ -75,6 +75,36 @@ defmodule Converger.Channels.Adapters.Webhook do
      }}
   end
 
+  @impl true
+  def parse_status_update(_channel, params) do
+    cond do
+      is_binary(params["delivery_id"]) and is_binary(params["status"]) ->
+        {:ok,
+         [
+           %{
+             "delivery_id" => params["delivery_id"],
+             "status" => params["status"],
+             "timestamp" => params["timestamp"],
+             "error" => params["error"]
+           }
+         ]}
+
+      is_binary(params["provider_message_id"]) and is_binary(params["status"]) ->
+        {:ok,
+         [
+           %{
+             "provider_message_id" => params["provider_message_id"],
+             "status" => params["status"],
+             "timestamp" => params["timestamp"],
+             "error" => params["error"]
+           }
+         ]}
+
+      true ->
+        :ignore
+    end
+  end
+
   defp valid_url?(url) do
     uri = URI.parse(url)
     uri.scheme in ["http", "https"] and not is_nil(uri.host)

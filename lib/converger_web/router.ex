@@ -33,6 +33,9 @@ defmodule ConvergerWeb.Router do
     # Inbound webhook endpoints for external channel integrations
     get "/channels/:channel_id/inbound", InboundController, :verify
     post "/channels/:channel_id/inbound", InboundController, :create
+
+    # Delivery status webhook endpoint (receipts / read receipts)
+    post "/channels/:channel_id/status", InboundController, :status
   end
 
   scope "/admin", ConvergerWeb.Admin do

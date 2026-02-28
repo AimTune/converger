@@ -53,7 +53,8 @@ config :converger, Oban,
     {Oban.Plugins.Pruner, max_age: 3600 * 24},
     {Oban.Plugins.Cron,
      crontab: [
-       {"0 * * * *", Converger.Workers.ConversationExpirationWorker}
+       {"0 * * * *", Converger.Workers.ConversationExpirationWorker},
+       {"*/5 * * * *", Converger.Workers.ChannelHealthWorker}
      ]}
   ],
   queues: [default: 10, deliveries: 20]

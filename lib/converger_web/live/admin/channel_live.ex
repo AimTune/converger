@@ -4,40 +4,62 @@ defmodule ConvergerWeb.Admin.ChannelLive do
   alias Converger.Channels
   alias Converger.Channels.Channel
   alias Converger.Channels.Adapter
+  alias Converger.Channels.Health
   alias Converger.Tenants
   alias Converger.Auth.Token
 
   @default_type "webhook"
 
   def mount(_params, _session, socket) do
+    if connected?(socket) do
+      ConvergerWeb.Endpoint.subscribe("channel_health")
+    end
+
     tenants = Tenants.list_tenants()
     actor = build_actor(socket)
     supported = Adapter.supported_modes(@default_type)
+    channels = Channels.list_channels()
+    health_map = load_health_map(channels)
 
     {:ok,
      assign(socket,
-       channels: Channels.list_channels(),
+       channels: channels,
        tenants: tenants,
        form: to_form(Channels.change_channel(%Channel{})),
        mode_filter: "all",
        selected_type: @default_type,
        supported_modes: supported,
        selected_mode: default_mode(supported),
+       health_map: health_map,
        page_title: "Channels",
        actor: actor
      )}
+  end
+
+  def handle_info(%{event: "health_changed", payload: payload}, socket) do
+    health_map =
+      Map.put(socket.assigns.health_map, payload.channel_id, %{
+        status: payload.status,
+        failure_rate: payload.failure_rate,
+        total_deliveries: payload.total_deliveries,
+        failed_deliveries: payload.failed_deliveries
+      })
+
+    {:noreply, assign(socket, health_map: health_map)}
   end
 
   def handle_event("save", %{"channel" => params}, socket) do
     case Channels.create_channel(params, socket.assigns.actor) do
       {:ok, _channel} ->
         supported = Adapter.supported_modes(@default_type)
+        channels = load_channels(socket.assigns.mode_filter)
 
         {:noreply,
          socket
          |> put_flash(:info, "Channel created")
          |> assign(
-           channels: load_channels(socket.assigns.mode_filter),
+           channels: channels,
+           health_map: load_health_map(channels),
            form: to_form(Channels.change_channel(%Channel{})),
            selected_type: @default_type,
            supported_modes: supported,
@@ -64,7 +86,8 @@ defmodule ConvergerWeb.Admin.ChannelLive do
   def handle_event("form_changed", _params, socket), do: {:noreply, socket}
 
   def handle_event("filter_mode", %{"mode" => mode}, socket) do
-    {:noreply, assign(socket, channels: load_channels(mode), mode_filter: mode)}
+    channels = load_channels(mode)
+    {:noreply, assign(socket, channels: channels, health_map: load_health_map(channels), mode_filter: mode)}
   end
 
   def handle_event("toggle_status", %{"id" => id}, socket) do
@@ -73,8 +96,10 @@ defmodule ConvergerWeb.Admin.ChannelLive do
 
     case Channels.update_channel(channel, %{status: new_status}, socket.assigns.actor) do
       {:ok, _} ->
+        channels = load_channels(socket.assigns.mode_filter)
+
         {:noreply,
-         assign(socket, channels: load_channels(socket.assigns.mode_filter))
+         assign(socket, channels: channels, health_map: load_health_map(channels))
          |> put_flash(:info, "Status updated")}
 
       {:error, _} ->
@@ -87,8 +112,10 @@ defmodule ConvergerWeb.Admin.ChannelLive do
 
     case Channels.delete_channel(channel, socket.assigns.actor) do
       {:ok, _} ->
+        channels = load_channels(socket.assigns.mode_filter)
+
         {:noreply,
-         assign(socket, channels: load_channels(socket.assigns.mode_filter))
+         assign(socket, channels: channels, health_map: load_health_map(channels))
          |> put_flash(:info, "Channel deleted")}
 
       {:error, _} ->
@@ -98,6 +125,28 @@ defmodule ConvergerWeb.Admin.ChannelLive do
 
   defp load_channels("all"), do: Channels.list_channels()
   defp load_channels(mode), do: Channels.list_channels_by_mode(mode)
+
+  defp load_health_map(channels) do
+    channel_ids = Enum.map(channels, & &1.id)
+    Health.get_latest_health_map(channel_ids)
+  end
+
+  defp health_color("healthy"), do: "#4CAF50"
+  defp health_color("degraded"), do: "#FF9800"
+  defp health_color("unhealthy"), do: "#f44336"
+  defp health_color(_), do: "#9E9E9E"
+
+  defp health_label("healthy"), do: "Healthy"
+  defp health_label("degraded"), do: "Degraded"
+  defp health_label("unhealthy"), do: "Unhealthy"
+  defp health_label(_), do: "—"
+
+  defp channel_health_status(health_map, channel_id) do
+    case Map.get(health_map, channel_id) do
+      %{status: status} -> status
+      _ -> "unknown"
+    end
+  end
 
   defp build_actor(socket) do
     case get_connect_info(socket, :peer_data) do
@@ -251,6 +300,7 @@ defmodule ConvergerWeb.Admin.ChannelLive do
             <th>Mode</th>
             <th>Tenant</th>
             <th>Status</th>
+            <th>Health</th>
             <th>Config</th>
             <th>Token</th>
             <th>Actions</th>
@@ -269,6 +319,13 @@ defmodule ConvergerWeb.Admin.ChannelLive do
             <td>
               <span class={"badge badge-#{channel.status}"}>
                 <%= channel.status %>
+              </span>
+            </td>
+            <td>
+              <% health_status = channel_health_status(@health_map, channel.id) %>
+              <span style={"display: inline-flex; align-items: center; gap: 4px; color: #{health_color(health_status)}; font-size: 0.85em;"}>
+                <span style={"width: 8px; height: 8px; border-radius: 50%; background: #{health_color(health_status)}; display: inline-block;"}></span>
+                <%= health_label(health_status) %>
               </span>
             </td>
             <td>

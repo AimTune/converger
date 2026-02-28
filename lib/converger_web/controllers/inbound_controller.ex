@@ -3,31 +3,31 @@ defmodule ConvergerWeb.InboundController do
 
   require Logger
 
-  alias Converger.{Channels, Activities, Conversations}
+  alias Converger.{Channels, Activities, Conversations, Deliveries}
   alias Converger.Channels.Adapter
 
   action_fallback ConvergerWeb.FallbackController
 
   def create(conn, %{"channel_id" => channel_id} = params) do
     with {:ok, channel} <- Channels.get_active_channel(channel_id),
-         :ok <- verify_inbound_capable(channel),
-         :ok <- verify_inbound_signature(conn, channel),
-         {:ok, parsed} <- Adapter.parse_inbound(channel, params),
-         {:ok, conversation} <- resolve_or_create_conversation(channel, params),
-         {:ok, activity} <-
-           Activities.create_activity(
-             parsed
-             |> Map.put("tenant_id", channel.tenant_id)
-             |> Map.put("conversation_id", conversation.id)
-           ) do
-      Logger.info("Inbound activity received",
-        channel_id: channel_id,
-        activity_id: activity.id
-      )
+         :ok <- verify_inbound_signature(conn, channel) do
+      # Try parsing as status update first (WhatsApp sends statuses and messages
+      # to the same endpoint)
+      case Adapter.parse_status_update(channel, params) do
+        {:ok, status_updates} when status_updates != [] ->
+          process_status_updates(conn, channel, status_updates)
 
-      conn
-      |> put_status(:created)
-      |> json(%{status: "accepted", activity_id: activity.id})
+        _ ->
+          process_inbound_message(conn, channel, params)
+      end
+    end
+  end
+
+  def status(conn, %{"channel_id" => channel_id} = params) do
+    with {:ok, channel} <- Channels.get_active_channel(channel_id),
+         :ok <- verify_inbound_signature(conn, channel),
+         {:ok, status_updates} <- Adapter.parse_status_update(channel, params) do
+      process_status_updates(conn, channel, status_updates)
     end
   end
 
@@ -46,6 +46,49 @@ defmodule ConvergerWeb.InboundController do
         _ ->
           send_resp(conn, 200, "ok")
       end
+    end
+  end
+
+  defp process_status_updates(conn, channel, status_updates) do
+    results =
+      Enum.map(status_updates, fn update ->
+        Deliveries.apply_status_update(channel.id, update)
+      end)
+
+    processed = Enum.count(results, fn
+      {:ok, _} -> true
+      _ -> false
+    end)
+
+    Logger.info("Status updates processed",
+      channel_id: channel.id,
+      total: length(results),
+      processed: processed
+    )
+
+    conn
+    |> put_status(:ok)
+    |> json(%{status: "accepted", receipts_processed: processed})
+  end
+
+  defp process_inbound_message(conn, channel, params) do
+    with :ok <- verify_inbound_capable(channel),
+         {:ok, parsed} <- Adapter.parse_inbound(channel, params),
+         {:ok, conversation} <- resolve_or_create_conversation(channel, params),
+         {:ok, activity} <-
+           Activities.create_activity(
+             parsed
+             |> Map.put("tenant_id", channel.tenant_id)
+             |> Map.put("conversation_id", conversation.id)
+           ) do
+      Logger.info("Inbound activity received",
+        channel_id: channel.id,
+        activity_id: activity.id
+      )
+
+      conn
+      |> put_status(:created)
+      |> json(%{status: "accepted", activity_id: activity.id})
     end
   end
 

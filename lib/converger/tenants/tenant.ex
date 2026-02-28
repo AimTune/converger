@@ -8,6 +8,7 @@ defmodule Converger.Tenants.Tenant do
     field :name, :string
     field :api_key, :string
     field :status, :string, default: "active"
+    field :alert_webhook_url, :string
 
     timestamps(type: :utc_datetime_usec)
   end
@@ -29,10 +30,11 @@ defmodule Converger.Tenants.Tenant do
   @doc false
   def changeset(tenant, attrs) do
     tenant
-    |> cast(attrs, [:name, :status])
+    |> cast(attrs, [:name, :status, :alert_webhook_url])
     |> validate_required([:name])
     |> ensure_api_key()
     |> validate_required([:api_key, :status])
+    |> validate_url(:alert_webhook_url)
     |> unique_constraint(:api_key)
   end
 
@@ -46,5 +48,18 @@ defmodule Converger.Tenants.Tenant do
 
   defp generate_api_key do
     :crypto.strong_rand_bytes(32) |> Base.encode64(padding: false)
+  end
+
+  defp validate_url(changeset, field) do
+    validate_change(changeset, field, fn _, value ->
+      case URI.parse(value) do
+        %URI{scheme: scheme, host: host}
+        when scheme in ["http", "https"] and is_binary(host) and host != "" ->
+          []
+
+        _ ->
+          [{field, "must be a valid HTTP or HTTPS URL"}]
+      end
+    end)
   end
 end

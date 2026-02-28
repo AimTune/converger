@@ -18,7 +18,7 @@ defmodule Converger.Workers.ActivityDeliveryWorker do
 
     case Adapter.deliver_activity(channel, activity) do
       :ok ->
-        Deliveries.mark_delivered(delivery)
+        Deliveries.mark_sent(delivery)
 
         Logger.info("Activity delivered",
           activity_id: activity_id,
@@ -29,7 +29,7 @@ defmodule Converger.Workers.ActivityDeliveryWorker do
         :ok
 
       {:ok, response_meta} ->
-        Deliveries.mark_delivered(delivery, response_meta)
+        Deliveries.mark_sent(delivery, response_meta)
         :ok
 
       {:error, reason} ->

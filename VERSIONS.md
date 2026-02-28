@@ -100,8 +100,8 @@
 
 - [ ] Media message support (images, documents, audio, video)
 - [ ] Template message support (WhatsApp HSM templates)
-- [ ] Delivery receipts / read receipts
-- [ ] Channel health monitoring and alerting
+- [x] Delivery receipts / read receipts
+- [x] Channel health monitoring and alerting
 - [ ] Webhook retry dashboard in admin panel
 - [ ] Message transformation pipeline (middleware)
 - [ ] Per-channel rate limiting

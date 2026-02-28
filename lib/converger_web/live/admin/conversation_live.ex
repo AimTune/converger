@@ -6,6 +6,7 @@ defmodule ConvergerWeb.Admin.ConversationLive do
   alias Converger.Tenants
   alias Converger.Channels
   alias Converger.Activities
+  alias Converger.Deliveries
 
   def mount(_params, _session, socket) do
     {:ok,
@@ -39,12 +40,47 @@ defmodule ConvergerWeb.Admin.ConversationLive do
 
     activities = Activities.list_activities_for_conversation(id)
 
-    assign(socket, conversation: conversation, activities: activities)
+    # Build delivery status map for all activities
+    activity_ids = Enum.map(activities, & &1.id)
+    deliveries = Deliveries.list_deliveries_for_activities(activity_ids)
+
+    delivery_map =
+      Enum.group_by(deliveries, & &1.activity_id)
+      |> Map.new(fn {activity_id, dels} ->
+        # Pick the most advanced delivery status for display
+        best = Enum.max_by(dels, &Converger.Deliveries.Delivery.status_rank(&1.status), fn -> hd(dels) end)
+        {activity_id, best}
+      end)
+
+    # Subscribe to real-time status updates
+    if connected?(socket) do
+      ConvergerWeb.Endpoint.subscribe("conversation:#{id}")
+    end
+
+    assign(socket,
+      conversation: conversation,
+      activities: activities,
+      delivery_map: delivery_map
+    )
   end
 
   def handle_event("filter", %{"filters" => filters}, socket) do
     {:noreply, push_patch(socket, to: ~p"/admin/conversations?#{filters}")}
   end
+
+  def handle_info(%{topic: "conversation:" <> _, event: "delivery_status", payload: payload}, socket) do
+    delivery_map =
+      Map.put(socket.assigns.delivery_map, payload.activity_id, %{
+        status: payload.status,
+        sent_at: payload.sent_at,
+        delivered_at: payload.delivered_at,
+        read_at: payload.read_at
+      })
+
+    {:noreply, assign(socket, delivery_map: delivery_map)}
+  end
+
+  def handle_info(%{topic: "conversation:" <> _}, socket), do: {:noreply, socket}
 
   def render(assigns) do
     case assigns.live_action do
@@ -176,6 +212,7 @@ defmodule ConvergerWeb.Admin.ConversationLive do
             <th>Time</th>
             <th>Sender</th>
             <th>Message</th>
+            <th>Delivery</th>
           </tr>
         </thead>
         <tbody>
@@ -183,13 +220,43 @@ defmodule ConvergerWeb.Admin.ConversationLive do
             <td style="white-space: nowrap;"><small><%= a.inserted_at %></small></td>
             <td><strong><%= a.sender %></strong></td>
             <td><%= a.text %></td>
+            <td><%= delivery_badge(Map.get(@delivery_map, a.id)) %></td>
           </tr>
           <tr :if={Enum.empty?(@activities)}>
-            <td colspan="3" style="text-align: center; color: #999;">No activities found</td>
+            <td colspan="4" style="text-align: center; color: #999;">No activities found</td>
           </tr>
         </tbody>
       </table>
     </div>
     """
   end
+
+  defp delivery_badge(nil), do: ""
+
+  defp delivery_badge(%{status: "pending"}) do
+    assigns = %{}
+    ~H|<span class="badge" title="Pending">...</span>|
+  end
+
+  defp delivery_badge(%{status: "sent"}) do
+    assigns = %{}
+    ~H|<span class="badge badge-outbound" title="Sent">&#10003;</span>|
+  end
+
+  defp delivery_badge(%{status: "delivered"}) do
+    assigns = %{}
+    ~H|<span class="badge badge-active" title="Delivered">&#10003;&#10003;</span>|
+  end
+
+  defp delivery_badge(%{status: "read"}) do
+    assigns = %{}
+    ~H|<span class="badge badge-active" title="Read" style="color: #2196F3;">&#10003;&#10003;</span>|
+  end
+
+  defp delivery_badge(%{status: "failed"}) do
+    assigns = %{}
+    ~H|<span class="badge badge-inactive" title="Failed">&#10007;</span>|
+  end
+
+  defp delivery_badge(_), do: ""
 end
