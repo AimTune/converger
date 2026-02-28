@@ -108,14 +108,39 @@
 - [ ] SDK updates (JS client for inbound webhooks, delivery status)
 - [ ] Channel config encryption at rest
 
+## v2.4 — User Management & Multi-Login (Completed)
+
+- [x] Admin user accounts (`admin_users` table with bcrypt password hashing)
+- [x] Tenant user accounts (`tenant_users` table with tenant-scoped email uniqueness)
+- [x] Admin roles: super_admin, admin, viewer
+- [x] Tenant roles: owner, admin, member, viewer
+- [x] Session-based authentication (cookie sessions)
+- [x] Admin login page (`/admin/login`) with IP whitelist protection
+- [x] Tenant portal login page (`/portal/login`) with freetext tenant name (no tenant enumeration)
+- [x] Dual-layer auth: Plug-level `require_admin_user`/`require_tenant_user` + LiveView `on_mount` hooks
+- [x] Admin panel: Admin Users management (CRUD, role assignment, super_admin-only creation)
+- [x] Admin panel: Tenant Users management (CRUD, tenant filter, role assignment)
+- [x] Tenant portal (`/portal/*`) with tenant-scoped views
+  - [x] Dashboard (channel, conversation, activity stats)
+  - [x] Channels (view, toggle status)
+  - [x] Conversations (list, detail with activity timeline)
+  - [x] Routing Rules (view, toggle enabled)
+  - [x] Users (owner/admin can manage team members)
+- [x] Separate layouts: admin (blue theme) and portal (green theme) with user info + logout
+- [x] Role-based authorization (viewer read-only, member CRUD, owner/admin user management)
+- [x] Audit log integration: actor tracked by user email instead of IP address
+- [x] Audit log resource types extended: `admin_user`, `tenant_user`
+- [x] Seed data: default super_admin user (`admin@converger.local`)
+- [x] `password_hash` and `password` added to audit log sensitive fields
+
 ## v3.0 — Enterprise (Planned)
 
 - [ ] Tenant sharding for horizontal data scaling
 - [ ] Multi-region replication
 - [ ] Advanced analytics dashboards
 - [ ] SLA tiers per tenant
-- [ ] Enterprise RBAC (role-based access control)
-- [ ] Audit logging
+- [x] Enterprise RBAC (role-based access control)
+- [x] Audit logging
 - [ ] API versioning strategy
 - [ ] SMS channel adapters (Twilio, Vonage)
 - [ ] Email channel adapter (SMTP/SendGrid)
