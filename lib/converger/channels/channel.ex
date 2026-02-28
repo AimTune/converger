@@ -14,6 +14,7 @@ defmodule Converger.Channels.Channel do
     field :secret, :string
     field :status, :string, default: "active"
     field :config, :map, default: %{}
+    field :transformations, {:array, :map}, default: []
     belongs_to :tenant, Converger.Tenants.Tenant
 
     timestamps(type: :utc_datetime_usec)
@@ -25,12 +26,13 @@ defmodule Converger.Channels.Channel do
   @doc false
   def changeset(channel, attrs) do
     channel
-    |> cast(attrs, [:name, :status, :tenant_id, :type, :mode, :secret, :config])
+    |> cast(attrs, [:name, :status, :tenant_id, :type, :mode, :secret, :config, :transformations])
     |> validate_required([:name, :status, :tenant_id])
     |> validate_inclusion(:type, @channel_types)
     |> validate_inclusion(:mode, @channel_modes)
     |> validate_channel_config()
     |> validate_mode_compatibility()
+    |> validate_transformations()
     |> unique_constraint([:tenant_id, :name])
     |> ensure_secret()
   end
@@ -55,6 +57,19 @@ defmodule Converger.Channels.Channel do
       changeset
     else
       add_error(changeset, :mode, "#{type} channels only support modes: #{Enum.join(supported, ", ")}")
+    end
+  end
+
+  defp validate_transformations(changeset) do
+    transformations = get_field(changeset, :transformations) || []
+
+    if transformations == [] do
+      changeset
+    else
+      case Converger.Pipeline.Middleware.validate_chain(transformations) do
+        :ok -> changeset
+        {:error, message} -> add_error(changeset, :transformations, message)
+      end
     end
   end
 

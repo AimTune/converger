@@ -6,20 +6,15 @@ defmodule Converger.Workers.ActivityDeliveryWorker do
 
   require Logger
 
-  alias Converger.{Activities, Channels, Deliveries}
-  alias Converger.Channels.Adapter
+  alias Converger.{Activities, Channels}
 
   @impl Oban.Worker
   def perform(%Oban.Job{args: %{"activity_id" => activity_id, "channel_id" => channel_id}}) do
     activity = Activities.get_activity!(activity_id)
     channel = Channels.get_channel!(channel_id)
 
-    delivery = Deliveries.get_or_create_delivery(activity_id, channel_id)
-
-    case Adapter.deliver_activity(channel, activity) do
+    case Converger.Pipeline.deliver(activity, channel) do
       :ok ->
-        Deliveries.mark_sent(delivery)
-
         Logger.info("Activity delivered",
           activity_id: activity_id,
           channel_id: channel_id,
@@ -28,13 +23,7 @@ defmodule Converger.Workers.ActivityDeliveryWorker do
 
         :ok
 
-      {:ok, response_meta} ->
-        Deliveries.mark_sent(delivery, response_meta)
-        :ok
-
       {:error, reason} ->
-        Deliveries.mark_attempt_failed(delivery, inspect(reason))
-
         Logger.warning("Activity delivery failed",
           activity_id: activity_id,
           channel_id: channel_id,

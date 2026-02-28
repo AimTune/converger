@@ -103,7 +103,7 @@
 - [x] Delivery receipts / read receipts
 - [x] Channel health monitoring and alerting
 - [ ] Webhook retry dashboard in admin panel
-- [ ] Message transformation pipeline (middleware)
+- [x] Message transformation pipeline (middleware)
 - [ ] Per-channel rate limiting
 - [ ] SDK updates (JS client for inbound webhooks, delivery status)
 - [ ] Channel config encryption at rest

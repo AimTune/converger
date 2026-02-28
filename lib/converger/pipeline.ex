@@ -98,24 +98,37 @@ defmodule Converger.Pipeline do
     (primary ++ additional) |> Enum.uniq_by(& &1.id)
   end
 
-  @doc "Execute the actual delivery via adapter + delivery tracking."
+  @doc """
+  Execute the actual delivery via middleware + adapter + delivery tracking.
+
+  The middleware chain (from `channel.transformations`) runs before the adapter.
+  If any middleware halts, the delivery is marked as failed and skipped.
+  """
   def deliver(activity, channel) do
     alias Converger.{Deliveries, Channels.Adapter}
+    alias Converger.Pipeline.Middleware
 
     delivery = Deliveries.get_or_create_delivery(activity.id, channel.id)
 
-    case Adapter.deliver_activity(channel, activity) do
-      :ok ->
-        Deliveries.mark_sent(delivery)
-        :ok
+    case Middleware.run(activity, channel) do
+      {:halt, reason} ->
+        Deliveries.mark_attempt_failed(delivery, "halted: #{reason}")
+        {:error, {:halted, reason}}
 
-      {:ok, response_meta} ->
-        Deliveries.mark_sent(delivery, response_meta)
-        :ok
+      {:ok, transformed_activity} ->
+        case Adapter.deliver_activity(channel, transformed_activity) do
+          :ok ->
+            Deliveries.mark_sent(delivery)
+            :ok
 
-      {:error, reason} ->
-        Deliveries.mark_attempt_failed(delivery, inspect(reason))
-        {:error, reason}
+          {:ok, response_meta} ->
+            Deliveries.mark_sent(delivery, response_meta)
+            :ok
+
+          {:error, reason} ->
+            Deliveries.mark_attempt_failed(delivery, inspect(reason))
+            {:error, reason}
+        end
     end
   end
 
