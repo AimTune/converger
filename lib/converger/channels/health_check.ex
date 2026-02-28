@@ -23,8 +23,22 @@ defmodule Converger.Channels.HealthCheck do
   @doc false
   def changeset(health_check, attrs) do
     health_check
-    |> cast(attrs, [:channel_id, :status, :total_deliveries, :failed_deliveries, :failure_rate, :checked_at])
-    |> validate_required([:channel_id, :status, :total_deliveries, :failed_deliveries, :failure_rate, :checked_at])
+    |> cast(attrs, [
+      :channel_id,
+      :status,
+      :total_deliveries,
+      :failed_deliveries,
+      :failure_rate,
+      :checked_at
+    ])
+    |> validate_required([
+      :channel_id,
+      :status,
+      :total_deliveries,
+      :failed_deliveries,
+      :failure_rate,
+      :checked_at
+    ])
     |> validate_inclusion(:status, @health_statuses)
     |> validate_number(:failure_rate, greater_than_or_equal_to: 0.0, less_than_or_equal_to: 1.0)
   end

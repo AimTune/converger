@@ -55,10 +55,11 @@ defmodule ConvergerWeb.InboundController do
         Deliveries.apply_status_update(channel.id, update)
       end)
 
-    processed = Enum.count(results, fn
-      {:ok, _} -> true
-      _ -> false
-    end)
+    processed =
+      Enum.count(results, fn
+        {:ok, _} -> true
+        _ -> false
+      end)
 
     Logger.info("Status updates processed",
       channel_id: channel.id,

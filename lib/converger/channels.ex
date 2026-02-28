@@ -141,14 +141,16 @@ defmodule Converger.Channels do
 
   def list_inbound_capable_channels(tenant_id) do
     from(c in Channel,
-      where: c.tenant_id == ^tenant_id and c.mode in ["inbound", "duplex"] and c.status == "active"
+      where:
+        c.tenant_id == ^tenant_id and c.mode in ["inbound", "duplex"] and c.status == "active"
     )
     |> Repo.all()
   end
 
   def list_outbound_capable_channels(tenant_id) do
     from(c in Channel,
-      where: c.tenant_id == ^tenant_id and c.mode in ["outbound", "duplex"] and c.status == "active"
+      where:
+        c.tenant_id == ^tenant_id and c.mode in ["outbound", "duplex"] and c.status == "active"
     )
     |> Repo.all()
   end

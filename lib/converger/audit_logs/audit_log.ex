@@ -17,13 +17,21 @@ defmodule Converger.AuditLogs.AuditLog do
     timestamps(type: :utc_datetime_usec, updated_at: false)
   end
 
-  @valid_actor_types ~w(admin tenant_api system)
+  @valid_actor_types ~w(admin tenant_api tenant_user system)
   @valid_actions ~w(create update delete toggle_status toggle_enabled)
-  @valid_resource_types ~w(tenant channel routing_rule)
+  @valid_resource_types ~w(tenant channel routing_rule admin_user tenant_user)
 
   def changeset(audit_log, attrs) do
     audit_log
-    |> cast(attrs, [:tenant_id, :actor_type, :actor_id, :action, :resource_type, :resource_id, :changes])
+    |> cast(attrs, [
+      :tenant_id,
+      :actor_type,
+      :actor_id,
+      :action,
+      :resource_type,
+      :resource_id,
+      :changes
+    ])
     |> validate_required([:actor_type, :actor_id, :action, :resource_type, :resource_id])
     |> validate_inclusion(:actor_type, @valid_actor_types)
     |> validate_inclusion(:action, @valid_actions)

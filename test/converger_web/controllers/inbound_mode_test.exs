@@ -16,7 +16,10 @@ defmodule ConvergerWeb.InboundModeTest do
       conn =
         build_conn()
         |> put_req_header("x-converger-signature", "")
-        |> post(~p"/api/v1/channels/#{channel.id}/inbound", %{"text" => "hello", "sender" => "user1"})
+        |> post(~p"/api/v1/channels/#{channel.id}/inbound", %{
+          "text" => "hello",
+          "sender" => "user1"
+        })
 
       assert json_response(conn, 400)["error"] =~ "inbound"
     end
@@ -26,7 +29,10 @@ defmodule ConvergerWeb.InboundModeTest do
 
       conn =
         build_conn()
-        |> post(~p"/api/v1/channels/#{channel.id}/inbound", %{"text" => "hello", "sender" => "user1"})
+        |> post(~p"/api/v1/channels/#{channel.id}/inbound", %{
+          "text" => "hello",
+          "sender" => "user1"
+        })
 
       assert json_response(conn, 201)["status"] == "accepted"
     end
@@ -36,7 +42,10 @@ defmodule ConvergerWeb.InboundModeTest do
 
       conn =
         build_conn()
-        |> post(~p"/api/v1/channels/#{channel.id}/inbound", %{"text" => "hello", "sender" => "user1"})
+        |> post(~p"/api/v1/channels/#{channel.id}/inbound", %{
+          "text" => "hello",
+          "sender" => "user1"
+        })
 
       assert json_response(conn, 201)["status"] == "accepted"
     end

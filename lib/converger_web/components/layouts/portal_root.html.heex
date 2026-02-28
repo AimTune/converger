@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="csrf-token" content={get_csrf_token()} />
+    <.live_title suffix=" · Converger Portal">
+      <%= assigns[:page_title] || "Portal" %>
+    </.live_title>
+    <script src="https://cdn.jsdelivr.net/npm/phoenix@1.7.14/priv/static/phoenix.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/phoenix_live_view@0.20.17/priv/static/phoenix_live_view.min.js"></script>
+    <script>
+      let liveSocket = new window.LiveView.LiveSocket("/live", window.Phoenix.Socket, {
+        params: {_csrf_token: document.querySelector("meta[name='csrf-token']").getAttribute("content")}
+      })
+      liveSocket.connect()
+      window.liveSocket = liveSocket
+    </script>
+    <style>
+      body { font-family: system-ui, sans-serif; padding: 20px; background: #f0f2f5; }
+      header { background: #2e7d32; padding: 15px 20px; margin-bottom: 20px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); display: flex; justify-content: space-between; align-items: center; }
+      nav a { margin-right: 15px; text-decoration: none; color: #fff; font-weight: bold; }
+      nav a:hover { color: #c8e6c9; }
+      .card { background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 20px; }
+      table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+      th, td { text-align: left; padding: 10px; border-bottom: 1px solid #eee; }
+      th { background-color: #f8f9fa; }
+      .badge { padding: 4px 8px; border-radius: 4px; font-size: 0.8em; }
+      .badge-active { background: #d4edda; color: #155724; }
+      .badge-inactive { background: #f8d7da; color: #721c24; }
+      .badge-inbound { background: #e3f2fd; color: #1565c0; }
+      .badge-outbound { background: #fce4ec; color: #c62828; }
+      .badge-duplex { background: #e8f5e9; color: #2e7d32; }
+      .badge-owner { background: #f3e5f5; color: #6a1b9a; }
+      .badge-admin { background: #e3f2fd; color: #1565c0; }
+      .badge-member { background: #e8f5e9; color: #2e7d32; }
+      .badge-viewer { background: #fff3e0; color: #e65100; }
+      button { cursor: pointer; padding: 5px 10px; background: #2e7d32; color: white; border: none; border-radius: 4px; }
+      button:hover { background: #1b5e20; }
+      .user-info { display: flex; align-items: center; gap: 10px; font-size: 0.9em; color: #e8f5e9; }
+      .user-info strong { color: #fff; }
+      .btn-logout { background: rgba(255,255,255,0.2); padding: 5px 12px; font-size: 0.85em; color: #fff; }
+      .btn-logout:hover { background: rgba(255,255,255,0.3); }
+      .tenant-name { background: rgba(255,255,255,0.15); padding: 4px 10px; border-radius: 4px; font-size: 0.85em; color: #fff; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <nav>
+        <a href={~p"/portal"}>Dashboard</a>
+        <a href={~p"/portal/channels"}>Channels</a>
+        <a href={~p"/portal/conversations"}>Conversations</a>
+        <a href={~p"/portal/routing_rules"}>Routing Rules</a>
+        <a href={~p"/portal/users"}>Users</a>
+      </nav>
+      <div class="user-info">
+        <span :if={assigns[:current_tenant]} class="tenant-name">
+          <%= assigns[:current_tenant] && assigns[:current_tenant].name %>
+        </span>
+        <span :if={assigns[:current_tenant_user]}>
+          <strong><%= assigns[:current_tenant_user] && assigns[:current_tenant_user].name %></strong>
+        </span>
+        <form action="/portal/logout" method="post" style="display: inline;">
+          <input type="hidden" name="_csrf_token" value={get_csrf_token()} />
+          <input type="hidden" name="_method" value="delete" />
+          <button type="submit" class="btn-logout">Logout</button>
+        </form>
+      </div>
+    </header>
+    <%= @inner_content %>
+  </body>
+</html>

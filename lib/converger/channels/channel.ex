@@ -56,7 +56,11 @@ defmodule Converger.Channels.Channel do
     if mode in supported do
       changeset
     else
-      add_error(changeset, :mode, "#{type} channels only support modes: #{Enum.join(supported, ", ")}")
+      add_error(
+        changeset,
+        :mode,
+        "#{type} channels only support modes: #{Enum.join(supported, ", ")}"
+      )
     end
   end
 

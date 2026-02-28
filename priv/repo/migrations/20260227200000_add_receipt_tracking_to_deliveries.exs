@@ -10,14 +10,12 @@ defmodule Converger.Repo.Migrations.AddReceiptTrackingToDeliveries do
 
     # Index for looking up deliveries by provider message ID
     # (critical path: status webhook arrives with only the provider ID)
-    create index(:deliveries, [:provider_message_id],
-      where: "provider_message_id IS NOT NULL"
-    )
+    create index(:deliveries, [:provider_message_id], where: "provider_message_id IS NOT NULL")
 
     # Scoped lookup by channel + provider message ID
     create index(:deliveries, [:channel_id, :provider_message_id],
-      where: "provider_message_id IS NOT NULL"
-    )
+             where: "provider_message_id IS NOT NULL"
+           )
 
     # Data migration:
     # 1. "delivered" → "sent" (adapter success = message left our system)

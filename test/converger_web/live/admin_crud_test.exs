@@ -4,12 +4,31 @@ defmodule ConvergerWeb.Admin.CrudTest do
   import Phoenix.LiveViewTest
   alias Converger.Tenants
   alias Converger.Channels
+  alias Converger.Accounts
 
   @admin_user_ip {127, 0, 0, 1}
 
+  setup do
+    {:ok, admin} =
+      Accounts.create_admin_user(%{
+        email: "test-admin-#{System.unique_integer([:positive])}@test.com",
+        password: "testpassword123",
+        name: "Test Admin",
+        role: "super_admin"
+      })
+
+    %{admin: admin}
+  end
+
+  defp admin_conn(conn, admin) do
+    conn
+    |> Map.put(:remote_ip, @admin_user_ip)
+    |> init_test_session(%{admin_user_id: admin.id})
+  end
+
   describe "Tenant CRUD" do
-    test "lists, creates, updates, and deletes tenants", %{conn: conn} do
-      conn = %{conn | remote_ip: @admin_user_ip}
+    test "lists, creates, updates, and deletes tenants", %{conn: conn, admin: admin} do
+      conn = admin_conn(conn, admin)
       {:ok, view, _html} = live(conn, ~p"/admin/tenants")
 
       # Create
@@ -43,14 +62,19 @@ defmodule ConvergerWeb.Admin.CrudTest do
       %{tenant: tenant}
     end
 
-    test "lists, creates, updates, and deletes channels", %{conn: conn, tenant: tenant} do
-      conn = %{conn | remote_ip: @admin_user_ip}
+    test "lists, creates, updates, and deletes channels", %{conn: conn, tenant: tenant, admin: admin} do
+      conn = admin_conn(conn, admin)
       {:ok, view, _html} = live(conn, ~p"/admin/channels")
 
       # Create
       assert view
              |> form("form",
-               channel: %{name: "New Channel", tenant_id: tenant.id, type: "echo", mode: "outbound"}
+               channel: %{
+                 name: "New Channel",
+                 tenant_id: tenant.id,
+                 type: "echo",
+                 mode: "outbound"
+               }
              )
              |> render_submit() =~ "Channel created"
 

@@ -99,7 +99,9 @@ defmodule Converger.Channels.Adapters.WhatsAppMetaTest do
             "changes" => [
               %{
                 "value" => %{
-                  "messages" => [%{"id" => "wamid.msg", "from" => "123", "text" => %{"body" => "hi"}}],
+                  "messages" => [
+                    %{"id" => "wamid.msg", "from" => "123", "text" => %{"body" => "hi"}}
+                  ],
                   "metadata" => %{"phone_number_id" => "1234"}
                 }
               }

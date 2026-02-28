@@ -20,6 +20,10 @@ defmodule Converger.Tenants do
     Repo.get_by(Tenant, api_key: api_key)
   end
 
+  def get_tenant_by_name(name) when is_binary(name) do
+    Repo.get_by(Tenant, name: name)
+  end
+
   def create_tenant(attrs \\ %{}, actor \\ nil) do
     changeset = Tenant.changeset(%Tenant{}, attrs)
 

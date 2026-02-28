@@ -102,7 +102,11 @@ defmodule ConvergerWeb.Admin.ChannelLive do
     {:noreply, assign(socket, transformations: updated)}
   end
 
-  def handle_event("change_transformation", %{"index" => index, "field" => field, "value" => value}, socket) do
+  def handle_event(
+        "change_transformation",
+        %{"index" => index, "field" => field, "value" => value},
+        socket
+      ) do
     idx = String.to_integer(index)
     entry = Enum.at(socket.assigns.transformations, idx)
     updated_entry = Map.put(entry, field, value)
@@ -112,7 +116,9 @@ defmodule ConvergerWeb.Admin.ChannelLive do
 
   def handle_event("filter_mode", %{"mode" => mode}, socket) do
     channels = load_channels(mode)
-    {:noreply, assign(socket, channels: channels, health_map: load_health_map(channels), mode_filter: mode)}
+
+    {:noreply,
+     assign(socket, channels: channels, health_map: load_health_map(channels), mode_filter: mode)}
   end
 
   def handle_event("toggle_status", %{"id" => id}, socket) do
@@ -150,7 +156,11 @@ defmodule ConvergerWeb.Admin.ChannelLive do
 
   defp handle_channel_type_change(%{"channel" => %{"type" => type}}, socket) do
     supported = Adapter.supported_modes(type)
-    mode = if socket.assigns.selected_mode in supported, do: socket.assigns.selected_mode, else: default_mode(supported)
+
+    mode =
+      if socket.assigns.selected_mode in supported,
+        do: socket.assigns.selected_mode,
+        else: default_mode(supported)
 
     assign(socket,
       selected_type: type,
@@ -167,7 +177,9 @@ defmodule ConvergerWeb.Admin.ChannelLive do
         idx = String.to_integer(idx_str)
 
         if idx < length(acc.assigns.transformations) do
-          updated = List.replace_at(acc.assigns.transformations, idx, default_transformation(type))
+          updated =
+            List.replace_at(acc.assigns.transformations, idx, default_transformation(type))
+
           assign(acc, transformations: updated)
         else
           acc
@@ -204,8 +216,8 @@ defmodule ConvergerWeb.Admin.ChannelLive do
   end
 
   defp build_actor(socket) do
-    case get_connect_info(socket, :peer_data) do
-      %{address: address} -> %{type: "admin", id: address |> :inet.ntoa() |> to_string()}
+    case socket.assigns[:current_admin_user] do
+      %{email: email} -> %{type: "admin", id: email}
       _ -> %{type: "admin", id: "unknown"}
     end
   end
@@ -220,10 +232,19 @@ defmodule ConvergerWeb.Admin.ChannelLive do
 
   defp default_transformation("add_prefix"), do: %{"type" => "add_prefix", "prefix" => ""}
   defp default_transformation("add_suffix"), do: %{"type" => "add_suffix", "suffix" => ""}
-  defp default_transformation("text_replace"), do: %{"type" => "text_replace", "pattern" => "", "replacement" => ""}
-  defp default_transformation("truncate_text"), do: %{"type" => "truncate_text", "max_length" => 160, "ellipsis" => "..."}
-  defp default_transformation("set_metadata"), do: %{"type" => "set_metadata", "values_text" => ""}
-  defp default_transformation("content_filter"), do: %{"type" => "content_filter", "patterns_text" => ""}
+
+  defp default_transformation("text_replace"),
+    do: %{"type" => "text_replace", "pattern" => "", "replacement" => ""}
+
+  defp default_transformation("truncate_text"),
+    do: %{"type" => "truncate_text", "max_length" => 160, "ellipsis" => "..."}
+
+  defp default_transformation("set_metadata"),
+    do: %{"type" => "set_metadata", "values_text" => ""}
+
+  defp default_transformation("content_filter"),
+    do: %{"type" => "content_filter", "patterns_text" => ""}
+
   defp default_transformation(_), do: %{"type" => "add_prefix", "prefix" => ""}
 
   defp build_transformations(transformations) do
@@ -257,11 +278,17 @@ defmodule ConvergerWeb.Admin.ChannelLive do
   defp middleware_types, do: @middleware_types
 
   defp config_summary(%{type: "webhook", config: %{"url" => url}}) when url != "", do: url
-  defp config_summary(%{type: "whatsapp_meta", config: %{"phone_number_id" => id}}) when id != "", do: "Phone: #{id}"
-  defp config_summary(%{type: "whatsapp_infobip", config: %{"sender" => s}}) when s != "", do: "Sender: #{s}"
+
+  defp config_summary(%{type: "whatsapp_meta", config: %{"phone_number_id" => id}}) when id != "",
+    do: "Phone: #{id}"
+
+  defp config_summary(%{type: "whatsapp_infobip", config: %{"sender" => s}}) when s != "",
+    do: "Sender: #{s}"
+
   defp config_summary(_), do: ""
 
   defp config_detail(%{config: config}) when config == %{}, do: ""
+
   defp config_detail(%{config: config}) do
     config
     |> Enum.reject(fn {_k, v} -> v == "" end)

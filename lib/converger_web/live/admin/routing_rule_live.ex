@@ -112,8 +112,8 @@ defmodule ConvergerWeb.Admin.RoutingRuleLive do
   end
 
   defp build_actor(socket) do
-    case get_connect_info(socket, :peer_data) do
-      %{address: address} -> %{type: "admin", id: address |> :inet.ntoa() |> to_string()}
+    case socket.assigns[:current_admin_user] do
+      %{email: email} -> %{type: "admin", id: email}
       _ -> %{type: "admin", id: "unknown"}
     end
   end

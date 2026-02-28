@@ -20,7 +20,13 @@ defmodule Converger.ChannelsTest do
     end
 
     test "create_channel/1 with valid data creates a channel", %{tenant: tenant} do
-      valid_attrs = %{name: "some name", type: "echo", mode: "outbound", status: "active", tenant_id: tenant.id}
+      valid_attrs = %{
+        name: "some name",
+        type: "echo",
+        mode: "outbound",
+        status: "active",
+        tenant_id: tenant.id
+      }
 
       assert {:ok, %Channel{} = channel} = Channels.create_channel(valid_attrs)
       assert channel.name == "some name"

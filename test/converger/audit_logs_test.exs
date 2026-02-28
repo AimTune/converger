@@ -94,7 +94,11 @@ defmodule Converger.AuditLogsTest do
       {:ok, _} = AuditLogs.create_audit_log(@valid_attrs)
 
       {:ok, _} =
-        AuditLogs.create_audit_log(%{@valid_attrs | actor_type: "tenant_api", actor_id: Ecto.UUID.generate()})
+        AuditLogs.create_audit_log(%{
+          @valid_attrs
+          | actor_type: "tenant_api",
+            actor_id: Ecto.UUID.generate()
+        })
 
       assert [log] = AuditLogs.list_audit_logs(%{"actor_type" => "tenant_api"})
       assert log.actor_type == "tenant_api"

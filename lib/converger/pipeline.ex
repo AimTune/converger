@@ -70,8 +70,8 @@ defmodule Converger.Pipeline do
     primary =
       if primary_channel.type in @external_delivery_types and
            primary_channel.mode in ["outbound", "duplex"],
-        do: [primary_channel],
-        else: []
+         do: [primary_channel],
+         else: []
 
     target_ids =
       Converger.RoutingRules.resolve_target_channels(

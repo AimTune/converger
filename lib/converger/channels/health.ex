@@ -63,7 +63,8 @@ defmodule Converger.Channels.Health do
   def check_all_channels(window_minutes \\ 60) do
     channels =
       from(c in Channel,
-        where: c.status == "active" and c.type in ["webhook", "whatsapp_meta", "whatsapp_infobip"],
+        where:
+          c.status == "active" and c.type in ["webhook", "whatsapp_meta", "whatsapp_infobip"],
         preload: [:tenant]
       )
       |> Repo.all()
@@ -180,13 +181,17 @@ defmodule Converger.Channels.Health do
       Task.start(fn ->
         case Req.post(tenant.alert_webhook_url, json: payload, receive_timeout: 10_000) do
           {:ok, %{status: status}} when status in 200..299 ->
-            Logger.info("Health alert sent for channel #{channel.id} to #{tenant.alert_webhook_url}")
+            Logger.info(
+              "Health alert sent for channel #{channel.id} to #{tenant.alert_webhook_url}"
+            )
 
           {:ok, %{status: status}} ->
             Logger.warning("Health alert webhook returned #{status} for channel #{channel.id}")
 
           {:error, reason} ->
-            Logger.warning("Health alert webhook failed for channel #{channel.id}: #{inspect(reason)}")
+            Logger.warning(
+              "Health alert webhook failed for channel #{channel.id}: #{inspect(reason)}"
+            )
         end
       end)
     end

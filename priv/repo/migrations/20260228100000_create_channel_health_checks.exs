@@ -4,7 +4,10 @@ defmodule Converger.Repo.Migrations.CreateChannelHealthChecks do
   def change do
     create table(:channel_health_checks, primary_key: false) do
       add :id, :binary_id, primary_key: true
-      add :channel_id, references(:channels, type: :binary_id, on_delete: :delete_all), null: false
+
+      add :channel_id, references(:channels, type: :binary_id, on_delete: :delete_all),
+        null: false
+
       add :status, :string, null: false
       add :total_deliveries, :integer, null: false, default: 0
       add :failed_deliveries, :integer, null: false, default: 0

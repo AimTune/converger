@@ -32,7 +32,8 @@ defmodule ConvergerWeb.Admin.DashboardLive do
 
     channels =
       from(c in Channel,
-        where: c.status == "active" and c.type in ["webhook", "whatsapp_meta", "whatsapp_infobip"],
+        where:
+          c.status == "active" and c.type in ["webhook", "whatsapp_meta", "whatsapp_infobip"],
         preload: [:tenant]
       )
       |> Repo.all()

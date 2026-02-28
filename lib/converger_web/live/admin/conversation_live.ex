@@ -48,7 +48,11 @@ defmodule ConvergerWeb.Admin.ConversationLive do
       Enum.group_by(deliveries, & &1.activity_id)
       |> Map.new(fn {activity_id, dels} ->
         # Pick the most advanced delivery status for display
-        best = Enum.max_by(dels, &Converger.Deliveries.Delivery.status_rank(&1.status), fn -> hd(dels) end)
+        best =
+          Enum.max_by(dels, &Converger.Deliveries.Delivery.status_rank(&1.status), fn ->
+            hd(dels)
+          end)
+
         {activity_id, best}
       end)
 
@@ -68,7 +72,10 @@ defmodule ConvergerWeb.Admin.ConversationLive do
     {:noreply, push_patch(socket, to: ~p"/admin/conversations?#{filters}")}
   end
 
-  def handle_info(%{topic: "conversation:" <> _, event: "delivery_status", payload: payload}, socket) do
+  def handle_info(
+        %{topic: "conversation:" <> _, event: "delivery_status", payload: payload},
+        socket
+      ) do
     delivery_map =
       Map.put(socket.assigns.delivery_map, payload.activity_id, %{
         status: payload.status,
@@ -250,6 +257,7 @@ defmodule ConvergerWeb.Admin.ConversationLive do
 
   defp delivery_badge(%{status: "read"}) do
     assigns = %{}
+
     ~H|<span class="badge badge-active" title="Read" style="color: #2196F3;">&#10003;&#10003;</span>|
   end
 

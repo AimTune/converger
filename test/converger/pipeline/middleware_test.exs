@@ -2,7 +2,15 @@ defmodule Converger.Pipeline.MiddlewareTest do
   use ExUnit.Case, async: true
 
   alias Converger.Pipeline.Middleware
-  alias Converger.Pipeline.Middleware.{AddPrefix, AddSuffix, TextReplace, TruncateText, SetMetadata, ContentFilter}
+
+  alias Converger.Pipeline.Middleware.{
+    AddPrefix,
+    AddSuffix,
+    TextReplace,
+    TruncateText,
+    SetMetadata,
+    ContentFilter
+  }
 
   # Stub activity struct for unit tests
   defp activity(attrs \\ %{}) do

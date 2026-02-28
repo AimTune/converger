@@ -1,0 +1,37 @@
+<div style="max-width: 400px; margin: 80px auto;">
+  <div class="card" style="padding: 30px;">
+    <h2 style="text-align: center; margin-bottom: 20px;">Tenant Portal Login</h2>
+    <p style="text-align: center; color: #666; margin-bottom: 25px;">Sign in to your Tenant Portal</p>
+
+    <div :if={@error_message} style="background: #f8d7da; color: #721c24; padding: 10px 15px; border-radius: 4px; margin-bottom: 15px; font-size: 0.9em;">
+      <%= @error_message %>
+    </div>
+
+    <form action="/portal/login" method="post">
+      <input type="hidden" name="_csrf_token" value={get_csrf_token()} />
+
+      <div style="margin-bottom: 15px;">
+        <label style="display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.85em; color: #555;">Tenant Name</label>
+        <input type="text" name="tenant_name" placeholder="Enter your tenant name" required
+          style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; font-size: 1em;" />
+      </div>
+
+      <div style="margin-bottom: 15px;">
+        <label style="display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.85em; color: #555;">Email</label>
+        <input type="email" name="email" placeholder="user@example.com" required
+          style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; font-size: 1em;" />
+      </div>
+
+      <div style="margin-bottom: 20px;">
+        <label style="display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.85em; color: #555;">Password</label>
+        <input type="password" name="password" placeholder="Enter your password" required
+          style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; font-size: 1em;" />
+      </div>
+
+      <button type="submit"
+        style="width: 100%; padding: 12px; background: #2e7d32; color: white; border: none; border-radius: 4px; font-size: 1em; cursor: pointer;">
+        Sign In
+      </button>
+    </form>
+  </div>
+</div>

@@ -3,7 +3,7 @@ defmodule Converger.AuditLogs.Changes do
   Helpers for computing before/after change maps for audit logging.
   """
 
-  @sensitive_fields ~w(api_key secret)
+  @sensitive_fields ~w(api_key secret password_hash password)
 
   def for_create(resource) do
     %{"before" => nil, "after" => serialize(resource)}

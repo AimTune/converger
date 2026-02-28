@@ -63,7 +63,8 @@ defmodule Converger.MixProject do
       {:opentelemetry_exporter, "~> 1.8"},
       {:opentelemetry_phoenix, "~> 2.0"},
       {:opentelemetry_ecto, "~> 1.2"},
-      {:telemetry_metrics_prometheus, "~> 1.1"}
+      {:telemetry_metrics_prometheus, "~> 1.1"},
+      {:bcrypt_elixir, "~> 3.0"}
     ]
   end
 
