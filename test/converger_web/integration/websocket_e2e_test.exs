@@ -5,8 +5,8 @@ defmodule ConvergerWeb.Integration.WebSocketE2ETest do
   import Converger.TenantsFixtures
   import Converger.ChannelsFixtures
   import Converger.ConversationsFixtures
-  alias ConvergerWeb.UserSocket
   alias ConvergerWeb.ConversationChannel
+  alias ConvergerWeb.UserSocket
 
   setup %{conn: conn} do
     tenant = tenant_fixture()
@@ -18,7 +18,7 @@ defmodule ConvergerWeb.Integration.WebSocketE2ETest do
 
   test "complete flow: API token -> WebSocket join -> Broadcast", %{
     conn: conn,
-    tenant: tenant,
+    tenant: _tenant,
     channel: channel,
     conversation: conversation
   } do
@@ -43,7 +43,7 @@ defmodule ConvergerWeb.Integration.WebSocketE2ETest do
     {:ok, socket} = Phoenix.ChannelTest.connect(UserSocket, %{"token" => websocket_token})
 
     # 3. Join Channel
-    {:ok, _, socket} =
+    {:ok, _, _socket} =
       subscribe_and_join(socket, ConversationChannel, "conversation:#{conversation.id}")
 
     # 4. Trigger activity via API and check broadcast

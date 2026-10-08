@@ -20,9 +20,19 @@ if System.get_env("PHX_SERVER") do
   config :converger, ConvergerWeb.Endpoint, server: true
 end
 
-config :converger,
-       :prometheus_port,
-       String.to_integer(System.get_env("PROMETHEUS_PORT") || "9568")
+# Prometheus metrics listener. Not started in test (see config/test.exs), so
+# concurrent test runs on one machine don't fight over the port; set
+# PROMETHEUS_PORT to force one anyway.
+cond do
+  port = System.get_env("PROMETHEUS_PORT") ->
+    config :converger, :prometheus_port, String.to_integer(port)
+
+  config_env() != :test ->
+    config :converger, :prometheus_port, 9568
+
+  true ->
+    :ok
+end
 
 # Configurable CORS origins and admin IP whitelist.
 # CORS origins are read per request by ConvergerWeb.Endpoint, so this takes
@@ -41,12 +51,51 @@ if admin_ips = System.get_env("ADMIN_IP_WHITELIST") do
     admin_ip_whitelist: admin_ips |> String.split(",", trim: true) |> Enum.map(&String.trim/1)
 end
 
+# Pagination limits (defaults in config/config.exs), e.g. PAGINATION_MAX_LIMIT=200.
+pagination_env = [
+  default_limit: "PAGINATION_DEFAULT_LIMIT",
+  max_limit: "PAGINATION_MAX_LIMIT",
+  activity_default_limit: "PAGINATION_ACTIVITY_DEFAULT_LIMIT",
+  activity_max_limit: "PAGINATION_ACTIVITY_MAX_LIMIT",
+  ws_replay_limit: "PAGINATION_WS_REPLAY_LIMIT",
+  lookup_limit: "PAGINATION_LOOKUP_LIMIT"
+]
+
+pagination_overrides =
+  for {key, var} <- pagination_env, value = System.get_env(var), value not in [nil, ""] do
+    {key, String.to_integer(value)}
+  end
+
+# Keyword values are deep-merged with the compile-time config.
+if pagination_overrides != [] do
+  config :converger, :pagination, pagination_overrides
+end
+
 # Reverse proxies / load balancers allowed to set X-Forwarded-For
 # (comma-separated IPs or CIDR ranges, e.g. "10.0.0.0/8,fd00::/8").
 # When unset, forwarding headers are ignored and conn.remote_ip is the TCP peer.
 if trusted_proxies = System.get_env("TRUSTED_PROXIES") do
   config :converger,
     trusted_proxies: trusted_proxies |> String.split(",", trim: true) |> Enum.map(&String.trim/1)
+end
+
+# Rate-limit backend: "local" (per-node counters) or "cluster" (counters
+# replicated between nodes over PubSub). Defaults to "cluster" when node
+# discovery is configured through DNS_CLUSTER_QUERY, otherwise "local".
+rate_limit_backend =
+  case System.get_env("RATE_LIMIT_BACKEND") do
+    nil -> if System.get_env("DNS_CLUSTER_QUERY") in [nil, ""], do: nil, else: :cluster
+    "local" -> :local
+    "cluster" -> :cluster
+    other -> raise "RATE_LIMIT_BACKEND must be \"local\" or \"cluster\", got: #{inspect(other)}"
+  end
+
+if rate_limit_backend && config_env() != :test do
+  config :converger, Converger.RateLimit, backend: rate_limit_backend
+end
+
+if sync_interval = System.get_env("RATE_LIMIT_SYNC_INTERVAL_MS") do
+  config :converger, Converger.RateLimit, sync_interval_ms: String.to_integer(sync_interval)
 end
 
 # OpenTelemetry trace export.
@@ -74,6 +123,107 @@ if otel_endpoint && config_env() != :test do
   config :opentelemetry, traces_exporter: {:opentelemetry_exporter, %{}}
 else
   config :opentelemetry, traces_exporter: :none
+end
+
+# File storage for attachments (see docs/storage.md). Only applied when
+# UPLOAD_STORAGE is set, and never in the test environment.
+if config_env() != :test and System.get_env("UPLOAD_STORAGE") do
+  env = &System.get_env/1
+  blank_to_nil = fn v -> if v in [nil, ""], do: nil, else: v end
+  truthy? = fn v -> v in ~w(true 1 yes) end
+
+  {storage, storage_opts} =
+    case System.get_env("UPLOAD_STORAGE") do
+      "local" ->
+        {Converger.Uploads.LocalStorage, [dir: env.("UPLOAD_DIR") || "priv/uploads"]}
+
+      s3 when s3 in ["s3", "minio", "r2"] ->
+        {Converger.Uploads.S3Storage,
+         [
+           bucket: System.fetch_env!("S3_BUCKET"),
+           access_key_id: System.fetch_env!("S3_ACCESS_KEY_ID"),
+           secret_access_key: System.fetch_env!("S3_SECRET_ACCESS_KEY"),
+           session_token: blank_to_nil.(env.("S3_SESSION_TOKEN")),
+           region: blank_to_nil.(env.("S3_REGION")),
+           endpoint: blank_to_nil.(env.("S3_ENDPOINT")),
+           path_style:
+             truthy?.(env.("S3_PATH_STYLE") || if(s3 == "s3", do: "false", else: "true"))
+         ]}
+
+      "gcs" ->
+        {Converger.Uploads.GCSStorage,
+         [
+           bucket: System.fetch_env!("GCS_BUCKET"),
+           access_key_id: System.fetch_env!("GCS_HMAC_ACCESS_ID"),
+           secret_access_key: System.fetch_env!("GCS_HMAC_SECRET"),
+           endpoint: blank_to_nil.(env.("GCS_ENDPOINT"))
+         ]}
+
+      "azure" ->
+        {Converger.Uploads.AzureBlobStorage,
+         [
+           account: System.fetch_env!("AZURE_STORAGE_ACCOUNT"),
+           account_key: System.fetch_env!("AZURE_STORAGE_KEY"),
+           container: System.fetch_env!("AZURE_STORAGE_CONTAINER"),
+           endpoint: blank_to_nil.(env.("AZURE_STORAGE_ENDPOINT"))
+         ]}
+
+      other ->
+        raise "UPLOAD_STORAGE must be one of local, s3, minio, r2, gcs, azure (got #{inspect(other)})"
+    end
+
+  cdn =
+    case blank_to_nil.(env.("CDN_TYPE")) do
+      nil ->
+        nil
+
+      "cloudfront" ->
+        private_key =
+          blank_to_nil.(env.("CLOUDFRONT_PRIVATE_KEY")) ||
+            File.read!(System.fetch_env!("CLOUDFRONT_PRIVATE_KEY_FILE"))
+
+        [
+          type: :cloudfront,
+          base_url: System.fetch_env!("CDN_BASE_URL"),
+          path_prefix: env.("CDN_PATH_PREFIX") || "",
+          key_pair_id: System.fetch_env!("CLOUDFRONT_KEY_PAIR_ID"),
+          private_key: private_key
+        ]
+
+      "google_cdn" ->
+        [
+          type: :google_cdn,
+          base_url: System.fetch_env!("CDN_BASE_URL"),
+          path_prefix: env.("CDN_PATH_PREFIX") || "",
+          key_name: System.fetch_env!("GOOGLE_CDN_KEY_NAME"),
+          key: System.fetch_env!("GOOGLE_CDN_KEY")
+        ]
+
+      "plain" ->
+        [
+          type: :plain,
+          base_url: System.fetch_env!("CDN_BASE_URL"),
+          path_prefix: env.("CDN_PATH_PREFIX") || "",
+          sign_origin: truthy?.(env.("CDN_SIGN_ORIGIN"))
+        ]
+
+      other ->
+        raise "CDN_TYPE must be one of cloudfront, google_cdn, plain (got #{inspect(other)})"
+    end
+
+  allowed =
+    case blank_to_nil.(env.("UPLOAD_ALLOWED_TYPES")) do
+      nil -> nil
+      types -> String.split(types, ",", trim: true) |> Enum.map(&String.trim/1)
+    end
+
+  config :converger, Converger.Uploads,
+    storage: storage,
+    storage_opts: Enum.reject(storage_opts, fn {_k, v} -> is_nil(v) end),
+    max_file_size: String.to_integer(env.("UPLOAD_MAX_BYTES") || "#{10 * 1024 * 1024}"),
+    signed_url_ttl: String.to_integer(env.("UPLOAD_SIGNED_URL_TTL") || "300"),
+    allowed_content_types: allowed,
+    cdn: cdn
 end
 
 if config_env() == :prod do
@@ -106,6 +256,51 @@ if config_env() == :prod do
       You can generate one by calling: mix phx.gen.secret
       """
 
+  if byte_size(secret_key_base) < 64 do
+    raise """
+    environment variable SECRET_KEY_BASE is too short (#{byte_size(secret_key_base)} bytes).
+    It must be at least 64 bytes. Generate one with: mix phx.gen.secret
+    """
+  end
+
+  # SHA-256 fingerprints of secrets that were published in this repository
+  # (the SECRET_KEY_BASE formerly hardcoded in docker-compose.yml
+  # and the demo CLOAK_KEY proposed alongside it). They are public knowledge,
+  # so refuse to boot with them. See docs/security.md.
+  leaked_secret_fingerprints = [
+    "d759ffb9f77efdcea1576616cc59e9b9834eed3e84c1a67f95c265dd9d06ab5b",
+    "43cf796f773e59d3e3729463263820ec49ca51bf04431344a7803931ee46d16c"
+  ]
+
+  for {var, value} <- [
+        {"SECRET_KEY_BASE", secret_key_base},
+        {"CLOAK_KEY", System.get_env("CLOAK_KEY")}
+      ],
+      is_binary(value),
+      Base.encode16(:crypto.hash(:sha256, value), case: :lower) in leaked_secret_fingerprints do
+    raise """
+    environment variable #{var} is set to a value that was published in the
+    Converger git repository and must be considered compromised.
+    Generate a new secret and rotate it (see docs/security.md).
+    """
+  end
+
+  # Key used to encrypt channel secrets and configs at rest (base64, 32 bytes).
+  # Generate one with: mix run -e 'IO.puts(Converger.Vault.generate_key())'
+  # For key rotation, put the previous key(s) in CLOAK_RETIRED_KEYS
+  # (comma-separated) and run Converger.Release.reencrypt_secrets/0.
+  cloak_key =
+    System.get_env("CLOAK_KEY") ||
+      raise """
+      environment variable CLOAK_KEY is missing.
+      It must be a base64-encoded 32 byte key, e.g. generated with:
+      mix run -e 'IO.puts(Converger.Vault.generate_key())'
+      """
+
+  config :converger, Converger.Vault,
+    key: cloak_key,
+    retired_keys: String.split(System.get_env("CLOAK_RETIRED_KEYS") || "", ",", trim: true)
+
   host = System.get_env("PHX_HOST") || "example.com"
   port = String.to_integer(System.get_env("PORT") || "4000")
 
@@ -122,6 +317,55 @@ if config_env() == :prod do
       port: port
     ],
     secret_key_base: secret_key_base
+
+  # Allowed origins for browser WebSocket connections (LiveView and the
+  # Phoenix sockets). Comma-separated, e.g.
+  # "https://converger.example.com,//*.example.com". When unset, Phoenix only
+  # accepts the host of the endpoint `url` (PHX_HOST). Non-browser clients
+  # that send no Origin header are not affected.
+  if check_origin = System.get_env("CHECK_ORIGIN") do
+    origins =
+      check_origin
+      |> String.split(",", trim: true)
+      |> Enum.map(&String.trim/1)
+      |> Enum.reject(&(&1 == ""))
+
+    if origins == [] do
+      raise "environment variable CHECK_ORIGIN is set but contains no origins"
+    end
+
+    config :converger, ConvergerWeb.Endpoint, check_origin: origins
+  end
+
+  # HTTPS enforcement (ConvergerWeb.Plugs.ForceSSL). Enabled by default in
+  # production: plain HTTP requests are redirected to https://PHX_HOST and
+  # HTTPS responses carry an HSTS header. Behind a TLS-terminating proxy, set
+  # TRUSTED_PROXIES so its X-Forwarded-Proto header is honoured; the header is
+  # ignored from any other peer. Set FORCE_SSL=false only when TLS is
+  # enforced elsewhere and the app never receives plain HTTP from clients.
+  truthy? = fn var, default ->
+    case System.get_env(var) do
+      nil -> default
+      value -> String.downcase(String.trim(value)) in ~w(true 1 yes on)
+    end
+  end
+
+  if truthy?.("FORCE_SSL", true) do
+    exclude_paths =
+      (System.get_env("FORCE_SSL_EXCLUDE_PATHS") || "")
+      |> String.split(",", trim: true)
+      |> Enum.map(&String.trim/1)
+      |> Enum.reject(&(&1 == ""))
+
+    config :converger, :force_ssl,
+      hsts: truthy?.("HSTS", true),
+      expires: String.to_integer(System.get_env("HSTS_MAX_AGE") || "31536000"),
+      subdomains: truthy?.("HSTS_INCLUDE_SUBDOMAINS", false),
+      preload: truthy?.("HSTS_PRELOAD", false),
+      exclude: [hosts: ["localhost", "127.0.0.1"], paths: exclude_paths]
+  else
+    config :converger, :force_ssl, false
+  end
 
   # ## SSL Support
   #
@@ -147,13 +391,9 @@ if config_env() == :prod do
   # "priv/ssl/server.key". For all supported SSL configuration
   # options, see https://hexdocs.pm/plug/Plug.SSL.html#configure/1
   #
-  # We also recommend setting `force_ssl` in your config/prod.exs,
-  # ensuring no data is ever sent via http, always redirecting to https:
-  #
-  #     config :converger, ConvergerWeb.Endpoint,
-  #       force_ssl: [hsts: true]
-  #
-  # Check `Plug.SSL` for all available options in `force_ssl`.
+  # HTTP -> HTTPS redirects and HSTS are handled by the FORCE_SSL settings
+  # above (ConvergerWeb.Plugs.ForceSSL), not by the endpoint's compile-time
+  # `force_ssl` option.
 
   # ## Configuring the mailer
   #

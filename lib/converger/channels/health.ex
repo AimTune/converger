@@ -12,10 +12,10 @@ defmodule Converger.Channels.Health do
   import Ecto.Query, warn: false
   require Logger
 
-  alias Converger.Repo
   alias Converger.Channels.Channel
   alias Converger.Channels.HealthCheck
   alias Converger.Deliveries.Delivery
+  alias Converger.Repo
 
   @healthy_threshold 0.10
   @degraded_threshold 0.50
@@ -179,7 +179,7 @@ defmodule Converger.Channels.Health do
       }
 
       Task.start(fn ->
-        case Req.post(tenant.alert_webhook_url, json: payload, receive_timeout: 10_000) do
+        case Converger.HTTP.post(tenant.alert_webhook_url, json: payload, receive_timeout: 10_000) do
           {:ok, %{status: status}} when status in 200..299 ->
             Logger.info(
               "Health alert sent for channel #{channel.id} to #{tenant.alert_webhook_url}"

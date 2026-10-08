@@ -5,8 +5,8 @@ defmodule Converger.Pipeline.BroadwayRetryTest do
 
   alias Converger.{Activities, Deliveries}
   alias Converger.Pipeline
-  alias Converger.Pipeline.RetryPolicy
   alias Converger.Pipeline.Broadway.Pipeline, as: BroadwayPipeline
+  alias Converger.Pipeline.RetryPolicy
   alias Converger.Workers.ActivityDeliveryWorker
 
   import Converger.TenantsFixtures

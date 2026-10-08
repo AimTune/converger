@@ -16,13 +16,18 @@ defmodule ConvergerWeb.Live.AuthHooks do
         try do
           user = Accounts.get_admin_user!(admin_user_id)
 
-          if user.status == "active" do
-            {:cont,
-             socket
-             |> assign(:current_admin_user, user)
-             |> assign(:admin_role, user.role)}
-          else
-            {:halt, redirect(socket, to: "/admin/login")}
+          cond do
+            user.status != "active" ->
+              {:halt, redirect(socket, to: "/admin/login")}
+
+            user.must_change_password ->
+              {:halt, redirect(socket, to: "/admin/password")}
+
+            true ->
+              {:cont,
+               socket
+               |> assign(:current_admin_user, user)
+               |> assign(:admin_role, user.role)}
           end
         rescue
           Ecto.NoResultsError ->

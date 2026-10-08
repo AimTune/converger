@@ -60,5 +60,4 @@ defmodule Converger.Auth.ConvergerToken do
   end
 
   def default_expiry, do: @default_expiry
-
 end

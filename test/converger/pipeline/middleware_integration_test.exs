@@ -1,8 +1,8 @@
 defmodule Converger.Pipeline.MiddlewareIntegrationTest do
   use Converger.DataCase
 
-  alias Converger.Pipeline
   alias Converger.Deliveries
+  alias Converger.Pipeline
 
   import Converger.TenantsFixtures
   import Converger.ChannelsFixtures

@@ -18,6 +18,43 @@ config :converger,
   # Allowed clock skew for timestamped `x-converger-signature` inbound signatures
   inbound_signature_tolerance_seconds: 300
 
+# Page sizes for every list query (see Converger.Pagination). Request-supplied
+# `limit` params are clamped to the max; omitted/invalid ones use the default.
+config :converger, :pagination,
+  # Conversations, audit logs, deliveries, tenant users (REST + admin tables)
+  default_limit: 50,
+  max_limit: 500,
+  # Activities (REST `?limit=` and the admin/portal transcript views)
+  activity_default_limit: 100,
+  activity_max_limit: 1000,
+  # Max activities replayed on WebSocket join; the rest come over REST
+  ws_replay_limit: 100,
+  # Hard cap for small operator-managed tables listed whole
+  # (tenants, channels, routing rules, admin users)
+  lookup_limit: 1000
+
+# Serialize migration runs with a session-level Postgres advisory lock instead
+# of the default table lock. Concurrent `Converger.Release.migrate/0` calls
+# (e.g. several replicas or init containers starting at once) wait for the
+# lock holder, then find nothing pending, so each migration runs exactly once.
+# Unlike the table lock it also works with `@disable_ddl_transaction`
+# migrations such as `create index(..., concurrently: true)`.
+# Requires a session-mode connection (not PgBouncer transaction pooling).
+config :converger, Converger.Repo,
+  migration_lock: :pg_advisory_lock,
+  migration_advisory_lock_retry_interval_ms: 1_000
+
+# File uploads / attachments. Backends, CDN options and env vars are
+# documented in docs/storage.md; production values come from runtime.exs.
+config :converger, Converger.Uploads,
+  storage: Converger.Uploads.LocalStorage,
+  # Not under priv/static: files are only served through the authenticated
+  # GET /api/v1/converger/attachments/:id endpoint.
+  storage_opts: [dir: "priv/uploads"],
+  max_file_size: 10 * 1024 * 1024,
+  signed_url_ttl: 300,
+  cdn: nil
+
 # Configures the endpoint
 config :converger, ConvergerWeb.Endpoint,
   url: [host: "localhost"],
@@ -63,9 +100,17 @@ config :converger, Oban,
   ],
   queues: [default: 10, deliveries: 20]
 
-# Configure Hammer for Rate Limiting
-config :hammer,
-  backend: {Hammer.Backend.ETS, [expiry_ms: 60_000 * 60 * 4, cleanup_interval_ms: 60_000 * 10]}
+# Rate limiting (Hammer 7, see Converger.RateLimit).
+#   backend: :local   - per-node ETS counters (single node)
+#            :cluster - ETS counters replicated between nodes over PubSub
+#   limits:  overrides of the built-in defaults, e.g. %{inbound: {1_000, 1_000}}
+# config/runtime.exs sets the backend from RATE_LIMIT_BACKEND (defaulting to
+# :cluster when DNS_CLUSTER_QUERY is set).
+config :converger, Converger.RateLimit,
+  backend: :local,
+  sync_interval_ms: 100,
+  override_cache_ttl_ms: 30_000,
+  limits: %{}
 
 # Configure OpenTelemetry. Span export is disabled by default; config/runtime.exs
 # enables the OTLP exporter when OTEL_EXPORTER_OTLP_ENDPOINT (or

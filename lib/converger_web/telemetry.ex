@@ -10,13 +10,18 @@ defmodule ConvergerWeb.Telemetry do
   def init(_arg) do
     port = Application.get_env(:converger, :prometheus_port, 9568)
 
-    children = [
-      # Telemetry poller will execute the given period measurements
-      # every 10_000ms. Learn more here: https://hexdocs.pm/telemetry_metrics
-      {:telemetry_poller, measurements: periodic_measurements(), period: 10_000},
-      # Add reporters as children of your supervision tree.
-      {TelemetryMetricsPrometheus, [metrics: metrics(), port: port]}
-    ]
+    # `prometheus_port: false` disables the metrics listener (used in test).
+    reporters =
+      if port,
+        do: [{TelemetryMetricsPrometheus, [metrics: metrics(), port: port]}],
+        else: []
+
+    children =
+      [
+        # Telemetry poller will execute the given period measurements
+        # every 10_000ms. Learn more here: https://hexdocs.pm/telemetry_metrics
+        {:telemetry_poller, measurements: periodic_measurements(), period: 10_000}
+      ] ++ reporters
 
     Supervisor.init(children, strategy: :one_for_one)
   end
@@ -86,6 +91,7 @@ defmodule ConvergerWeb.Telemetry do
 
       # Custom App Metrics
       counter("converger.activities.create.count"),
+      counter("converger.rate_limit.exceeded.count", tags: [:bucket]),
       counter("phoenix.socket_connected.count"),
       counter("phoenix.channel_joined.count"),
 

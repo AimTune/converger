@@ -5,6 +5,7 @@ defmodule ConvergerWeb.ConvergerChannel do
 
   alias Converger.{Activities, Conversations}
   alias Converger.ConvergerAPI.Watermark
+  alias Converger.Pagination
   alias ConvergerWeb.ConvergerAPI.ActivityJSON
 
   @impl true
@@ -31,12 +32,23 @@ defmodule ConvergerWeb.ConvergerChannel do
   def handle_info({:after_join, watermark}, socket) do
     conversation_id = socket.assigns.conversation_id
 
-    # Without a watermark the client starts live (no replay).
-    activities =
+    # Without a watermark the client starts live (no replay). Replay is capped
+    # at :ws_replay_limit activities (the oldest ones after the watermark);
+    # when `has_more` is true the client fetches the rest over
+    # GET /api/v1/converger/conversations/:id/activities?watermark=<frame watermark>
+    # until `has_more` is false, de-duplicating by activity id against live frames.
+    {activities, has_more} =
       case Watermark.decode(watermark) do
-        {:ok, nil} -> []
-        {:ok, position} -> Activities.list_activities_since(conversation_id, position)
-        {:error, _} -> []
+        {:ok, nil} ->
+          {[], false}
+
+        {:ok, position} ->
+          Activities.page_activities_since(conversation_id, position,
+            limit: Pagination.config(:ws_replay_limit)
+          )
+
+        {:error, _} ->
+          {[], false}
       end
 
     if activities != [] do
@@ -44,7 +56,8 @@ defmodule ConvergerWeb.ConvergerChannel do
 
       push(socket, "activitySet", %{
         activities: Enum.map(activities, &ActivityJSON.activity_data/1),
-        watermark: new_watermark
+        watermark: new_watermark,
+        has_more: has_more
       })
     end
 
@@ -58,7 +71,8 @@ defmodule ConvergerWeb.ConvergerChannel do
 
     activity_set = %{
       activities: [ActivityJSON.activity_data(payload)],
-      watermark: watermark
+      watermark: watermark,
+      has_more: false
     }
 
     push(socket, "activitySet", activity_set)
