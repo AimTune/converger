@@ -23,6 +23,16 @@ defmodule ConvergerWeb.Endpoint do
     websocket: [connect_info: [:peer_data, session: @session_options]],
     longpoll: [connect_info: [session: @session_options]]
 
+  # Must run before anything that reads conn.remote_ip (AdminAuth, RateLimit)
+  # and before ForceSSL, which only trusts X-Forwarded-Proto from the proxies
+  # this plug accepted.
+  plug ConvergerWeb.Plugs.TrustedProxies
+
+  # HTTP -> HTTPS redirect + HSTS, configured at runtime (FORCE_SSL, HSTS_*).
+  # Runs before Plug.Static so assets are covered too. WebSocket upgrades are
+  # dispatched by Phoenix before these plugs; see docs/deployment.md.
+  plug ConvergerWeb.Plugs.ForceSSL
+
   # Serve at "/" the static files from "priv/static" directory.
   #
   # When code reloading is disabled (e.g., in production),
@@ -40,9 +50,6 @@ defmodule ConvergerWeb.Endpoint do
     plug Phoenix.CodeReloader
     plug Phoenix.Ecto.CheckRepoStatus, otp_app: :converger
   end
-
-  # Must run before anything that reads conn.remote_ip (AdminAuth, RateLimit).
-  plug ConvergerWeb.Plugs.TrustedProxies
 
   plug Plug.RequestId
   plug Plug.Telemetry, event_prefix: [:phoenix, :endpoint]

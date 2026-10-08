@@ -1,5 +1,6 @@
-ARG ELIXIR_VERSION=1.18.4
-ARG OTP_VERSION=27.3.4.16
+# Keep in sync with .tool-versions.
+ARG ELIXIR_VERSION=1.19.5
+ARG OTP_VERSION=28.5.0.5
 ARG DEBIAN_VERSION=bookworm-20260824-slim
 
 ARG BUILDER_IMAGE="docker.io/hexpm/elixir:${ELIXIR_VERSION}-erlang-${OTP_VERSION}-debian-${DEBIAN_VERSION}"
@@ -32,6 +33,9 @@ COPY lib lib
 RUN mix compile
 
 COPY config/runtime.exs config/
+# bin/server and bin/migrate overlays (see docs/deployment.md).
+COPY rel rel
+RUN chmod +x rel/overlays/bin/*
 
 RUN mix release
 
@@ -56,9 +60,10 @@ ENV MIX_ENV="prod"
 
 COPY --from=builder --chown=nobody:root /app/_build/${MIX_ENV}/rel/converger ./
 
-RUN printf '#!/bin/sh\nset -e\n/app/bin/converger eval "Converger.Release.create_db()"\n/app/bin/converger eval "Converger.Release.migrate()"\nexec /app/bin/converger start\n' > /app/bin/entrypoint.sh \
-  && chmod +x /app/bin/entrypoint.sh
-
 USER nobody
 
-ENTRYPOINT ["/app/bin/entrypoint.sh"]
+# The default command only starts the server. Migrations are a separate,
+# one-off step: run `/app/bin/migrate` (an init container, pre-deploy job or
+# the compose `migrate` service) before rolling out new replicas, so a
+# rolling deploy never runs migrations from several replicas at once.
+CMD ["/app/bin/server"]

@@ -12,7 +12,12 @@
   # endpoint itself serves plain HTTP. Individual findings that were reviewed
   # and accepted are marked inline with `# sobelow_skip [...]` and a
   # justification comment (honoured because of `skip: true`).
-  ignore: ["Config.HTTPS"],
+  # Config.CSWH: config/runtime.exs sets `check_origin` to the CHECK_ORIGIN
+  # allow-list when given (Phoenix checks the endpoint host otherwise), which
+  # Sobelow reports as a dynamic value. Only dev.exs disables the check;
+  # test/converger_web/check_origin_config_test.exs fails if any other config
+  # file does.
+  ignore: ["Config.HTTPS", "Config.CSWH"],
   ignore_files: [""],
   version: false
 ]

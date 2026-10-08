@@ -1,12 +1,16 @@
+# Secrets are never committed. Copy .env.example to .env and fill it in;
+# `docker compose up` refuses to start while a required variable is unset.
+# See docs/deployment.md.
 services:
   db:
     image: postgres:17-alpine
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is not set. Copy .env.example to .env and fill in the secrets (see docs/deployment.md)}
       POSTGRES_DB: converger_dev
     ports:
-      - "5432:5432"
+      # Published on loopback only; the app reaches Postgres over the compose network.
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -15,24 +19,45 @@ services:
       timeout: 5s
       retries: 5
 
-  app:
+  # One-shot migration step: runs to completion before `app` starts.
+  # Converger.Release.migrate/0 holds a Postgres advisory lock, so even
+  # concurrent runs apply each migration exactly once.
+  migrate:
     build: .
+    image: converger:local
     depends_on:
       db:
         condition: service_healthy
+    command: ["/app/bin/migrate"]
+    environment: &app_env
+      DATABASE_URL: ecto://postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is not set. Copy .env.example to .env and fill in the secrets (see docs/deployment.md)}@db/converger_prod
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE:?SECRET_KEY_BASE is not set. Copy .env.example to .env and generate one with mix phx.gen.secret}
+      CLOAK_KEY: ${CLOAK_KEY:?CLOAK_KEY is not set. Copy .env.example to .env and generate one with openssl rand -base64 32}
+      CREATE_DB: "true"
+      PHX_HOST: ${PHX_HOST:-localhost}
+      PORT: "4000"
+      PROMETHEUS_PORT: "9568"
+      # Local compose serves plain HTTP. Set FORCE_SSL=true (and
+      # TRUSTED_PROXIES) when running behind a TLS-terminating proxy.
+      FORCE_SSL: ${FORCE_SSL:-false}
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+
+  app:
+    build: .
+    image: converger:local
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     ports:
       - "4000:4000"
       - "9568:9568"
     environment:
-      DATABASE_URL: ecto://postgres:postgres@db/converger_prod
-      SECRET_KEY_BASE: "hJk3F8xZq2Lm9Rn5Tp7Wv0Yd4Bg6Ai1Cj8Ek0Fl2Gn4Ho6Ip8Jq0Kr2Lt4Mu6Nv8Ow0Px2Qy4Rz6Sa8Tb0Uc2Vd4We"
-      # Demo encryption key for local docker-compose only. Generate your own for production.
-      CLOAK_KEY: "Y29udmVyZ2VyLWNvbXBvc2UtZGVtby1rZXktMzJieSE="
+      <<: *app_env
+      CREATE_DB: "false"
       PHX_SERVER: "true"
-      PHX_HOST: localhost
-      PORT: "4000"
-      PROMETHEUS_PORT: "9568"
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
 
   prometheus:
     image: prom/prometheus:latest
@@ -54,7 +79,7 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GF_SECURITY_ADMIN_PASSWORD:?GF_SECURITY_ADMIN_PASSWORD is not set. Copy .env.example to .env and choose a Grafana admin password}
     depends_on:
       - prometheus
       - loki

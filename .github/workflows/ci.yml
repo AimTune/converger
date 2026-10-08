@@ -14,9 +14,9 @@ permissions:
 
 env:
   MIX_ENV: test
-  # Keep in sync with the Dockerfile's ELIXIR_VERSION / OTP_VERSION.
-  ELIXIR_VERSION: "1.18.4"
-  OTP_VERSION: "27.3.4.16"
+  # Keep in sync with the Dockerfile's ELIXIR_VERSION / OTP_VERSION and .tool-versions.
+  ELIXIR_VERSION: "1.19.5"
+  OTP_VERSION: "28.5.0.5"
 
 jobs:
   lint:

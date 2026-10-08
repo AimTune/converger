@@ -11,6 +11,9 @@ defmodule Converger.Accounts.AdminUser do
     field :name, :string
     field :role, :string, default: "admin"
     field :status, :string, default: "active"
+    # Set programmatically (never cast) for bootstrap accounts with a
+    # generated password; cleared by password_changeset/2.
+    field :must_change_password, :boolean, default: false
 
     timestamps(type: :utc_datetime_usec)
   end
@@ -39,12 +42,15 @@ defmodule Converger.Accounts.AdminUser do
     |> unique_constraint(:email)
   end
 
+  @doc "Sets a new password and clears `must_change_password`."
   def password_changeset(user, attrs) do
     user
     |> cast(attrs, [:password])
     |> validate_required([:password])
     |> validate_length(:password, min: 8, message: "must be at least 8 characters")
+    |> validate_confirmation(:password, message: "does not match password")
     |> hash_password()
+    |> put_change(:must_change_password, false)
   end
 
   def valid_password?(%__MODULE__{password_hash: hash}, password)
