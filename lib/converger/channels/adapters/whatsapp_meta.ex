@@ -1,8 +1,9 @@
 defmodule Converger.Channels.Adapters.WhatsAppMeta do
   @behaviour Converger.Channels.Adapter
 
-  alias Converger.Channels.InboundSignature
+  alias Converger.Channels.{DeliveryError, InboundSignature}
   alias Converger.Participants
+  alias Converger.Pipeline.RetryPolicy
 
   require Logger
 
@@ -35,7 +36,9 @@ defmodule Converger.Channels.Adapters.WhatsAppMeta do
 
     if is_nil(recipient) do
       {:error,
-       "no recipient: set activity metadata 'recipient_phone' or 'to', or reply in a conversation with a participant on this channel"}
+       DeliveryError.permanent(
+         "no recipient: set activity metadata 'recipient_phone' or 'to', or reply in a conversation with a participant on this channel"
+       )}
     else
       url = "https://graph.facebook.com/#{graph_api_version(channel)}/#{phone_number_id}/messages"
 
@@ -47,25 +50,25 @@ defmodule Converger.Channels.Adapters.WhatsAppMeta do
         text: %{body: activity.text}
       }
 
-      req_options =
-        Keyword.merge(
-          [
-            json: payload,
-            headers: [{"authorization", "Bearer #{access_token}"}],
-            receive_timeout: 15_000
-          ],
-          Application.get_env(:converger, :whatsapp_req_options, [])
-        )
+      options =
+        [
+          json: payload,
+          headers: [{"authorization", "Bearer #{access_token}"}],
+          receive_timeout: RetryPolicy.for_channel(channel).timeout_ms
+        ]
+        |> Keyword.merge(Application.get_env(:converger, :whatsapp_req_options, []))
 
-      case Req.post(url, req_options) do
+      case Req.post(url, options) do
         {:ok, %Req.Response{status: 200, body: body}} ->
           {:ok, %{whatsapp_message_id: get_in(body, ["messages", Access.at(0), "id"])}}
 
-        {:ok, %Req.Response{status: status, body: body}} ->
-          {:error, "WhatsApp API returned #{status}: #{inspect(body)}"}
+        # 400 (e.g. invalid recipient) and auth errors are permanent; 429 and
+        # 5xx are retried, honouring Retry-After.
+        {:ok, %Req.Response{status: status, headers: headers, body: body}} ->
+          {:error, DeliveryError.from_http(status, headers, body, "WhatsApp API")}
 
         {:error, reason} ->
-          {:error, "WhatsApp API request failed: #{inspect(reason)}"}
+          {:error, DeliveryError.from_transport(reason, "WhatsApp API")}
       end
     end
   end

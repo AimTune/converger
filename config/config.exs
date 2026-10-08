@@ -92,6 +92,9 @@ config :converger, Oban,
   repo: Converger.Repo,
   plugins: [
     {Oban.Plugins.Pruner, max_age: 3600 * 24},
+    # Rescue jobs left `executing` by a crashed node (e.g. a delivery that was
+    # mid-flight). Deliveries time out within seconds, so 30 minutes is safe.
+    {Oban.Plugins.Lifeline, rescue_after: :timer.minutes(30)},
     {Oban.Plugins.Cron,
      crontab: [
        {"0 * * * *", Converger.Workers.ConversationExpirationWorker},

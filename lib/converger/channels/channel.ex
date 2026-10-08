@@ -24,6 +24,8 @@ defmodule Converger.Channels.Channel do
       skip_default_validation: true
 
     field :transformations, {:array, :map}, default: []
+    # Per-channel delivery retry overrides, see Converger.Pipeline.RetryPolicy.
+    field :retry_policy, :map, default: %{}
     belongs_to :tenant, Converger.Tenants.Tenant
 
     timestamps(type: :utc_datetime_usec)
@@ -44,7 +46,8 @@ defmodule Converger.Channels.Channel do
       :secret,
       :require_signature,
       :config,
-      :transformations
+      :transformations,
+      :retry_policy
     ])
     |> validate_required([:name, :status, :tenant_id])
     |> validate_inclusion(:type, @channel_types)
@@ -53,6 +56,7 @@ defmodule Converger.Channels.Channel do
     |> validate_signature_config()
     |> validate_mode_compatibility()
     |> validate_transformations()
+    |> validate_retry_policy()
     |> unique_constraint([:tenant_id, :name])
     |> ensure_secret()
     |> put_secret_hash()
@@ -103,6 +107,15 @@ defmodule Converger.Channels.Channel do
         "#{type} channels only support modes: #{Enum.join(supported, ", ")}"
       )
     end
+  end
+
+  defp validate_retry_policy(changeset) do
+    validate_change(changeset, :retry_policy, fn :retry_policy, policy ->
+      case Converger.Pipeline.RetryPolicy.validate(policy) do
+        :ok -> []
+        {:error, message} -> [retry_policy: message]
+      end
+    end)
   end
 
   defp validate_transformations(changeset) do

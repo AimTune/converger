@@ -98,12 +98,13 @@ defmodule Converger.Deliveries do
   Record a failed delivery attempt.
 
   The delivery stays `pending` (eligible for retry) until the attempts reach
-  `RetryPolicy.max_attempts/0`, then it is dead-lettered (`failed`).
+  the policy's `max_attempts` (the channel's policy, see
+  `RetryPolicy.for_channel/1`), then it is dead-lettered (`failed`).
   """
-  def mark_attempt_failed(delivery, error_message) do
+  def mark_attempt_failed(delivery, error_message, policy \\ RetryPolicy.default()) do
     new_attempts = delivery.attempts + 1
 
-    if RetryPolicy.exhausted?(new_attempts) do
+    if RetryPolicy.exhausted?(policy, new_attempts) do
       dead_letter(delivery, new_attempts, error_message)
     else
       delivery

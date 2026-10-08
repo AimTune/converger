@@ -66,7 +66,7 @@ defmodule Converger.Pipeline.Broadway.Pipeline do
           )
 
           if Pipeline.retryable?(result),
-            do: hand_off_retry(message, activity, channel),
+            do: hand_off_retry(message, activity, channel, reason),
             else: Broadway.Message.failed(message, inspect(reason))
       end
     end)
@@ -75,10 +75,10 @@ defmodule Converger.Pipeline.Broadway.Pipeline do
   # Broadway for throughput, Oban for retries: a transient failure becomes a
   # durable, backed-off Oban job and the message is acked, since Oban now owns
   # the delivery. Only if the hand-off itself fails is the message failed.
-  defp hand_off_retry(message, activity, channel) do
+  defp hand_off_retry(message, activity, channel, error) do
     delivery = Deliveries.get_delivery_for_activity_and_channel(activity.id, channel.id)
 
-    case Pipeline.schedule_retry(delivery, delivery.attempts) do
+    case Pipeline.schedule_retry(delivery, delivery.attempts, channel: channel, error: error) do
       {:ok, _job} ->
         message
 
