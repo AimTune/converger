@@ -64,6 +64,8 @@ defmodule ConvergerWeb.RateLimitingTest do
 
   describe "portal login lockout" do
     setup do
+      start_in_fresh_window()
+
       tenant = tenant_fixture()
 
       {:ok, user} =
@@ -124,6 +126,11 @@ defmodule ConvergerWeb.RateLimitingTest do
   end
 
   describe "admin login lockout" do
+    setup do
+      start_in_fresh_window()
+      :ok
+    end
+
     test "locks the admin account after 5 failures" do
       {:ok, admin} =
         Accounts.create_admin_user(%{
@@ -148,5 +155,17 @@ defmodule ConvergerWeb.RateLimitingTest do
 
       assert html_response(login.("correctpassword"), 429) =~ "Too many failed login attempts"
     end
+  end
+
+  # Login counters use fixed windows aligned to wall-clock time (60 s). Five
+  # failures that straddle a window boundary would reset the count and the
+  # lockout would not trigger, so start each lockout test with time to spare.
+  defp start_in_fresh_window(scale_ms \\ 60_000, margin_ms \\ 5_000) do
+    into_window = rem(System.system_time(:millisecond), scale_ms)
+
+    if into_window > scale_ms - margin_ms,
+      do: Process.sleep(scale_ms - into_window + 50)
+
+    :ok
   end
 end
