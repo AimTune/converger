@@ -56,5 +56,13 @@ config :converger, Converger.Uploads,
 # Disable OpenTelemetry span export in test
 config :opentelemetry, traces_exporter: :none
 
+# Deterministic DNS for the webhook SSRF guard (no network lookups in tests).
+# Deliveries that are not stubbed with Req.Test fail fast instead of waiting
+# for the default connect timeout.
+config :converger, :webhook,
+  resolver: {Converger.TestDnsResolver, :resolve},
+  connect_timeout: 200,
+  receive_timeout: 1_000
+
 # Deterministic encryption key for tests only.
 config :converger, Converger.Vault, key: Base.encode64("converger-tst-cloak-key-32bytes!")

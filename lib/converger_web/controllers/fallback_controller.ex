@@ -42,6 +42,12 @@ defmodule ConvergerWeb.FallbackController do
     |> json(%{error: "Channel does not accept inbound messages"})
   end
 
+  def call(conn, {:error, :empty_inbound_message}) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> json(%{error: "Inbound message has no text and no attachments"})
+  end
+
   def call(conn, {:error, :forbidden}) do
     conn
     |> put_status(:forbidden)

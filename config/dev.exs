@@ -65,6 +65,10 @@ config :phoenix, :plug_init_mode, :runtime
 # Disable swoosh api client as it is only required for production adapters.
 config :swoosh, :api_client, false
 
+# Let development webhooks target local services. The SSRF guard blocks
+# private, loopback and link-local targets everywhere else.
+config :converger, :webhook, allowed_targets: ["localhost", "127.0.0.0/8", "::1"]
+
 # Deterministic encryption key for local development only.
 # Never use this key outside of development.
 config :converger, Converger.Vault, key: Base.encode64("converger-dev-cloak-key-32bytes!")

@@ -79,6 +79,23 @@ if trusted_proxies = System.get_env("TRUSTED_PROXIES") do
     trusted_proxies: trusted_proxies |> String.split(",", trim: true) |> Enum.map(&String.trim/1)
 end
 
+# Webhook SSRF guard escape hatches (see Converger.Channels.UrlGuard).
+# WEBHOOK_ALLOWED_TARGETS: comma-separated host names ("*.svc.local" matches
+# subdomains) or IP/CIDR ranges that webhooks may target even though they are
+# private. WEBHOOK_ALLOW_PRIVATE_TARGETS=true disables the guard entirely.
+if allowed_targets = System.get_env("WEBHOOK_ALLOWED_TARGETS") do
+  config :converger, :webhook,
+    allowed_targets:
+      allowed_targets
+      |> String.split(",", trim: true)
+      |> Enum.map(&String.trim/1)
+      |> Enum.reject(&(&1 == ""))
+end
+
+if System.get_env("WEBHOOK_ALLOW_PRIVATE_TARGETS") in ~w(true 1) do
+  config :converger, :webhook, allow_private_targets: true
+end
+
 # Rate-limit backend: "local" (per-node counters) or "cluster" (counters
 # replicated between nodes over PubSub). Defaults to "cluster" when node
 # discovery is configured through DNS_CLUSTER_QUERY, otherwise "local".
