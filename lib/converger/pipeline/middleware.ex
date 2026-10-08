@@ -34,11 +34,20 @@ defmodule Converger.Pipeline.Middleware do
     "content_filter" => Converger.Pipeline.Middleware.ContentFilter
   }
 
-  @doc "Resolve a middleware type string to its module."
-  def middleware_for(type), do: Map.get(@registry, type)
+  @doc """
+  Resolve a middleware type string to its module.
+
+  Built-in middleware can be extended (or overridden) with the
+  `:extra_middleware` application env, a map of type string to module.
+  """
+  def middleware_for(type), do: Map.get(registry(), type)
 
   @doc "Return all registered middleware type strings."
-  def registered_types, do: Map.keys(@registry)
+  def registered_types, do: Map.keys(registry())
+
+  defp registry do
+    Map.merge(@registry, Application.get_env(:converger, :extra_middleware, %{}))
+  end
 
   @doc """
   Run the middleware chain for a channel's transformations.
@@ -46,8 +55,8 @@ defmodule Converger.Pipeline.Middleware do
   Returns `{:ok, activity}` if all middleware passed (or chain is empty),
   or `{:halt, reason}` if any middleware halted the chain.
   """
-  def run(activity, %{transformations: transformations})
-      when is_list(transformations) and length(transformations) > 0 do
+  def run(activity, %{transformations: transformations} = channel)
+      when is_list(transformations) and transformations != [] do
     Enum.reduce_while(transformations, {:ok, activity}, fn config, {:ok, acc_activity} ->
       type = Map.get(config, "type")
 
@@ -56,7 +65,7 @@ defmodule Converger.Pipeline.Middleware do
           {:cont, {:ok, acc_activity}}
 
         module ->
-          case module.call(acc_activity, config, config) do
+          case safe_call(module, type, acc_activity, channel, config) do
             {:cont, updated} -> {:cont, {:ok, updated}}
             {:halt, reason} -> {:halt, {:halt, reason}}
           end
@@ -65,6 +74,33 @@ defmodule Converger.Pipeline.Middleware do
   end
 
   def run(activity, _channel), do: {:ok, activity}
+
+  # A crashing middleware halts the chain instead of crashing the caller,
+  # so a buggy transformation dead-letters the delivery rather than making
+  # the job retry forever.
+  defp safe_call(module, type, activity, channel, config) do
+    module.call(activity, channel, config)
+  rescue
+    exception ->
+      report_exception(module, type, activity, channel, :error, exception, __STACKTRACE__)
+      {:halt, "middleware crashed: #{type}: #{Exception.message(exception)}"}
+  catch
+    kind, reason ->
+      report_exception(module, type, activity, channel, kind, reason, __STACKTRACE__)
+      {:halt, "middleware crashed: #{type}: #{Exception.format_banner(kind, reason)}"}
+  end
+
+  defp report_exception(module, type, activity, channel, kind, reason, stacktrace) do
+    :telemetry.execute([:converger, :middleware, :exception], %{count: 1}, %{
+      middleware: module,
+      type: type,
+      activity_id: Map.get(activity, :id),
+      channel_id: Map.get(channel, :id),
+      kind: kind,
+      reason: reason,
+      stacktrace: stacktrace
+    })
+  end
 
   @doc """
   Validate a list of transformation configs.
