@@ -38,23 +38,67 @@ defmodule ConvergerWeb.ConversationChannel do
     end
   end
 
+  # Client idempotency keys are opaque strings of bounded size.
+  @max_idempotency_key_bytes 255
+
   @impl true
-  def handle_in("new_activity", payload, socket) do
+  def handle_in("new_activity", payload, socket) when is_map(payload) do
     claims = socket.assigns.claims
 
     # Only client fields are taken from the payload; the sender is the
     # authenticated token subject, never client-supplied.
-    system_attrs = %{
-      tenant_id: claims["tenant_id"],
-      conversation_id: claims["conversation_id"],
-      sender: claims["sub"] || "user"
-    }
+    #
+    # `idempotency_key` (optional, like the REST `x-idempotency-key` header)
+    # makes a re-push safe: a client that lost the connection before the
+    # reply re-sends with the same key and gets the already stored activity
+    # instead of a duplicate. The key is stored namespaced by the sender
+    # (`ws:<sub>:<key>`), so a WebSocket client cannot claim a key that the
+    # tenant's REST API, an inbound webhook or another participant uses in
+    # the same conversation.
+    sender = claims["sub"] || "user"
 
-    # The pipeline (run by create_activity) is the only delivery path: it
-    # applies middleware, tracks deliveries, retries and fans out via routing rules.
-    case Activities.create_client_activity(payload, system_attrs) do
-      {:ok, _activity} ->
-        {:reply, :ok, socket}
+    case idempotency_key(payload) do
+      {:ok, idempotency_key} ->
+        system_attrs = %{
+          tenant_id: claims["tenant_id"],
+          conversation_id: claims["conversation_id"],
+          sender: sender,
+          idempotency_key: idempotency_key && "ws:#{sender}:#{idempotency_key}"
+        }
+
+        # The pipeline (run by create_activity) is the only delivery path: it
+        # applies middleware, tracks deliveries, retries and fans out via routing rules.
+        payload
+        |> Activities.create_client_activity(system_attrs)
+        |> reply_to_push(socket)
+
+      {:error, message} ->
+        {:reply, {:error, %{reason: "invalid_activity", errors: %{idempotency_key: [message]}}},
+         socket}
+    end
+  end
+
+  def handle_in("new_activity", _payload, socket) do
+    {:reply, {:error, %{reason: "invalid_activity"}}, socket}
+  end
+
+  defp idempotency_key(%{"idempotency_key" => nil}), do: {:ok, nil}
+
+  defp idempotency_key(%{"idempotency_key" => key})
+       when is_binary(key) and key != "" and byte_size(key) <= @max_idempotency_key_bytes,
+       do: {:ok, key}
+
+  defp idempotency_key(%{"idempotency_key" => _}),
+    do: {:error, "must be a non-empty string of at most #{@max_idempotency_key_bytes} bytes"}
+
+  defp idempotency_key(_payload), do: {:ok, nil}
+
+  # The reply carries the stored activity's id and seq (also on an idempotent
+  # replay), so the client can correlate its push with the broadcast.
+  defp reply_to_push(result, socket) do
+    case result do
+      {:ok, activity} ->
+        {:reply, {:ok, %{id: activity.id, seq: activity.seq}}, socket}
 
       {:error, :conversation_closed} ->
         {:reply, {:error, %{reason: "conversation_closed"}}, socket}

@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Chaos test: kill the node during load (#57)
+
+- New chaos harness (`test/chaos/run.sh`, docs/chaos.md, manual/nightly
+  `Chaos` workflow): SIGKILLs the app container while REST and WebSocket
+  clients send, then verifies zero acked messages lost, no duplicates,
+  gap-free `seq` and complete webhook delivery.
+- Fixed: re-pushing a legacy WebSocket `new_activity` after a lost reply
+  stored the message twice. The push now takes an optional `idempotency_key`
+  (stored as `ws:<sender>:<key>`, unique per conversation) and the `ok` reply
+  carries the activity `id` and `seq`.
+- Added `OBAN_LIFELINE_RESCUE_AFTER_SECONDS` / `OBAN_LIFELINE_INTERVAL_SECONDS`
+  to re-deliver jobs orphaned by a crashed node sooner than the 30 minute
+  default (unchanged).
+
 ### Dependency and platform upgrades (#56)
 
 Toolchain:

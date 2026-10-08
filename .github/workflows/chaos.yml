@@ -1,0 +1,52 @@
+name: Chaos
+
+# Kills the app container under REST + WebSocket load and verifies that no
+# acked message is lost (test/chaos, docs/chaos.md). Manual, nightly, and on
+# pull requests that touch the harness: it builds the release image and takes
+# a few minutes, so it is not part of the regular CI run.
+on:
+  pull_request:
+    paths:
+      - "test/chaos/**"
+      - ".github/workflows/chaos.yml"
+  workflow_dispatch:
+    inputs:
+      kills:
+        description: Number of SIGKILLs during the run
+        default: "3"
+      duration:
+        description: Seconds of load
+        default: "60"
+  schedule:
+    - cron: "30 3 * * *"
+
+concurrency:
+  group: chaos-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  chaos:
+    name: Kill node during load
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Run chaos test
+        env:
+          CHAOS_KILLS: ${{ inputs.kills || '3' }}
+          CHAOS_DURATION_S: ${{ inputs.duration || '60' }}
+        run: bash test/chaos/run.sh
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: chaos-results
+          # Only the results directory: the generated .env stays behind.
+          path: test/chaos/.run/out/
+          if-no-files-found: ignore

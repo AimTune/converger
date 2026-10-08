@@ -1,0 +1,65 @@
+# Chaos harness override, layered on the root docker-compose.yml by
+# test/chaos/run.sh (see docs/chaos.md):
+#
+#   docker compose -p converger-chaos --project-directory . \
+#     --env-file test/chaos/.run/.env \
+#     -f docker-compose.yml -f test/chaos/docker-compose.chaos.yml ...
+#
+# Only db, migrate, app and the chaos services (sink, driver) are started.
+# Host ports differ from the defaults so it can run next to a dev stack.
+# Requires Docker Compose >= 2.24 (`!override` / `!reset`).
+services:
+  db:
+    # Not published; run.sh talks to Postgres with `docker compose exec db psql`.
+    ports: !reset []
+    volumes: !override
+      - chaos_postgres_data:/var/lib/postgresql/data
+
+  migrate:
+    image: converger-chaos:local
+
+  app:
+    image: converger-chaos:local
+    ports: !override
+      - "127.0.0.1:${CHAOS_APP_PORT:-14000}:4000"
+    environment:
+      # The sink lives on the private compose network: allow it past the
+      # webhook SSRF guard (docs/webhooks.md).
+      WEBHOOK_ALLOWED_TARGETS: sink
+      # Jobs left `executing` by the killed node are rescued after this many
+      # seconds instead of the 30 minute default (see docs/chaos.md).
+      OBAN_LIFELINE_RESCUE_AFTER_SECONDS: ${CHAOS_LIFELINE_RESCUE_AFTER_SECONDS:-30}
+      OBAN_LIFELINE_INTERVAL_SECONDS: ${CHAOS_LIFELINE_INTERVAL_SECONDS:-10}
+      # No collector in the chaos stack.
+      OTEL_EXPORTER_OTLP_ENDPOINT: ""
+      POOL_SIZE: "20"
+    volumes:
+      - ./test/chaos:/chaos:ro
+
+  sink:
+    image: node:22-alpine
+    command: ["node", "/chaos/sink.js"]
+    environment:
+      SINK_OUT: /out/sink.jsonl
+    volumes:
+      - ./test/chaos:/chaos:ro
+      - ./test/chaos/.run/out:/out
+
+  # Started on demand by run.sh (`docker compose run driver ...`).
+  driver:
+    image: node:22-alpine
+    profiles: ["chaos-driver"]
+    command: ["node", "/chaos/driver.js"]
+    environment:
+      OUT_DIR: /out
+      APP_URL: http://app:4000
+      CHAOS_DURATION_S: ${CHAOS_DURATION_S:-60}
+      CHAOS_DRAIN_S: ${CHAOS_DRAIN_S:-180}
+      CHAOS_REST_WORKERS_PER_CONVERSATION: ${CHAOS_REST_WORKERS_PER_CONVERSATION:-2}
+      CHAOS_WS_WINDOW: ${CHAOS_WS_WINDOW:-4}
+    volumes:
+      - ./test/chaos:/chaos:ro
+      - ./test/chaos/.run/out:/out
+
+volumes:
+  chaos_postgres_data:
