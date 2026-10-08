@@ -1,0 +1,5 @@
+{
+  "label": "Architecture decisions",
+  "position": 12,
+  "link": { "type": "doc", "id": "adr/index" }
+}
