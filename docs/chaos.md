@@ -125,6 +125,7 @@ this branch. Numbers are messages.
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Before the fixes (main) | 3 | 10,439 | 10,439 | 96 | 10,439 | **14** (WS) | 0 | **10,422** | 0 | 0 | **not within 150 s** (37 jobs stuck `executing`) |
 | After, default | 3 | 7,056 | 7,056 | 96 | 7,056 | 0 | 0 | 7,056 | 0 | 27 | 4 s |
+| After, default, with latest main merged | 3 | 6,932 | 6,932 | 96 | 6,932 | 0 | 0 | 6,932 | 1 | 34 | 13 s |
 | After, 5 kills, 90 s | 5 | 11,344 | 11,344 | 192 | 11,344 | 0 | 0 | 11,344 | 8 | 59 | 13 s |
 
 Split by transport for the 5-kill run: REST 6,161 sent / 6,161 acked /
