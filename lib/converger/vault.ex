@@ -41,6 +41,9 @@ defmodule Converger.Vault do
   @doc "Generates a new random base64-encoded key suitable for `CLOAK_KEY`."
   def generate_key, do: :crypto.strong_rand_bytes(32) |> Base.encode64()
 
+  # The `:"retired_N"` labels come from the position in the operator-configured
+  # CLOAK_RETIRED_KEYS list (a handful at most), never from request input.
+  # sobelow_skip ["DOS.BinToAtom"]
   defp ciphers(config) do
     default =
       Keyword.get(config, :key) ||
