@@ -9,6 +9,7 @@ defmodule Converger.Application do
   def start(_type, _args) do
     OpentelemetryPhoenix.setup(adapter: :bandit)
     OpentelemetryEcto.setup([:converger, :repo])
+    OpentelemetryOban.setup()
 
     children =
       [
