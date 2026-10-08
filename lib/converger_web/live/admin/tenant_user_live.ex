@@ -12,14 +12,18 @@ defmodule ConvergerWeb.Admin.TenantUserLive do
       socket.assigns[:current_admin_user] && socket.assigns.current_admin_user.role == "viewer"
 
     {:ok,
-     assign(socket,
-       tenant_users: Accounts.list_all_tenant_users(),
+     socket
+     |> assign(
        tenants: tenants,
        page_title: "Tenant Users",
        form: to_form(Accounts.change_tenant_user(%TenantUser{})),
        filter_tenant_id: "",
-       is_viewer: is_viewer
-     )}
+       is_viewer: is_viewer,
+       next_cursor: nil,
+       has_more: false,
+       loaded_count: 0
+     )
+     |> load_users(reset: true)}
   end
 
   def handle_event("save", %{"tenant_user" => params}, socket) do
@@ -31,10 +35,8 @@ defmodule ConvergerWeb.Admin.TenantUserLive do
           {:noreply,
            socket
            |> put_flash(:info, "Tenant user created")
-           |> assign(
-             tenant_users: list_users(socket.assigns.filter_tenant_id),
-             form: to_form(Accounts.change_tenant_user(%TenantUser{}))
-           )}
+           |> assign(form: to_form(Accounts.change_tenant_user(%TenantUser{})))
+           |> load_users(reset: true)}
 
         {:error, changeset} ->
           {:noreply, assign(socket, form: to_form(changeset))}
@@ -44,10 +46,17 @@ defmodule ConvergerWeb.Admin.TenantUserLive do
 
   def handle_event("filter", %{"tenant_id" => tenant_id}, socket) do
     {:noreply,
-     assign(socket,
-       filter_tenant_id: tenant_id,
-       tenant_users: list_users(tenant_id)
-     )}
+     socket
+     |> assign(filter_tenant_id: tenant_id)
+     |> load_users(reset: true)}
+  end
+
+  def handle_event("load_more", _params, socket) do
+    if socket.assigns.has_more do
+      {:noreply, load_users(socket, reset: false)}
+    else
+      {:noreply, socket}
+    end
   end
 
   def handle_event("toggle_status", %{"id" => id}, socket) do
@@ -60,7 +69,8 @@ defmodule ConvergerWeb.Admin.TenantUserLive do
       case Accounts.update_tenant_user(user, %{status: new_status}, build_actor(socket)) do
         {:ok, _} ->
           {:noreply,
-           assign(socket, tenant_users: list_users(socket.assigns.filter_tenant_id))
+           socket
+           |> stream_insert(:tenant_users, Accounts.get_tenant_user!(id))
            |> put_flash(:info, "Status updated")}
 
         {:error, _} ->
@@ -78,7 +88,9 @@ defmodule ConvergerWeb.Admin.TenantUserLive do
       case Accounts.delete_tenant_user(user, build_actor(socket)) do
         {:ok, _} ->
           {:noreply,
-           assign(socket, tenant_users: list_users(socket.assigns.filter_tenant_id))
+           socket
+           |> stream_delete(:tenant_users, user)
+           |> assign(loaded_count: max(socket.assigns.loaded_count - 1, 0))
            |> put_flash(:info, "Tenant user deleted")}
 
         {:error, _} ->
@@ -87,8 +99,27 @@ defmodule ConvergerWeb.Admin.TenantUserLive do
     end
   end
 
-  defp list_users(""), do: Accounts.list_all_tenant_users()
-  defp list_users(tenant_id), do: Accounts.list_tenant_users(tenant_id)
+  # Keyset page of tenant users (newest first); `reset: true` starts over.
+  defp load_users(socket, reset: reset) do
+    cursor = if reset, do: nil, else: socket.assigns.next_cursor
+    filters = %{"tenant_id" => socket.assigns.filter_tenant_id}
+
+    page =
+      case Accounts.paginate_tenant_users(filters, cursor: cursor) do
+        {:ok, page} -> page
+        {:error, :invalid_cursor} -> %Converger.Pagination.Page{}
+      end
+
+    loaded = if reset, do: 0, else: socket.assigns.loaded_count
+
+    socket
+    |> stream(:tenant_users, page.entries, reset: reset)
+    |> assign(
+      next_cursor: page.next_cursor,
+      has_more: page.has_more,
+      loaded_count: loaded + length(page.entries)
+    )
+  end
 
   defp build_actor(socket) do
     case socket.assigns[:current_admin_user] do
@@ -166,8 +197,8 @@ defmodule ConvergerWeb.Admin.TenantUserLive do
             <th>Actions</th>
           </tr>
         </thead>
-        <tbody>
-          <tr :for={user <- @tenant_users}>
+        <tbody id="tenant-users" phx-update="stream">
+          <tr :for={{dom_id, user} <- @streams.tenant_users} id={dom_id}>
             <td><%= user.name %></td>
             <td><%= user.email %></td>
             <td><%= user.tenant.name %></td>
@@ -190,11 +221,13 @@ defmodule ConvergerWeb.Admin.TenantUserLive do
               </button>
             </td>
           </tr>
-          <tr :if={@tenant_users == []}>
-            <td colspan="7" style="text-align: center; color: #999;">No tenant users found.</td>
-          </tr>
         </tbody>
       </table>
+      <p :if={@loaded_count == 0} style="text-align: center; color: #999;">No tenant users found.</p>
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;">
+        <small style="color: #666;">Showing <%= @loaded_count %> users</small>
+        <button :if={@has_more} id="load-more-tenant-users" phx-click="load_more" class="badge">Load more</button>
+      </div>
     </div>
     """
   end

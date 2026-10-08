@@ -41,6 +41,26 @@ if admin_ips = System.get_env("ADMIN_IP_WHITELIST") do
     admin_ip_whitelist: admin_ips |> String.split(",", trim: true) |> Enum.map(&String.trim/1)
 end
 
+# Pagination limits (defaults in config/config.exs), e.g. PAGINATION_MAX_LIMIT=200.
+pagination_env = [
+  default_limit: "PAGINATION_DEFAULT_LIMIT",
+  max_limit: "PAGINATION_MAX_LIMIT",
+  activity_default_limit: "PAGINATION_ACTIVITY_DEFAULT_LIMIT",
+  activity_max_limit: "PAGINATION_ACTIVITY_MAX_LIMIT",
+  ws_replay_limit: "PAGINATION_WS_REPLAY_LIMIT",
+  lookup_limit: "PAGINATION_LOOKUP_LIMIT"
+]
+
+pagination_overrides =
+  for {key, var} <- pagination_env, value = System.get_env(var), value not in [nil, ""] do
+    {key, String.to_integer(value)}
+  end
+
+# Keyword values are deep-merged with the compile-time config.
+if pagination_overrides != [] do
+  config :converger, :pagination, pagination_overrides
+end
+
 # Reverse proxies / load balancers allowed to set X-Forwarded-For
 # (comma-separated IPs or CIDR ranges, e.g. "10.0.0.0/8,fd00::/8").
 # When unset, forwarding headers are ignored and conn.remote_ip is the TCP peer.

@@ -18,6 +18,21 @@ config :converger,
   # Allowed clock skew for timestamped `x-converger-signature` inbound signatures
   inbound_signature_tolerance_seconds: 300
 
+# Page sizes for every list query (see Converger.Pagination). Request-supplied
+# `limit` params are clamped to the max; omitted/invalid ones use the default.
+config :converger, :pagination,
+  # Conversations, audit logs, deliveries, tenant users (REST + admin tables)
+  default_limit: 50,
+  max_limit: 500,
+  # Activities (REST `?limit=` and the admin/portal transcript views)
+  activity_default_limit: 100,
+  activity_max_limit: 1000,
+  # Max activities replayed on WebSocket join; the rest come over REST
+  ws_replay_limit: 100,
+  # Hard cap for small operator-managed tables listed whole
+  # (tenants, channels, routing rules, admin users)
+  lookup_limit: 1000
+
 # Configures the endpoint
 config :converger, ConvergerWeb.Endpoint,
   url: [host: "localhost"],

@@ -10,8 +10,11 @@ defmodule Converger.Tenants do
   alias Converger.AuditLogs
   alias Converger.AuditLogs.Changes
 
+  # Operator-managed configuration: listed whole under a hard safety cap
+  # (Converger.Pagination.bounded_all/2).
   def list_tenants do
-    Repo.all(Tenant)
+    from(t in Tenant, order_by: [asc: t.name, asc: t.id])
+    |> Converger.Pagination.bounded_all()
   end
 
   def get_tenant!(id), do: Repo.get!(Tenant, id)
