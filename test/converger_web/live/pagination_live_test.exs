@@ -77,7 +77,9 @@ defmodule ConvergerWeb.PaginationLiveTest do
       conversation = conversation_fixture(t, ch)
       for i <- 1..5, do: activity_fixture(t, conversation, %{text: "msg-#{i}"})
 
-      {:ok, view, html} = live(admin_conn(conn, admin), ~p"/admin/conversations/#{conversation.id}")
+      {:ok, view, html} =
+        live(admin_conn(conn, admin), ~p"/admin/conversations/#{conversation.id}")
+
       assert row_count(html, "activities") == 3
       refute html =~ "msg-2"
       assert html =~ "msg-5"

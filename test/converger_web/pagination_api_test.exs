@@ -121,7 +121,11 @@ defmodule ConvergerWeb.PaginationApiTest do
   end
 
   describe "tenant API GET /api/v1/conversations" do
-    test "keyset pages the tenant's conversations", %{tenant: tenant, channel: channel, conversation: first} do
+    test "keyset pages the tenant's conversations", %{
+      tenant: tenant,
+      channel: channel,
+      conversation: first
+    } do
       more = for _ <- 1..2, do: conversation_fixture(tenant, channel)
       _other_tenant = conversation_fixture(tenant_fixture(), channel_fixture(tenant_fixture()))
 
@@ -130,7 +134,9 @@ defmodule ConvergerWeb.PaginationApiTest do
       assert %{"has_more" => true, "next_cursor" => cursor, "limit" => 2} = body["meta"]
 
       body =
-        tenant |> tenant_get("/api/v1/conversations?limit=2&cursor=#{cursor}") |> json_response(200)
+        tenant
+        |> tenant_get("/api/v1/conversations?limit=2&cursor=#{cursor}")
+        |> json_response(200)
 
       assert length(body["data"]) == 1
       assert body["meta"] == %{"has_more" => false, "next_cursor" => nil, "limit" => 2}
@@ -170,9 +176,14 @@ defmodule ConvergerWeb.PaginationApiTest do
       {:ok, socket} = connect(ConvergerSocket, %{"token" => token})
 
       {:ok, _, _socket} =
-        subscribe_and_join(socket, ConvergerChannel, "converger:conversation:#{conversation.id}", %{
-          "watermark" => Watermark.encode(first.seq)
-        })
+        subscribe_and_join(
+          socket,
+          ConvergerChannel,
+          "converger:conversation:#{conversation.id}",
+          %{
+            "watermark" => Watermark.encode(first.seq)
+          }
+        )
 
       expected = rest |> Enum.take(2) |> Enum.map(& &1.id)
       assert_push "activitySet", %{activities: replayed, watermark: wm, has_more: true}
@@ -198,9 +209,14 @@ defmodule ConvergerWeb.PaginationApiTest do
       {:ok, socket} = connect(ConvergerSocket, %{"token" => token})
 
       {:ok, _, _socket} =
-        subscribe_and_join(socket, ConvergerChannel, "converger:conversation:#{conversation.id}", %{
-          "watermark" => Watermark.encode(Enum.at(activities, 2).seq)
-        })
+        subscribe_and_join(
+          socket,
+          ConvergerChannel,
+          "converger:conversation:#{conversation.id}",
+          %{
+            "watermark" => Watermark.encode(Enum.at(activities, 2).seq)
+          }
+        )
 
       assert_push "activitySet", %{activities: [_, _], has_more: false}
     end

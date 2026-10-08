@@ -96,10 +96,16 @@ defmodule Converger.PaginationBenchmarkTest do
       |> Map.put(:remote_ip, {127, 0, 0, 1})
       |> init_test_session(%{admin_user_id: admin.id})
 
-    {:ok, view, html} = timed("admin /conversations mount", fn -> live(conn, ~p"/admin/conversations") end)
+    {:ok, view, html} =
+      timed("admin /conversations mount", fn -> live(conn, ~p"/admin/conversations") end)
+
     assert html =~ "Showing 50 conversations"
 
-    html = timed("admin load more", fn -> view |> element("#load-more-conversations") |> render_click() end)
+    html =
+      timed("admin load more", fn ->
+        view |> element("#load-more-conversations") |> render_click()
+      end)
+
     assert html =~ "Showing 100 conversations"
   end
 end

@@ -46,15 +46,32 @@ defmodule Converger.Conversations do
           :error -> where(q, [c], false)
         end
 
-      {"tenant_id", value}, q when value != "" -> where(q, tenant_id: ^value)
-      {:tenant_id, value}, q when value != "" -> where(q, tenant_id: ^value)
-      {"channel_id", value}, q when value != "" -> where(q, channel_id: ^value)
-      {:channel_id, value}, q when value != "" -> where(q, channel_id: ^value)
-      {"status", value}, q when value != "" -> where(q, status: ^value)
-      {:status, value}, q when value != "" -> where(q, status: ^value)
-      {"external_id", value}, q when is_binary(value) -> where_external_id(q, value)
-      {:external_id, value}, q when is_binary(value) -> where_external_id(q, value)
-      {_, _}, q -> q
+      {"tenant_id", value}, q when value != "" ->
+        where(q, tenant_id: ^value)
+
+      {:tenant_id, value}, q when value != "" ->
+        where(q, tenant_id: ^value)
+
+      {"channel_id", value}, q when value != "" ->
+        where(q, channel_id: ^value)
+
+      {:channel_id, value}, q when value != "" ->
+        where(q, channel_id: ^value)
+
+      {"status", value}, q when value != "" ->
+        where(q, status: ^value)
+
+      {:status, value}, q when value != "" ->
+        where(q, status: ^value)
+
+      {"external_id", value}, q when is_binary(value) ->
+        where_external_id(q, value)
+
+      {:external_id, value}, q when is_binary(value) ->
+        where_external_id(q, value)
+
+      {_, _}, q ->
+        q
     end)
   end
 

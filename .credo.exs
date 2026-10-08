@@ -219,6 +219,7 @@ baseline_alias_usage = [
              metadata_keys: [
                :activity_id,
                :attempts,
+               :cap,
                :channel_id,
                :channel_type,
                :claims,
@@ -230,6 +231,7 @@ baseline_alias_usage = [
                :errors,
                :processed,
                :reason,
+               :source,
                :status,
                :tenant_id,
                :total

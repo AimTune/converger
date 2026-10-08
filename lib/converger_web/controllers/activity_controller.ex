@@ -2,8 +2,8 @@ defmodule ConvergerWeb.ActivityController do
   use ConvergerWeb, :controller
 
   alias Converger.Activities
-  alias Converger.Conversations
   alias Converger.ConvergerAPI.Watermark
+  alias Converger.Conversations
 
   plug ConvergerWeb.Plugs.TenantAuth
 

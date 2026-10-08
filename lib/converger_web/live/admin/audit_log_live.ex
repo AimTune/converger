@@ -53,8 +53,7 @@ defmodule ConvergerWeb.Admin.AuditLogLive do
   end
 
   def handle_event("filter", %{"filters" => filters}, socket) do
-    {:noreply,
-     push_patch(socket, to: ~p"/admin/audit_logs?#{Map.take(filters, @filter_keys)}")}
+    {:noreply, push_patch(socket, to: ~p"/admin/audit_logs?#{Map.take(filters, @filter_keys)}")}
   end
 
   def handle_event("load_more", _, socket) do

@@ -8,7 +8,7 @@ defmodule Converger.PaginationTest do
   import Converger.ActivitiesFixtures
   import Converger.AuditLogsFixtures
 
-  alias Converger.{Activities, Accounts, AuditLogs, Conversations, Pagination, Repo}
+  alias Converger.{Accounts, Activities, AuditLogs, Conversations, Pagination, Repo}
   alias Converger.Conversations.Conversation
   alias Converger.Pagination.Page
 
@@ -31,7 +31,12 @@ defmodule Converger.PaginationTest do
 
   describe "clamp_limit/2" do
     test "defaults, caps and parses" do
-      put_limits(default_limit: 10, max_limit: 20, activity_default_limit: 5, activity_max_limit: 7)
+      put_limits(
+        default_limit: 10,
+        max_limit: 20,
+        activity_default_limit: 5,
+        activity_max_limit: 7
+      )
 
       assert Pagination.clamp_limit(nil) == 10
       assert Pagination.clamp_limit(15) == 15
@@ -108,7 +113,10 @@ defmodule Converger.PaginationTest do
       assert is_binary(cursor)
 
       {:ok, %Page{entries: rest, has_more: false, next_cursor: nil}} =
-        Conversations.paginate_conversations(%{"tenant_id" => tenant.id}, limit: 3, cursor: cursor)
+        Conversations.paginate_conversations(%{"tenant_id" => tenant.id},
+          limit: 3,
+          cursor: cursor
+        )
 
       assert length(rest) == 2
     end
@@ -168,7 +176,9 @@ defmodule Converger.PaginationTest do
     end
 
     test "exactly a full page has no more", %{conversation: conversation} do
-      assert {activities, false} = Activities.page_activities_since(conversation.id, nil, limit: 5)
+      assert {activities, false} =
+               Activities.page_activities_since(conversation.id, nil, limit: 5)
+
       assert length(activities) == 5
     end
 
