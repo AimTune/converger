@@ -1,3 +1,8 @@
+---
+sidebar_label: Webhook
+description: The webhook channel adapter - outbound JSON delivery, request signing, SSRF guard, method allowlist, timeouts and response limits.
+---
+
 # Outbound webhooks
 
 A `webhook` channel delivers every activity to the configured URL as JSON.

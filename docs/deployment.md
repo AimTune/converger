@@ -1,3 +1,8 @@
+---
+sidebar_label: Deployment
+description: Environment variables, secrets, TLS/HSTS, migrations, initial admin, backups and the upgrade/rollback runbook for running Converger in production.
+---
+
 # Deployment
 
 Converger ships as a standard Elixir release (see the `Dockerfile`). All

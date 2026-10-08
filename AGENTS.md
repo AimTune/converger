@@ -5,6 +5,22 @@ This is a web application written using the Phoenix web framework.
 - Use `mix precommit` alias when you are done with all changes and fix any pending issues
 - Use the already included and available `:req` (`Req`) library for HTTP requests, **avoid** `:httpoison`, `:tesla`, and `:httpc`. Req is included by default and is the preferred HTTP client for Phoenix apps
 
+## Documentation
+
+The documentation site (https://converger.aimtune.dev) is built with Docusaurus from `website/`, and its content is the
+repository's `docs/` folder (single source of truth). Documentation is part of every change:
+
+- **Every PR must update the relevant `docs/` pages** in the same PR: behaviour, API shapes, config/env vars, adapters,
+  operations, security. Planned features are marked with their issue number.
+- **When an architectural decision is made or changed, add a new ADR (or supersede an existing one) in `docs/adr/`**
+  using `docs/adr/template.md`, and add it to `docs/adr/index.md`. See `docs/adr/how-we-write-adrs.md`.
+- New pages need front matter (`title`, `description`, `sidebar_position`); new folders need a `_category_.json`.
+  `.md` files are CommonMark (not MDX); link other docs by relative path with the `.md` extension.
+- Run `cd website && npm ci && npm run build` when you change docs; broken links fail the build.
+- CI enforces this: the "Docs required" job (`.github/workflows/docs.yml`) fails when `lib/`, `config/` or
+  `priv/repo/migrations/` change without any change under `docs/`. Only for changes with genuinely no documentation
+  impact may a maintainer add the `no-docs` label, with the reason stated in the PR description.
+
 ### Phoenix v1.8 guidelines
 
 - **Always** begin your LiveView templates with `<Layouts.app flash={@flash} ...>` which wraps all inner content
