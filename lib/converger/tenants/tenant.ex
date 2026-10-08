@@ -9,6 +9,7 @@ defmodule Converger.Tenants.Tenant do
     field :api_key, :string
     field :status, :string, default: "active"
     field :alert_webhook_url, :string
+    field :allowed_upload_types, {:array, :string}
 
     timestamps(type: :utc_datetime_usec)
   end
@@ -30,7 +31,7 @@ defmodule Converger.Tenants.Tenant do
   @doc false
   def changeset(tenant, attrs) do
     tenant
-    |> cast(attrs, [:name, :status, :alert_webhook_url])
+    |> cast(attrs, [:name, :status, :alert_webhook_url, :allowed_upload_types])
     |> validate_required([:name])
     |> ensure_api_key()
     |> validate_required([:api_key, :status])
