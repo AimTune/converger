@@ -20,9 +20,19 @@ if System.get_env("PHX_SERVER") do
   config :converger, ConvergerWeb.Endpoint, server: true
 end
 
-config :converger,
-       :prometheus_port,
-       String.to_integer(System.get_env("PROMETHEUS_PORT") || "9568")
+# Prometheus metrics listener. Not started in test (see config/test.exs), so
+# concurrent test runs on one machine don't fight over the port; set
+# PROMETHEUS_PORT to force one anyway.
+cond do
+  port = System.get_env("PROMETHEUS_PORT") ->
+    config :converger, :prometheus_port, String.to_integer(port)
+
+  config_env() != :test ->
+    config :converger, :prometheus_port, 9568
+
+  true ->
+    :ok
+end
 
 # Configurable CORS origins and admin IP whitelist.
 # CORS origins are read per request by ConvergerWeb.Endpoint, so this takes
