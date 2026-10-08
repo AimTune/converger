@@ -63,6 +63,32 @@ defmodule ConvergerWeb.ConvergerAPI.ConversationController do
     end
   end
 
+  @doc "POST /conversations/:id/close"
+  def close(conn, %{"id" => conversation_id}) do
+    change_status(conn, conversation_id, &Conversations.close_conversation/1)
+  end
+
+  @doc "POST /conversations/:id/reopen"
+  def reopen(conn, %{"id" => conversation_id}) do
+    change_status(conn, conversation_id, &Conversations.reopen_conversation/1)
+  end
+
+  defp change_status(conn, conversation_id, fun) do
+    claims = conn.assigns.converger_claims
+
+    with :ok <- authorize_conversation(claims, conversation_id),
+         %Conversations.Conversation{} = conversation <-
+           Conversations.get_conversation(conversation_id, claims["tenant_id"]),
+         {:ok, conversation} <- fun.(conversation) do
+      conn
+      |> put_status(:ok)
+      |> json(%{conversationId: conversation.id, status: conversation.status})
+    else
+      nil -> {:error, :not_found}
+      error -> error
+    end
+  end
+
   defp build_stream_url(conn, conversation_id, token, watermark \\ nil) do
     scheme = if conn.scheme == :https, do: "wss", else: "ws"
     host = conn.host

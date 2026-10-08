@@ -12,12 +12,13 @@ defmodule Converger.TenantsTest do
 
     test "list_tenants/0 returns all tenants" do
       tenant = tenant_fixture()
-      assert Tenants.list_tenants() == [tenant]
+      # The plaintext api_key is virtual and only present right after creation.
+      assert Tenants.list_tenants() == [%{tenant | api_key: nil}]
     end
 
     test "get_tenant!/1 returns the tenant with given id" do
       tenant = tenant_fixture()
-      assert Tenants.get_tenant!(tenant.id) == tenant
+      assert Tenants.get_tenant!(tenant.id) == %{tenant | api_key: nil}
     end
 
     test "create_tenant/1 with valid data creates a tenant" do
@@ -49,7 +50,6 @@ defmodule Converger.TenantsTest do
 
     test "create_tenant/1 enforces api_key uniqueness" do
       tenant = tenant_fixture()
-      api_key = tenant.api_key
 
       # Bypass create_tenant mapping to ensure we try the SAME api_key
       # Actually, let's just use the same name and see if we can manually set it if schema allows

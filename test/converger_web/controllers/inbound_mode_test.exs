@@ -45,5 +45,16 @@ defmodule ConvergerWeb.InboundModeTest do
 
       assert json_response(conn, 201)["status"] == "accepted"
     end
+
+    test "rejects an inbound message without text or attachments with 422", %{tenant: tenant} do
+      channel = webhook_channel_fixture(tenant, %{mode: "inbound"})
+
+      conn =
+        signed_post(build_conn(), ~p"/api/v1/channels/#{channel.id}/inbound", channel, %{
+          "sender" => "user1"
+        })
+
+      assert json_response(conn, 422)["error"] =~ "no text"
+    end
   end
 end

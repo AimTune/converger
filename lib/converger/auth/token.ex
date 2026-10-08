@@ -1,5 +1,12 @@
 defmodule Converger.Auth.Token do
+  @moduledoc """
+  Joken configuration for the conversation-scoped tokens used to join the
+  WebSocket conversation channel.
+  """
+
   use Joken.Config
+
+  alias Converger.Auth.Signer
 
   @impl true
   def token_config do
@@ -17,7 +24,7 @@ defmodule Converger.Auth.Token do
       "sub" => user_id
     }
 
-    generate_and_sign(claims, Converger.Auth.Signer.signer())
+    generate_and_sign(claims, Signer.signer())
   end
 
   def generate_channel_token(channel) do
@@ -27,11 +34,10 @@ defmodule Converger.Auth.Token do
       "sub" => "channel_#{channel.id}"
     }
 
-    generate_and_sign(claims, Converger.Auth.Signer.signer())
+    generate_and_sign(claims, Signer.signer())
   end
 
   def verify_token(token) do
-    verify_and_validate(token, Converger.Auth.Signer.signer())
+    verify_and_validate(token, Signer.signer())
   end
-
 end

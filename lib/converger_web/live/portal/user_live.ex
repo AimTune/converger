@@ -18,9 +18,7 @@ defmodule ConvergerWeb.Portal.UserLive do
   end
 
   def handle_event("save", %{"tenant_user" => params}, socket) do
-    if not socket.assigns.can_manage do
-      {:noreply, put_flash(socket, :error, "You don't have permission to create users.")}
-    else
+    if socket.assigns.can_manage do
       tenant_id = socket.assigns.current_tenant.id
       params = Map.put(params, "tenant_id", tenant_id)
 
@@ -37,60 +35,71 @@ defmodule ConvergerWeb.Portal.UserLive do
         {:error, changeset} ->
           {:noreply, assign(socket, form: to_form(changeset))}
       end
+    else
+      {:noreply, put_flash(socket, :error, "You don't have permission to create users.")}
     end
   end
 
   def handle_event("toggle_status", %{"id" => id}, socket) do
-    if not socket.assigns.can_manage do
-      {:noreply, put_flash(socket, :error, "You don't have permission to do this.")}
-    else
+    if socket.assigns.can_manage do
       user = Accounts.get_tenant_user!(id)
 
-      if user.tenant_id != socket.assigns.current_tenant.id do
-        {:noreply, put_flash(socket, :error, "Unauthorized")}
+      if user.tenant_id == socket.assigns.current_tenant.id do
+        toggle_user_status(socket, user)
       else
-        new_status = if user.status == "active", do: "inactive", else: "active"
-
-        case Accounts.update_tenant_user(user, %{status: new_status}, build_actor(socket)) do
-          {:ok, _} ->
-            {:noreply,
-             assign(socket,
-               tenant_users: Accounts.list_tenant_users(socket.assigns.current_tenant.id)
-             )
-             |> put_flash(:info, "Status updated")}
-
-          {:error, _} ->
-            {:noreply, put_flash(socket, :error, "Failed to update status")}
-        end
+        {:noreply, put_flash(socket, :error, "Unauthorized")}
       end
+    else
+      {:noreply, put_flash(socket, :error, "You don't have permission to do this.")}
     end
   end
 
   def handle_event("delete", %{"id" => id}, socket) do
-    if not socket.assigns.can_manage do
-      {:noreply, put_flash(socket, :error, "You don't have permission to delete users.")}
-    else
+    if socket.assigns.can_manage do
       user = Accounts.get_tenant_user!(id)
 
-      if user.tenant_id != socket.assigns.current_tenant.id do
-        {:noreply, put_flash(socket, :error, "Unauthorized")}
-      else
-        if user.id == socket.assigns.current_tenant_user.id do
-          {:noreply, put_flash(socket, :error, "You cannot delete your own account.")}
-        else
-          case Accounts.delete_tenant_user(user, build_actor(socket)) do
-            {:ok, _} ->
-              {:noreply,
-               assign(socket,
-                 tenant_users: Accounts.list_tenant_users(socket.assigns.current_tenant.id)
-               )
-               |> put_flash(:info, "User deleted")}
+      cond do
+        user.tenant_id != socket.assigns.current_tenant.id ->
+          {:noreply, put_flash(socket, :error, "Unauthorized")}
 
-            {:error, _} ->
-              {:noreply, put_flash(socket, :error, "Failed to delete user")}
-          end
-        end
+        user.id == socket.assigns.current_tenant_user.id ->
+          {:noreply, put_flash(socket, :error, "You cannot delete your own account.")}
+
+        true ->
+          delete_user(socket, user)
       end
+    else
+      {:noreply, put_flash(socket, :error, "You don't have permission to delete users.")}
+    end
+  end
+
+  defp toggle_user_status(socket, user) do
+    new_status = if user.status == "active", do: "inactive", else: "active"
+
+    case Accounts.update_tenant_user(user, %{status: new_status}, build_actor(socket)) do
+      {:ok, _} ->
+        {:noreply,
+         assign(socket,
+           tenant_users: Accounts.list_tenant_users(socket.assigns.current_tenant.id)
+         )
+         |> put_flash(:info, "Status updated")}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Failed to update status")}
+    end
+  end
+
+  defp delete_user(socket, user) do
+    case Accounts.delete_tenant_user(user, build_actor(socket)) do
+      {:ok, _} ->
+        {:noreply,
+         assign(socket,
+           tenant_users: Accounts.list_tenant_users(socket.assigns.current_tenant.id)
+         )
+         |> put_flash(:info, "User deleted")}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Failed to delete user")}
     end
   end
 

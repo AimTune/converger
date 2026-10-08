@@ -10,15 +10,17 @@ defmodule Converger.Channels do
   alias Converger.AuditLogs
   alias Converger.AuditLogs.Changes
 
+  # Channels are operator-managed configuration: listed whole (for tables and
+  # dropdowns) under a hard safety cap, see Converger.Pagination.bounded_all/2.
   def list_channels do
-    Channel
-    |> Repo.all()
+    from(c in Channel, order_by: [asc: c.name, asc: c.id])
+    |> Converger.Pagination.bounded_all()
     |> Repo.preload(:tenant)
   end
 
   def list_channels_for_tenant(tenant_id) do
-    from(c in Channel, where: c.tenant_id == ^tenant_id)
-    |> Repo.all()
+    from(c in Channel, where: c.tenant_id == ^tenant_id, order_by: [asc: c.name, asc: c.id])
+    |> Converger.Pagination.bounded_all()
   end
 
   def get_channel!(id), do: Repo.get!(Channel, id)
@@ -151,11 +153,52 @@ defmodule Converger.Channels do
     end
   end
 
-  def validate_channel_secret(id, secret) do
+  def validate_channel_secret(id, secret) when is_binary(secret) do
     case Repo.get(Channel, id) do
-      %Channel{secret: ^secret} = channel -> {:ok, channel}
-      _ -> {:error, :unauthorized}
+      %Channel{secret: stored} = channel when is_binary(stored) ->
+        if Plug.Crypto.secure_compare(stored, secret),
+          do: {:ok, channel},
+          else: {:error, :unauthorized}
+
+      _ ->
+        {:error, :unauthorized}
     end
+  end
+
+  def validate_channel_secret(_id, _secret), do: {:error, :unauthorized}
+
+  @doc """
+  Finds a channel by its secret. The lookup uses the secret's SHA-256 digest
+  and the decrypted secret is then compared in constant time.
+  """
+  def get_channel_by_secret(secret) when is_binary(secret) and secret != "" do
+    with %Channel{secret: stored} = channel when is_binary(stored) <-
+           Repo.get_by(Channel, secret_hash: Converger.Secrets.hash(secret)),
+         true <- Plug.Crypto.secure_compare(stored, secret) do
+      channel
+    else
+      _ -> nil
+    end
+  end
+
+  def get_channel_by_secret(_secret), do: nil
+
+  @doc """
+  Re-encrypts every channel's encrypted fields with the vault's current
+  default key. Run after rotating `CLOAK_KEY`.
+  """
+  def reencrypt_all do
+    Channel
+    |> Repo.all()
+    |> Enum.reduce(0, fn channel, count ->
+      channel
+      |> Ecto.Changeset.change()
+      |> Ecto.Changeset.force_change(:secret, channel.secret)
+      |> Ecto.Changeset.force_change(:config, channel.config)
+      |> Repo.update!()
+
+      count + 1
+    end)
   end
 
   def list_channels_by_mode(mode) when mode in ~w(inbound outbound duplex) do

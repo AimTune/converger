@@ -42,6 +42,12 @@ defmodule ConvergerWeb.FallbackController do
     |> json(%{error: "Channel does not accept inbound messages"})
   end
 
+  def call(conn, {:error, :empty_inbound_message}) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> json(%{error: "Inbound message has no text and no attachments"})
+  end
+
   def call(conn, {:error, :forbidden}) do
     conn
     |> put_status(:forbidden)
@@ -55,6 +61,14 @@ defmodule ConvergerWeb.FallbackController do
     conn
     |> put_status(:service_unavailable)
     |> json(%{error: "Activity could not be accepted, please retry"})
+  end
+
+  # The conversation is closed (manually or by inactivity) and does not accept
+  # activities until it is reopened.
+  def call(conn, {:error, :conversation_closed}) do
+    conn
+    |> put_status(:conflict)
+    |> json(%{error: "conversation_closed", detail: "Conversation is closed"})
   end
 
   def call(conn, {:error, message}) when is_binary(message) do
