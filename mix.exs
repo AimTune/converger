@@ -12,6 +12,22 @@ defmodule Converger.MixProject do
       deps: deps(),
       listeners: [Phoenix.CodeReloader],
       test_coverage: [tool: ExCoveralls],
+      # Acknowledged advisories (Hex >= 2.5.1). `mix hex.audit` lists them
+      # without failing and warns once an entry no longer matches: remove it
+      # when a fixed version ships.
+      hex: [
+        ignore_advisories: [
+          # cowlib 2.20.0, no fixed release yet. cowlib is only pulled in for
+          # the Prometheus metrics listener (plug_cowboy); the app is served by
+          # Bandit. Neither affected function is reachable with client input:
+          # EEF-CVE-2026-43966: cow_http_struct_hd:escape_string/2 (encoding
+          # structured response headers, not used by the metrics endpoint).
+          "CVE-2026-43966",
+          # EEF-CVE-2026-43969: cow_cookie:cookie/1 builds client Cookie
+          # request headers; we never act as a cowboy/gun HTTP client.
+          "CVE-2026-43969"
+        ]
+      ],
       dialyzer: [
         plt_local_path: "priv/plts",
         plt_core_path: "priv/plts",
