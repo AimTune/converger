@@ -40,6 +40,29 @@ defmodule ConvergerWeb.Portal.ConversationLive do
 
   def handle_params(_params, _uri, socket), do: {:noreply, socket}
 
+  def handle_event(action, _params, %{assigns: %{viewing: %{} = conversation}} = socket)
+      when action in ["close", "reopen"] do
+    result =
+      case action do
+        "close" -> Conversations.close_conversation(conversation)
+        "reopen" -> Conversations.reopen_conversation(conversation)
+      end
+
+    case result do
+      {:ok, updated} ->
+        {:noreply,
+         socket
+         |> assign(
+           viewing: updated,
+           activities: Activities.list_activities_for_conversation(updated.id)
+         )
+         |> put_flash(:info, "Conversation #{updated.status}")}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Could not update conversation")}
+    end
+  end
+
   def handle_event("filter", params, socket) do
     tenant_id = socket.assigns.current_tenant.id
     channel_id = Map.get(params, "channel_id", "")
@@ -69,6 +92,13 @@ defmodule ConvergerWeb.Portal.ConversationLive do
     <div class="card">
       <p><strong>ID:</strong> <small><%= @viewing.id %></small></p>
       <p><strong>Status:</strong> <span class={"badge badge-#{@viewing.status}"}><%= @viewing.status %></span></p>
+      <button :if={@viewing.status == "active"} id="close-conversation" phx-click="close"
+        data-confirm="Close this conversation? It will stop accepting activities.">
+        Close conversation
+      </button>
+      <button :if={@viewing.status == "closed"} id="reopen-conversation" phx-click="reopen">
+        Reopen conversation
+      </button>
     </div>
 
     <h2>Activities</h2>

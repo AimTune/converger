@@ -37,4 +37,22 @@ defmodule ConvergerWeb.ConversationController do
       render(conn, :show, conversation: conversation)
     end
   end
+
+  def close(conn, %{"conversation_id" => id}) do
+    change_status(conn, id, &Conversations.close_conversation/1)
+  end
+
+  def reopen(conn, %{"conversation_id" => id}) do
+    change_status(conn, id, &Conversations.reopen_conversation/1)
+  end
+
+  defp change_status(conn, id, fun) do
+    tenant = conn.assigns.tenant
+
+    with %Conversations.Conversation{} = conversation <-
+           Conversations.get_conversation(id, tenant.id),
+         {:ok, conversation} <- fun.(conversation) do
+      render(conn, :show, conversation: conversation)
+    end
+  end
 end

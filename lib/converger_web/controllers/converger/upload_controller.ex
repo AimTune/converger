@@ -10,8 +10,10 @@ defmodule ConvergerWeb.ConvergerAPI.UploadController do
     claims = conn.assigns.converger_claims
 
     with :ok <- authorize_conversation(claims, conversation_id),
-         %Conversations.Conversation{} = _conversation <-
+         %Conversations.Conversation{} = conversation <-
            Conversations.get_conversation(conversation_id, claims["tenant_id"]),
+         # Fail fast before storing the file; create_activity re-checks atomically.
+         :ok <- Conversations.ensure_open(conversation),
          {:ok, file_result} <- upload_file(params, claims["tenant_id"]) do
       # Parse optional activity JSON from multipart
       activity_meta = parse_activity_metadata(params)
@@ -74,5 +76,4 @@ defmodule ConvergerWeb.ConvergerAPI.UploadController do
 
   defp parse_activity_metadata(%{"activity" => meta}) when is_map(meta), do: meta
   defp parse_activity_metadata(_), do: %{}
-
 end
