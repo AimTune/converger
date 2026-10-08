@@ -20,7 +20,7 @@ defmodule Converger.Application do
         {Phoenix.PubSub, name: Converger.PubSub},
         ConvergerWeb.SocketPresence,
         Converger.RateLimit.Supervisor,
-        {Oban, Application.fetch_env!(:converger, Oban)}
+        {Oban, oban_config()}
       ] ++
         Converger.Pipeline.child_specs() ++
         [
@@ -32,6 +32,29 @@ defmodule Converger.Application do
     opts = [strategy: :one_for_one, name: Converger.Supervisor]
     Supervisor.start_link(children, opts)
   end
+
+  @doc """
+  The Oban config, with `config :converger, :oban_lifeline` options (set from
+  `OBAN_LIFELINE_*` in config/runtime.exs) merged into the
+  `Oban.Plugins.Lifeline` plugin.
+  """
+  def oban_config do
+    config = Application.fetch_env!(:converger, Oban)
+
+    case Application.get_env(:converger, :oban_lifeline, []) do
+      [] -> config
+      overrides -> Keyword.update(config, :plugins, [], &override_lifeline(&1, overrides))
+    end
+  end
+
+  defp override_lifeline(plugins, overrides) when is_list(plugins) do
+    Enum.map(plugins, fn
+      {Oban.Plugins.Lifeline, opts} -> {Oban.Plugins.Lifeline, Keyword.merge(opts, overrides)}
+      plugin -> plugin
+    end)
+  end
+
+  defp override_lifeline(plugins, _overrides), do: plugins
 
   # Tell Phoenix to update the endpoint configuration
   # whenever the application is updated.

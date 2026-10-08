@@ -25,7 +25,8 @@ The site is built with Docusaurus from [`website/`](website/) and uses [`docs/`]
 - **High Performance**: Validated to handle **5,000+ messages/second** on a single node.
 - **Observability Stack**: Built-in support for **OpenTelemetry**, Prometheus, Grafana, Jaeger, and Loki.
 - **Reliability & Safety**:
-    - **Idempotency**: `x-idempotency-key` support to prevent duplicate activities.
+    - **Idempotency**: `x-idempotency-key` header (REST) and `idempotency_key` field on the legacy WebSocket `new_activity` push, so clients can retry after a lost reply without duplicates.
+    - **Crash-tested**: a [chaos test](docs/chaos.md) kills the node under REST + WebSocket load and checks that no acknowledged message is lost.
     - **Transaction Safety**: Atomic persistence before real-time broadcast.
     - **Rate Limiting**: Tenant and IP-level throttling.
 - **Admin Panel**: IP-restricted LiveView interface for managing tenants, channels, and conversations.

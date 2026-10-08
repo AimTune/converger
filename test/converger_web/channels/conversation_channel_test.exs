@@ -22,7 +22,7 @@ defmodule ConvergerWeb.ConversationChannelTest do
     %{socket: socket, conversation: conversation, tenant: tenant, token: token}
   end
 
-  test "WS payload cannot set sender, inserted_at or idempotency_key", %{
+  test "WS payload cannot set sender or inserted_at; idempotency_key is namespaced", %{
     socket: socket,
     conversation: conversation
   } do
@@ -37,12 +37,105 @@ defmodule ConvergerWeb.ConversationChannelTest do
         "idempotency_key" => "from-client"
       })
 
-    assert_reply ref, :ok
+    assert_reply ref, :ok, %{id: id, seq: 1}
 
     [activity] = Converger.Activities.list_activities_for_conversation(conversation.id)
+    assert activity.id == id
     assert activity.sender == "user-1"
-    assert activity.idempotency_key == nil
+    assert activity.idempotency_key == "ws:user-1:from-client"
     assert activity.inserted_at.year >= 2026
+  end
+
+  describe "idempotent re-push" do
+    setup %{socket: socket, conversation: conversation} do
+      {:ok, _, socket} =
+        subscribe_and_join(socket, ConversationChannel, "conversation:#{conversation.id}")
+
+      %{socket: socket}
+    end
+
+    test "the same key returns the stored activity instead of a duplicate", %{
+      socket: socket,
+      conversation: conversation
+    } do
+      ref = push(socket, "new_activity", %{"text" => "once", "idempotency_key" => "k-1"})
+      assert_reply ref, :ok, %{id: id, seq: 1}
+
+      # e.g. the client lost the connection before the reply and re-sends
+      ref = push(socket, "new_activity", %{"text" => "once", "idempotency_key" => "k-1"})
+      assert_reply ref, :ok, %{id: ^id, seq: 1}
+
+      assert [%{id: ^id}] = Converger.Activities.list_activities_for_conversation(conversation.id)
+    end
+
+    test "survives a reconnect (new socket, same user)", %{
+      socket: socket,
+      conversation: conversation,
+      token: token
+    } do
+      ref = push(socket, "new_activity", %{"text" => "once", "idempotency_key" => "k-2"})
+      assert_reply ref, :ok, %{id: id}
+
+      {:ok, socket2} = connect(UserSocket, %{"token" => token})
+
+      {:ok, _, socket2} =
+        subscribe_and_join(socket2, ConversationChannel, "conversation:#{conversation.id}")
+
+      ref = push(socket2, "new_activity", %{"text" => "once", "idempotency_key" => "k-2"})
+      assert_reply ref, :ok, %{id: ^id}
+
+      assert [_] = Converger.Activities.list_activities_for_conversation(conversation.id)
+    end
+
+    test "keys of different senders and of the REST API do not collide", %{
+      socket: socket,
+      conversation: conversation,
+      tenant: tenant
+    } do
+      {:ok, rest} =
+        Converger.Activities.create_client_activity(%{"text" => "rest"}, %{
+          tenant_id: tenant.id,
+          conversation_id: conversation.id,
+          sender: "bot",
+          idempotency_key: "shared"
+        })
+
+      ref = push(socket, "new_activity", %{"text" => "user-1", "idempotency_key" => "shared"})
+      assert_reply ref, :ok, %{id: id1}
+
+      {:ok, token2, _} = Token.generate_token(conversation, tenant, "user-2")
+      {:ok, socket2} = connect(UserSocket, %{"token" => token2})
+
+      {:ok, _, socket2} =
+        subscribe_and_join(socket2, ConversationChannel, "conversation:#{conversation.id}")
+
+      ref = push(socket2, "new_activity", %{"text" => "user-2", "idempotency_key" => "shared"})
+      assert_reply ref, :ok, %{id: id2}
+
+      assert Enum.uniq([rest.id, id1, id2]) |> length() == 3
+
+      assert ~w(rest user-1 user-2) ==
+               conversation.id
+               |> Converger.Activities.list_activities_for_conversation()
+               |> Enum.map(& &1.text)
+    end
+
+    test "rejects an invalid key", %{socket: socket, conversation: conversation} do
+      for key <- ["", 42, String.duplicate("k", 256)] do
+        ref = push(socket, "new_activity", %{"text" => "x", "idempotency_key" => key})
+
+        assert_reply ref, :error, %{
+          reason: "invalid_activity",
+          errors: %{idempotency_key: [_]}
+        }
+      end
+
+      ref = push(socket, "new_activity", %{"text" => "no key", "idempotency_key" => nil})
+      assert_reply ref, :ok
+
+      assert [%{idempotency_key: nil}] =
+               Converger.Activities.list_activities_for_conversation(conversation.id)
+    end
   end
 
   test "invalid WS payload replies with field-level errors", %{
