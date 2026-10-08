@@ -1,8 +1,8 @@
 defmodule ConvergerWeb.Portal.RoutingRuleLive do
   use ConvergerWeb, :live_view
 
-  alias Converger.RoutingRules
   alias Converger.Channels
+  alias Converger.RoutingRules
 
   def mount(_params, _session, socket) do
     tenant_id = socket.assigns.current_tenant.id
@@ -18,31 +18,31 @@ defmodule ConvergerWeb.Portal.RoutingRuleLive do
   end
 
   def handle_event("toggle_enabled", %{"id" => id}, socket) do
-    if not socket.assigns.can_edit do
-      {:noreply, put_flash(socket, :error, "You don't have permission to do this.")}
-    else
+    if socket.assigns.can_edit do
       rule = RoutingRules.get_routing_rule!(id)
 
-      if rule.tenant_id != socket.assigns.current_tenant.id do
-        {:noreply, put_flash(socket, :error, "Unauthorized")}
+      if rule.tenant_id == socket.assigns.current_tenant.id do
+        toggle_rule_enabled(socket, rule)
       else
-        case RoutingRules.update_routing_rule(
-               rule,
-               %{enabled: !rule.enabled},
-               build_actor(socket)
-             ) do
-          {:ok, _} ->
-            {:noreply,
-             assign(socket,
-               routing_rules:
-                 RoutingRules.list_routing_rules_for_tenant(socket.assigns.current_tenant.id)
-             )
-             |> put_flash(:info, "Rule updated")}
-
-          {:error, _} ->
-            {:noreply, put_flash(socket, :error, "Failed to update rule")}
-        end
+        {:noreply, put_flash(socket, :error, "Unauthorized")}
       end
+    else
+      {:noreply, put_flash(socket, :error, "You don't have permission to do this.")}
+    end
+  end
+
+  defp toggle_rule_enabled(socket, rule) do
+    case RoutingRules.update_routing_rule(rule, %{enabled: !rule.enabled}, build_actor(socket)) do
+      {:ok, _} ->
+        {:noreply,
+         assign(socket,
+           routing_rules:
+             RoutingRules.list_routing_rules_for_tenant(socket.assigns.current_tenant.id)
+         )
+         |> put_flash(:info, "Rule updated")}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Failed to update rule")}
     end
   end
 

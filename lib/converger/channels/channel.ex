@@ -2,6 +2,8 @@ defmodule Converger.Channels.Channel do
   use Ecto.Schema
   import Ecto.Changeset
 
+  @type t :: %__MODULE__{}
+
   @channel_types ~w(echo webhook websocket whatsapp_meta whatsapp_infobip)
   @channel_modes ~w(inbound outbound duplex)
 
@@ -11,10 +13,16 @@ defmodule Converger.Channels.Channel do
     field :name, :string
     field :type, :string, default: "webhook"
     field :mode, :string, default: "duplex"
-    field :secret, :string
+    field :secret, Converger.Encrypted.Binary, redact: true
+    field :secret_hash, :binary, redact: true
     field :require_signature, :boolean, default: true
     field :status, :string, default: "active"
-    field :config, :map, default: %{}
+
+    field :config, Converger.Encrypted.Map,
+      default: %{},
+      redact: true,
+      skip_default_validation: true
+
     field :transformations, {:array, :map}, default: []
     belongs_to :tenant, Converger.Tenants.Tenant
 
@@ -47,6 +55,8 @@ defmodule Converger.Channels.Channel do
     |> validate_transformations()
     |> unique_constraint([:tenant_id, :name])
     |> ensure_secret()
+    |> put_secret_hash()
+    |> unique_constraint(:secret_hash)
   end
 
   defp validate_channel_config(changeset) do
@@ -113,6 +123,18 @@ defmodule Converger.Channels.Channel do
       changeset
     else
       put_change(changeset, :secret, generate_secret())
+    end
+  end
+
+  # The secret is stored encrypted (non-deterministic), so lookups by secret
+  # go through its SHA-256 digest instead.
+  defp put_secret_hash(changeset) do
+    case fetch_change(changeset, :secret) do
+      {:ok, secret} when is_binary(secret) ->
+        put_change(changeset, :secret_hash, Converger.Secrets.hash(secret))
+
+      _ ->
+        changeset
     end
   end
 

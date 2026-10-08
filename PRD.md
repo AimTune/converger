@@ -284,13 +284,13 @@ The system must implement a behaviour-based adapter pattern:
 Each adapter must implement:
 - `validate_config/1` — Validate type-specific channel configuration
 - `deliver_activity/2` — Deliver activity to external service
-- `parse_inbound/2` — Parse incoming webhook payload
+- `parse_inbound/2` — Parse incoming webhook payload into a list of messages (providers batch them)
 
 Supported adapters:
 - **Echo** — Echoes messages back as bot responses (testing)
 - **WebSocket** — No-op delivery (PubSub handles it)
 - **Webhook** — HTTP POST to configured URL
-- **WhatsApp Meta** — Meta Cloud API (Graph API v18.0)
+- **WhatsApp Meta** — Meta Cloud API (Graph API v26.0 by default, configurable per channel via `graph_api_version`)
 - **WhatsApp Infobip** — Infobip WhatsApp API
 
 ---

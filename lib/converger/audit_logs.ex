@@ -7,8 +7,8 @@ defmodule Converger.AuditLogs do
   """
 
   import Ecto.Query, warn: false
-  alias Converger.Repo
   alias Converger.AuditLogs.AuditLog
+  alias Converger.Repo
 
   def build_audit_log_entry(attrs) do
     %AuditLog{}
@@ -21,16 +21,35 @@ defmodule Converger.AuditLogs do
     |> Repo.insert()
   end
 
+  @doc """
+  Audit log entries, newest first, by limit/offset.
+
+  `:limit` is clamped to the configured maximum (see `Converger.Pagination`).
+  Offsets get slower the deeper they go; for browsing prefer
+  `paginate_audit_logs/2`.
+  """
   def list_audit_logs(filters \\ %{}, opts \\ []) do
-    limit = Keyword.get(opts, :limit, 50)
-    offset = Keyword.get(opts, :offset, 0)
+    limit = Converger.Pagination.clamp_limit(Keyword.get(opts, :limit))
+    offset = max(Keyword.get(opts, :offset, 0), 0)
 
     AuditLog
     |> apply_filters(filters)
-    |> order_by([a], desc: a.inserted_at)
+    |> order_by([a], desc: a.inserted_at, desc: a.id)
     |> limit(^limit)
     |> offset(^offset)
     |> Repo.all()
+  end
+
+  @doc """
+  Keyset-paginated audit log entries on `(inserted_at, id)`, newest first.
+
+  Options: `:limit`, `:cursor`. Returns `{:ok, %Converger.Pagination.Page{}}`
+  or `{:error, :invalid_cursor}`. See `Converger.Pagination.keyset/2`.
+  """
+  def paginate_audit_logs(filters \\ %{}, opts \\ []) do
+    AuditLog
+    |> apply_filters(filters)
+    |> Converger.Pagination.keyset(opts)
   end
 
   def count_audit_logs(filters \\ %{}) do

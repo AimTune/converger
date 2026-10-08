@@ -5,12 +5,8 @@ defmodule Converger.PerformanceTest do
   import Converger.TenantsFixtures
   import Converger.ChannelsFixtures
   import Converger.ConversationsFixtures
-  alias ConvergerWeb.UserSocket
-  alias ConvergerWeb.ConversationChannel
   alias Converger.Repo
-  import Phoenix.ChannelTest
-
-  @endpoint ConvergerWeb.Endpoint
+  alias Ecto.Adapters.SQL.Sandbox
 
   def run(opts \\ []) do
     connections = Keyword.get(opts, :connections, 100)
@@ -20,15 +16,15 @@ defmodule Converger.PerformanceTest do
 
     unless live do
       # 1. Setup Sandbox for the main process
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, :manual)
+      Sandbox.mode(Repo, :manual)
 
-      case Ecto.Adapters.SQL.Sandbox.checkout(Repo) do
+      case Sandbox.checkout(Repo) do
         {:ok, _} -> :ok
         {:error, {:already_checked_out, _}} -> :ok
         other -> IO.puts("Warning: Checkout returned #{inspect(other)}")
       end
 
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+      Sandbox.mode(Repo, {:shared, self()})
     end
 
     tenant = tenant_fixture()
@@ -64,7 +60,7 @@ defmodule Converger.PerformanceTest do
       max_concurrency: concurrency,
       timeout: 60_000
     )
-    |> Enum.to_list()
+    |> Stream.run()
 
     end_time = System.monotonic_time()
     duration_ms = System.convert_time_unit(end_time - start_time, :native, :millisecond)

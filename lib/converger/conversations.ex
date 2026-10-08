@@ -7,26 +7,81 @@ defmodule Converger.Conversations do
   alias Converger.Repo
   alias Converger.Conversations.Conversation
 
-  def list_conversations(filters \\ %{}) do
-    Conversation
-    |> apply_filters(filters)
-    |> Repo.all()
+  @doc """
+  First page of conversations matching `filters`, newest first.
+
+  Bounded by the configured page size; use `paginate_conversations/2` to get
+  the cursor for further pages. Options: `:limit`, `:direction`, `:preload`.
+  """
+  def list_conversations(filters \\ %{}, opts \\ []) do
+    {:ok, page} = paginate_conversations(filters, Keyword.delete(opts, :cursor))
+    page.entries
   end
 
-  def list_conversations_for_tenant(tenant_id) do
-    list_conversations(%{"tenant_id" => tenant_id})
+  def list_conversations_for_tenant(tenant_id, opts \\ []) do
+    list_conversations(%{"tenant_id" => tenant_id}, opts)
+  end
+
+  @doc """
+  Keyset-paginated conversations on `(inserted_at, id)`, newest first by default.
+
+  Filters (string or atom keys, `""` ignored): `tenant_id`, `channel_id`,
+  `status`, `external_id` (the participant's provider id), and `q` (a
+  conversation id; anything that is not a UUID matches nothing). Options: `:limit`, `:cursor`, `:direction` (`:desc` | `:asc`),
+  `:preload`. See `Converger.Pagination.keyset/2`.
+
+  Returns `{:ok, %Converger.Pagination.Page{}}` or `{:error, :invalid_cursor}`.
+  """
+  def paginate_conversations(filters \\ %{}, opts \\ []) do
+    Conversation
+    |> apply_filters(filters)
+    |> Converger.Pagination.keyset(opts)
   end
 
   defp apply_filters(query, filters) do
     Enum.reduce(filters, query, fn
-      {"tenant_id", value}, q when value != "" -> where(q, tenant_id: ^value)
-      {:tenant_id, value}, q when value != "" -> where(q, tenant_id: ^value)
-      {"channel_id", value}, q when value != "" -> where(q, channel_id: ^value)
-      {:channel_id, value}, q when value != "" -> where(q, channel_id: ^value)
-      {"status", value}, q when value != "" -> where(q, status: ^value)
-      {:status, value}, q when value != "" -> where(q, status: ^value)
-      {_, _}, q -> q
+      {key, value}, q when key in ["q", :q] and is_binary(value) and value != "" ->
+        case Ecto.UUID.cast(String.trim(value)) do
+          {:ok, id} -> where(q, id: ^id)
+          :error -> where(q, [c], false)
+        end
+
+      {"tenant_id", value}, q when value != "" ->
+        where(q, tenant_id: ^value)
+
+      {:tenant_id, value}, q when value != "" ->
+        where(q, tenant_id: ^value)
+
+      {"channel_id", value}, q when value != "" ->
+        where(q, channel_id: ^value)
+
+      {:channel_id, value}, q when value != "" ->
+        where(q, channel_id: ^value)
+
+      {"status", value}, q when value != "" ->
+        where(q, status: ^value)
+
+      {:status, value}, q when value != "" ->
+        where(q, status: ^value)
+
+      {"external_id", value}, q when is_binary(value) ->
+        where_external_id(q, value)
+
+      {:external_id, value}, q when is_binary(value) ->
+        where_external_id(q, value)
+
+      {_, _}, q ->
+        q
     end)
+  end
+
+  # Conversations whose participant (on the conversation's channel) has this
+  # external id, e.g. a WhatsApp phone number.
+  defp where_external_id(query, external_id) do
+    from(c in query,
+      join: p in assoc(c, :participant),
+      where: p.external_id == ^external_id and p.channel_id == c.channel_id
+    )
   end
 
   def get_conversation(id), do: Repo.get(Conversation, id)

@@ -44,7 +44,7 @@ In recent stress tests on a live PostgreSQL database:
 ## 🚀 Quick Start
 
 ### Prerequisites
-- Elixir 1.15+
+- Elixir 1.19 / OTP 28 (see `.tool-versions`; the `Dockerfile` uses the same versions)
 - PostgreSQL 14+
 - Docker (optional, for observability stack)
 
@@ -81,13 +81,37 @@ The API will be available at `http://localhost:4000`.
 
 ---
 
+## 📄 Pagination
+
+Every list endpoint and admin table is bounded. Page sizes are set in `config :converger, :pagination` (`config/config.exs`) and can be overridden at runtime with `PAGINATION_DEFAULT_LIMIT`, `PAGINATION_MAX_LIMIT`, `PAGINATION_ACTIVITY_DEFAULT_LIMIT`, `PAGINATION_ACTIVITY_MAX_LIMIT`, `PAGINATION_WS_REPLAY_LIMIT` and `PAGINATION_LOOKUP_LIMIT`. A `limit` above the max is capped. A missing or invalid `limit` uses the default.
+
+| Endpoint | Params | Pagination fields in the response |
+|---|---|---|
+| `GET /api/v1/converger/conversations/:id/activities` | `watermark`, `limit` (default 100, max 1000) | `watermark`, `has_more` (new) |
+| `GET /api/v1/conversations/:id/activities` (tenant API key) | `watermark`, `limit` (default 100, max 1000) | `meta: {watermark, has_more, limit}` (new) |
+| `GET /api/v1/conversations` (tenant API key, new) | `cursor`, `limit` (default 50, max 500), `status`, `channel_id` | `meta: {next_cursor, has_more, limit}` |
+
+- Activities are paged by their per-conversation `seq`. The `watermark` is opaque. To read the whole conversation, pass back the `watermark` you received until `has_more` is `false`.
+- Conversations are paged newest first with keyset pagination on `(inserted_at, id)`. To get the next page, pass back `next_cursor`. A malformed `cursor` or `watermark` on the tenant API returns `400`. On the Converger API, an invalid watermark starts from the beginning, as it did before.
+- **Behaviour change:** before this change, both activity endpoints returned the whole history when no watermark was given. They now return one page. Clients that need everything must follow `has_more`.
+- **WebSocket replay on join** is capped at `ws_replay_limit` (100) activities. The Converger channel's replayed `activitySet` frame now carries `has_more`. When it is `true`, fetch the rest over REST from that frame's `watermark` and de-duplicate by activity id against live frames. On the legacy `conversation:*` channel, a `replay_truncated` event (`{has_more, last_activity_id}`) follows a truncated replay. Rejoin with that `last_activity_id` to continue.
+
+---
+
 ## 📊 Observability
 
 Converger comes pre-configured with a full observability stack. To launch it:
 
 ```bash
-docker-compose up -d
+cp .env.example .env   # then fill in every secret; compose refuses to start without them
+docker compose up -d
 ```
+
+`mix ecto.setup` (and `bin/converger eval "Converger.Release.seed_admin()"` in a
+release) creates the first super admin. Set `ADMIN_EMAIL` / `ADMIN_PASSWORD`, or
+a random password is printed once and must be changed at first login.
+Production setup, migrations, backups and upgrades are covered in
+[docs/deployment.md](docs/deployment.md).
 
 - **Grafana**: `http://localhost:3000` (Dashboards enabled)
 - **Jaeger**: `http://localhost:16686` (Distributed Tracing)

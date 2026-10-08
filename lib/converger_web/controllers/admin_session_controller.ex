@@ -33,6 +33,13 @@ defmodule ConvergerWeb.AdminSessionController do
 
   defp authenticate(conn, email, password, account) do
     case Accounts.authenticate_admin(email, password) do
+      {:ok, %{must_change_password: true} = user} ->
+        conn
+        |> renew_session()
+        |> put_session(:admin_user_id, user.id)
+        |> put_flash(:info, "Please choose a new password before continuing.")
+        |> redirect(to: "/admin/password")
+
       {:ok, user} ->
         conn
         |> renew_session()

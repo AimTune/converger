@@ -29,10 +29,9 @@ defmodule Converger.ConvergerAPI.Watermark do
   def decode(""), do: {:ok, nil}
 
   def decode(watermark) when is_binary(watermark) do
-    with {:ok, decoded} <- Base.url_decode64(watermark, padding: false) do
-      decode_position(decoded)
-    else
-      _ -> {:error, :invalid_watermark}
+    case Base.url_decode64(watermark, padding: false) do
+      {:ok, decoded} -> decode_position(decoded)
+      :error -> {:error, :invalid_watermark}
     end
   end
 

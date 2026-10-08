@@ -13,3 +13,5 @@ doc
 .fetch
 .formatter.exs
 .credo.exs
+.env
+.env.*
