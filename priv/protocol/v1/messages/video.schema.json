@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://converger.aimtune.dev/schemas/protocol/v1/messages/video.schema.json",
+  "title": "video message data",
+  "description": "A video (chativa VideoMessage, mekik VideoMessageData).",
+  "type": "object",
+  "required": ["src"],
+  "properties": {
+    "src": { "$ref": "../common.schema.json#/$defs/url" },
+    "poster": { "$ref": "../common.schema.json#/$defs/url" },
+    "caption": { "type": "string", "maxLength": 4096 },
+    "mimeType": { "type": "string", "maxLength": 255 },
+    "size": { "type": "integer", "minimum": 0 },
+    "durationMs": { "type": "integer", "minimum": 0 },
+    "text": { "type": "string", "maxLength": 4096 },
+    "extensions": { "$ref": "../common.schema.json#/$defs/extensions" }
+  },
+  "examples": [{ "src": "https://example.com/howto.mp4", "poster": "https://example.com/howto.jpg", "caption": "How to reset your router" }]
+}

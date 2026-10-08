@@ -1,0 +1,102 @@
+{
+  "name": "skill-loaded",
+  "description": "A skill use (§12.5): the $mekik.skill custom event becomes a persistent `skill` frame carrying data = the use record verbatim (id, name, status, source); an unknown name becomes a status:error use; the run then finishes with the reply.",
+  "startSeq": 0,
+  "replyChannel": "reply",
+  "events": [
+    {
+      "type": "run_start",
+      "runId": "run-1",
+      "threadId": "conv-1",
+      "seq": 1,
+      "ns": []
+    },
+    {
+      "type": "custom",
+      "payload": {
+        "$mekik": "skill",
+        "use": {
+          "id": "conv-1:ckpt-a:agent/0:skill:0",
+          "name": "pdf",
+          "status": "loaded",
+          "source": "server"
+        }
+      },
+      "runId": "run-1",
+      "threadId": "conv-1",
+      "seq": 2,
+      "ns": []
+    },
+    {
+      "type": "custom",
+      "payload": {
+        "$mekik": "skill",
+        "use": {
+          "id": "conv-1:ckpt-a:agent/0:skill:1",
+          "name": "nope",
+          "status": "error",
+          "error": "unknown skill \"nope\""
+        }
+      },
+      "runId": "run-1",
+      "threadId": "conv-1",
+      "seq": 3,
+      "ns": []
+    },
+    {
+      "type": "run_end",
+      "status": "done",
+      "state": {
+        "reply": "Filled the form."
+      },
+      "runId": "run-1",
+      "threadId": "conv-1",
+      "seq": 4,
+      "ns": []
+    }
+  ],
+  "expectedFrames": [
+    {
+      "type": "run",
+      "data": {
+        "status": "started"
+      }
+    },
+    {
+      "type": "skill",
+      "seq": 1,
+      "data": {
+        "id": "conv-1:ckpt-a:agent/0:skill:0",
+        "name": "pdf",
+        "status": "loaded",
+        "source": "server"
+      }
+    },
+    {
+      "type": "skill",
+      "seq": 2,
+      "data": {
+        "id": "conv-1:ckpt-a:agent/0:skill:1",
+        "name": "nope",
+        "status": "error",
+        "error": "unknown skill \"nope\""
+      }
+    },
+    {
+      "type": "text",
+      "id": "msg-1",
+      "seq": 3,
+      "from": "bot",
+      "data": {
+        "text": "Filled the form."
+      },
+      "timestamp": 1750000000000
+    },
+    {
+      "type": "run",
+      "data": {
+        "status": "finished"
+      }
+    }
+  ]
+}

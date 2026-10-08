@@ -1,0 +1,27 @@
+{
+  "name": "mixed-turn",
+  "description": "One run mixing tool traces, a ui chunk, streaming tokens, and a consolidated reply. Pins ordering, seq monotonicity, chunk-id sequencing (consecutive text deltas share one id; the ui chunk before and the event chunk after take their own), stream auto-close, and reply-text emission. node_start is ignored.",
+  "startSeq": 10,
+  "replyChannel": "reply",
+  "events": [
+    { "type": "run_start", "runId": "run-1", "threadId": "conv-1", "seq": 1, "ns": [] },
+    { "type": "node_start", "node": "lookup", "taskId": "conv-1:root:lookup", "runId": "run-1", "threadId": "conv-1", "seq": 2, "ns": [] },
+    { "type": "custom", "payload": { "$mekik": "tool", "call": { "id": "t1", "name": "get_order", "status": "running", "params": { "id": "ORD-42" } } }, "runId": "run-1", "threadId": "conv-1", "seq": 3, "ns": [] },
+    { "type": "custom", "payload": { "$mekik": "tool", "call": { "id": "t1", "name": "get_order", "status": "completed", "result": { "id": "ORD-42", "total": 249.9 } } }, "runId": "run-1", "threadId": "conv-1", "seq": 4, "ns": [] },
+    { "type": "custom", "payload": { "$mekik": "genui", "chunk": { "type": "ui", "component": "order-card", "props": { "id": "ORD-42", "total": 249.9 } } }, "runId": "run-1", "threadId": "conv-1", "seq": 5, "ns": [] },
+    { "type": "custom", "payload": { "type": "token", "text": "Processing" }, "runId": "run-1", "threadId": "conv-1", "seq": 6, "ns": [] },
+    { "type": "custom", "payload": { "type": "token", "text": " refund…" }, "runId": "run-1", "threadId": "conv-1", "seq": 7, "ns": [] },
+    { "type": "run_end", "status": "done", "state": { "reply": "Refund complete: ORD-42", "order": { "id": "ORD-42", "total": 249.9 } }, "runId": "run-1", "threadId": "conv-1", "seq": 8, "ns": [] }
+  ],
+  "expectedFrames": [
+    { "type": "run", "data": { "status": "started" } },
+    { "type": "tool_call", "seq": 11, "data": { "id": "t1", "name": "get_order", "status": "running", "params": { "id": "ORD-42" } } },
+    { "type": "tool_call", "seq": 12, "data": { "id": "t1", "name": "get_order", "status": "completed", "result": { "id": "ORD-42", "total": 249.9 } } },
+    { "type": "genui", "seq": 13, "streamId": "stream-1", "done": false, "chunk": { "type": "ui", "component": "order-card", "props": { "id": "ORD-42", "total": 249.9 }, "id": 1 } },
+    { "type": "genui", "seq": 14, "streamId": "stream-1", "done": false, "chunk": { "type": "text", "content": "Processing", "id": 2 } },
+    { "type": "genui", "seq": 15, "streamId": "stream-1", "done": false, "chunk": { "type": "text", "content": " refund…", "id": 2 } },
+    { "type": "genui", "seq": 16, "streamId": "stream-1", "done": true, "chunk": { "type": "event", "name": "stream_done", "id": 3 } },
+    { "type": "text", "seq": 17, "id": "msg-1", "from": "bot", "data": { "text": "Refund complete: ORD-42" }, "timestamp": 1750000000000 },
+    { "type": "run", "data": { "status": "finished" } }
+  ]
+}

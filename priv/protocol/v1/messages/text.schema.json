@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://converger.aimtune.dev/schemas/protocol/v1/messages/text.schema.json",
+  "title": "text message data",
+  "description": "Plain or Markdown text (chativa DefaultTextMessage, mekik TextMessageData). Chips travel in the frame-level `actions` field, not inside data (the chativa parseChatFrame rule).",
+  "type": "object",
+  "required": ["text"],
+  "properties": {
+    "text": { "type": "string", "maxLength": 65536, "description": "At most limits.maxTextBytes (64 KiB) of UTF-8." },
+    "urls": { "type": "array", "maxItems": 10, "items": { "$ref": "../common.schema.json#/$defs/url" }, "description": "Link-preview URLs (chativa)." },
+    "previewVariant": { "enum": ["compact", "expanded"] },
+    "streaming": { "type": "boolean", "description": "chativa: render with a live caret while the bubble is still growing." },
+    "attachments": {
+      "type": "array",
+      "maxItems": 10,
+      "items": { "type": "object" },
+      "description": "Legacy Converger activity attachments, carried verbatim for activities created through the pre-v1 API. New senders use image/file/video/audio messages."
+    },
+    "extensions": { "$ref": "../common.schema.json#/$defs/extensions" }
+  },
+  "examples": [
+    { "text": "Hello! How can I help?" },
+    { "text": "See https://example.com/docs", "urls": ["https://example.com/docs"], "previewVariant": "compact" }
+  ]
+}

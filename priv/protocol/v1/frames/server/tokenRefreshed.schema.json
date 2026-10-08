@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://converger.aimtune.dev/schemas/protocol/v1/frames/server/tokenRefreshed.schema.json",
+  "title": "server -> client: tokenRefreshed (transient, Converger)",
+  "description": "The token presented in an `auth` frame was accepted; the connection now expires at `expiresAt`.",
+  "type": "object",
+  "required": ["type", "data"],
+  "properties": {
+    "type": { "const": "tokenRefreshed" },
+    "data": {
+      "type": "object",
+      "required": ["expiresAt"],
+      "properties": { "expiresAt": { "$ref": "../../common.schema.json#/$defs/timestamp" } }
+    }
+  },
+  "examples": [{ "type": "tokenRefreshed", "data": { "expiresAt": 1750003600000 } }]
+}

@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://converger.aimtune.dev/schemas/protocol/v1/messages/carousel.schema.json",
+  "title": "carousel message data",
+  "description": "A horizontally scrolling list of cards (chativa CarouselMessage, mekik CarouselMessageData).",
+  "type": "object",
+  "required": ["cards"],
+  "properties": {
+    "text": { "type": "string", "maxLength": 4096, "description": "Converger addition: optional lead-in and fallback text." },
+    "cards": { "type": "array", "minItems": 1, "maxItems": 10, "items": { "$ref": "card.schema.json" } },
+    "extensions": { "$ref": "../common.schema.json#/$defs/extensions" }
+  },
+  "examples": [
+    {
+      "cards": [
+        { "title": "Basic", "subtitle": "9 USD / month", "buttons": [{ "label": "Pick", "value": "basic" }] },
+        { "title": "Pro", "subtitle": "29 USD / month", "image": "https://example.com/pro.png", "buttons": [{ "label": "Pick", "value": "pro" }] }
+      ]
+    }
+  ]
+}

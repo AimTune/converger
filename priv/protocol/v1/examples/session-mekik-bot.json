@@ -1,0 +1,27 @@
+{
+  "description": "An unmodified mekik/1 client (chativa connector-mekik: no protocol field, no clientId) talks to a mekik bot behind Converger: tool trace, GenUI stream, an approval interrupt and its resume. Converger relays the bot's frames, renumbering seq into the conversation's seq space.",
+  "frames": [
+    { "direction": "c2s", "frame": { "type": "hello", "userId": "user-42", "conversationId": "conv-1", "watermark": 10 } },
+    { "direction": "s2c", "frame": { "type": "welcome", "data": { "protocol": "converger/1", "compat": ["mekik/1"], "conversationId": "conv-1", "userId": "user-42", "connectionId": "conn-1", "watermark": 10, "pending": [] } } },
+    { "direction": "c2s", "frame": { "id": "1750000000000-k3j2h1g", "type": "text", "data": { "text": "refund ORD-42" }, "timestamp": 1750000000000 } },
+    { "direction": "s2c", "frame": { "type": "run", "data": { "status": "started" } } },
+    { "direction": "s2c", "frame": { "type": "tool_call", "seq": 12, "data": { "id": "t1", "name": "get_order", "status": "running", "params": { "id": "ORD-42" } } } },
+    { "direction": "s2c", "frame": { "type": "tool_call", "seq": 13, "data": { "id": "t1", "name": "get_order", "status": "completed", "result": { "id": "ORD-42", "total": 249.9 } } } },
+    { "direction": "s2c", "frame": { "type": "genui", "seq": 14, "streamId": "stream-1", "done": false, "chunk": { "type": "ui", "component": "order-card", "props": { "id": "ORD-42" }, "id": 1 } } },
+    {
+      "direction": "s2c",
+      "frame": {
+        "type": "interrupt", "seq": 15, "id": "approve/0:interrupt#0",
+        "data": { "payload": { "title": "249.90 TRY refund" }, "actions": [{ "label": "Approve", "value": { "approved": true } }, { "label": "Reject", "value": { "approved": false } }] }
+      }
+    },
+    { "direction": "s2c", "frame": { "type": "run", "data": { "status": "interrupted" } } },
+    { "direction": "c2s", "frame": { "type": "resume", "answers": { "approve/0:interrupt#0": { "approved": true } } } },
+    { "direction": "s2c", "frame": { "type": "interrupt_resolved", "seq": 16, "id": "approve/0:interrupt#0", "data": { "answer": { "approved": true } } } },
+    { "direction": "s2c", "frame": { "type": "run", "data": { "status": "started" } } },
+    { "direction": "s2c", "frame": { "type": "text", "id": "msg-1", "seq": 17, "from": "bot", "data": { "text": "Refund complete: ORD-42" }, "timestamp": 1750000002000 } },
+    { "direction": "s2c", "frame": { "type": "run", "data": { "status": "finished" } } },
+    { "direction": "c2s", "frame": { "type": "text", "data": { "text": "thanks" } } },
+    { "direction": "s2c", "frame": { "type": "error", "data": { "code": "busy", "message": "a run is already in flight" } } }
+  ]
+}

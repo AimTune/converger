@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://converger.aimtune.dev/schemas/protocol/v1/messages/card.schema.json",
+  "title": "card message data",
+  "description": "A titled card with optional image, body text and buttons (chativa CardMessage, mekik CardMessageData). `text` (the body) is a Converger addition that chativa's card renderer does not show yet; keep essential information in title/subtitle.",
+  "type": "object",
+  "required": ["title"],
+  "properties": {
+    "title": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "subtitle": { "type": "string", "maxLength": 1024 },
+    "image": { "$ref": "../common.schema.json#/$defs/url" },
+    "text": { "type": "string", "maxLength": 4096 },
+    "buttons": { "$ref": "../common.schema.json#/$defs/messageActions" },
+    "extensions": { "$ref": "../common.schema.json#/$defs/extensions" }
+  },
+  "examples": [
+    {
+      "title": "Pro Plan",
+      "subtitle": "Best for teams",
+      "image": "https://example.com/pro.png",
+      "buttons": [{ "label": "Choose Pro", "value": "select_pro" }]
+    }
+  ]
+}

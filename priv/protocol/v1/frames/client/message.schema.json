@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://converger.aimtune.dev/schemas/protocol/v1/frames/client/message.schema.json",
+  "title": "client -> server: message frame (a user turn)",
+  "description": "A user turn: mekik/1 `{type: \"text\", data: {text}, meta?}` generalised to every message type, so a client can also send image, file, location, contact, ... (#21 called this `send`; v1 uses the typed frame instead). `clientId` (Converger, #24) requests an ack and makes the send idempotent. `id` and `timestamp`, which chativa's OutgoingMessage carries, are accepted and ignored: the server assigns both.",
+  "type": "object",
+  "required": ["type", "data"],
+  "properties": {
+    "type": {
+      "allOf": [
+        { "$ref": "../../common.schema.json#/$defs/messageType" },
+        { "if": { "$ref": "../../common.schema.json#/$defs/reservedFrameType" }, "then": { "const": "text" } }
+      ]
+    },
+    "data": { "type": "object" },
+    "clientId": { "$ref": "../../common.schema.json#/$defs/clientId" },
+    "meta": { "$ref": "../../common.schema.json#/$defs/meta" },
+    "metadata": { "$ref": "../../common.schema.json#/$defs/metadata" },
+    "replyTo": {
+      "description": "Converger: the activity this turn answers (a tapped button), so channels can normalise it (#68).",
+      "type": "object",
+      "properties": { "id": { "$ref": "../../common.schema.json#/$defs/id" }, "seq": { "$ref": "../../common.schema.json#/$defs/seq" } }
+    },
+    "id": { "type": "string", "description": "mekik/1 client message id. Used as the clientId (idempotency key, ack) when no clientId is sent and it matches the clientId syntax (section 7)." },
+    "timestamp": { "type": "number" }
+  },
+  "allOf": [
+    { "if": { "properties": { "type": { "const": "text" } } }, "then": { "properties": { "data": { "$ref": "../../messages/text.schema.json" } } } },
+    { "if": { "properties": { "type": { "const": "image" } } }, "then": { "properties": { "data": { "$ref": "../../messages/image.schema.json" } } } },
+    { "if": { "properties": { "type": { "const": "file" } } }, "then": { "properties": { "data": { "$ref": "../../messages/file.schema.json" } } } },
+    { "if": { "properties": { "type": { "const": "video" } } }, "then": { "properties": { "data": { "$ref": "../../messages/video.schema.json" } } } },
+    { "if": { "properties": { "type": { "const": "audio" } } }, "then": { "properties": { "data": { "$ref": "../../messages/audio.schema.json" } } } },
+    { "if": { "properties": { "type": { "const": "location" } } }, "then": { "properties": { "data": { "$ref": "../../messages/location.schema.json" } } } },
+    { "if": { "properties": { "type": { "const": "contact" } } }, "then": { "properties": { "data": { "$ref": "../../messages/contact.schema.json" } } } },
+    { "if": { "properties": { "type": { "const": "quick-reply" } } }, "then": { "properties": { "data": { "$ref": "../../messages/quick-reply.schema.json" } } } },
+    { "if": { "properties": { "type": { "const": "buttons" } } }, "then": { "properties": { "data": { "$ref": "../../messages/buttons.schema.json" } } } },
+    { "if": { "properties": { "type": { "const": "card" } } }, "then": { "properties": { "data": { "$ref": "../../messages/card.schema.json" } } } },
+    { "if": { "properties": { "type": { "const": "carousel" } } }, "then": { "properties": { "data": { "$ref": "../../messages/carousel.schema.json" } } } }
+  ],
+  "examples": [
+    { "type": "text", "data": { "text": "Where is my order?" } },
+    { "type": "text", "clientId": "c-17", "data": { "text": "Where is my order?" }, "meta": { "locale": "tr-TR" } },
+    { "id": "1750000000000-k3j2h1g", "type": "text", "data": { "text": "hi" }, "timestamp": 1750000000000 },
+    { "type": "location", "clientId": "c-18", "data": { "latitude": 41.0082, "longitude": 28.9784 } }
+  ]
+}

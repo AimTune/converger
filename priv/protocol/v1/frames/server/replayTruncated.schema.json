@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://converger.aimtune.dev/schemas/protocol/v1/frames/server/replayTruncated.schema.json",
+  "title": "server -> client: replayTruncated (transient, Converger)",
+  "description": "The replay hit limits.replayMax. Frames up to data.watermark were sent; fetch (data.watermark, data.headSeq] over REST (GET .../activities?watermark=<n>) or send `sync` again later. Live delivery continues after this frame.",
+  "type": "object",
+  "required": ["type", "data"],
+  "properties": {
+    "type": { "const": "replayTruncated" },
+    "data": {
+      "type": "object",
+      "required": ["watermark", "headSeq"],
+      "properties": {
+        "watermark": { "$ref": "../../common.schema.json#/$defs/watermark" },
+        "headSeq": { "$ref": "../../common.schema.json#/$defs/watermark" }
+      }
+    }
+  },
+  "examples": [{ "type": "replayTruncated", "data": { "watermark": 10000, "headSeq": 12500 } }]
+}

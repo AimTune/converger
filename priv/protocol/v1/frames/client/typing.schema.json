@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://converger.aimtune.dev/schemas/protocol/v1/frames/client/typing.schema.json",
+  "title": "client -> server: typing (Converger, #25)",
+  "description": "Start or stop the sender's typing indicator. Transient: relayed to the conversation's other connections and target channels, never persisted. At most one frame per 2 s per connection; an indicator not refreshed within 6 s expires.",
+  "type": "object",
+  "required": ["type", "isTyping"],
+  "properties": { "type": { "const": "typing" }, "isTyping": { "type": "boolean" } },
+  "examples": [{ "type": "typing", "isTyping": true }]
+}

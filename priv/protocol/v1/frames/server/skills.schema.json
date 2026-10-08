@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://converger.aimtune.dev/schemas/protocol/v1/frames/server/skills.schema.json",
+  "title": "server -> client: skills (transient, mekik/1)",
+  "description": "The bot's skill catalog, level 1 only (mekik/1 section 12.2), relayed unchanged.",
+  "type": "object",
+  "required": ["type", "hash"],
+  "properties": {
+    "type": { "const": "skills" },
+    "hash": { "type": "string", "minLength": 1 },
+    "unchanged": { "type": "boolean" },
+    "skills": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "description"],
+        "properties": {
+          "name": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$", "maxLength": 64 },
+          "description": { "type": "string" },
+          "tags": { "type": "array", "items": { "type": "string" } },
+          "source": { "enum": ["server", "client"] }
+        }
+      }
+    }
+  },
+  "examples": [{ "type": "skills", "hash": "9f3a", "skills": [{ "name": "brand-voice", "description": "Write in the house voice.", "source": "server" }] }]
+}

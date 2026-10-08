@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://converger.aimtune.dev/schemas/protocol/v1/frames/server/tool_call.schema.json",
+  "title": "server -> client: tool_call (persistent, mekik/1)",
+  "description": "A tool trace, upserted by data.id. Exactly the mekik/1 shape; Converger adds no top-level fields.",
+  "type": "object",
+  "required": ["type", "seq", "data"],
+  "properties": {
+    "type": { "const": "tool_call" },
+    "seq": { "$ref": "../../common.schema.json#/$defs/seq" },
+    "data": { "$ref": "../../messages/tool-call.schema.json" }
+  },
+  "examples": [
+    { "type": "tool_call", "seq": 11, "data": { "id": "t1", "name": "get_order", "status": "running", "params": { "id": "ORD-42" } } },
+    { "type": "tool_call", "seq": 12, "data": { "id": "t1", "name": "get_order", "status": "completed", "result": { "id": "ORD-42", "total": 249.9 } } }
+  ]
+}

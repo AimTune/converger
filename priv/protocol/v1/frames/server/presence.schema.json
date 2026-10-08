@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://converger.aimtune.dev/schemas/protocol/v1/frames/server/presence.schema.json",
+  "title": "server -> client: presence (transient, Converger, #25)",
+  "description": "A participant of the conversation came online, went away or went offline. Derived from live connections (all of a participant's connections across nodes).",
+  "type": "object",
+  "required": ["type", "data"],
+  "properties": {
+    "type": { "const": "presence" },
+    "data": {
+      "type": "object",
+      "required": ["participant", "status"],
+      "properties": {
+        "participant": { "$ref": "../../common.schema.json#/$defs/sender" },
+        "status": { "enum": ["online", "away", "offline"] },
+        "connections": { "type": "integer", "minimum": 0 },
+        "lastSeenAt": { "$ref": "../../common.schema.json#/$defs/timestamp" }
+      }
+    }
+  },
+  "examples": [{ "type": "presence", "data": { "participant": { "id": "agent-7", "role": "agent", "name": "Ayse" }, "status": "online", "connections": 1 } }]
+}

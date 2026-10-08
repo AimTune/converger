@@ -1,0 +1,65 @@
+{
+  "name": "concurrent-approvals",
+  "description": "Two pending interrupts in one interrupt event (both journal key interrupt#0, from two sends to the same node) become two interrupt frames with DISTINCT thread-scoped ids. Proves ids disambiguate where keys collide.",
+  "startSeq": 3,
+  "events": [
+    { "type": "run_start", "runId": "run-1", "threadId": "conv-1", "seq": 1, "ns": [] },
+    {
+      "type": "interrupt",
+      "pending": [
+        {
+          "id": "charge#0:interrupt#0",
+          "taskId": "conv-1:ckpt-a:charge#0",
+          "node": "charge",
+          "key": "interrupt#0",
+          "payload": { "title": "Charge order A", "$mekik": { "actions": [ { "label": "OK", "value": true } ] } }
+        },
+        {
+          "id": "charge#1:interrupt#0",
+          "taskId": "conv-1:ckpt-a:charge#1",
+          "node": "charge",
+          "key": "interrupt#0",
+          "payload": { "title": "Charge order B", "$mekik": { "actions": [ { "label": "OK", "value": true } ] } }
+        }
+      ],
+      "runId": "run-1", "threadId": "conv-1", "seq": 2, "ns": []
+    },
+    {
+      "type": "run_end",
+      "status": "interrupted",
+      "pending": [
+        {
+          "id": "charge#0:interrupt#0",
+          "taskId": "conv-1:ckpt-a:charge#0",
+          "node": "charge",
+          "key": "interrupt#0",
+          "payload": { "title": "Charge order A", "$mekik": { "actions": [ { "label": "OK", "value": true } ] } }
+        },
+        {
+          "id": "charge#1:interrupt#0",
+          "taskId": "conv-1:ckpt-a:charge#1",
+          "node": "charge",
+          "key": "interrupt#0",
+          "payload": { "title": "Charge order B", "$mekik": { "actions": [ { "label": "OK", "value": true } ] } }
+        }
+      ],
+      "runId": "run-1", "threadId": "conv-1", "seq": 3, "ns": []
+    }
+  ],
+  "expectedFrames": [
+    { "type": "run", "data": { "status": "started" } },
+    {
+      "type": "interrupt",
+      "seq": 4,
+      "id": "charge#0:interrupt#0",
+      "data": { "payload": { "title": "Charge order A" }, "actions": [ { "label": "OK", "value": true } ] }
+    },
+    {
+      "type": "interrupt",
+      "seq": 5,
+      "id": "charge#1:interrupt#0",
+      "data": { "payload": { "title": "Charge order B" }, "actions": [ { "label": "OK", "value": true } ] }
+    },
+    { "type": "run", "data": { "status": "interrupted" } }
+  ]
+}

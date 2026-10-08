@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://converger.aimtune.dev/schemas/protocol/v1/frames/client/genui_event.schema.json",
+  "title": "client -> server: genui_event (mekik/1)",
+  "description": "An interaction from a mounted GenUI component. Forwarded to the bot channel unchanged.",
+  "type": "object",
+  "required": ["type", "streamId", "eventType"],
+  "properties": {
+    "type": { "const": "genui_event" },
+    "streamId": { "type": "string", "minLength": 1 },
+    "eventType": { "type": "string", "minLength": 1 },
+    "scope": { "enum": ["component", "graph"] },
+    "component": { "type": "string" },
+    "payload": true
+  },
+  "examples": [{ "type": "genui_event", "streamId": "stream-1", "eventType": "submit", "scope": "component", "payload": { "id": "approve/0:interrupt#0", "answer": { "approved": true } } }]
+}

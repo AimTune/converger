@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://converger.aimtune.dev/schemas/protocol/v1/frames/client/sync.schema.json",
+  "title": "client -> server: sync (Converger)",
+  "description": "Replay every persistent frame with seq > watermark on a live connection (after gap detection, or to page past replayTruncated). Live frames are held back until the replay tail is sent, so order is preserved. #21 drafted this as `resume {watermark}`; renamed because mekik/1 `resume` answers interrupts.",
+  "type": "object",
+  "required": ["type", "watermark"],
+  "properties": { "type": { "const": "sync" }, "watermark": { "$ref": "../../common.schema.json#/$defs/legacyWatermark" } },
+  "examples": [{ "type": "sync", "watermark": 15 }]
+}

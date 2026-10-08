@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://converger.aimtune.dev/schemas/protocol/v1/frames/server/event.schema.json",
+  "title": "server -> client: event (persistent, Converger)",
+  "description": "A Converger `event` activity (for example a channel reaction or system notice). `data.text` is the fallback a renderer without an `event` renderer shows (chativa falls back to its text renderer).",
+  "type": "object",
+  "required": ["type", "id", "seq", "from", "data", "timestamp"],
+  "properties": {
+    "type": { "const": "event" },
+    "id": { "$ref": "../../common.schema.json#/$defs/id" },
+    "seq": { "$ref": "../../common.schema.json#/$defs/seq" },
+    "from": { "$ref": "../../common.schema.json#/$defs/from" },
+    "data": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "maxLength": 128 },
+        "text": { "type": "string" },
+        "value": true
+      }
+    },
+    "timestamp": { "$ref": "../../common.schema.json#/$defs/timestamp" },
+    "sender": { "$ref": "../../common.schema.json#/$defs/sender" },
+    "metadata": { "$ref": "../../common.schema.json#/$defs/metadata" }
+  },
+  "examples": [
+    {
+      "type": "event", "id": "6d1c0a8e-1f7b-4b9e-8f6a-2c3d4e5f6a7b", "seq": 21, "from": "user",
+      "data": { "name": "reaction", "text": "👍", "value": { "messageId": "wamid.HBgM", "emoji": "👍" } },
+      "timestamp": 1750000003000
+    }
+  ]
+}

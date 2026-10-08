@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://converger.aimtune.dev/schemas/protocol/v1/messages/audio.schema.json",
+  "title": "audio message data",
+  "description": "An audio clip or voice note. Converger-defined: chativa has no audio renderer yet and falls back to data.text. Field names follow video.",
+  "type": "object",
+  "required": ["src"],
+  "properties": {
+    "src": { "$ref": "../common.schema.json#/$defs/url" },
+    "caption": { "type": "string", "maxLength": 4096 },
+    "mimeType": { "type": "string", "maxLength": 255 },
+    "size": { "type": "integer", "minimum": 0 },
+    "durationMs": { "type": "integer", "minimum": 0 },
+    "voice": { "type": "boolean", "description": "A recorded voice note rather than an audio file." },
+    "text": { "type": "string", "maxLength": 65536, "description": "Fallback text, for example a transcript." },
+    "extensions": { "$ref": "../common.schema.json#/$defs/extensions" }
+  },
+  "examples": [
+    { "src": "/api/v1/converger/attachments/0f2b1a77-3c55-4a0d-8d0e-6c1f8f6e9c21", "mimeType": "audio/ogg", "voice": true, "durationMs": 4200, "text": "[voice message]" }
+  ]
+}

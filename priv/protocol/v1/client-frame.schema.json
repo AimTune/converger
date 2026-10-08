@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://converger.aimtune.dev/schemas/protocol/v1/client-frame.schema.json",
+  "title": "Converger Protocol v1 - any client -> server frame",
+  "description": "Dispatches on `type`. Every type that is not one of the protocol's own frames is a user turn (frames/client/message.schema.json), which rejects the remaining reserved names.",
+  "type": "object",
+  "required": ["type"],
+  "properties": { "type": { "type": "string" } },
+  "allOf": [
+    { "if": { "properties": { "type": { "const": "hello" } } }, "then": { "$ref": "frames/client/hello.schema.json" } },
+    { "if": { "properties": { "type": { "const": "resume" } } }, "then": { "$ref": "frames/client/resume.schema.json" } },
+    { "if": { "properties": { "type": { "const": "genui_event" } } }, "then": { "$ref": "frames/client/genui_event.schema.json" } },
+    { "if": { "properties": { "type": { "const": "client_tools" } } }, "then": { "$ref": "frames/client/client_tools.schema.json" } },
+    { "if": { "properties": { "type": { "const": "client_skills" } } }, "then": { "$ref": "frames/client/client_skills.schema.json" } },
+    { "if": { "properties": { "type": { "const": "abort" } } }, "then": { "$ref": "frames/client/abort.schema.json" } },
+    { "if": { "properties": { "type": { "const": "survey" } } }, "then": { "$ref": "frames/client/survey.schema.json" } },
+    { "if": { "properties": { "type": { "const": "regenerate" } } }, "then": { "$ref": "frames/client/regenerate.schema.json" } },
+    { "if": { "properties": { "type": { "const": "edit" } } }, "then": { "$ref": "frames/client/edit.schema.json" } },
+    { "if": { "properties": { "type": { "const": "typing" } } }, "then": { "$ref": "frames/client/typing.schema.json" } },
+    { "if": { "properties": { "type": { "const": "read" } } }, "then": { "$ref": "frames/client/read.schema.json" } },
+    { "if": { "properties": { "type": { "const": "sync" } } }, "then": { "$ref": "frames/client/sync.schema.json" } },
+    { "if": { "properties": { "type": { "const": "ping" } } }, "then": { "$ref": "frames/client/ping.schema.json" } },
+    { "if": { "properties": { "type": { "const": "auth" } } }, "then": { "$ref": "frames/client/auth.schema.json" } },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "not": {
+              "enum": [
+                "hello", "resume", "genui_event", "client_tools", "client_skills", "abort", "survey", "regenerate", "edit",
+                "typing", "read", "sync", "ping", "auth"
+              ]
+            }
+          }
+        }
+      },
+      "then": { "$ref": "frames/client/message.schema.json" }
+    }
+  ]
+}

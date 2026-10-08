@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+### Converger Protocol v1 specification (#21, refs #63 #68)
+
+Documentation and schemas only; no server behaviour changes.
+
+- `docs/protocol/v1.md`: the WebSocket wire protocol, a superset profile of mekik/1
+  (handshake, frame envelope, replay and watermark semantics, acks, receipts, typing,
+  presence, channel-scoped sockets, limits, error and close codes, deprecation policy,
+  mekik/1 compatibility table). Every feature is marked implemented or planned with
+  its issue.
+- `docs/protocol/messages.md`: the rich message vocabulary (chativa-compatible) and
+  the per-channel downgrade matrix.
+- `docs/adr/0024-converger-protocol-v1-as-superset-of-mekik-1.md`: the decisions behind the spec (merged with the ADR from the docs site).
+- JSON Schemas (draft 2020-12) for every frame and message type in `priv/protocol/v1/`,
+  with example sessions.
+- `test/protocol/`: conformance suite validating the schemas, the examples in the
+  docs and mekik's golden fixtures (vendored, MIT). Adds `jsv` 0.26 as a test-only
+  dependency (with `abnf_parsec`, `texture`, `nimble_parsec`).
+- Announced change: from v3.0 (#22) the watermark becomes the integer `seq` in v1 frames
+  and in the REST `activitySet`; the opaque base64url watermarks stay accepted for one
+  more release (`docs/protocol/v1.md`, section 6.5).
+
 ### Chaos test: kill the node during load (#57)
 
 - New chaos harness (`test/chaos/run.sh`, docs/chaos.md, manual/nightly

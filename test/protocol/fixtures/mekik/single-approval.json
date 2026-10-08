@@ -1,0 +1,70 @@
+{
+  "name": "single-approval",
+  "description": "One interrupt carrying $mekik ui + actions becomes an interrupt frame with payload (stripped of $mekik), ui, and actions; the run ends interrupted.",
+  "startSeq": 6,
+  "events": [
+    { "type": "run_start", "runId": "run-1", "threadId": "conv-1", "seq": 1, "ns": [] },
+    {
+      "type": "interrupt",
+      "pending": [
+        {
+          "id": "approve/0:interrupt#0",
+          "taskId": "conv-1:ckpt-a:approve/0",
+          "node": "approve",
+          "key": "interrupt#0",
+          "payload": {
+            "title": "249.90₺ refund",
+            "$mekik": {
+              "ui": { "component": "approval-form", "props": { "orderId": "ORD-42", "amount": 249.9 } },
+              "actions": [
+                { "label": "Approve", "value": { "approved": true } },
+                { "label": "Reject", "value": { "approved": false } }
+              ]
+            }
+          }
+        }
+      ],
+      "runId": "run-1", "threadId": "conv-1", "seq": 2, "ns": []
+    },
+    {
+      "type": "run_end",
+      "status": "interrupted",
+      "pending": [
+        {
+          "id": "approve/0:interrupt#0",
+          "taskId": "conv-1:ckpt-a:approve/0",
+          "node": "approve",
+          "key": "interrupt#0",
+          "payload": {
+            "title": "249.90₺ refund",
+            "$mekik": {
+              "ui": { "component": "approval-form", "props": { "orderId": "ORD-42", "amount": 249.9 } },
+              "actions": [
+                { "label": "Approve", "value": { "approved": true } },
+                { "label": "Reject", "value": { "approved": false } }
+              ]
+            }
+          }
+        }
+      ],
+      "runId": "run-1", "threadId": "conv-1", "seq": 3, "ns": []
+    }
+  ],
+  "expectedFrames": [
+    { "type": "run", "data": { "status": "started" } },
+    {
+      "type": "interrupt",
+      "seq": 7,
+      "id": "approve/0:interrupt#0",
+      "data": {
+        "payload": { "title": "249.90₺ refund" },
+        "ui": { "component": "approval-form", "props": { "orderId": "ORD-42", "amount": 249.9 } },
+        "actions": [
+          { "label": "Approve", "value": { "approved": true } },
+          { "label": "Reject", "value": { "approved": false } }
+        ]
+      }
+    },
+    { "type": "run", "data": { "status": "interrupted" } }
+  ]
+}

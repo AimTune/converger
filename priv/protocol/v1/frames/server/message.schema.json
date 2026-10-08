@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://converger.aimtune.dev/schemas/protocol/v1/frames/server/message.schema.json",
+  "title": "server -> client: message frame (persistent)",
+  "description": "A persistent message frame: the mekik/1 `text` frame envelope `{type, id, seq, from, data, timestamp}` under a message type name. `text` and every type in docs/protocol/messages.md have a typed `data` schema; any other renderer name that is not a reserved frame type is an opaque rich message frame (mekik/1 section 4.5) whose `data` is only required to be an object.",
+  "type": "object",
+  "required": ["type", "id", "seq", "from", "data", "timestamp"],
+  "properties": {
+    "type": {
+      "allOf": [
+        { "$ref": "../../common.schema.json#/$defs/messageType" },
+        { "if": { "$ref": "../../common.schema.json#/$defs/reservedFrameType" }, "then": { "const": "text" } }
+      ]
+    },
+    "id": { "$ref": "../../common.schema.json#/$defs/id" },
+    "seq": { "$ref": "../../common.schema.json#/$defs/seq" },
+    "from": { "$ref": "../../common.schema.json#/$defs/from" },
+    "data": { "type": "object" },
+    "timestamp": { "$ref": "../../common.schema.json#/$defs/timestamp" },
+    "actions": {
+      "description": "chativa quick-reply chips on a bot `text` frame (parseChatFrame turns a bot text frame with actions into a quick-reply).",
+      "$ref": "../../common.schema.json#/$defs/messageActions"
+    },
+    "sender": { "$ref": "../../common.schema.json#/$defs/sender" },
+    "metadata": { "$ref": "../../common.schema.json#/$defs/metadata" },
+    "clientId": { "$ref": "../../common.schema.json#/$defs/clientId" }
+  },
+  "allOf": [
+    { "if": { "properties": { "type": { "const": "text" } } }, "then": { "properties": { "data": { "$ref": "../../messages/text.schema.json" } } } },
+    { "if": { "properties": { "type": { "const": "quick-reply" } } }, "then": { "properties": { "data": { "$ref": "../../messages/quick-reply.schema.json" } } } },
+    { "if": { "properties": { "type": { "const": "buttons" } } }, "then": { "properties": { "data": { "$ref": "../../messages/buttons.schema.json" } } } },
+    { "if": { "properties": { "type": { "const": "card" } } }, "then": { "properties": { "data": { "$ref": "../../messages/card.schema.json" } } } },
+    { "if": { "properties": { "type": { "const": "carousel" } } }, "then": { "properties": { "data": { "$ref": "../../messages/carousel.schema.json" } } } },
+    { "if": { "properties": { "type": { "const": "image" } } }, "then": { "properties": { "data": { "$ref": "../../messages/image.schema.json" } } } },
+    { "if": { "properties": { "type": { "const": "file" } } }, "then": { "properties": { "data": { "$ref": "../../messages/file.schema.json" } } } },
+    { "if": { "properties": { "type": { "const": "video" } } }, "then": { "properties": { "data": { "$ref": "../../messages/video.schema.json" } } } },
+    { "if": { "properties": { "type": { "const": "audio" } } }, "then": { "properties": { "data": { "$ref": "../../messages/audio.schema.json" } } } },
+    { "if": { "properties": { "type": { "const": "location" } } }, "then": { "properties": { "data": { "$ref": "../../messages/location.schema.json" } } } },
+    { "if": { "properties": { "type": { "const": "contact" } } }, "then": { "properties": { "data": { "$ref": "../../messages/contact.schema.json" } } } }
+  ],
+  "examples": [
+    { "type": "text", "id": "msg-1", "seq": 17, "from": "bot", "data": { "text": "Refund complete: ORD-42" }, "timestamp": 1750000000000 },
+    {
+      "type": "text", "id": "3f0e8a52-8c1a-4a3e-9d7a-0b6a2b7f0c11", "seq": 18, "from": "bot",
+      "data": { "text": "Shall I cancel the order?" },
+      "actions": [{ "label": "Yes", "value": "yes" }, { "label": "No", "value": "no" }],
+      "sender": { "id": "agent-7", "role": "agent", "name": "Ayse" },
+      "timestamp": 1750000000500
+    },
+    { "type": "image", "id": "msg-2", "seq": 19, "from": "bot", "data": { "src": "https://example.test/receipt.png", "caption": "Your receipt" }, "timestamp": 1750000001000 },
+    { "type": "order-summary", "id": "msg-3", "seq": 20, "from": "bot", "data": { "orderId": "ORD-42", "total": 249.9 }, "timestamp": 1750000002000 }
+  ]
+}

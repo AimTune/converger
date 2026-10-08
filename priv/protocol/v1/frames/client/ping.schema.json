@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://converger.aimtune.dev/schemas/protocol/v1/frames/client/ping.schema.json",
+  "title": "client -> server: ping (Converger)",
+  "description": "Application-level liveness probe; the server answers with heartbeat (echoing nonce). Resets the idle timer.",
+  "type": "object",
+  "required": ["type"],
+  "properties": { "type": { "const": "ping" }, "nonce": { "type": "string", "maxLength": 64 } },
+  "examples": [{ "type": "ping" }, { "type": "ping", "nonce": "p-3" }]
+}

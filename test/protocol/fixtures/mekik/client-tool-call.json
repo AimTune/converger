@@ -1,0 +1,79 @@
+{
+  "name": "client-tool-call",
+  "description": "A client tool call (§11.3): the running tool_call trace, then an interrupt whose $mekik.tool metadata is unwrapped into data.tool = {name, params} with an empty payload and no ui/actions/event; the run ends interrupted.",
+  "startSeq": 0,
+  "events": [
+    { "type": "run_start", "runId": "run-1", "threadId": "conv-1", "seq": 1, "ns": [] },
+    {
+      "type": "custom",
+      "payload": {
+        "$mekik": "tool",
+        "call": {
+          "id": "conv-1:ckpt-a:call/0:tool:0",
+          "name": "pick_date",
+          "status": "running",
+          "params": { "min": "2026-08-01" }
+        }
+      },
+      "runId": "run-1", "threadId": "conv-1", "seq": 2, "ns": []
+    },
+    {
+      "type": "interrupt",
+      "pending": [
+        {
+          "id": "call/0:tool:pick_date",
+          "taskId": "conv-1:ckpt-a:call/0",
+          "node": "call",
+          "key": "tool:pick_date",
+          "payload": {
+            "$mekik": {
+              "tool": { "name": "pick_date", "params": { "min": "2026-08-01" } }
+            }
+          }
+        }
+      ],
+      "runId": "run-1", "threadId": "conv-1", "seq": 3, "ns": []
+    },
+    {
+      "type": "run_end",
+      "status": "interrupted",
+      "pending": [
+        {
+          "id": "call/0:tool:pick_date",
+          "taskId": "conv-1:ckpt-a:call/0",
+          "node": "call",
+          "key": "tool:pick_date",
+          "payload": {
+            "$mekik": {
+              "tool": { "name": "pick_date", "params": { "min": "2026-08-01" } }
+            }
+          }
+        }
+      ],
+      "runId": "run-1", "threadId": "conv-1", "seq": 4, "ns": []
+    }
+  ],
+  "expectedFrames": [
+    { "type": "run", "data": { "status": "started" } },
+    {
+      "type": "tool_call",
+      "seq": 1,
+      "data": {
+        "id": "conv-1:ckpt-a:call/0:tool:0",
+        "name": "pick_date",
+        "status": "running",
+        "params": { "min": "2026-08-01" }
+      }
+    },
+    {
+      "type": "interrupt",
+      "seq": 2,
+      "id": "call/0:tool:pick_date",
+      "data": {
+        "payload": {},
+        "tool": { "name": "pick_date", "params": { "min": "2026-08-01" } }
+      }
+    },
+    { "type": "run", "data": { "status": "interrupted" } }
+  ]
+}

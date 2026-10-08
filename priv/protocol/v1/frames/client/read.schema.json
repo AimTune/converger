@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://converger.aimtune.dev/schemas/protocol/v1/frames/client/read.schema.json",
+  "title": "client -> server: read (Converger, #25)",
+  "description": "The sender has read every persistent frame up to and including `watermark`. Produces deliveryStatus {status: read, upToSeq} for the other participants and read receipts on channels that support them. A read watermark never moves backwards.",
+  "type": "object",
+  "required": ["type", "watermark"],
+  "properties": { "type": { "const": "read" }, "watermark": { "$ref": "../../common.schema.json#/$defs/seq" } },
+  "examples": [{ "type": "read", "watermark": 18 }]
+}

@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://converger.aimtune.dev/schemas/protocol/v1/frames/server/typing.schema.json",
+  "title": "server -> client: typing (transient)",
+  "description": "Typing indicator, flat as chativa's parseChatFrame expects (`isTyping` at the top level). Transient: no seq. A typing frame that carries `seq` is a pre-#25 persisted `typing` activity being replayed or relayed; clients only advance their watermark from it, and the server sends it with isTyping false on replay.",
+  "type": "object",
+  "required": ["type", "isTyping"],
+  "properties": {
+    "type": { "const": "typing" },
+    "isTyping": { "type": "boolean" },
+    "from": { "$ref": "../../common.schema.json#/$defs/from" },
+    "sender": { "$ref": "../../common.schema.json#/$defs/sender" },
+    "seq": { "$ref": "../../common.schema.json#/$defs/seq" },
+    "id": { "$ref": "../../common.schema.json#/$defs/id" },
+    "timestamp": { "$ref": "../../common.schema.json#/$defs/timestamp" }
+  },
+  "examples": [
+    { "type": "typing", "isTyping": true, "from": "bot", "sender": { "id": "agent-7", "role": "agent" } },
+    { "type": "typing", "isTyping": false, "seq": 4, "id": "5a4b3c2d-1e0f-4a9b-8c7d-6e5f4a3b2c1d", "from": "user", "timestamp": 1740000000000 }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://converger.aimtune.dev/schemas/protocol/v1/frames/client/client_skills.schema.json",
+  "title": "client -> server: client_skills (mekik/1)",
+  "description": "Replace this connection's declared client skills (mekik/1 section 12.4). Forwarded to the bot channel; Converger does not interpret it.",
+  "type": "object",
+  "required": ["type", "skills"],
+  "properties": {
+    "type": { "const": "client_skills" },
+    "skills": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "description", "instructions"],
+        "properties": {
+          "name": { "type": "string" },
+          "description": { "type": "string" },
+          "instructions": { "type": "string" },
+          "tags": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    }
+  },
+  "examples": [{ "type": "client_skills", "skills": [{ "name": "page-context", "description": "Knows the page the user is on.", "instructions": "Use the page title when answering." }] }]
+}

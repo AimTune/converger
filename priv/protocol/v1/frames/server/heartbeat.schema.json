@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://converger.aimtune.dev/schemas/protocol/v1/frames/server/heartbeat.schema.json",
+  "title": "server -> client: heartbeat (transient, Converger)",
+  "description": "Sent after limits.heartbeatIntervalMs of outbound silence, and as the answer to a client `ping` (echoing its nonce).",
+  "type": "object",
+  "required": ["type", "timestamp"],
+  "properties": {
+    "type": { "const": "heartbeat" },
+    "timestamp": { "$ref": "../../common.schema.json#/$defs/timestamp" },
+    "nonce": { "type": "string", "maxLength": 64 },
+    "headSeq": { "$ref": "../../common.schema.json#/$defs/watermark" }
+  },
+  "examples": [{ "type": "heartbeat", "timestamp": 1750000030000 }, { "type": "heartbeat", "timestamp": 1750000031000, "nonce": "p-3", "headSeq": 18 }]
+}

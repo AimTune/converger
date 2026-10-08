@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://converger.aimtune.dev/schemas/protocol/v1/frames/server/interrupt_resolved.schema.json",
+  "title": "server -> client: interrupt_resolved (persistent, mekik/1)",
+  "description": "The pause `id` was answered (by any connection), so every tab and every future replay learns it is closed.",
+  "type": "object",
+  "required": ["type", "seq", "id", "data"],
+  "properties": {
+    "type": { "const": "interrupt_resolved" },
+    "seq": { "$ref": "../../common.schema.json#/$defs/seq" },
+    "id": { "$ref": "../../common.schema.json#/$defs/id" },
+    "data": { "type": "object", "properties": { "answer": true } }
+  },
+  "examples": [{ "type": "interrupt_resolved", "seq": 8, "id": "approve/0:interrupt#0", "data": { "answer": { "approved": true } } }]
+}

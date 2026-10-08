@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://converger.aimtune.dev/schemas/protocol/v1/frames/server/genui_components.schema.json",
+  "title": "server -> client: genui_components (transient, mekik/1)",
+  "description": "The bot's server-defined component catalog (mekik/1 section 10), relayed unchanged right after welcome. Converger does not interpret it.",
+  "type": "object",
+  "required": ["type", "hash"],
+  "properties": {
+    "type": { "const": "genui_components" },
+    "hash": { "type": "string", "minLength": 1 },
+    "unchanged": { "type": "boolean" },
+    "components": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "template"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "template": { "type": "string" },
+          "css": { "type": "string" },
+          "props": { "type": "object" },
+          "version": { "type": "string" },
+          "tag": { "type": "string" }
+        }
+      }
+    }
+  },
+  "examples": [
+    { "type": "genui_components", "hash": "4be1c0ffee", "unchanged": true },
+    { "type": "genui_components", "hash": "9f3a", "components": [{ "name": "order-card", "template": "<div>{{id}}: {{total}}</div>", "props": { "id": "", "total": 0 } }] }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://converger.aimtune.dev/schemas/protocol/v1/frames/client/survey.schema.json",
+  "title": "client -> server: survey (chativa / mekik connector)",
+  "description": "chativa's end-of-conversation survey, sent flat as `{type: \"survey\", ...SurveyPayload}`. Forwarded to the bot channel and stored as an `event` activity (name survey) once #28 lands.",
+  "type": "object",
+  "required": ["type"],
+  "properties": {
+    "type": { "const": "survey" },
+    "rating": { "type": "number" },
+    "comment": { "type": "string" }
+  },
+  "examples": [{ "type": "survey", "rating": 5, "comment": "Quick and helpful" }]
+}
