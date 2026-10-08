@@ -2,6 +2,7 @@ defmodule ConvergerWeb.ActivityController do
   use ConvergerWeb, :controller
 
   alias Converger.Activities
+  alias Converger.ConvergerAPI.Watermark
   alias Converger.Conversations
 
   plug ConvergerWeb.Plugs.TenantAuth
@@ -12,13 +13,41 @@ defmodule ConvergerWeb.ActivityController do
 
   action_fallback ConvergerWeb.FallbackController
 
-  def index(conn, %{"conversation_id" => conversation_id}) do
+  @doc """
+  One page of a conversation's activities, oldest first.
+
+  Query params: `limit` (default/max from `config :converger, :pagination`)
+  and `watermark` (opaque, from a previous response's `meta.watermark`).
+  The response is `%{data: [...], meta: %{watermark, has_more, limit}}`.
+  """
+  def index(conn, %{"conversation_id" => conversation_id} = params) do
     tenant = conn.assigns.tenant
 
     with %Conversations.Conversation{} = conversation <-
-           Conversations.get_conversation(conversation_id, tenant.id) do
-      activities = Activities.list_activities_for_conversation(conversation.id)
-      render(conn, :index, activities: activities)
+           Conversations.get_conversation(conversation_id, tenant.id),
+         {:ok, position} <- decode_watermark(params["watermark"]) do
+      limit = Converger.Pagination.clamp_limit(params["limit"], :activity)
+
+      {activities, has_more} =
+        Activities.page_activities_since(conversation.id, position, limit: limit)
+
+      watermark =
+        case List.last(activities) do
+          nil -> params["watermark"]
+          last -> Watermark.encode(last.seq)
+        end
+
+      render(conn, :index,
+        activities: activities,
+        meta: %{watermark: watermark, has_more: has_more, limit: limit}
+      )
+    end
+  end
+
+  defp decode_watermark(watermark) do
+    case Watermark.decode(watermark) do
+      {:ok, position} -> {:ok, position}
+      {:error, :invalid_watermark} -> {:error, "Invalid watermark"}
     end
   end
 

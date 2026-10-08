@@ -12,10 +12,10 @@ defmodule Converger.Channels.Health do
   import Ecto.Query, warn: false
   require Logger
 
-  alias Converger.Repo
   alias Converger.Channels.Channel
   alias Converger.Channels.HealthCheck
   alias Converger.Deliveries.Delivery
+  alias Converger.Repo
 
   @healthy_threshold 0.10
   @degraded_threshold 0.50

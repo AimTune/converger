@@ -10,14 +10,78 @@ defmodule Converger.Tenants do
   alias Converger.AuditLogs
   alias Converger.AuditLogs.Changes
 
+  # Operator-managed configuration: listed whole under a hard safety cap
+  # (Converger.Pagination.bounded_all/2).
   def list_tenants do
-    Repo.all(Tenant)
+    from(t in Tenant, order_by: [asc: t.name, asc: t.id])
+    |> Converger.Pagination.bounded_all()
   end
 
   def get_tenant!(id), do: Repo.get!(Tenant, id)
 
-  def get_tenant_by_api_key(api_key) do
-    Repo.get_by(Tenant, api_key: api_key)
+  @default_rotation_grace_period 24 * 60 * 60
+
+  @doc """
+  Looks up a tenant by API key. Keys are stored as SHA-256 digests; a
+  previous key is accepted until its grace period expires.
+  """
+  def get_tenant_by_api_key(api_key) when is_binary(api_key) and api_key != "" do
+    hash = Converger.Secrets.hash(api_key)
+    now = DateTime.utc_now()
+
+    from(t in Tenant,
+      where:
+        t.api_key_hash == ^hash or
+          (t.previous_api_key_hash == ^hash and t.previous_api_key_expires_at > ^now),
+      limit: 1
+    )
+    |> Repo.one()
+  end
+
+  def get_tenant_by_api_key(_api_key), do: nil
+
+  @doc """
+  Generates a new API key for the tenant. The returned tenant carries the
+  plaintext key in its virtual `api_key` field (shown once). The old key
+  remains valid for `:grace_period` seconds (default 24h, configurable via
+  `config :converger, :api_key_rotation_grace_period`).
+  """
+  def rotate_api_key(%Tenant{} = tenant, opts \\ []) do
+    grace =
+      Keyword.get_lazy(opts, :grace_period, fn ->
+        Application.get_env(
+          :converger,
+          :api_key_rotation_grace_period,
+          @default_rotation_grace_period
+        )
+      end)
+
+    expires_at = DateTime.add(DateTime.utc_now(), grace, :second)
+    changeset = Tenant.rotate_api_key_changeset(tenant, expires_at)
+
+    case Keyword.get(opts, :actor) do
+      nil ->
+        Repo.update(changeset)
+
+      actor ->
+        Multi.new()
+        |> Multi.update(:tenant, changeset)
+        |> Multi.insert(:audit_log, fn %{tenant: updated} ->
+          AuditLogs.build_audit_log_entry(%{
+            actor_type: actor.type,
+            actor_id: actor.id,
+            action: "rotate_api_key",
+            resource_type: "tenant",
+            resource_id: tenant.id,
+            changes: Changes.for_update(tenant, updated)
+          })
+        end)
+        |> Repo.transaction()
+        |> case do
+          {:ok, %{tenant: updated}} -> {:ok, updated}
+          {:error, :tenant, changeset, _} -> {:error, changeset}
+        end
+    end
   end
 
   def get_tenant_by_name(name) when is_binary(name) do

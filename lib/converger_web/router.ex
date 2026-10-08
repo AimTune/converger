@@ -14,7 +14,14 @@ defmodule ConvergerWeb.Router do
     plug :fetch_live_flash
     plug :put_root_layout, html: {ConvergerWeb.Layouts, :root}
     plug :protect_from_forgery
-    plug :put_secure_browser_headers
+
+    # The admin/portal layouts load phoenix + LiveView from jsDelivr and use an
+    # inline bootstrap <script> and <style> (there is no asset pipeline), hence
+    # the CDN origin and 'unsafe-inline'. Everything else is locked to 'self'.
+    plug :put_secure_browser_headers, %{
+      "content-security-policy" =>
+        "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+    }
   end
 
   pipeline :admin_auth do
@@ -27,6 +34,10 @@ defmodule ConvergerWeb.Router do
 
   pipeline :require_admin do
     plug :require_admin_user
+  end
+
+  pipeline :require_admin_login do
+    plug :require_admin_session
   end
 
   pipeline :tenant_session do
@@ -42,7 +53,7 @@ defmodule ConvergerWeb.Router do
 
     post "/tokens", TokenController, :create
 
-    resources "/conversations", ConversationController, only: [:create, :show] do
+    resources "/conversations", ConversationController, only: [:index, :create, :show] do
       resources "/activities", ActivityController, only: [:create, :index]
     end
 
@@ -83,6 +94,13 @@ defmodule ConvergerWeb.Router do
     post "/conversations/:conversation_id/upload", UploadController, :create
   end
 
+  # Attachment downloads: no `accepts ["json"]`, clients ask for image/*, etc.
+  scope "/api/v1/converger", ConvergerWeb.ConvergerAPI do
+    pipe_through [:converger_token_auth]
+
+    get "/attachments/:id", AttachmentController, :show
+  end
+
   # Admin login (IP whitelist protected)
   scope "/admin", ConvergerWeb do
     pipe_through [:browser, :admin_auth, :admin_session]
@@ -90,6 +108,14 @@ defmodule ConvergerWeb.Router do
     get "/login", AdminSessionController, :new
     post "/login", AdminSessionController, :create
     delete "/logout", AdminSessionController, :delete
+  end
+
+  # Own password change (also the forced change for `must_change_password`)
+  scope "/admin", ConvergerWeb do
+    pipe_through [:browser, :admin_auth, :admin_session, :require_admin_login]
+
+    get "/password", AdminPasswordController, :edit
+    put "/password", AdminPasswordController, :update
   end
 
   # Admin panel (IP whitelist + session auth)

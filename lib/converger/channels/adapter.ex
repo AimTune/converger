@@ -15,8 +15,24 @@ defmodule Converger.Channels.Adapter do
   @callback validate_config(config) ::
               :ok | {:error, String.t()}
 
+  @doc """
+  Parse an inbound webhook payload into the messages it carries.
+
+  Providers batch several messages into one webhook call, so this returns a
+  **list**. The list may be empty, e.g. for a well-formed payload that only
+  carries status updates or events Converger does not handle. Each parsed
+  message is a map with:
+
+    - "type", "text", "attachments", "metadata" - activity client fields
+    - "sender" (required) - the sender identifier stored on the activity
+    - "idempotency_key" (optional) - a stable provider message id (e.g. a
+      WhatsApp `wamid`); a re-delivered webhook carrying the same id never
+      creates a second activity
+
+  `parse_inbound/2` below also accepts an adapter returning a single map.
+  """
   @callback parse_inbound(channel, params :: map()) ::
-              {:ok, map()} | {:error, term()}
+              {:ok, [map()]} | {:ok, map()} | {:error, term()}
 
   @doc """
   Parse a provider status update (delivery receipt / read receipt).
@@ -80,18 +96,32 @@ defmodule Converger.Channels.Adapter do
     end
   end
 
+  @doc """
+  Parse an inbound payload with the channel's adapter. Always returns
+  `{:ok, list_of_messages}` or `{:error, reason}`.
+  """
   def parse_inbound(%{type: type} = channel, params) do
     case adapter_for(type) do
-      {:ok, mod} -> mod.parse_inbound(channel, params)
-      {:error, _} = err -> err
+      {:ok, mod} ->
+        case mod.parse_inbound(channel, params) do
+          {:ok, messages} when is_list(messages) -> {:ok, messages}
+          {:ok, %{} = message} -> {:ok, [message]}
+          {:error, _} = err -> err
+        end
+
+      {:error, _} = err ->
+        err
     end
   end
 
   def parse_status_update(%{type: type} = channel, params) do
     case adapter_for(type) do
       {:ok, mod} ->
+        Code.ensure_loaded(mod)
+
         if function_exported?(mod, :parse_status_update, 2) do
-          mod.parse_status_update(channel, params)
+          # apply/3 because the callback is optional and not every adapter defines it
+          apply(mod, :parse_status_update, [channel, params])
         else
           :ignore
         end

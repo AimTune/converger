@@ -1,8 +1,8 @@
 defmodule ConvergerWeb.ActivityIdempotencyTest do
   use ConvergerWeb.ConnCase, async: false
 
-  alias Converger.Repo
   alias Converger.Activities.Activity
+  alias Converger.Repo
 
   import Converger.TenantsFixtures
   import Converger.ChannelsFixtures

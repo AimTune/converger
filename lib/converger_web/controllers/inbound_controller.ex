@@ -3,7 +3,7 @@ defmodule ConvergerWeb.InboundController do
 
   require Logger
 
-  alias Converger.{Channels, Activities, Conversations, Deliveries}
+  alias Converger.{Channels, Activities, Conversations, Deliveries, Participants}
   alias Converger.Channels.Adapter
 
   # Per channel, keyed by the channel_id path parameter, so floods are rejected
@@ -14,17 +14,54 @@ defmodule ConvergerWeb.InboundController do
 
   action_fallback ConvergerWeb.FallbackController
 
+  # Channel types whose provider retries any non-200 response (for days, in
+  # Meta's case). They always get 200 once the request has been handled,
+  # including for messages rejected permanently (retrying cannot fix those).
+  @provider_ack_types ~w(whatsapp_meta whatsapp_infobip)
+
+  @doc """
+  Inbound webhook. A request may carry several messages and status updates
+  (providers batch them, and WhatsApp sends both to the same endpoint).
+
+  ## Batch semantics: per message, idempotent
+
+  Messages are processed in order, each in its own transaction (an activity
+  plus its delivery jobs). A batch is not all-or-nothing; instead every
+  message carries its provider message id as idempotency key, so the batch
+  can always be retried safely:
+
+    * created or already-known (duplicate) messages count as handled;
+    * a message rejected permanently (invalid activity, e.g. too large) is
+      logged and skipped - retrying would never succeed;
+    * a transient failure (e.g. the delivery jobs could not be enqueued) stops
+      processing and returns an error, so the provider re-delivers the whole
+      batch. Messages committed before the failure are recognised as
+      duplicates on re-delivery and the remaining ones are created, in order.
+
+  Status updates are applied best-effort before the messages.
+  """
   def create(conn, %{"channel_id" => channel_id} = params) do
     with {:ok, channel} <- Channels.get_active_channel(channel_id),
          :ok <- verify_inbound_signature(conn, channel) do
-      # Try parsing as status update first (WhatsApp sends statuses and messages
-      # to the same endpoint)
-      case Adapter.parse_status_update(channel, params) do
-        {:ok, status_updates} when status_updates != [] ->
+      status_updates =
+        case Adapter.parse_status_update(channel, params) do
+          {:ok, updates} when is_list(updates) -> updates
+          _ -> []
+        end
+
+      case Adapter.parse_inbound(channel, params) do
+        {:ok, [_ | _] = messages} ->
+          receipts = apply_status_updates(channel, status_updates)
+          process_inbound_messages(conn, channel, params, messages, receipts)
+
+        {:ok, []} ->
           process_status_updates(conn, channel, status_updates)
 
-        _ ->
-          process_inbound_message(conn, channel, params)
+        {:error, _} when status_updates != [] ->
+          process_status_updates(conn, channel, status_updates)
+
+        {:error, _} = error ->
+          error
       end
     end
   end
@@ -37,13 +74,19 @@ defmodule ConvergerWeb.InboundController do
     end
   end
 
+  # Meta's webhook handshake requires echoing `hub.challenge` verbatim once the
+  # verify token matches.
+  # sobelow_skip ["XSS.SendResp"]
   def verify(conn, %{"channel_id" => channel_id} = params) do
     with {:ok, channel} <- Channels.get_active_channel(channel_id) do
       case channel.type do
         "whatsapp_meta" ->
           verify_token = channel.config["verify_token"]
 
-          if params["hub.verify_token"] == verify_token do
+          provided = params["hub.verify_token"]
+
+          if is_binary(verify_token) and is_binary(provided) and
+               Plug.Crypto.secure_compare(provided, verify_token) do
             send_resp(conn, 200, params["hub.challenge"] || "")
           else
             send_resp(conn, 403, "Verification failed")
@@ -56,6 +99,16 @@ defmodule ConvergerWeb.InboundController do
   end
 
   defp process_status_updates(conn, channel, status_updates) do
+    processed = apply_status_updates(channel, status_updates)
+
+    conn
+    |> put_status(:ok)
+    |> json(%{status: "accepted", receipts_processed: processed})
+  end
+
+  defp apply_status_updates(_channel, []), do: 0
+
+  defp apply_status_updates(channel, status_updates) do
     results =
       Enum.map(status_updates, fn update ->
         Deliveries.apply_status_update(channel.id, update)
@@ -73,29 +126,127 @@ defmodule ConvergerWeb.InboundController do
       processed: processed
     )
 
-    conn
-    |> put_status(:ok)
-    |> json(%{status: "accepted", receipts_processed: processed})
+    processed
   end
 
-  defp process_inbound_message(conn, channel, params) do
-    with :ok <- verify_inbound_capable(channel),
-         {:ok, parsed} <- Adapter.parse_inbound(channel, params),
-         {:ok, conversation} <- resolve_or_create_conversation(channel, params),
-         {:ok, activity} <-
-           Activities.create_client_activity(parsed, %{
-             tenant_id: channel.tenant_id,
-             conversation_id: conversation.id,
-             sender: parsed["sender"]
-           }) do
-      Logger.info("Inbound activity received",
-        channel_id: channel.id,
-        activity_id: activity.id
-      )
+  defp process_inbound_messages(conn, channel, params, messages, receipts) do
+    case verify_inbound_capable(channel) do
+      :ok ->
+        messages
+        |> Enum.reduce_while([], fn message, acc ->
+          case process_inbound_message(channel, params, message) do
+            {:error, _} = error -> {:halt, error}
+            result -> {:cont, [result | acc]}
+          end
+        end)
+        |> respond_to_inbound(conn, channel, receipts)
+
+      # Statuses for an outbound-only channel arrived together with messages:
+      # acknowledge the statuses, drop the messages the channel does not accept.
+      {:error, _} when receipts > 0 ->
+        Logger.warning("Dropped inbound messages on a channel that is not inbound-capable",
+          channel_id: channel.id,
+          count: length(messages)
+        )
+
+        conn
+        |> put_status(:ok)
+        |> json(%{status: "accepted", receipts_processed: receipts})
+
+      {:error, _} = error ->
+        error
+    end
+  end
+
+  # Returns {:created, activity}, {:duplicate, activity}, {:rejected, changeset}
+  # or {:error, reason} (request-level or transient: stop and let the sender retry).
+  defp process_inbound_message(channel, params, message) do
+    key = message["idempotency_key"]
+
+    case Activities.get_activity_by_channel_idempotency_key(channel.id, key) do
+      %Activities.Activity{} = existing ->
+        Logger.info("Duplicate inbound message ignored",
+          channel_id: channel.id,
+          activity_id: existing.id
+        )
+
+        {:duplicate, existing}
+
+      nil ->
+        case resolve_or_create_conversation(channel, params, message) do
+          {:ok, conversation} ->
+            create_inbound_activity(channel, conversation, message)
+
+          # e.g. an external id the participant schema rejects: permanent.
+          {:error, %Ecto.Changeset{} = changeset} ->
+            Logger.warning("Rejected inbound message: invalid participant or conversation",
+              channel_id: channel.id,
+              errors: inspect(changeset.errors)
+            )
+
+            {:rejected, changeset}
+
+          {:error, _} = error ->
+            error
+        end
+    end
+  end
+
+  defp create_inbound_activity(channel, conversation, message) do
+    case Activities.create_client_activity(message, %{
+           tenant_id: channel.tenant_id,
+           conversation_id: conversation.id,
+           sender: message["sender"],
+           idempotency_key: message["idempotency_key"]
+         }) do
+      {:ok, activity} ->
+        Logger.info("Inbound activity received",
+          channel_id: channel.id,
+          activity_id: activity.id
+        )
+
+        {:created, activity}
+
+      {:error, %Ecto.Changeset{} = changeset} ->
+        Logger.warning("Rejected inbound message",
+          channel_id: channel.id,
+          errors: inspect(changeset.errors)
+        )
+
+        {:rejected, changeset}
+
+      {:error, _} = error ->
+        error
+    end
+  end
+
+  defp respond_to_inbound({:error, _} = error, _conn, _channel, _receipts), do: error
+
+  defp respond_to_inbound(results, conn, channel, receipts) do
+    results = Enum.reverse(results)
+    accepted = for {tag, activity} <- results, tag in [:created, :duplicate], do: activity
+    created = Enum.count(results, &match?({:created, _}, &1))
+    rejected = for {:rejected, changeset} <- results, do: changeset
+
+    provider_ack? = channel.type in @provider_ack_types
+
+    if accepted == [] and not provider_ack? do
+      # A generic webhook client sent an invalid message: tell it why.
+      {:error, hd(rejected)}
+    else
+      # Generic webhooks keep 201 Created; providers get the 200 they expect.
+      status = if created > 0 and not provider_ack?, do: :created, else: :ok
 
       conn
-      |> put_status(:created)
-      |> json(%{status: "accepted", activity_id: activity.id})
+      |> put_status(status)
+      |> json(%{
+        status: "accepted",
+        activity_id: accepted |> List.first() |> then(&(&1 && &1.id)),
+        activity_ids: Enum.map(accepted, & &1.id),
+        duplicates: Enum.count(results, &match?({:duplicate, _}, &1)),
+        rejected: length(rejected),
+        receipts_processed: receipts
+      })
     end
   end
 
@@ -147,20 +298,36 @@ defmodule ConvergerWeb.InboundController do
   defp deprecation_reason(:missing), do: "no signature"
   defp deprecation_reason(:legacy), do: "a legacy (non-timestamped) signature"
 
-  defp resolve_or_create_conversation(channel, params) do
+  # Conversation for an inbound message, in order of precedence:
+  #   1. an explicit `conversation_id` in the request (tenant-scoped);
+  #   2. the participant's active conversation on this channel, or a new one
+  #      for the participant (see Converger.Participants);
+  #   3. a new, participant-less conversation (adapters without an external id).
+  defp resolve_or_create_conversation(channel, params, message) do
     conversation_id = params["conversation_id"]
 
-    if conversation_id do
-      case Conversations.get_conversation(conversation_id, channel.tenant_id) do
-        %Conversations.Conversation{} = conv -> {:ok, conv}
-        nil -> {:error, :not_found}
-      end
-    else
-      Conversations.create_conversation(%{
-        "tenant_id" => channel.tenant_id,
-        "channel_id" => channel.id,
-        "metadata" => %{"source" => "inbound_webhook"}
-      })
+    cond do
+      conversation_id ->
+        case Conversations.get_conversation(conversation_id, channel.tenant_id) do
+          %Conversations.Conversation{} = conv -> {:ok, conv}
+          nil -> {:error, :not_found}
+        end
+
+      participant = participant_attrs(message) ->
+        Participants.resolve_conversation(channel, participant)
+
+      true ->
+        Conversations.create_conversation(%{
+          "tenant_id" => channel.tenant_id,
+          "channel_id" => channel.id,
+          "metadata" => %{"source" => "inbound_webhook"}
+        })
     end
   end
+
+  defp participant_attrs(%{"participant" => %{"external_id" => external_id} = participant})
+       when is_binary(external_id) and external_id != "",
+       do: participant
+
+  defp participant_attrs(_message), do: nil
 end

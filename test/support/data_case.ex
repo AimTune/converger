@@ -16,6 +16,8 @@ defmodule Converger.DataCase do
 
   use ExUnit.CaseTemplate
 
+  alias Ecto.Adapters.SQL.Sandbox
+
   using do
     quote do
       alias Converger.Repo
@@ -39,11 +41,11 @@ defmodule Converger.DataCase do
     # Check if we already have an owner to avoid double-starting in integration tests
     # that 'use' multiple Case modules.
     unless Process.get(:ecto_sandbox_owner) do
-      pid = Ecto.Adapters.SQL.Sandbox.start_owner!(Converger.Repo, shared: not tags[:async])
+      pid = Sandbox.start_owner!(Converger.Repo, shared: not tags[:async])
       Process.put(:ecto_sandbox_owner, pid)
 
       on_exit(fn ->
-        Ecto.Adapters.SQL.Sandbox.stop_owner(pid)
+        Sandbox.stop_owner(pid)
         Process.delete(:ecto_sandbox_owner)
       end)
     end

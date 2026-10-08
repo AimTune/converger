@@ -39,7 +39,7 @@ Deferred (`mix hex.outdated`, 2026-10-09):
 | Package | Locked | Latest | Decision |
 | --- | --- | --- | --- |
 | `phoenix_live_view` | 1.1.33 | 1.2.12 | #56 targets 1.1. Move to 1.2 together with the UI modernization. |
-| `req` | 0.5.17 | 0.7.5 | Pinned to `~> 0.5.17`. 0.6 drops automatic decompression, and 0.7 turns GET-with-body into POST and replaces the plug/finch steps. Both need a review of the webhook adapter (custom methods) and its `Req.Test` usage, so the upgrade gets its own PR. |
+| `req` | 0.5.17 | 0.7.5 | Upgraded to 0.7.5 (`~> 0.7`) for the decompression-bomb fix (only in >= 0.6.1), via #92. The webhook adapter and its `Req.Test` stubs pass on 0.7; custom methods are limited to POST/PUT/PATCH (#87). |
 | `gettext` | 0.26.2 | 1.0.2 | Major. The backend API changed (`use Gettext.Backend`). |
 | `logger_json` | 6.2.1 | 7.0.4 | Major. Formatter configuration changed. |
 | `dns_cluster` | 0.2.0 | 0.3.1 | Pre-1.0 minor with changed options. Revisit with the clustering work. |

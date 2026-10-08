@@ -12,8 +12,8 @@ defmodule Converger.RateLimit.Overrides do
 
   import Ecto.Query, only: [from: 2]
 
-  alias Converger.Repo
   alias Converger.Channels.Channel
+  alias Converger.Repo
   alias Converger.Tenants.Tenant
 
   @table __MODULE__
@@ -100,18 +100,16 @@ defmodule Converger.RateLimit.Overrides do
   end
 
   defp tenant_limits(tenant_id) do
-    with {:ok, uuid} <- Ecto.UUID.cast(tenant_id) do
-      Repo.one(from t in Tenant, where: t.id == ^uuid, select: t.limits)
-    else
-      _ -> nil
+    case Ecto.UUID.cast(tenant_id) do
+      {:ok, uuid} -> Repo.one(from t in Tenant, where: t.id == ^uuid, select: t.limits)
+      :error -> nil
     end
   end
 
   defp channel_tenant_id(channel_id) do
-    with {:ok, uuid} <- Ecto.UUID.cast(channel_id) do
-      Repo.one(from c in Channel, where: c.id == ^uuid, select: c.tenant_id)
-    else
-      _ -> nil
+    case Ecto.UUID.cast(channel_id) do
+      {:ok, uuid} -> Repo.one(from c in Channel, where: c.id == ^uuid, select: c.tenant_id)
+      :error -> nil
     end
   end
 end

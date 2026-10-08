@@ -7,25 +7,25 @@ defmodule Converger.RoutingRules do
   """
 
   import Ecto.Query, warn: false
-  alias Ecto.Multi
-  alias Converger.Repo
-  alias Converger.RoutingRules.RoutingRule
   alias Converger.AuditLogs
   alias Converger.AuditLogs.Changes
+  alias Converger.Repo
+  alias Converger.RoutingRules.RoutingRule
+  alias Ecto.Multi
 
   def list_routing_rules do
     RoutingRule
-    |> order_by([r], asc: r.name)
-    |> Repo.all()
+    |> order_by([r], asc: r.name, asc: r.id)
+    |> Converger.Pagination.bounded_all()
     |> Repo.preload([:tenant, :source_channel])
   end
 
   def list_routing_rules_for_tenant(tenant_id) do
     from(r in RoutingRule,
       where: r.tenant_id == ^tenant_id,
-      order_by: [asc: r.name]
+      order_by: [asc: r.name, asc: r.id]
     )
-    |> Repo.all()
+    |> Converger.Pagination.bounded_all()
   end
 
   def get_routing_rule!(id), do: Repo.get!(RoutingRule, id)
@@ -238,7 +238,7 @@ defmodule Converger.RoutingRules do
 
     all_ids = [source_id | target_ids] |> Enum.reject(&is_nil/1)
 
-    if tenant_id && length(all_ids) > 0 do
+    if tenant_id && all_ids != [] do
       count =
         from(c in Converger.Channels.Channel,
           where: c.id in ^all_ids and c.tenant_id == ^tenant_id,
