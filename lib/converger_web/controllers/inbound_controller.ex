@@ -6,6 +6,12 @@ defmodule ConvergerWeb.InboundController do
   alias Converger.{Channels, Activities, Conversations, Deliveries}
   alias Converger.Channels.Adapter
 
+  # Per channel, keyed by the channel_id path parameter, so floods are rejected
+  # before the channel is loaded or the signature is checked.
+  plug ConvergerWeb.Plugs.RateLimit,
+       [bucket: :inbound, scope: :channel]
+       when action in [:create, :status]
+
   action_fallback ConvergerWeb.FallbackController
 
   def create(conn, %{"channel_id" => channel_id} = params) do

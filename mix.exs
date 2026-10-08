@@ -58,7 +58,7 @@ defmodule Converger.MixProject do
       {:gettext, "~> 0.20"},
       {:cors_plug, "~> 3.0"},
       {:broadway, "~> 1.1"},
-      {:hammer, "~> 6.1"},
+      {:hammer, "~> 7.5"},
       {:opentelemetry, "~> 1.5"},
       {:opentelemetry_exporter, "~> 1.8"},
       {:opentelemetry_phoenix, "~> 2.0"},

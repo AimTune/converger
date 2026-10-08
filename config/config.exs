@@ -63,9 +63,17 @@ config :converger, Oban,
   ],
   queues: [default: 10, deliveries: 20]
 
-# Configure Hammer for Rate Limiting
-config :hammer,
-  backend: {Hammer.Backend.ETS, [expiry_ms: 60_000 * 60 * 4, cleanup_interval_ms: 60_000 * 10]}
+# Rate limiting (Hammer 7, see Converger.RateLimit).
+#   backend: :local   - per-node ETS counters (single node)
+#            :cluster - ETS counters replicated between nodes over PubSub
+#   limits:  overrides of the built-in defaults, e.g. %{inbound: {1_000, 1_000}}
+# config/runtime.exs sets the backend from RATE_LIMIT_BACKEND (defaulting to
+# :cluster when DNS_CLUSTER_QUERY is set).
+config :converger, Converger.RateLimit,
+  backend: :local,
+  sync_interval_ms: 100,
+  override_cache_ttl_ms: 30_000,
+  limits: %{}
 
 # Configure OpenTelemetry. Span export is disabled by default; config/runtime.exs
 # enables the OTLP exporter when OTEL_EXPORTER_OTLP_ENDPOINT (or

@@ -5,6 +5,10 @@ defmodule ConvergerWeb.ConvergerAPI.ActivityController do
   alias Converger.ConvergerAPI.Watermark
   import ConvergerWeb.Helpers.Authorization, only: [authorize_conversation: 2]
 
+  plug ConvergerWeb.Plugs.RateLimit,
+       [bucket: :activity_create, scope: :tenant]
+       when action in [:create]
+
   action_fallback ConvergerWeb.FallbackController
 
   def create(conn, %{"conversation_id" => conversation_id} = params) do

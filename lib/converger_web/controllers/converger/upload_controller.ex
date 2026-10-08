@@ -4,6 +4,8 @@ defmodule ConvergerWeb.ConvergerAPI.UploadController do
   alias Converger.{Activities, Conversations, Uploads}
   import ConvergerWeb.Helpers.Authorization, only: [authorize_conversation: 2]
 
+  plug ConvergerWeb.Plugs.RateLimit, bucket: :upload, scope: :tenant
+
   action_fallback ConvergerWeb.FallbackController
 
   def create(conn, %{"conversation_id" => conversation_id} = params) do
@@ -74,5 +76,4 @@ defmodule ConvergerWeb.ConvergerAPI.UploadController do
 
   defp parse_activity_metadata(%{"activity" => meta}) when is_map(meta), do: meta
   defp parse_activity_metadata(_), do: %{}
-
 end
