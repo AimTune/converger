@@ -13,7 +13,14 @@ defmodule ConvergerWeb.Router do
     plug :fetch_live_flash
     plug :put_root_layout, html: {ConvergerWeb.Layouts, :root}
     plug :protect_from_forgery
-    plug :put_secure_browser_headers
+
+    # The admin/portal layouts load phoenix + LiveView from jsDelivr and use an
+    # inline bootstrap <script> and <style> (there is no asset pipeline), hence
+    # the CDN origin and 'unsafe-inline'. Everything else is locked to 'self'.
+    plug :put_secure_browser_headers, %{
+      "content-security-policy" =>
+        "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+    }
   end
 
   pipeline :admin_auth do
@@ -84,6 +91,13 @@ defmodule ConvergerWeb.Router do
     post "/conversations/:conversation_id/activities", ActivityController, :create
     get "/conversations/:conversation_id/activities", ActivityController, :index
     post "/conversations/:conversation_id/upload", UploadController, :create
+  end
+
+  # Attachment downloads: no `accepts ["json"]`, clients ask for image/*, etc.
+  scope "/api/v1/converger", ConvergerWeb.ConvergerAPI do
+    pipe_through [:converger_token_auth]
+
+    get "/attachments/:id", AttachmentController, :show
   end
 
   # Admin login (IP whitelist protected)

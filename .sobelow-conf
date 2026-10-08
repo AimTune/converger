@@ -1,0 +1,18 @@
+[
+  verbose: true,
+  private: false,
+  skip: true,
+  router: "lib/converger_web/router.ex",
+  exit: "low",
+  format: "txt",
+  out: "",
+  threshold: "low",
+  # Config.HTTPS: TLS is terminated at the load balancer / reverse proxy in
+  # front of the release (see ConvergerWeb.Plugs.TrustedProxies), so the
+  # endpoint itself serves plain HTTP. Individual findings that were reviewed
+  # and accepted are marked inline with `# sobelow_skip [...]` and a
+  # justification comment (honoured because of `skip: true`).
+  ignore: ["Config.HTTPS"],
+  ignore_files: [""],
+  version: false
+]

@@ -30,3 +30,9 @@ converger-*.tar
 /.env
 /.env.*
 !/.env.example
+
+# Local attachment storage (LocalStorage backend).
+/priv/uploads/
+
+# Dialyzer PLTs (cached in CI).
+/priv/plts/

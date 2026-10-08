@@ -1,4 +1,28 @@
-# Release scripts run inside Linux containers: keep LF line endings even
-# when core.autocrlf is enabled on Windows checkouts.
+# Normalize line endings: store LF in the repository and check out LF on
+# every platform, so `mix format --check-formatted` and diffs behave the same
+# on Windows (core.autocrlf=true) as on Linux CI.
+* text=auto eol=lf
+
+# Windows-only scripts keep CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary assets.
+*.ico binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.eot binary
+*.pdf binary
+*.zip binary
+*.gz binary
+
+# Release scripts run inside Linux containers (also covered by the default
+# above; kept explicit so they stay LF even if the default changes).
 *.sh text eol=lf
 rel/overlays/bin/* text eol=lf

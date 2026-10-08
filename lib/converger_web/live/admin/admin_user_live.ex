@@ -15,9 +15,7 @@ defmodule ConvergerWeb.Admin.AdminUserLive do
   end
 
   def handle_event("save", %{"admin_user" => params}, socket) do
-    if not can_manage_users?(socket) do
-      {:noreply, put_flash(socket, :error, "Only super_admin can create admin users.")}
-    else
+    if can_manage_users?(socket) do
       case Accounts.create_admin_user(params, build_actor(socket)) do
         {:ok, _user} ->
           {:noreply,
@@ -31,13 +29,13 @@ defmodule ConvergerWeb.Admin.AdminUserLive do
         {:error, changeset} ->
           {:noreply, assign(socket, form: to_form(changeset))}
       end
+    else
+      {:noreply, put_flash(socket, :error, "Only super_admin can create admin users.")}
     end
   end
 
   def handle_event("toggle_status", %{"id" => id}, socket) do
-    if not can_manage_users?(socket) do
-      {:noreply, put_flash(socket, :error, "Only super_admin can manage admin users.")}
-    else
+    if can_manage_users?(socket) do
       user = Accounts.get_admin_user!(id)
       new_status = if user.status == "active", do: "inactive", else: "active"
 
@@ -50,29 +48,35 @@ defmodule ConvergerWeb.Admin.AdminUserLive do
         {:error, _} ->
           {:noreply, put_flash(socket, :error, "Failed to update status")}
       end
+    else
+      {:noreply, put_flash(socket, :error, "Only super_admin can manage admin users.")}
     end
   end
 
   def handle_event("delete", %{"id" => id}, socket) do
-    if not can_manage_users?(socket) do
-      {:noreply, put_flash(socket, :error, "Only super_admin can delete admin users.")}
-    else
+    if can_manage_users?(socket) do
       user = Accounts.get_admin_user!(id)
 
       # Prevent deleting yourself
       if user.id == socket.assigns.current_admin_user.id do
         {:noreply, put_flash(socket, :error, "You cannot delete your own account.")}
       else
-        case Accounts.delete_admin_user(user, build_actor(socket)) do
-          {:ok, _} ->
-            {:noreply,
-             assign(socket, admin_users: Accounts.list_admin_users())
-             |> put_flash(:info, "Admin user deleted")}
-
-          {:error, _} ->
-            {:noreply, put_flash(socket, :error, "Failed to delete admin user")}
-        end
+        delete_admin_user(socket, user)
       end
+    else
+      {:noreply, put_flash(socket, :error, "Only super_admin can delete admin users.")}
+    end
+  end
+
+  defp delete_admin_user(socket, user) do
+    case Accounts.delete_admin_user(user, build_actor(socket)) do
+      {:ok, _} ->
+        {:noreply,
+         assign(socket, admin_users: Accounts.list_admin_users())
+         |> put_flash(:info, "Admin user deleted")}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Failed to delete admin user")}
     end
   end
 

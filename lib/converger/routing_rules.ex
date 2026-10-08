@@ -7,11 +7,11 @@ defmodule Converger.RoutingRules do
   """
 
   import Ecto.Query, warn: false
-  alias Ecto.Multi
-  alias Converger.Repo
-  alias Converger.RoutingRules.RoutingRule
   alias Converger.AuditLogs
   alias Converger.AuditLogs.Changes
+  alias Converger.Repo
+  alias Converger.RoutingRules.RoutingRule
+  alias Ecto.Multi
 
   def list_routing_rules do
     RoutingRule
@@ -238,7 +238,7 @@ defmodule Converger.RoutingRules do
 
     all_ids = [source_id | target_ids] |> Enum.reject(&is_nil/1)
 
-    if tenant_id && length(all_ids) > 0 do
+    if tenant_id && all_ids != [] do
       count =
         from(c in Converger.Channels.Channel,
           where: c.id in ^all_ids and c.tenant_id == ^tenant_id,

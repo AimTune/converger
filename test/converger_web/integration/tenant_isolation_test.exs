@@ -4,7 +4,6 @@ defmodule ConvergerWeb.Integration.TenantIsolationTest do
   import Converger.TenantsFixtures
   import Converger.ChannelsFixtures
   import Converger.ConversationsFixtures
-  alias Converger.Conversations
 
   setup %{conn: conn} do
     # Tenant A

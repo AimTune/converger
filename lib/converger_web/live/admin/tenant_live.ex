@@ -14,21 +14,45 @@ defmodule ConvergerWeb.Admin.TenantLive do
        tenants: list_tenants(),
        page_title: "Tenants",
        form: to_form(Tenants.change_tenant(%Tenant{})),
+       revealed_key: nil,
        actor: actor
      )}
   end
 
   def handle_event("save", %{"tenant" => params}, socket) do
     case Tenants.create_tenant(params, socket.assigns.actor) do
-      {:ok, _tenant} ->
+      {:ok, tenant} ->
         {:noreply,
          socket
          |> put_flash(:info, "Tenant created")
-         |> assign(tenants: list_tenants(), form: to_form(Tenants.change_tenant(%Tenant{})))}
+         |> assign(
+           tenants: list_tenants(),
+           form: to_form(Tenants.change_tenant(%Tenant{})),
+           revealed_key: reveal(tenant)
+         )}
 
       {:error, changeset} ->
         {:noreply, assign(socket, form: to_form(changeset))}
     end
+  end
+
+  def handle_event("rotate_api_key", %{"id" => id}, socket) do
+    tenant = Tenants.get_tenant!(id)
+
+    case Tenants.rotate_api_key(tenant, actor: socket.assigns.actor) do
+      {:ok, rotated} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "API key rotated")
+         |> assign(tenants: list_tenants(), revealed_key: reveal(rotated))}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Failed to rotate API key")}
+    end
+  end
+
+  def handle_event("dismiss_key", _params, socket) do
+    {:noreply, assign(socket, revealed_key: nil)}
   end
 
   def handle_event("toggle_status", %{"id" => id}, socket) do
@@ -60,6 +84,18 @@ defmodule ConvergerWeb.Admin.TenantLive do
          )}
     end
   end
+
+  # The plaintext key only exists on the struct returned right after
+  # creation/rotation; it is kept in the socket until dismissed.
+  defp reveal(%Tenant{api_key: key} = tenant) when is_binary(key) do
+    %{
+      tenant_name: tenant.name,
+      key: key,
+      previous_expires_at: tenant.previous_api_key_expires_at
+    }
+  end
+
+  defp reveal(_), do: nil
 
   defp list_tenants do
     Tenants.list_tenants() |> Enum.sort_by(& &1.inserted_at, :desc)
@@ -97,6 +133,21 @@ defmodule ConvergerWeb.Admin.TenantLive do
       </.form>
     </div>
 
+    <div
+      :if={@revealed_key}
+      id="revealed-api-key"
+      class="card"
+      style="border-left: 4px solid #f0ad4e;"
+    >
+      <h3>API key for <%= @revealed_key.tenant_name %></h3>
+      <p>Copy this key now. It is stored hashed and will not be shown again.</p>
+      <code style="display: block; padding: 8px; background: #f6f8fa; word-break: break-all;"><%= @revealed_key.key %></code>
+      <p :if={@revealed_key.previous_expires_at} style="font-size: 0.85em; color: #666;">
+        The previous key stays valid until <%= Calendar.strftime(@revealed_key.previous_expires_at, "%Y-%m-%d %H:%M UTC") %>.
+      </p>
+      <button phx-click="dismiss_key">I have saved the key</button>
+    </div>
+
     <div class="card">
       <table>
         <thead>
@@ -113,7 +164,7 @@ defmodule ConvergerWeb.Admin.TenantLive do
           <tr :for={tenant <- @tenants}>
             <td><small><%= tenant.id %></small></td>
             <td><%= tenant.name %></td>
-            <td><code style="font-size: 0.8em;"><%= tenant.api_key %></code></td>
+            <td><code style="font-size: 0.8em;"><%= Tenant.masked_api_key(tenant) %></code></td>
             <td>
               <span :if={tenant.alert_webhook_url && tenant.alert_webhook_url != ""} style="font-size: 0.8em; color: #666;" title={tenant.alert_webhook_url}>
                 <%= String.slice(tenant.alert_webhook_url, 0, 40) %><%= if String.length(tenant.alert_webhook_url) > 40, do: "..." %>
@@ -128,6 +179,14 @@ defmodule ConvergerWeb.Admin.TenantLive do
             <td>
               <button phx-click="toggle_status" phx-value-id={tenant.id} class="badge">
                 <%= if tenant.status == "active", do: "Disable", else: "Enable" %>
+              </button>
+              <button
+                phx-click="rotate_api_key"
+                phx-value-id={tenant.id}
+                phx-confirm="Generate a new API key? The current key stays valid for a grace period."
+                class="badge"
+              >
+                Rotate key
               </button>
               <button phx-click="delete" phx-value-id={tenant.id} phx-confirm="Are you sure?" class="badge badge-inactive">
                 Delete

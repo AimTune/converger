@@ -77,7 +77,7 @@ See [TLS, HSTS and WebSocket origins](#tls-hsts-and-websocket-origins).
 | Variable | Default | Description |
 | --- | --- | --- |
 | `DNS_CLUSTER_QUERY` | unset | DNS name queried by `DNSCluster` to discover and connect other nodes (prod only). Clustering is disabled when unset. |
-| `PROMETHEUS_PORT` | `9568` | Port of the Prometheus metrics exporter. |
+| `PROMETHEUS_PORT` | `9568` | Port of the Prometheus metrics exporter. Not started in `test` unless set. |
 
 ### OpenTelemetry tracing
 

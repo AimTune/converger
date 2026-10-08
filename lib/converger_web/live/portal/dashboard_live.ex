@@ -1,10 +1,10 @@
 defmodule ConvergerWeb.Portal.DashboardLive do
   use ConvergerWeb, :live_view
 
-  alias Converger.Repo
+  alias Converger.Activities.Activity
   alias Converger.Channels.Channel
   alias Converger.Conversations.Conversation
-  alias Converger.Activities.Activity
+  alias Converger.Repo
 
   import Ecto.Query
 

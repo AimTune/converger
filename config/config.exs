@@ -29,6 +29,17 @@ config :converger, Converger.Repo,
   migration_lock: :pg_advisory_lock,
   migration_advisory_lock_retry_interval_ms: 1_000
 
+# File uploads / attachments. Backends, CDN options and env vars are
+# documented in docs/storage.md; production values come from runtime.exs.
+config :converger, Converger.Uploads,
+  storage: Converger.Uploads.LocalStorage,
+  # Not under priv/static: files are only served through the authenticated
+  # GET /api/v1/converger/attachments/:id endpoint.
+  storage_opts: [dir: "priv/uploads"],
+  max_file_size: 10 * 1024 * 1024,
+  signed_url_ttl: 300,
+  cdn: nil
+
 # Configures the endpoint
 config :converger, ConvergerWeb.Endpoint,
   url: [host: "localhost"],
