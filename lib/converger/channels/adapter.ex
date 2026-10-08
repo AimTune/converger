@@ -32,7 +32,23 @@ defmodule Converger.Channels.Adapter do
   @callback parse_status_update(channel, params :: map()) ::
               {:ok, [map()]} | :ignore | {:error, term()}
 
-  @optional_callbacks [parse_status_update: 2]
+  @doc """
+  Verify the signature of an inbound webhook request using the provider's
+  native scheme (e.g. WhatsApp Meta's `X-Hub-Signature-256`).
+
+  Receives the channel, the request headers (lowercase names) and the raw
+  request body. Must return one of the results documented in
+  `Converger.Channels.InboundSignature`: `:ok`, `:legacy`, `:missing` or
+  `{:error, reason}`. Adapters that do not implement it fall back to the
+  generic `x-converger-signature` scheme.
+  """
+  @callback verify_inbound_signature(
+              channel,
+              headers :: [{String.t(), String.t()}],
+              raw_body :: binary() | nil
+            ) :: :ok | :legacy | :missing | {:error, term()}
+
+  @optional_callbacks [parse_status_update: 2, verify_inbound_signature: 3]
 
   @callback supported_modes() :: [String.t()]
 
@@ -78,6 +94,27 @@ defmodule Converger.Channels.Adapter do
           mod.parse_status_update(channel, params)
         else
           :ignore
+        end
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
+  @doc """
+  Verify an inbound webhook signature with the channel's adapter, falling
+  back to the generic `x-converger-signature` scheme.
+  """
+  def verify_inbound_signature(%{type: type} = channel, headers, raw_body) do
+    case adapter_for(type) do
+      {:ok, mod} ->
+        Code.ensure_loaded(mod)
+
+        if function_exported?(mod, :verify_inbound_signature, 3) do
+          # apply/3 because the callback is optional and not every adapter defines it
+          apply(mod, :verify_inbound_signature, [channel, headers, raw_body])
+        else
+          Converger.Channels.InboundSignature.verify(channel, headers, raw_body)
         end
 
       {:error, _} = err ->
