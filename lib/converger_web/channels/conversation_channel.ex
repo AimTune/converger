@@ -24,24 +24,36 @@ defmodule ConvergerWeb.ConversationChannel do
 
   @impl true
   def handle_in("new_activity", payload, socket) do
-    tenant_id = socket.assigns.claims["tenant_id"]
-    conversation_id = socket.assigns.claims["conversation_id"]
+    claims = socket.assigns.claims
 
-    activity_params =
-      payload
-      |> Map.put("tenant_id", tenant_id)
-      |> Map.put("conversation_id", conversation_id)
-      |> Map.put_new("sender", "user")
+    # Only client fields are taken from the payload; the sender is the
+    # authenticated token subject, never client-supplied.
+    system_attrs = %{
+      tenant_id: claims["tenant_id"],
+      conversation_id: claims["conversation_id"],
+      sender: claims["sub"] || "user"
+    }
 
     # The pipeline (run by create_activity) is the only delivery path: it
     # applies middleware, tracks deliveries, retries and fans out via routing rules.
-    case Activities.create_activity(activity_params) do
+    case Activities.create_client_activity(payload, system_attrs) do
       {:ok, _activity} ->
         {:reply, :ok, socket}
 
-      {:error, _changeset} ->
+      {:error, %Ecto.Changeset{} = changeset} ->
+        {:reply, {:error, %{reason: "invalid_activity", errors: errors(changeset)}}, socket}
+
+      {:error, _reason} ->
         {:reply, {:error, %{reason: "invalid_activity"}}, socket}
     end
+  end
+
+  defp errors(changeset) do
+    Ecto.Changeset.traverse_errors(changeset, fn {msg, opts} ->
+      Enum.reduce(opts, msg, fn {key, value}, acc ->
+        String.replace(acc, "%{#{key}}", fn _ -> to_string(value) end)
+      end)
+    end)
   end
 
   @impl true
