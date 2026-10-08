@@ -25,10 +25,10 @@ defmodule Converger.Participants do
 
   import Ecto.Query, warn: false
 
-  alias Converger.Repo
   alias Converger.Activities.Activity
   alias Converger.Conversations.Conversation
   alias Converger.Participants.Participant
+  alias Converger.Repo
 
   def get_participant(id), do: Repo.get(Participant, id)
 

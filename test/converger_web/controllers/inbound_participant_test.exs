@@ -5,10 +5,13 @@ defmodule ConvergerWeb.InboundParticipantTest do
   import Converger.TenantsFixtures
   import Converger.ChannelsFixtures
 
-  alias Converger.{Channels, Conversations, Participants, Repo}
   alias Converger.Activities.Activity
+  alias Converger.Channels
   alias Converger.Channels.InboundSignature
+  alias Converger.Conversations
   alias Converger.Conversations.Conversation
+  alias Converger.Participants
+  alias Converger.Repo
 
   @app_secret "meta-app-secret-participants"
   @phone "16505551234"
