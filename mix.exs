@@ -92,7 +92,7 @@ defmodule Converger.MixProject do
       {:oban_web, "~> 2.13"},
       {:joken, "~> 2.6"},
       {:logger_json, "~> 7.0"},
-      {:phoenix_live_view, "~> 1.1.0"},
+      {:phoenix_live_view, "~> 1.2.12"},
       {:lazy_html, ">= 0.1.0", only: :test},
       {:gettext, "~> 1.0"},
       {:cors_plug, "~> 3.0"},
