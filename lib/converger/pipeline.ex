@@ -99,17 +99,18 @@ defmodule Converger.Pipeline do
     backend().child_specs()
   end
 
-  @doc "Broadcast activity to WebSocket clients via PubSub."
+  @doc """
+  Broadcast activity to WebSocket clients via PubSub.
+
+  The payload is the full canonical activity (`Converger.Activities.Serializer`),
+  so real-time clients see the same data as REST, including attachments,
+  metadata and type.
+  """
   def broadcast(activity) do
     ConvergerWeb.Endpoint.broadcast!(
       "conversation:#{activity.conversation_id}",
       "new_activity",
-      %{
-        id: activity.id,
-        text: activity.text,
-        sender: activity.sender,
-        inserted_at: activity.inserted_at
-      }
+      Converger.Activities.Serializer.canonical(activity)
     )
 
     :ok
