@@ -2,8 +2,12 @@ defmodule Converger.Pipeline.Oban do
   @moduledoc """
   Oban-based pipeline backend.
 
-  Uses persistent Oban jobs for external delivery with retry and exponential backoff.
-  PubSub broadcast is done inline (fast, no persistence needed).
+  Delivery jobs are inserted inside the same database transaction as the
+  activity (transactional outbox), so a committed activity always has its
+  delivery jobs. Jobs are unique per `{activity_id, channel_id}`, so
+  re-processing an activity never duplicates deliveries.
+
+  PubSub broadcast is done after commit (fast, no persistence needed).
 
   Best for: Production use with guaranteed delivery.
 
@@ -15,26 +19,36 @@ defmodule Converger.Pipeline.Oban do
 
   require Logger
 
+  alias Converger.Workers.ActivityDeliveryWorker
+
   @impl true
   def child_specs, do: []
 
   @impl true
-  def process(activity) do
-    Converger.Pipeline.broadcast(activity)
-
-    channels = Converger.Pipeline.resolve_delivery_channels(activity)
-
-    Enum.each(channels, fn channel ->
+  def enqueue(activity) do
+    activity
+    |> Converger.Pipeline.resolve_delivery_channels()
+    |> Enum.reduce_while(:ok, fn channel, :ok ->
       %{activity_id: activity.id, channel_id: channel.id}
-      |> Converger.Workers.ActivityDeliveryWorker.new()
+      |> ActivityDeliveryWorker.new()
       |> Oban.insert()
+      |> case do
+        {:ok, _job} ->
+          Logger.debug("Delivery enqueued via Oban",
+            activity_id: activity.id,
+            channel_id: channel.id
+          )
 
-      Logger.debug("Delivery enqueued via Oban",
-        activity_id: activity.id,
-        channel_id: channel.id
-      )
+          {:cont, :ok}
+
+        {:error, reason} ->
+          {:halt, {:error, {:enqueue_failed, reason}}}
+      end
     end)
+  end
 
-    :ok
+  @impl true
+  def after_commit(activity) do
+    Converger.Pipeline.broadcast(activity)
   end
 end

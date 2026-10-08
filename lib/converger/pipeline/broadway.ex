@@ -55,6 +55,20 @@ defmodule Converger.Pipeline.Broadway do
   - RabbitMQ: `{:broadway_rabbitmq, "~> 0.8"}`
 
   These are NOT included by default. Add them to your mix.exs when needed.
+
+  ## Durability
+
+  This backend is **not durable**. Messages are pushed to the producer after
+  the activity commits, so a crash between commit and push loses the delivery.
+  Use `Converger.Pipeline.Oban` when deliveries must not be lost.
+
+  The `:memory` producer is **dev-only**: it keeps queued messages in process
+  memory and does not acknowledge them, so a restart loses everything queued.
+  It refuses to start in production unless explicitly allowed:
+
+      config :converger, :pipeline,
+        backend: Converger.Pipeline.Broadway,
+        broadway: [producer: :memory, allow_memory_producer_in_prod: true]
   """
 
   @behaviour Converger.Pipeline
@@ -83,8 +97,13 @@ defmodule Converger.Pipeline.Broadway do
     ]
   end
 
+  # Producers live outside the database, so nothing can be enqueued
+  # transactionally. Messages are pushed after commit (not crash-safe).
   @impl true
-  def process(activity) do
+  def enqueue(_activity), do: :ok
+
+  @impl true
+  def after_commit(activity) do
     Converger.Pipeline.broadcast(activity)
 
     channels = Converger.Pipeline.resolve_delivery_channels(activity)
@@ -140,6 +159,7 @@ defmodule Converger.Pipeline.Broadway do
   defp build_producer_config(config) do
     case Keyword.get(config, :producer, :memory) do
       :memory ->
+        ensure_memory_producer_allowed!(config)
         [module: {Converger.Pipeline.Broadway.MemoryProducer, []}]
 
       :kafka ->
@@ -175,6 +195,20 @@ defmodule Converger.Pipeline.Broadway do
         custom_config = Keyword.get(config, :custom, [])
         [module: Keyword.fetch!(custom_config, :broadway_producer)]
     end
+  end
+
+  @doc false
+  def ensure_memory_producer_allowed!(config, env \\ Application.get_env(:converger, :env)) do
+    if env == :prod and not Keyword.get(config, :allow_memory_producer_in_prod, false) do
+      raise ArgumentError, """
+      the Broadway :memory producer is not durable and refuses to start in production.
+      Use the Oban pipeline backend or a Kafka/RabbitMQ producer, or set
+      `allow_memory_producer_in_prod: true` under `config :converger, :pipeline, broadway: [...]`
+      to accept losing queued deliveries on restart.
+      """
+    end
+
+    :ok
   end
 
   defp pipeline_config do

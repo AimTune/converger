@@ -2,7 +2,11 @@ defmodule Converger.Workers.ActivityDeliveryWorker do
   use Oban.Worker,
     queue: :deliveries,
     max_attempts: 5,
-    priority: 1
+    priority: 1,
+    # One live delivery job per activity/channel pair, forever. Cancelled or
+    # discarded jobs are excluded (default states) so dead deliveries can be
+    # re-enqueued explicitly.
+    unique: [keys: [:activity_id, :channel_id], period: :infinity]
 
   require Logger
 

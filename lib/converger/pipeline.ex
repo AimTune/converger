@@ -9,20 +9,48 @@ defmodule Converger.Pipeline do
   The pipeline backend is configurable:
 
       config :converger, :pipeline,
-        backend: Converger.Pipeline.Oban   # default - persistent job queue
-        # backend: Converger.Pipeline.GenStage  # in-memory with backpressure
-        # backend: Converger.Pipeline.Inline    # synchronous (testing/dev)
+        backend: Converger.Pipeline.Oban      # default - durable job queue
+        # backend: Converger.Pipeline.Broadway  # stream processing, not durable
+        # backend: Converger.Pipeline.Inline    # synchronous (testing/dev), not durable
 
-  All backends receive the same activity struct and handle broadcast + delivery.
+  ## Durability
+
+  Every backend is driven in two phases:
+
+    * `c:enqueue/1` runs **inside** the database transaction that persists the
+      activity. Whatever it writes commits or rolls back together with the
+      activity, so a crash cannot leave an activity without its deliveries.
+    * `c:after_commit/1` runs once the transaction has committed. It handles
+      fire-and-forget work such as the PubSub broadcast.
+
+  | Backend                       | Delivery enqueue          | Durable |
+  | ----------------------------- | ------------------------- | ------- |
+  | `Converger.Pipeline.Oban`     | Oban jobs, in transaction | yes     |
+  | `Converger.Pipeline.Broadway` | pushed after commit       | no      |
+  | `Converger.Pipeline.Inline`   | delivered after commit    | no      |
+
+  Only the Oban backend guarantees that every committed activity has its
+  delivery jobs. Broadway pushes to its producer after commit, so a crash in
+  between loses the delivery. The `:memory` producer also keeps messages in
+  process memory and refuses to start in production (see
+  `Converger.Pipeline.Broadway`).
   """
 
   @type activity :: Converger.Activities.Activity.t()
 
   @doc """
-  Process an activity through the pipeline after persistence.
-  Handles both PubSub broadcast and external channel delivery.
+  Enqueue external deliveries for a freshly inserted activity.
+
+  Called inside the persistence transaction. Returning `{:error, reason}`
+  (or raising) rolls back the activity insert.
   """
-  @callback process(activity) :: :ok | {:error, term()}
+  @callback enqueue(activity) :: :ok | {:error, term()}
+
+  @doc """
+  Called after the persistence transaction has committed. Handles the PubSub
+  broadcast and any non-transactional delivery work.
+  """
+  @callback after_commit(activity) :: :ok
 
   @doc """
   Called on application start. Backends that need supervision (GenStage)
@@ -30,9 +58,40 @@ defmodule Converger.Pipeline do
   """
   @callback child_specs() :: [Supervisor.child_spec()]
 
-  @doc "Dispatch activity to the configured pipeline backend."
+  @doc """
+  Run the in-transaction phase of the configured backend.
+
+  Must be called inside `Converger.Repo.transaction/1`.
+  """
+  def enqueue(activity) do
+    backend().enqueue(activity)
+  end
+
+  @doc "Run the post-commit phase of the configured backend."
+  def after_commit(activity) do
+    backend().after_commit(activity)
+  end
+
+  @doc """
+  (Re-)process an already persisted activity through the pipeline.
+
+  Runs `enqueue/1` in its own transaction, then `after_commit/1`. Safe to call
+  repeatedly: the Oban backend uses unique jobs, so re-processing does not
+  create duplicate deliveries.
+  """
   def process(activity) do
-    backend().process(activity)
+    result =
+      Converger.Repo.transaction(fn ->
+        case enqueue(activity) do
+          :ok -> :ok
+          {:error, reason} -> Converger.Repo.rollback(reason)
+        end
+      end)
+
+    case result do
+      {:ok, :ok} -> after_commit(activity)
+      {:error, reason} -> {:error, reason}
+    end
   end
 
   @doc "Get child specs for the configured backend's supervision tree."
