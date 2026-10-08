@@ -76,9 +76,8 @@ defmodule Converger.Channels.DeliveryError do
         seconds * 1000
 
       _ ->
-        with {:ok, datetime} <- parse_http_date(value) do
-          max(DateTime.diff(datetime, DateTime.utc_now(), :millisecond), 0)
-        else
+        case parse_http_date(value) do
+          {:ok, datetime} -> max(DateTime.diff(datetime, DateTime.utc_now(), :millisecond), 0)
           _ -> nil
         end
     end

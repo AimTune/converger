@@ -23,6 +23,7 @@ defmodule Converger.Pipeline.RetryPolicy do
 
   @backoffs ~w(exponential linear fixed)a
   @keys ~w(max_attempts backoff base_ms max_ms timeout_ms)
+  @atom_keys ~w(max_attempts backoff base_ms max_ms timeout_ms)a
 
   defstruct max_attempts: 5,
             backoff: :exponential,
@@ -49,7 +50,7 @@ defmodule Converger.Pipeline.RetryPolicy do
         :error -> config
       end
 
-    struct(__MODULE__, Keyword.take(config, Enum.map(@keys, &String.to_atom/1)))
+    struct(__MODULE__, Keyword.take(config, @atom_keys))
   end
 
   @doc "Resolve the effective policy for a channel."

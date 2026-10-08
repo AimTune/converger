@@ -135,7 +135,10 @@ defmodule ConvergerWeb.RateLimitingTest do
 
       login = fn password ->
         build_conn()
-        |> Map.put(:remote_ip, {127, 0, 0, 1})
+        # ::1 (also whitelisted for /admin), not 127.0.0.1: the per-IP lockout
+        # this test triggers would otherwise throttle every other admin login
+        # test that runs within the next minute.
+        |> Map.put(:remote_ip, {0, 0, 0, 0, 0, 0, 0, 1})
         |> post(~p"/admin/login", %{"email" => admin.email, "password" => password})
       end
 
