@@ -3,11 +3,10 @@ defmodule ConvergerWeb.ConvergerAPI.TokenController do
 
   alias Converger.Auth.ConvergerToken
 
-  plug ConvergerWeb.Plugs.RateLimit,
-    scope: :ip,
-    key_prefix: "cg_token",
-    limit: 10,
-    scale_ms: 60_000
+  # Limited per channel (the secret's channel for generate, the token's channel
+  # for refresh) rather than per IP, so tenants behind a shared NAT do not
+  # share a bucket.
+  plug ConvergerWeb.Plugs.RateLimit, bucket: :token_generate, scope: :channel
 
   action_fallback ConvergerWeb.FallbackController
 

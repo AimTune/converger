@@ -6,6 +6,8 @@ defmodule ConvergerWeb.ConvergerAPI.UploadController do
 
   require Logger
 
+  plug ConvergerWeb.Plugs.RateLimit, bucket: :upload, scope: :tenant
+
   action_fallback ConvergerWeb.FallbackController
 
   def create(conn, %{"conversation_id" => conversation_id} = params) do

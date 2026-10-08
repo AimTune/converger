@@ -79,6 +79,59 @@ See [TLS, HSTS and WebSocket origins](#tls-hsts-and-websocket-origins).
 | `DNS_CLUSTER_QUERY` | unset | DNS name queried by `DNSCluster` to discover and connect other nodes (prod only). Clustering is disabled when unset. |
 | `PROMETHEUS_PORT` | `9568` | Port of the Prometheus metrics exporter. Not started in `test` unless set. |
 
+### Rate limiting
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `RATE_LIMIT_BACKEND` | `cluster` when `DNS_CLUSTER_QUERY` is set, otherwise `local` | `local`: per-node ETS counters. `cluster`: per-node ETS counters replicated to every connected node over Phoenix PubSub, so limits apply across the cluster. |
+| `RATE_LIMIT_SYNC_INTERVAL_MS` | `100` | How often the `cluster` backend broadcasts counter deltas to the other nodes. |
+
+Default limits (requests per window; rejected requests get `429` with a
+`Retry-After` header and emit `[:converger, :rate_limit, :exceeded]`
+telemetry, exported as `converger_rate_limit_exceeded_count{bucket=...}`):
+
+| Bucket | Default | Counted per | Applies to |
+| --- | --- | --- | --- |
+| `activity_create` | 100 / s | tenant | `POST /api/v1/conversations/:id/activities`, `POST /api/v1/converger/conversations/:id/activities` |
+| `upload` | 10 / s | tenant | `POST /api/v1/converger/conversations/:id/upload` |
+| `inbound` | 500 / s | channel | `POST /api/v1/channels/:id/inbound`, `POST /api/v1/channels/:id/status` |
+| `token_generate` | 10 / min | channel | `POST /api/v1/converger/tokens/generate`, `/tokens/refresh` |
+| `token_create` | 10 / min | client IP | `POST /api/v1/tokens` (legacy, unauthenticated) |
+| `login_ip` | 5 failures / min | client IP | `/admin/login`, `/portal/login` |
+| `login_account` | 5 failures / min | account | `/admin/login`, `/portal/login` |
+
+Defaults can be changed for the whole installation with
+`config :converger, Converger.RateLimit, limits: %{inbound: {1_000, 1_000}}`,
+and per tenant (for the `activity_create`, `upload`, `inbound` and
+`token_generate` buckets) with `Converger.Tenants.update_tenant_limits/3`,
+which stores the override in `tenants.limits`, e.g.
+`%{"inbound" => %{"limit" => 2000, "scale_ms" => 1000}}`. Overrides are cached
+for 30s per node and invalidated cluster-wide when updated.
+
+Login limits count failed attempts only. Once the IP or the account reaches
+the limit, further attempts are rejected before the password is checked until
+the window ends. Anyone who knows an account's identifier can trigger its
+lock; the one-minute window keeps that bounded.
+
+**Backend trade-offs.** Both backends use Hammer 7's fixed-window ETS counters
+with windows aligned to wall-clock time, so a request costs one ETS update and
+no database or network round trip.
+
+- `local` is exact on a single node. Behind a load balancer with N nodes each
+  node counts on its own, so a client can get up to N times the limit.
+- `cluster` needs no extra infrastructure (it uses the Erlang distribution
+  that `DNS_CLUSTER_QUERY` already sets up). Counter deltas are batched and
+  broadcast every `RATE_LIMIT_SYNC_INTERVAL_MS`, so it is eventually
+  consistent: a burst can overshoot by what the other nodes accept within one
+  interval. Counters are in memory: a restarted node starts empty for the
+  current window and catches up from the other nodes' next sync. Node clocks
+  must be NTP-synchronised. Nodes that are not connected (netsplit) fall back
+  to per-node limits.
+- A Redis backend (`hammer_backend_redis`) would give exact global counters at
+  the cost of a Redis round trip per request and another piece of
+  infrastructure; a Postgres-backed counter was rejected because it would add
+  a database write to every request on the paths the limits protect.
+
 ### OpenTelemetry tracing
 
 Trace export is **disabled unless an OTLP endpoint is configured**. When neither

@@ -2,6 +2,8 @@ defmodule ConvergerWeb.TenantSessionController do
   use ConvergerWeb, :controller
 
   alias Converger.Accounts
+  alias Converger.RateLimit.LoginThrottle
+  alias ConvergerWeb.Plugs.RateLimit
 
   def new(conn, _params) do
     if conn.assigns[:current_tenant_user] do
@@ -12,6 +14,25 @@ defmodule ConvergerWeb.TenantSessionController do
   end
 
   def create(conn, %{"email" => email, "password" => password, "tenant_name" => tenant_name}) do
+    account = "tenant:" <> tenant_name <> ":" <> email
+
+    case LoginThrottle.check(conn.remote_ip, account) do
+      :ok ->
+        authenticate(conn, email, password, tenant_name, account)
+
+      {:error, retry_after_ms} ->
+        seconds = RateLimit.retry_after_seconds(retry_after_ms)
+
+        conn
+        |> put_resp_header("retry-after", Integer.to_string(seconds))
+        |> put_status(:too_many_requests)
+        |> render(:new,
+          error_message: "Too many failed login attempts. Try again in #{seconds} seconds."
+        )
+    end
+  end
+
+  defp authenticate(conn, email, password, tenant_name, account) do
     case Accounts.authenticate_tenant_user_by_name(email, password, tenant_name) do
       {:ok, user} ->
         conn
@@ -24,6 +45,7 @@ defmodule ConvergerWeb.TenantSessionController do
         render(conn, :new, error_message: "Your account has been deactivated.")
 
       {:error, :invalid_credentials} ->
+        LoginThrottle.record_failure(conn.remote_ip, account)
         render(conn, :new, error_message: "Invalid tenant, email, or password.")
     end
   end

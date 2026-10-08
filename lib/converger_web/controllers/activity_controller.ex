@@ -7,9 +7,9 @@ defmodule ConvergerWeb.ActivityController do
 
   plug ConvergerWeb.Plugs.TenantAuth
 
-  # plug ConvergerWeb.Plugs.RateLimit,
-  #     [scope: :tenant, key_prefix: "activity_create", limit: 60, scale_ms: 60_000]
-  #      when action in [:create]
+  plug ConvergerWeb.Plugs.RateLimit,
+       [bucket: :activity_create, scope: :tenant]
+       when action in [:create]
 
   action_fallback ConvergerWeb.FallbackController
 

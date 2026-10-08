@@ -21,6 +21,8 @@ defmodule Converger.Tenants.Tenant do
     field :previous_api_key_expires_at, :utc_datetime_usec
     field :status, :string, default: "active"
     field :alert_webhook_url, :string
+    # Rate-limit overrides, see Converger.RateLimit and limits_changeset/2.
+    field :limits, :map, default: %{}
     field :allowed_upload_types, {:array, :string}
 
     timestamps(type: :utc_datetime_usec)
@@ -63,6 +65,48 @@ defmodule Converger.Tenants.Tenant do
   @doc "Generates a new random API key."
   def generate_api_key do
     @api_key_prefix <> (:crypto.strong_rand_bytes(32) |> Base.url_encode64(padding: false))
+  end
+
+  @doc """
+  Changeset for the per-tenant rate-limit overrides.
+
+  `limits` maps a bucket name (see `Converger.RateLimit.tenant_buckets/0`) to
+  `%{"limit" => pos_integer, "scale_ms" => pos_integer}`.
+  """
+  def limits_changeset(tenant, limits) when is_map(limits) do
+    normalized =
+      Map.new(limits, fn {bucket, spec} ->
+        spec = if is_map(spec), do: Map.new(spec, fn {k, v} -> {to_string(k), v} end), else: spec
+        {to_string(bucket), spec}
+      end)
+
+    tenant
+    |> change(limits: normalized)
+    |> validate_change(:limits, fn :limits, value -> validate_limits(value) end)
+  end
+
+  defp validate_limits(limits) do
+    buckets = Converger.RateLimit.tenant_buckets()
+
+    Enum.flat_map(limits, fn {bucket, spec} ->
+      cond do
+        bucket not in buckets ->
+          [limits: "unknown rate limit bucket #{inspect(bucket)}"]
+
+        not match?(
+          %{"limit" => l, "scale_ms" => s}
+          when is_integer(l) and l > 0 and is_integer(s) and s > 0,
+          spec
+        ) ->
+          [limits: "#{bucket} must have a positive integer limit and scale_ms"]
+
+        map_size(spec) != 2 ->
+          [limits: "#{bucket} only accepts limit and scale_ms"]
+
+        true ->
+          []
+      end
+    end)
   end
 
   defp ensure_api_key(changeset) do

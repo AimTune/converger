@@ -79,6 +79,25 @@ if trusted_proxies = System.get_env("TRUSTED_PROXIES") do
     trusted_proxies: trusted_proxies |> String.split(",", trim: true) |> Enum.map(&String.trim/1)
 end
 
+# Rate-limit backend: "local" (per-node counters) or "cluster" (counters
+# replicated between nodes over PubSub). Defaults to "cluster" when node
+# discovery is configured through DNS_CLUSTER_QUERY, otherwise "local".
+rate_limit_backend =
+  case System.get_env("RATE_LIMIT_BACKEND") do
+    nil -> if System.get_env("DNS_CLUSTER_QUERY") in [nil, ""], do: nil, else: :cluster
+    "local" -> :local
+    "cluster" -> :cluster
+    other -> raise "RATE_LIMIT_BACKEND must be \"local\" or \"cluster\", got: #{inspect(other)}"
+  end
+
+if rate_limit_backend && config_env() != :test do
+  config :converger, Converger.RateLimit, backend: rate_limit_backend
+end
+
+if sync_interval = System.get_env("RATE_LIMIT_SYNC_INTERVAL_MS") do
+  config :converger, Converger.RateLimit, sync_interval_ms: String.to_integer(sync_interval)
+end
+
 # OpenTelemetry trace export.
 #
 # Spans are exported over OTLP only when an endpoint is configured through the

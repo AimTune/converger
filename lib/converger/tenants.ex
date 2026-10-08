@@ -164,6 +164,42 @@ defmodule Converger.Tenants do
     end
   end
 
+  @doc """
+  Replaces the tenant's rate-limit overrides (see `Converger.RateLimit`) and
+  drops the cached overrides on every node.
+  """
+  def update_tenant_limits(%Tenant{} = tenant, limits, actor \\ nil) when is_map(limits) do
+    changeset = Tenant.limits_changeset(tenant, limits)
+
+    result =
+      if actor do
+        Multi.new()
+        |> Multi.update(:tenant, changeset)
+        |> Multi.insert(:audit_log, fn %{tenant: updated} ->
+          AuditLogs.build_audit_log_entry(%{
+            actor_type: actor.type,
+            actor_id: actor.id,
+            action: "update",
+            resource_type: "tenant",
+            resource_id: tenant.id,
+            changes: Changes.for_update(tenant, updated)
+          })
+        end)
+        |> Repo.transaction()
+        |> case do
+          {:ok, %{tenant: updated}} -> {:ok, updated}
+          {:error, :tenant, changeset, _} -> {:error, changeset}
+        end
+      else
+        Repo.update(changeset)
+      end
+
+    with {:ok, updated} <- result do
+      Converger.RateLimit.Overrides.invalidate_tenant(updated.id)
+      {:ok, updated}
+    end
+  end
+
   def change_tenant(%Tenant{} = tenant, attrs \\ %{}) do
     Tenant.changeset(tenant, attrs)
   end
