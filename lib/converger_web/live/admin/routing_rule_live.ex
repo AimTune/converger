@@ -1,10 +1,10 @@
 defmodule ConvergerWeb.Admin.RoutingRuleLive do
   use ConvergerWeb, :live_view
 
+  alias Converger.Channels
   alias Converger.RoutingRules
   alias Converger.RoutingRules.RoutingRule
   alias Converger.Tenants
-  alias Converger.Channels
 
   def mount(_params, _session, socket) do
     tenants = Tenants.list_tenants()

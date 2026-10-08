@@ -56,7 +56,7 @@ defmodule Converger.Pipeline do
   Called on application start. Backends that need supervision (GenStage)
   return child specs. Others return an empty list.
   """
-  @callback child_specs() :: [Supervisor.child_spec()]
+  @callback child_specs() :: [Supervisor.child_spec() | {module(), term()} | module()]
 
   @doc """
   Run the in-transaction phase of the configured backend.

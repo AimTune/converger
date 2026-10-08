@@ -1,8 +1,8 @@
 defmodule Converger.Workers.ChannelHealthWorkerTest do
   use Converger.DataCase
 
-  alias Converger.Workers.ChannelHealthWorker
   alias Converger.Channels.Health
+  alias Converger.Workers.ChannelHealthWorker
 
   import Converger.TenantsFixtures
   import Converger.ChannelsFixtures

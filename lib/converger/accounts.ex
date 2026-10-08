@@ -4,11 +4,11 @@ defmodule Converger.Accounts do
   """
 
   import Ecto.Query, warn: false
-  alias Ecto.Multi
-  alias Converger.Repo
   alias Converger.Accounts.{AdminUser, TenantUser}
   alias Converger.AuditLogs
   alias Converger.AuditLogs.Changes
+  alias Converger.Repo
+  alias Ecto.Multi
 
   # --- Admin Users ---
 
