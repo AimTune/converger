@@ -67,7 +67,8 @@ defmodule Converger.AuditLogsIntegrationTest do
       assert log.action == "create"
       assert log.changes["after"]["name"] == "Audited Channel"
       # Secret must NOT be in the audit log
-      refute Map.has_key?(log.changes["after"], "secret")
+      assert log.changes["after"]["secret"] == "[REDACTED]"
+      refute Jason.encode!(log.changes) =~ channel.secret
     end
 
     test "update_channel with actor produces audit log" do
@@ -166,7 +167,9 @@ defmodule Converger.AuditLogsIntegrationTest do
       assert tenant.api_key != nil
 
       [log] = AuditLogs.list_audit_logs()
-      refute Map.has_key?(log.changes["after"], "api_key")
+      assert log.changes["after"]["api_key"] == "[REDACTED]"
+      assert log.changes["after"]["api_key_hash"] == "[REDACTED]"
+      refute Jason.encode!(log.changes) =~ tenant.api_key
     end
 
     test "channel audit log does not contain secret" do
@@ -181,7 +184,110 @@ defmodule Converger.AuditLogsIntegrationTest do
       assert channel.secret != nil
 
       [log] = AuditLogs.list_audit_logs()
-      refute Map.has_key?(log.changes["after"], "secret")
+      assert log.changes["after"]["secret"] == "[REDACTED]"
+      assert log.changes["after"]["secret_hash"] == "[REDACTED]"
+      refute Jason.encode!(log.changes) =~ channel.secret
+    end
+
+    test "WhatsApp channel update audit log contains no token values" do
+      tenant = tenant_fixture()
+
+      {:ok, channel} =
+        Channels.create_channel(%{
+          name: "WA Meta",
+          tenant_id: tenant.id,
+          type: "whatsapp_meta",
+          mode: "duplex",
+          config: %{
+            "phone_number_id" => "1234567890",
+            "access_token" => "EAAG-old-access-token-value",
+            "verify_token" => "old-verify-token-value"
+          }
+        })
+
+      {:ok, _} =
+        Channels.update_channel(
+          channel,
+          %{
+            config: %{
+              "phone_number_id" => "1234567890",
+              "access_token" => "EAAG-new-access-token-value",
+              "verify_token" => "new-verify-token-value"
+            }
+          },
+          @admin_actor
+        )
+
+      [log] = AuditLogs.list_audit_logs(%{"resource_type" => "channel"})
+      encoded = Jason.encode!(log.changes)
+
+      for value <- [
+            "EAAG-old-access-token-value",
+            "EAAG-new-access-token-value",
+            "old-verify-token-value",
+            "new-verify-token-value",
+            channel.secret
+          ] do
+        refute encoded =~ value
+      end
+
+      for side <- ["before", "after"] do
+        config = log.changes[side]["config"]
+        assert config["access_token"] == "[REDACTED]"
+        assert config["verify_token"] == "[REDACTED]"
+        assert config["phone_number_id"] == "1234567890"
+      end
+    end
+
+    test "Infobip api_key and webhook auth headers are redacted" do
+      tenant = tenant_fixture()
+
+      {:ok, _} =
+        Channels.create_channel(
+          %{
+            name: "Infobip",
+            tenant_id: tenant.id,
+            type: "whatsapp_infobip",
+            mode: "duplex",
+            config: %{
+              "base_url" => "https://xyz.api.infobip.com",
+              "api_key" => "infobip-secret-key",
+              "sender" => "4412345"
+            }
+          },
+          @admin_actor
+        )
+
+      {:ok, _} =
+        Channels.create_channel(
+          %{
+            name: "Hook",
+            tenant_id: tenant.id,
+            type: "webhook",
+            config: %{
+              "url" => "https://example.com/hook",
+              "headers" => %{"Authorization" => "Bearer hook-bearer-token"}
+            }
+          },
+          @admin_actor
+        )
+
+      encoded = AuditLogs.list_audit_logs() |> Enum.map(& &1.changes) |> Jason.encode!()
+      refute encoded =~ "infobip-secret-key"
+      refute encoded =~ "hook-bearer-token"
+      assert encoded =~ "https://example.com/hook"
+    end
+
+    test "API key rotation is audited without leaking keys" do
+      tenant = tenant_fixture()
+      {:ok, rotated} = Tenants.rotate_api_key(tenant, actor: @admin_actor)
+
+      [log] = AuditLogs.list_audit_logs(%{"action" => "rotate_api_key"})
+      assert log.resource_id == tenant.id
+      encoded = Jason.encode!(log.changes)
+      refute encoded =~ tenant.api_key
+      refute encoded =~ rotated.api_key
+      assert log.changes["after"]["previous_api_key_hash"] == "[REDACTED]"
     end
   end
 end

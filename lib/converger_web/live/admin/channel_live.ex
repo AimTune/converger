@@ -41,6 +41,7 @@ defmodule ConvergerWeb.Admin.ChannelLive do
        selected_mode: default_mode(supported),
        health_map: health_map,
        transformations: [],
+       revealed_secret: nil,
        page_title: "Channels",
        actor: actor
      )}
@@ -63,7 +64,7 @@ defmodule ConvergerWeb.Admin.ChannelLive do
     params = Map.put(params, "transformations", transformations)
 
     case Channels.create_channel(params, socket.assigns.actor) do
-      {:ok, _channel} ->
+      {:ok, channel} ->
         supported = Adapter.supported_modes(@default_type)
         channels = load_channels(socket.assigns.mode_filter)
 
@@ -77,12 +78,17 @@ defmodule ConvergerWeb.Admin.ChannelLive do
            selected_type: @default_type,
            supported_modes: supported,
            selected_mode: default_mode(supported),
-           transformations: []
+           transformations: [],
+           revealed_secret: %{channel_name: channel.name, secret: channel.secret}
          )}
 
       {:error, changeset} ->
         {:noreply, assign(socket, form: to_form(changeset))}
     end
+  end
+
+  def handle_event("dismiss_secret", _params, socket) do
+    {:noreply, assign(socket, revealed_secret: nil)}
   end
 
   def handle_event("form_changed", params, socket) do
@@ -291,13 +297,17 @@ defmodule ConvergerWeb.Admin.ChannelLive do
 
   defp config_detail(%{config: config}) do
     config
+    |> Converger.Secrets.redact()
     |> Enum.reject(fn {_k, v} -> v == "" end)
     |> Enum.map_join("\n", fn {k, v} ->
-      if k in ["access_token", "api_key", "verify_token"],
-        do: "#{k}: ****",
-        else: "#{k}: #{v}"
+      if Converger.Secrets.sensitive_key?(k),
+        do: "#{k}: #{Converger.Secrets.mask(config[k])}",
+        else: "#{k}: #{format_config_value(v)}"
     end)
   end
+
+  defp format_config_value(v) when is_binary(v), do: v
+  defp format_config_value(v), do: inspect(v)
 
   defp config_fields("webhook") do
     [
@@ -335,6 +345,18 @@ defmodule ConvergerWeb.Admin.ChannelLive do
   def render(assigns) do
     ~H"""
     <h1>Channels</h1>
+
+    <div
+      :if={@revealed_secret}
+      id="revealed-channel-secret"
+      class="card"
+      style="border-left: 4px solid #f0ad4e;"
+    >
+      <h3>Secret for <%= @revealed_secret.channel_name %></h3>
+      <p>Copy this channel secret now. It is stored encrypted and will not be shown again.</p>
+      <code style="display: block; padding: 8px; background: #f6f8fa; word-break: break-all;"><%= @revealed_secret.secret %></code>
+      <button phx-click="dismiss_secret">I have saved the secret</button>
+    </div>
 
     <div class="card">
       <h3>Create Channel</h3>

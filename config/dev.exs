@@ -67,3 +67,7 @@ config :swoosh, :api_client, false
 
 # Disable OpenTelemetry span export in dev (no collector running locally)
 config :opentelemetry, traces_exporter: :none
+
+# Deterministic encryption key for local development only.
+# Never use this key outside of development.
+config :converger, Converger.Vault, key: Base.encode64("converger-dev-cloak-key-32bytes!")
