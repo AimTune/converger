@@ -65,20 +65,13 @@ config :converger, Oban,
 config :hammer,
   backend: {Hammer.Backend.ETS, [expiry_ms: 60_000 * 60 * 4, cleanup_interval_ms: 60_000 * 10]}
 
-# Configure OpenTelemetry
+# Configure OpenTelemetry. Span export is disabled by default; config/runtime.exs
+# enables the OTLP exporter when OTEL_EXPORTER_OTLP_ENDPOINT (or
+# OTEL_EXPORTER_OTLP_TRACES_ENDPOINT) is set. OTEL_SERVICE_NAME overrides the
+# service name below. See docs/deployment.md.
 config :opentelemetry,
   resource: %{service: %{name: "converger"}},
-  processors: [
-    {:otel_batch_processor,
-     %{
-       exporter:
-         {:otel_exporter_traces_otlp,
-          %{
-            protocol: :http_protobuf,
-            endpoints: ["http://localhost:4318"]
-          }}
-     }}
-  ]
+  traces_exporter: :none
 
 # Use Jason for JSON parsing in Phoenix
 config :phoenix, :json_library, Jason
