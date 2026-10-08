@@ -7,6 +7,6 @@
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "dependencies": {
-    "phoenix": "^1.7.0"
+    "phoenix": "^1.8.15"
   }
 }
