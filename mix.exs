@@ -86,7 +86,7 @@ defmodule Converger.MixProject do
       {:telemetry_metrics, "~> 1.0"},
       {:telemetry_poller, "~> 1.0"},
       {:jason, "~> 1.2"},
-      {:dns_cluster, "~> 0.2.0"},
+      {:dns_cluster, "~> 0.3.1"},
       {:bandit, "~> 1.12"},
       {:oban, "~> 2.24"},
       {:oban_web, "~> 2.13"},
