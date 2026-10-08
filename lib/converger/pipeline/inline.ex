@@ -5,6 +5,9 @@ defmodule Converger.Pipeline.Inline do
   Executes broadcast and delivery synchronously in the calling process.
   No background jobs, no queuing - useful for testing and development.
 
+  **Not durable**: deliveries run after the activity commits, so a crash in
+  between loses them.
+
       config :converger, :pipeline,
         backend: Converger.Pipeline.Inline
   """
@@ -16,8 +19,13 @@ defmodule Converger.Pipeline.Inline do
   @impl true
   def child_specs, do: []
 
+  # Delivery performs network I/O, so it must not run inside the persistence
+  # transaction. Nothing is enqueued durably: this backend is not crash-safe.
   @impl true
-  def process(activity) do
+  def enqueue(_activity), do: :ok
+
+  @impl true
+  def after_commit(activity) do
     Converger.Pipeline.broadcast(activity)
 
     channels = Converger.Pipeline.resolve_delivery_channels(activity)

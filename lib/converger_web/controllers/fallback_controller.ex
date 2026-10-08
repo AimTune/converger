@@ -49,6 +49,14 @@ defmodule ConvergerWeb.FallbackController do
     |> render(:"403")
   end
 
+  # The activity was rolled back because its deliveries could not be enqueued.
+  # Retrying is safe when an idempotency key is used.
+  def call(conn, {:error, :delivery_enqueue_failed}) do
+    conn
+    |> put_status(:service_unavailable)
+    |> json(%{error: "Activity could not be accepted, please retry"})
+  end
+
   def call(conn, {:error, message}) when is_binary(message) do
     conn
     |> put_status(:bad_request)

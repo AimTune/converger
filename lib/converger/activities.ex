@@ -4,6 +4,7 @@ defmodule Converger.Activities do
   """
 
   import Ecto.Query, warn: false
+  require Logger
   alias Converger.Repo
   alias Converger.Activities.Activity
 
@@ -55,30 +56,30 @@ defmodule Converger.Activities do
         {:ok, activity}
 
       nil ->
-        # 2. Try inserting in a transaction (persistence only)
+        # 2. Persist the activity and enqueue its deliveries in one transaction
+        #    (transactional outbox): either both commit or neither does.
         result =
           Repo.transaction(fn ->
-            %Activity{}
-            |> Activity.changeset(attrs)
-            |> Repo.insert()
-            |> case do
-              {:ok, activity} ->
-                :telemetry.execute([:converger, :activities, :create], %{count: 1}, %{
-                  tenant_id: activity.tenant_id
-                })
-
-                activity
-
-              {:error, changeset} ->
-                Repo.rollback(changeset)
+            with {:ok, activity} <- %Activity{} |> Activity.changeset(attrs) |> Repo.insert(),
+                 :ok <- enqueue_deliveries(activity) do
+              activity
+            else
+              {:error, reason} -> Repo.rollback(reason)
             end
           end)
 
         case result do
           {:ok, activity} ->
-            # 3. Pipeline processing AFTER successful commit
-            Converger.Pipeline.process(activity)
+            :telemetry.execute([:converger, :activities, :create], %{count: 1}, %{
+              tenant_id: activity.tenant_id
+            })
+
+            # 3. Non-durable work (PubSub broadcast etc.) AFTER successful commit
+            Converger.Pipeline.after_commit(activity)
             {:ok, activity}
+
+          {:error, :delivery_enqueue_failed} ->
+            {:error, :delivery_enqueue_failed}
 
           {:error, changeset} ->
             if has_idempotency_error?(changeset) do
@@ -90,6 +91,21 @@ defmodule Converger.Activities do
               {:error, changeset}
             end
         end
+    end
+  end
+
+  defp enqueue_deliveries(activity) do
+    case Converger.Pipeline.enqueue(activity) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        Logger.error("Delivery enqueue failed, rolling back activity",
+          conversation_id: activity.conversation_id,
+          error: inspect(reason)
+        )
+
+        {:error, :delivery_enqueue_failed}
     end
   end
 

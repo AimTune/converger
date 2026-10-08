@@ -5,6 +5,10 @@ defmodule Converger.Pipeline.Broadway.MemoryProducer do
   Used when no external message broker (Kafka/RabbitMQ) is configured.
   Messages are pushed directly from the application process.
 
+  **Dev-only, not durable**: messages live in process memory and `ack/3` is a
+  no-op, so a restart loses every queued delivery. Starting it in production
+  requires `allow_memory_producer_in_prod: true` (see `Converger.Pipeline.Broadway`).
+
       config :converger, :pipeline,
         backend: Converger.Pipeline.Broadway,
         broadway: [producer: :memory]
