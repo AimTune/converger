@@ -82,6 +82,32 @@ defmodule ConvergerWeb.ConversationChannelTest do
     assert_broadcast "new_activity", %{text: "hello folks"}
   end
 
+  test "broadcast carries the full canonical activity", %{
+    socket: socket,
+    conversation: conversation,
+    tenant: tenant
+  } do
+    {:ok, _, _socket} =
+      subscribe_and_join(socket, ConversationChannel, "conversation:#{conversation.id}")
+
+    {:ok, activity} =
+      Converger.Activities.create_activity(%{
+        type: "event",
+        sender: "user-2",
+        text: "with file",
+        attachments: [%{"contentType" => "image/png", "contentUrl" => "https://x/a.png"}],
+        metadata: %{"k" => "v"},
+        tenant_id: tenant.id,
+        conversation_id: conversation.id
+      })
+
+    assert_broadcast "new_activity", payload
+    assert payload == Converger.Activities.Serializer.canonical(activity)
+    assert payload.type == "event"
+    assert [%{"contentUrl" => "https://x/a.png"}] = payload.attachments
+    assert payload.metadata == %{"k" => "v"}
+  end
+
   test "replays missed activities on reconnection", %{conversation: conversation, tenant: tenant} do
     # Create an old activity
     old_activity =

@@ -77,12 +77,8 @@ defmodule ConvergerWeb.ConversationChannel do
       conversation_id
       |> Activities.list_activities_after(last_id)
       |> Enum.each(fn activity ->
-        push(socket, "new_activity", %{
-          id: activity.id,
-          text: activity.text,
-          sender: activity.sender,
-          inserted_at: activity.inserted_at
-        })
+        # Same payload as the live `new_activity` broadcast.
+        push(socket, "new_activity", Converger.Activities.Serializer.canonical(activity))
       end)
     end
 
