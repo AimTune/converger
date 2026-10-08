@@ -105,6 +105,14 @@ Option 3, with these specific choices:
   announced in the changelog; old watermarks keep working for one more release.
 - The turn lock stays with the bot; Converger only relays `busy` and `interrupted`.
 - Two socket stacks and the legacy shapes stay until #23 and the deprecation window ends.
-- Still open, for the owner: the native endpoint path; whether chativa's outgoing `id` should
-  count as a `clientId` for mekik clients; the numbers in the limits table; how agent sockets
-  discover conversations they missed while disconnected.
+- Decided by the owner during review (2026-10-09):
+  - the native endpoint is `wss://HOST/socket/converger/v1`;
+  - the `id` that mekik/1 and chativa clients stamp on outgoing messages counts as the
+    `clientId` when no explicit `clientId` is sent, so unmodified clients get exactly-once
+    persistence and acks (dedupe on `(conversation_id, idempotency_key)`);
+  - the default limits stay as specified (128 KiB frames, 32 unacked sends, 10k replay cap,
+    5,000 conversations per agent socket, 30 s heartbeat, 60 s idle timeout), all configurable;
+  - the message vocabulary follows chativa's names where #68 differed (card actions are
+    `buttons`, the card body is `data.text`).
+- Still open: how agent sockets discover conversations they missed while disconnected
+  (specified as per-conversation watermarks plus REST for now).

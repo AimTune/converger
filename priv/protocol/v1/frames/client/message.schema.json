@@ -21,7 +21,7 @@
       "type": "object",
       "properties": { "id": { "$ref": "../../common.schema.json#/$defs/id" }, "seq": { "$ref": "../../common.schema.json#/$defs/seq" } }
     },
-    "id": { "type": "string" },
+    "id": { "type": "string", "description": "mekik/1 client message id. Used as the clientId (idempotency key, ack) when no clientId is sent and it matches the clientId syntax (section 7)." },
     "timestamp": { "type": "number" }
   },
   "allOf": [
