@@ -34,16 +34,16 @@ Added:
   webhooks. The channel adapters move to it once the open adapter PRs
   (#82, #85, #87) land.
 
-Deferred (`mix hex.outdated`, 2026-10-09):
+Deferred in #56, applied afterwards (Dependabot #95, #97, #98, #99, #101, #103):
 
-| Package | Locked | Latest | Decision |
+| Package | From | To | Notes |
 | --- | --- | --- | --- |
-| `phoenix_live_view` | 1.1.33 | 1.2.12 | #56 targets 1.1. Move to 1.2 together with the UI modernization. |
+| `phoenix_live_view` | 1.1.33 | 1.2.12 | Only breaking change is the trimmed global-attributes list (none used). Layout CDN scripts bumped to 1.2.12 (the version-drift test covers them). |
 | `req` | 0.5.17 | 0.7.5 | Upgraded to 0.7.5 (`~> 0.7`) for the decompression-bomb fix (only in >= 0.6.1), via #92. The webhook adapter and its `Req.Test` stubs pass on 0.7; custom methods are limited to POST/PUT/PATCH (#87). |
-| `gettext` | 0.26.2 | 1.0.2 | Major. The backend API changed (`use Gettext.Backend`). |
-| `logger_json` | 6.2.1 | 7.0.4 | Major. Formatter configuration changed. |
-| `dns_cluster` | 0.2.0 | 0.3.1 | Pre-1.0 minor with changed options. Revisit with the clustering work. |
-| `joken`, `swoosh`, `telemetry_metrics`, `opentelemetry_exporter` | | | Compatible minor updates. Low value right now; left for a routine `mix deps.update`. |
+| `gettext` | 0.26.2 | 1.0.2 | No breaking changes; the backend already uses `use Gettext.Backend`. |
+| `logger_json` | 6.2.1 | 7.0.4 | The `{LoggerJSON.Formatters.Basic, opts}` handler config and `RedactKeys` are unchanged; JSON output and redaction re-verified. |
+| `dns_cluster` | 0.2.0 | 0.3.1 | Adds SRV queries; the `query:` option used here is unchanged. |
+| `joken`, `telemetry_metrics` | 2.6.2, 1.1.0 | 2.7.0, 1.2.0 | Compatible minor updates. |
 
 Already handled elsewhere:
 
