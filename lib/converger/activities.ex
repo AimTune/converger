@@ -78,6 +78,25 @@ defmodule Converger.Activities do
   def get_activity!(id), do: Repo.get!(Activity, id)
 
   @doc """
+  The activity with `idempotency_key` in any conversation of `channel_id`, or
+  nil. Inbound webhooks use it to recognise a re-delivered provider message
+  (provider message ids are unique per channel) before a conversation has
+  been resolved for it.
+  """
+  def get_activity_by_channel_idempotency_key(_channel_id, nil), do: nil
+
+  def get_activity_by_channel_idempotency_key(channel_id, idempotency_key) do
+    from(a in Activity,
+      join: c in Converger.Conversations.Conversation,
+      on: c.id == a.conversation_id,
+      where: c.channel_id == ^channel_id and a.idempotency_key == ^idempotency_key,
+      order_by: [asc: a.inserted_at],
+      limit: 1
+    )
+    |> Repo.one()
+  end
+
+  @doc """
   Create an activity from untrusted client input.
 
   Only `Activity.client_fields/0` are taken from `client_params` (REST body,
