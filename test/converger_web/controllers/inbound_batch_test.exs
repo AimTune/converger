@@ -6,10 +6,11 @@ defmodule ConvergerWeb.InboundBatchTest do
   import Converger.TenantsFixtures
   import Converger.ChannelsFixtures
 
-  alias Converger.{Channels, Repo}
   alias Converger.Activities.Activity
+  alias Converger.Channels
   alias Converger.Channels.InboundSignature
   alias Converger.Conversations.Conversation
+  alias Converger.Repo
 
   @app_secret "meta-app-secret-batch"
 

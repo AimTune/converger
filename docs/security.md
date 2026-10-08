@@ -67,3 +67,52 @@ one instead:
   with an issued certificate can reach the admin UI.
 
 All of these sit in front of the existing admin login and do not replace it.
+
+## HTTPS and forwarded headers
+
+`X-Forwarded-Proto` follows the same rule as `X-Forwarded-For`: it is honoured
+only when the TCP peer is in `TRUSTED_PROXIES`. `ConvergerWeb.Plugs.ForceSSL`
+uses it to decide whether a request arrived over HTTPS, redirects everything
+else to `https://PHX_HOST` and sets HSTS. A client connecting directly cannot
+skip the redirect or fake an HTTPS request by sending the header itself. See
+[docs/deployment.md](deployment.md#tls-hsts-and-websocket-origins) for the
+`FORCE_SSL`, `HSTS_*` and `CHECK_ORIGIN` settings.
+
+## Rotating leaked secrets
+
+Some secrets used to be committed to this repository. They are still in the
+git history, which is **not** rewritten, so treat them as public:
+
+| Secret | Where it was | Since |
+| --- | --- | --- |
+| `SECRET_KEY_BASE` (`hJk3F8xZ...`) | `docker-compose.yml` | commit `8de0819` (2026-02-27) |
+| Demo `CLOAK_KEY` (`Y29udmVyZ2Vy...`) | `docker-compose.yml` in PR #79 | proposed only |
+| Grafana admin password `admin` | `docker-compose.yml` | initial commit |
+| Admin login `admin@converger.local` / `admin123456` | `priv/repo/seeds.exs` | commit `5098e43` |
+
+The release refuses to boot when `SECRET_KEY_BASE` or `CLOAK_KEY` equals one
+of the published values (checked by SHA-256 fingerprint in
+`config/runtime.exs`). If any deployment ever used them, rotate:
+
+1. **`SECRET_KEY_BASE`**: generate a new one (`mix phx.gen.secret`), put it in
+   your secret store and restart all replicas at the same time. Every session
+   cookie and every token signed with the old key (admin/portal sessions,
+   conversation and channel JWTs issued by Converger) becomes invalid: users
+   log in again and clients request new tokens. Anyone who knew the old key
+   could forge sessions and tokens, so also review the audit log
+   (`/admin/audit_logs`) for unexpected admin activity.
+2. **`CLOAK_KEY`** (if the demo key was used): generate a new key, set it as
+   `CLOAK_KEY`, move the old key into `CLOAK_RETIRED_KEYS`, deploy, run
+   `bin/converger eval "Converger.Release.reencrypt_secrets()"`, then remove the
+   retired key. Because the old key was public, also rotate the channel
+   secrets themselves (they could have been decrypted from a database copy).
+3. **Grafana**: set a strong `GF_SECURITY_ADMIN_PASSWORD`. It only applies to a
+   fresh Grafana data directory; on an existing one, change the password in
+   Grafana (or `grafana cli admin reset-admin-password`).
+4. **Seeded admin**: if an `admin@converger.local` / `admin123456` account
+   exists, change its password at `/admin/password` or delete the account and
+   create named admin users. New installations no longer get a fixed password
+   (see [Initial admin account](deployment.md#initial-admin-account)).
+
+Never commit real secrets: keep them in `.env` (gitignored) for compose and in
+your platform's secret store for production.

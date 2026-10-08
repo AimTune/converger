@@ -72,19 +72,20 @@ defmodule Converger.Channels.Adapters.Webhook do
         {:ok, []}
 
       :ignore ->
-        {:ok,
-         [
-           %{
-             "sender" => params["sender"] || params["from"] || "external",
-             "text" => params["text"] || params["message"] || params["body"],
-             "type" => params["type"] || "message",
-             "metadata" => params["metadata"] || %{},
-             "attachments" => params["attachments"] || [],
-             "idempotency_key" => string_or_nil(params["idempotency_key"]),
-             "participant" => participant(params)
-           }
-         ]}
+        {:ok, [inbound_message(params)]}
     end
+  end
+
+  defp inbound_message(params) do
+    %{
+      "sender" => params["sender"] || params["from"] || "external",
+      "text" => params["text"] || params["message"] || params["body"],
+      "type" => params["type"] || "message",
+      "metadata" => params["metadata"] || %{},
+      "attachments" => params["attachments"] || [],
+      "idempotency_key" => string_or_nil(params["idempotency_key"]),
+      "participant" => participant(params)
+    }
   end
 
   # Opt-in participant resolution: with an "external_id" (and no

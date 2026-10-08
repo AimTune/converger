@@ -1,58 +1,83 @@
 defmodule Converger.Uploads.LocalStorage do
   @moduledoc """
-  Local disk storage backend for file uploads.
+  Local disk storage backend, intended for development and single-node
+  setups.
+
+  Files are written below `:dir` (default `"priv/uploads"`), which is **not**
+  served by `Plug.Static`. Downloads go through the authenticated
+  `GET /api/v1/converger/attachments/:id` endpoint.
+
+  Options:
+
+    * `:dir` - base directory (relative paths are resolved against the
+      current working directory)
   """
 
   @behaviour Converger.Uploads.Storage
 
+  @default_dir "priv/uploads"
+
+  # Keys are generated server-side and path_for/2 rejects any key that would
+  # escape the base directory, so the File calls below cannot traverse.
   @impl true
-  def store(filename, binary, opts \\ []) do
-    tenant_id = Keyword.get(opts, :tenant_id, "default")
-    upload_dir = upload_directory(tenant_id)
-    File.mkdir_p!(upload_dir)
-
-    safe_filename = sanitize_filename(filename)
-    unique_name = "#{Ecto.UUID.generate()}_#{safe_filename}"
-    file_path = Path.join(upload_dir, unique_name)
-
-    case File.write(file_path, binary) do
-      :ok ->
-        relative_path = Path.join(["uploads", tenant_id, unique_name])
-        {:ok, %{path: relative_path, url: "/#{relative_path}", size: byte_size(binary)}}
-
-      {:error, reason} ->
-        {:error, reason}
+  # sobelow_skip ["Traversal.FileModule"]
+  def put(config, key, binary, _opts \\ []) do
+    with {:ok, path} <- path_for(config, key),
+         :ok <- File.mkdir_p(Path.dirname(path)) do
+      File.write(path, binary)
     end
   end
 
   @impl true
-  def url(path) do
-    "/#{path}"
-  end
-
-  @impl true
-  def delete(path) do
-    full_path = Path.join(base_directory(), path)
-
-    case File.rm(full_path) do
-      :ok -> :ok
-      {:error, :enoent} -> :ok
-      {:error, reason} -> {:error, reason}
+  # sobelow_skip ["Traversal.FileModule"]
+  def get(config, key) do
+    with {:ok, path} <- path_for(config, key) do
+      case File.read(path) do
+        {:ok, binary} -> {:ok, binary}
+        {:error, :enoent} -> {:error, :not_found}
+        {:error, reason} -> {:error, reason}
+      end
     end
   end
 
-  defp upload_directory(tenant_id) do
-    Path.join([base_directory(), "uploads", tenant_id])
+  @impl true
+  # sobelow_skip ["Traversal.FileModule"]
+  def delete(config, key) do
+    with {:ok, path} <- path_for(config, key) do
+      case File.rm(path) do
+        :ok -> :ok
+        {:error, :enoent} -> :ok
+        {:error, reason} -> {:error, reason}
+      end
+    end
   end
 
-  defp base_directory do
-    Application.get_env(:converger, :upload_dir, "priv/static")
+  @impl true
+  def signed_get_url(_config, _key, _opts), do: {:error, :unsupported}
+
+  @impl true
+  def presigned_put_url(_config, _key, _opts), do: {:error, :unsupported}
+
+  @impl true
+  def local_path(config, key) do
+    with {:ok, path} <- path_for(config, key) do
+      if File.regular?(path), do: {:ok, path}, else: {:error, :not_found}
+    end
   end
 
-  defp sanitize_filename(filename) do
-    filename
-    |> Path.basename()
-    |> String.replace(~r/[^\w\-\.]/, "_")
-    |> String.slice(0, 100)
+  @doc "The absolute base directory for the given config."
+  def base_dir(config), do: config |> Keyword.get(:dir, @default_dir) |> Path.expand()
+
+  # Keys are generated internally, but refuse anything that would escape
+  # the base directory anyway.
+  defp path_for(config, key) do
+    base = base_dir(config)
+    path = Path.expand(key, base)
+
+    if String.starts_with?(path, base <> "/") and not String.contains?(key, "..") do
+      {:ok, path}
+    else
+      {:error, :invalid_key}
+    end
   end
 end

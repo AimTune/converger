@@ -68,13 +68,19 @@ defmodule ConvergerWeb.InboundController do
     end
   end
 
+  # Meta's webhook handshake requires echoing `hub.challenge` verbatim once the
+  # verify token matches.
+  # sobelow_skip ["XSS.SendResp"]
   def verify(conn, %{"channel_id" => channel_id} = params) do
     with {:ok, channel} <- Channels.get_active_channel(channel_id) do
       case channel.type do
         "whatsapp_meta" ->
           verify_token = channel.config["verify_token"]
 
-          if params["hub.verify_token"] == verify_token do
+          provided = params["hub.verify_token"]
+
+          if is_binary(verify_token) and is_binary(provided) and
+               Plug.Crypto.secure_compare(provided, verify_token) do
             send_resp(conn, 200, params["hub.challenge"] || "")
           else
             send_resp(conn, 403, "Verification failed")

@@ -101,7 +101,7 @@ defmodule ConvergerWeb.Admin.AuditLogLive do
             <label style="display: block; font-weight: 600; margin-bottom: 5px; font-size: 0.9em; color: #555;">Action</label>
             <select name="filters[action]" style="padding: 6px; border: 1px solid #ddd; border-radius: 4px;">
               <option value="">All Actions</option>
-              <option :for={a <- ~w(create update delete toggle_status toggle_enabled)} value={a} selected={@filters["action"] == a}>
+              <option :for={a <- ~w(create update delete toggle_status toggle_enabled rotate_api_key)} value={a} selected={@filters["action"] == a}>
                 <%= a %>
               </option>
             </select>

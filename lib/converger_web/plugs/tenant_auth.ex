@@ -1,4 +1,9 @@
 defmodule ConvergerWeb.Plugs.TenantAuth do
+  @moduledoc """
+  Authenticates tenant API requests via the `x-api-key` header or a channel
+  token in `x-channel-token`.
+  """
+
   import Plug.Conn
   import Phoenix.Controller
 

@@ -13,6 +13,7 @@ defmodule Converger.Application do
     children =
       [
         ConvergerWeb.Telemetry,
+        Converger.Vault,
         Converger.Repo,
         {DNSCluster, query: Application.get_env(:converger, :dns_cluster_query) || :ignore},
         {Phoenix.PubSub, name: Converger.PubSub},

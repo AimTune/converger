@@ -123,16 +123,16 @@ defmodule Converger.Pipeline.TransactionalEnqueueTest do
   describe "Broadway memory producer guard" do
     test "refuses to start in prod unless explicitly allowed" do
       assert_raise ArgumentError, ~r/not durable/, fn ->
-        Converger.Pipeline.Broadway.ensure_memory_producer_allowed!([], :prod)
+        Pipeline.Broadway.ensure_memory_producer_allowed!([], :prod)
       end
 
       assert :ok =
-               Converger.Pipeline.Broadway.ensure_memory_producer_allowed!(
+               Pipeline.Broadway.ensure_memory_producer_allowed!(
                  [allow_memory_producer_in_prod: true],
                  :prod
                )
 
-      assert :ok = Converger.Pipeline.Broadway.ensure_memory_producer_allowed!([], :dev)
+      assert :ok = Pipeline.Broadway.ensure_memory_producer_allowed!([], :dev)
     end
   end
 end
