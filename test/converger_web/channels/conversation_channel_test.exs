@@ -90,5 +90,66 @@ defmodule ConvergerWeb.ConversationChannelTest do
     assert_broadcast "new_activity", %{text: "echo me", sender: "user"}
     # Assert broadcast of echo message from bot
     assert_broadcast "new_activity", %{text: "echo me", sender: "bot"}
+    # Exactly one echo, and the echo itself is not echoed again
+    refute_broadcast "new_activity", %{sender: "bot"}
+    assert length(Converger.Activities.list_activities_for_conversation(conversation.id)) == 2
+  end
+
+  describe "delivery through the pipeline" do
+    setup %{tenant: tenant} do
+      previous = Application.get_env(:converger, :webhook_req_options)
+
+      on_exit(fn ->
+        if previous,
+          do: Application.put_env(:converger, :webhook_req_options, previous),
+          else: Application.delete_env(:converger, :webhook_req_options)
+      end)
+
+      Application.put_env(:converger, :webhook_req_options,
+        plug: {Req.Test, __MODULE__},
+        retry: false
+      )
+
+      # Deliveries run in the channel process, not the test process.
+      Req.Test.set_req_test_to_shared()
+      test_pid = self()
+
+      Req.Test.stub(__MODULE__, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        send(test_pid, {:webhook_request, Jason.decode!(body)})
+        Req.Test.json(conn, %{ok: true})
+      end)
+
+      channel =
+        webhook_channel_fixture(tenant, %{
+          transformations: [%{"type" => "add_prefix", "prefix" => "[WS] "}]
+        })
+
+      conversation = conversation_fixture(tenant, channel)
+      {:ok, token, _} = Token.generate_token(conversation, tenant, "user-ws")
+      {:ok, socket} = connect(UserSocket, %{"token" => token})
+
+      {:ok, _, socket} =
+        subscribe_and_join(socket, ConversationChannel, "conversation:#{conversation.id}")
+
+      %{socket: socket, channel: channel}
+    end
+
+    test "one WS message results in exactly one tracked, transformed delivery", %{
+      socket: socket,
+      channel: channel
+    } do
+      ref = push(socket, "new_activity", %{"text" => "hi there"})
+      assert_reply ref, :ok
+
+      assert_receive {:webhook_request, %{"text" => "[WS] hi there", "id" => activity_id}}
+      refute_receive {:webhook_request, _}, 200
+
+      delivery =
+        Converger.Deliveries.get_delivery_for_activity_and_channel(activity_id, channel.id)
+
+      assert delivery.status == "sent"
+      assert delivery.attempts == 1
+    end
   end
 end

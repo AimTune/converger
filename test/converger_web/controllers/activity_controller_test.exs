@@ -35,6 +35,29 @@ defmodule ConvergerWeb.ActivityControllerTest do
       assert json_response(conn, 201)["data"]["tenant_id"] == tenant.id
     end
 
+    test "echo channel replies through the pipeline", %{conn: conn, tenant: tenant} do
+      echo_channel = channel_fixture(tenant, %{type: "echo"})
+      conversation = conversation_fixture(tenant, echo_channel)
+
+      conn =
+        conn
+        |> put_req_header("x-api-key", tenant.api_key)
+        |> post(~p"/api/v1/conversations/#{conversation.id}/activities", %{
+          "sender" => "user-1",
+          "text" => "echo via rest"
+        })
+
+      assert %{"id" => id} = json_response(conn, 201)["data"]
+
+      assert [%{id: ^id, sender: "user-1"}, %{sender: "bot", text: "echo via rest"} = reply] =
+               Converger.Activities.list_activities_for_conversation(conversation.id)
+
+      assert reply.metadata["echo_of"] == id
+
+      assert Converger.Deliveries.get_delivery_for_activity_and_channel(id, echo_channel.id).status ==
+               "sent"
+    end
+
     test "returns 404 when conversation belongs to another tenant", %{conn: conn, tenant: tenant} do
       other_tenant = tenant_fixture()
       other_channel = channel_fixture(other_tenant)
