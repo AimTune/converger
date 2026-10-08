@@ -39,7 +39,7 @@ config :phoenix, :plug_init_mode, :runtime
 config :converger, pipeline: [backend: Converger.Pipeline.Inline]
 
 # Use a different port for metrics in test to avoid conflicts with dev server
-config :converger, :prometheus_port, 9569
+config :converger, :prometheus_port, false
 
 # Disable OpenTelemetry span export in test
 config :opentelemetry, traces_exporter: :none
