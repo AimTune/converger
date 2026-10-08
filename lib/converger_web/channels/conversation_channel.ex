@@ -74,12 +74,26 @@ defmodule ConvergerWeb.ConversationChannel do
     )
 
     if last_id = payload["last_activity_id"] do
-      conversation_id
-      |> Activities.list_activities_after(last_id)
-      |> Enum.each(fn activity ->
+      # Replay is capped at :ws_replay_limit activities. When more are
+      # pending, a `replay_truncated` event carries the id of the last
+      # replayed activity; the client rejoins with it as `last_activity_id`
+      # to continue.
+      {activities, has_more} =
+        Activities.page_activities_since(conversation_id, {:activity_id, last_id},
+          limit: Converger.Pagination.config(:ws_replay_limit)
+        )
+
+      Enum.each(activities, fn activity ->
         # Same payload as the live `new_activity` broadcast.
         push(socket, "new_activity", Converger.Activities.Serializer.canonical(activity))
       end)
+
+      if has_more do
+        push(socket, "replay_truncated", %{
+          has_more: true,
+          last_activity_id: List.last(activities).id
+        })
+      end
     end
 
     {:noreply, socket}

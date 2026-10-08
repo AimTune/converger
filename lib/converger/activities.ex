@@ -13,52 +13,106 @@ defmodule Converger.Activities do
   # inserted (see create_activity/1). Unlike (inserted_at, id) this is strict,
   # gap-free and independent of node clocks.
 
-  def list_activities_for_conversation(conversation_id) do
-    from(a in Activity,
-      where: a.conversation_id == ^conversation_id,
-      order_by: [asc: a.seq]
-    )
-    |> Repo.all()
+  # Every list function here is bounded: the page size defaults to
+  # `:activity_default_limit` and is capped at `:activity_max_limit`
+  # (`config :converger, :pagination`, see Converger.Pagination). Callers that
+  # need to know whether more activities exist use the `page_*` variants,
+  # which return `{activities, has_more}`.
+
+  @doc """
+  The first page of a conversation's activities, oldest first.
+
+  Options: `:limit` (clamped, see `Converger.Pagination.clamp_limit/2`).
+  """
+  def list_activities_for_conversation(conversation_id, opts \\ []) do
+    conversation_id |> page_activities_since(nil, opts) |> elem(0)
   end
 
-  @doc "Activities of a conversation with `seq` greater than `seq`, in order."
-  def list_activities_after_seq(conversation_id, seq) when is_integer(seq) do
-    from(a in Activity,
-      where: a.conversation_id == ^conversation_id and a.seq > ^seq,
-      order_by: [asc: a.seq]
-    )
-    |> Repo.all()
+  @doc "Activities of a conversation with `seq` greater than `seq`, in order (one page)."
+  def list_activities_after_seq(conversation_id, seq, opts \\ []) when is_integer(seq) do
+    conversation_id |> page_activities_since({:seq, seq}, opts) |> elem(0)
   end
 
   @doc """
-  Activities after the given activity (by id), in order. Falls back to the
-  whole conversation when the activity is unknown. Kept for clients that
-  resume by activity id (legacy WebSocket, pre-`seq` watermarks).
+  Activities after the given activity (by id), in order (one page). Falls back
+  to the start of the conversation when the activity is unknown. Kept for
+  clients that resume by activity id (legacy WebSocket, pre-`seq` watermarks).
   """
-  def list_activities_after(conversation_id, last_activity_id) do
-    case seq_of(conversation_id, last_activity_id) do
-      nil -> list_activities_for_conversation(conversation_id)
-      seq -> list_activities_after_seq(conversation_id, seq)
-    end
+  def list_activities_after(conversation_id, last_activity_id, opts \\ []) do
+    conversation_id |> page_activities_since({:activity_id, last_activity_id}, opts) |> elem(0)
   end
 
   @doc """
   Activities after a decoded watermark position (see
-  `Converger.ConvergerAPI.Watermark.decode/1`). `nil` means from the start.
+  `Converger.ConvergerAPI.Watermark.decode/1`), one page. `nil` means from the start.
   """
-  def list_activities_since(conversation_id, nil),
-    do: list_activities_for_conversation(conversation_id)
+  def list_activities_since(conversation_id, position, opts \\ []) do
+    conversation_id |> page_activities_since(position, opts) |> elem(0)
+  end
 
-  def list_activities_since(conversation_id, {:seq, seq}),
-    do: list_activities_after_seq(conversation_id, seq)
+  @doc """
+  One page of activities after `position` (`nil`, `{:seq, n}` or
+  `{:activity_id, id}`), oldest first.
 
-  def list_activities_since(conversation_id, {:activity_id, id}),
-    do: list_activities_after(conversation_id, id)
+  Returns `{activities, has_more}`; when `has_more` is true, continue from the
+  `seq` of the last activity returned. An unknown activity id starts from the
+  beginning of the conversation.
+  """
+  def page_activities_since(conversation_id, position, opts \\ []) do
+    limit = Converger.Pagination.clamp_limit(Keyword.get(opts, :limit), :activity)
+
+    query =
+      from(a in Activity,
+        where: a.conversation_id == ^conversation_id,
+        order_by: [asc: a.seq],
+        limit: ^(limit + 1)
+      )
+
+    query =
+      case resolve_position(conversation_id, position) do
+        nil -> query
+        seq -> where(query, [a], a.seq > ^seq)
+      end
+
+    query |> Repo.all() |> Converger.Pagination.split(limit)
+  end
+
+  @doc """
+  The most recent page of a conversation's activities, returned oldest first
+  (for transcript views that open at the latest message).
+
+  Options: `:limit`, and `:before_seq` to load the page preceding an
+  already-loaded activity. Returns `{activities, has_more}` where `has_more`
+  means older activities exist.
+  """
+  def page_recent_activities(conversation_id, opts \\ []) do
+    limit = Converger.Pagination.clamp_limit(Keyword.get(opts, :limit), :activity)
+
+    query =
+      from(a in Activity,
+        where: a.conversation_id == ^conversation_id,
+        order_by: [desc: a.seq],
+        limit: ^(limit + 1)
+      )
+
+    query =
+      case Keyword.get(opts, :before_seq) do
+        seq when is_integer(seq) -> where(query, [a], a.seq < ^seq)
+        _ -> query
+      end
+
+    {newest_first, has_more} = query |> Repo.all() |> Converger.Pagination.split(limit)
+    {Enum.reverse(newest_first), has_more}
+  end
 
   @doc deprecated: "Use list_activities_after/2 or list_activities_after_seq/2"
   def list_activities_after_watermark(conversation_id, watermark_activity_id) do
     list_activities_after(conversation_id, watermark_activity_id)
   end
+
+  defp resolve_position(_conversation_id, nil), do: nil
+  defp resolve_position(_conversation_id, {:seq, seq}) when is_integer(seq), do: seq
+  defp resolve_position(conversation_id, {:activity_id, id}), do: seq_of(conversation_id, id)
 
   defp seq_of(conversation_id, activity_id) do
     case Ecto.UUID.cast(activity_id) do

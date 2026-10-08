@@ -5,8 +5,13 @@ defmodule ConvergerWeb.ConversationJSON do
   @doc """
   Renders a list of conversations.
   """
-  def index(%{conversations: conversations}) do
-    %{data: for(conversation <- conversations, do: data(conversation))}
+  def index(%{conversations: conversations} = assigns) do
+    body = %{data: for(conversation <- conversations, do: data(conversation))}
+
+    case assigns do
+      %{meta: %{} = meta} -> Map.put(body, :meta, meta)
+      _ -> body
+    end
   end
 
   @doc """

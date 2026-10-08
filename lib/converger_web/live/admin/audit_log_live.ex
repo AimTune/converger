@@ -4,59 +4,64 @@ defmodule ConvergerWeb.Admin.AuditLogLive do
   alias Converger.AuditLogs
   alias Converger.Tenants
 
-  @per_page 50
+  @filter_keys ~w(tenant_id actor_type action resource_type)
 
+  # Keyset pagination on (inserted_at, id) with "Load more": unlike OFFSET,
+  # every page costs the same however deep, and no COUNT(*) over the whole
+  # (append-only, ever-growing) table is needed.
   def mount(_params, _session, socket) do
     {:ok,
      assign(socket,
        tenants: Tenants.list_tenants(),
-       filters: %{
-         "tenant_id" => "",
-         "actor_type" => "",
-         "action" => "",
-         "resource_type" => ""
-       },
-       page: 0,
+       filters: default_filters(),
+       next_cursor: nil,
+       has_more: false,
+       loaded_count: 0,
        page_title: "Audit Logs"
      )}
   end
 
+  defp default_filters, do: Map.new(@filter_keys, &{&1, ""})
+
   def handle_params(params, _url, socket) do
-    filters =
-      Map.merge(
-        socket.assigns.filters,
-        Map.take(params, ~w(tenant_id actor_type action resource_type))
-      )
-
-    page = String.to_integer(Map.get(params, "page", "0"))
-
-    audit_logs = AuditLogs.list_audit_logs(filters, limit: @per_page, offset: page * @per_page)
-    total = AuditLogs.count_audit_logs(filters)
+    filters = Map.merge(default_filters(), Map.take(params, @filter_keys))
 
     {:noreply,
-     assign(socket,
-       audit_logs: audit_logs,
-       filters: filters,
-       page: page,
-       total: total,
-       total_pages: max(ceil(total / @per_page), 1)
-     )}
+     socket
+     |> assign(filters: filters)
+     |> load_page(reset: true)}
+  end
+
+  defp load_page(socket, reset: reset) do
+    cursor = if reset, do: nil, else: socket.assigns.next_cursor
+
+    page =
+      case AuditLogs.paginate_audit_logs(socket.assigns.filters, cursor: cursor) do
+        {:ok, page} -> page
+        {:error, :invalid_cursor} -> %Converger.Pagination.Page{}
+      end
+
+    loaded = if reset, do: 0, else: socket.assigns.loaded_count
+
+    socket
+    |> stream(:audit_logs, page.entries, reset: reset)
+    |> assign(
+      next_cursor: page.next_cursor,
+      has_more: page.has_more,
+      loaded_count: loaded + length(page.entries)
+    )
   end
 
   def handle_event("filter", %{"filters" => filters}, socket) do
-    {:noreply, push_patch(socket, to: ~p"/admin/audit_logs?#{filters}")}
+    {:noreply, push_patch(socket, to: ~p"/admin/audit_logs?#{Map.take(filters, @filter_keys)}")}
   end
 
-  def handle_event("prev_page", _, socket) do
-    page = max(0, socket.assigns.page - 1)
-    params = Map.put(socket.assigns.filters, "page", to_string(page))
-    {:noreply, push_patch(socket, to: ~p"/admin/audit_logs?#{params}")}
-  end
-
-  def handle_event("next_page", _, socket) do
-    page = min(socket.assigns.total_pages - 1, socket.assigns.page + 1)
-    params = Map.put(socket.assigns.filters, "page", to_string(page))
-    {:noreply, push_patch(socket, to: ~p"/admin/audit_logs?#{params}")}
+  def handle_event("load_more", _, socket) do
+    if socket.assigns.has_more do
+      {:noreply, load_page(socket, reset: false)}
+    else
+      {:noreply, socket}
+    end
   end
 
   defp action_badge_class("create"), do: "active"
@@ -125,14 +130,6 @@ defmodule ConvergerWeb.Admin.AuditLogLive do
     </div>
 
     <div class="card">
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-        <span style="color: #666; font-size: 0.9em;"><%= @total %> entries found</span>
-        <div style="display: flex; gap: 8px; align-items: center;">
-          <button :if={@page > 0} phx-click="prev_page" style="font-size: 0.85em;">Prev</button>
-          <span style="padding: 5px 10px; color: #666; font-size: 0.9em;">Page <%= @page + 1 %> of <%= @total_pages %></span>
-          <button :if={@page < @total_pages - 1} phx-click="next_page" style="font-size: 0.85em;">Next</button>
-        </div>
-      </div>
 
       <table>
         <thead>
@@ -145,8 +142,8 @@ defmodule ConvergerWeb.Admin.AuditLogLive do
             <th>Changes</th>
           </tr>
         </thead>
-        <tbody>
-          <tr :for={log <- @audit_logs}>
+        <tbody id="audit-logs" phx-update="stream">
+          <tr :for={{dom_id, log} <- @streams.audit_logs} id={dom_id}>
             <td style="white-space: nowrap;"><small><%= format_timestamp(log.inserted_at) %></small></td>
             <td>
               <span class="badge"><%= log.actor_type %></span>
@@ -164,11 +161,13 @@ defmodule ConvergerWeb.Admin.AuditLogLive do
               <span :if={is_nil(log.changes)} style="color: #999; font-size: 0.85em;">-</span>
             </td>
           </tr>
-          <tr :if={Enum.empty?(@audit_logs)}>
-            <td colspan="6" style="text-align: center; color: #999; padding: 30px;">No audit logs found</td>
-          </tr>
         </tbody>
       </table>
+      <p :if={@loaded_count == 0} style="text-align: center; color: #999; padding: 30px;">No audit logs found</p>
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;">
+        <span style="color: #666; font-size: 0.9em;">Showing <%= @loaded_count %> entries</span>
+        <button :if={@has_more} id="load-more-audit-logs" phx-click="load_more" style="font-size: 0.85em;">Load more</button>
+      </div>
     </div>
     """
   end

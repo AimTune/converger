@@ -13,7 +13,8 @@ defmodule Converger.Accounts do
   # --- Admin Users ---
 
   def list_admin_users do
-    Repo.all(from u in AdminUser, order_by: [desc: u.inserted_at])
+    from(u in AdminUser, order_by: [desc: u.inserted_at, desc: u.id])
+    |> Converger.Pagination.bounded_all()
   end
 
   def get_admin_user!(id), do: Repo.get!(AdminUser, id)
@@ -205,18 +206,40 @@ defmodule Converger.Accounts do
 
   # --- Tenant Users ---
 
+  @doc """
+  A tenant's users, newest first, under the `lookup_limit` safety cap (the
+  tenant portal's user table). Use `paginate_tenant_users/2` for the
+  cross-tenant admin table.
+  """
   def list_tenant_users(tenant_id) do
     from(u in TenantUser,
       where: u.tenant_id == ^tenant_id,
-      order_by: [desc: u.inserted_at],
-      preload: [:tenant]
+      order_by: [desc: u.inserted_at, desc: u.id]
     )
-    |> Repo.all()
+    |> Converger.Pagination.bounded_all()
+    |> Repo.preload(:tenant)
   end
 
-  def list_all_tenant_users do
-    from(u in TenantUser, order_by: [desc: u.inserted_at], preload: [:tenant])
-    |> Repo.all()
+  @doc "First page of all tenant users, newest first. See `paginate_tenant_users/2`."
+  def list_all_tenant_users(opts \\ []) do
+    {:ok, page} = paginate_tenant_users(%{}, Keyword.delete(opts, :cursor))
+    page.entries
+  end
+
+  @doc """
+  Keyset-paginated tenant users, newest first (`Converger.Pagination.keyset/2`).
+
+  Filters: `"tenant_id"`. Options: `:limit`, `:cursor`.
+  Returns `{:ok, %Converger.Pagination.Page{}}` or `{:error, :invalid_cursor}`.
+  """
+  def paginate_tenant_users(filters \\ %{}, opts \\ []) do
+    query =
+      case Map.get(filters, "tenant_id", Map.get(filters, :tenant_id)) do
+        id when is_binary(id) and id != "" -> from(u in TenantUser, where: u.tenant_id == ^id)
+        _ -> TenantUser
+      end
+
+    Converger.Pagination.keyset(query, Keyword.put(opts, :preload, [:tenant]))
   end
 
   def get_tenant_user!(id) do

@@ -15,17 +15,17 @@ defmodule Converger.RoutingRules do
 
   def list_routing_rules do
     RoutingRule
-    |> order_by([r], asc: r.name)
-    |> Repo.all()
+    |> order_by([r], asc: r.name, asc: r.id)
+    |> Converger.Pagination.bounded_all()
     |> Repo.preload([:tenant, :source_channel])
   end
 
   def list_routing_rules_for_tenant(tenant_id) do
     from(r in RoutingRule,
       where: r.tenant_id == ^tenant_id,
-      order_by: [asc: r.name]
+      order_by: [asc: r.name, asc: r.id]
     )
-    |> Repo.all()
+    |> Converger.Pagination.bounded_all()
   end
 
   def get_routing_rule!(id), do: Repo.get!(RoutingRule, id)

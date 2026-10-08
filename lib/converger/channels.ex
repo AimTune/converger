@@ -10,15 +10,17 @@ defmodule Converger.Channels do
   alias Converger.AuditLogs
   alias Converger.AuditLogs.Changes
 
+  # Channels are operator-managed configuration: listed whole (for tables and
+  # dropdowns) under a hard safety cap, see Converger.Pagination.bounded_all/2.
   def list_channels do
-    Channel
-    |> Repo.all()
+    from(c in Channel, order_by: [asc: c.name, asc: c.id])
+    |> Converger.Pagination.bounded_all()
     |> Repo.preload(:tenant)
   end
 
   def list_channels_for_tenant(tenant_id) do
-    from(c in Channel, where: c.tenant_id == ^tenant_id)
-    |> Repo.all()
+    from(c in Channel, where: c.tenant_id == ^tenant_id, order_by: [asc: c.name, asc: c.id])
+    |> Converger.Pagination.bounded_all()
   end
 
   def get_channel!(id), do: Repo.get!(Channel, id)
