@@ -3,8 +3,8 @@ defmodule Converger.HealthCheckFixtures do
   Test helpers for creating channel health check records.
   """
 
-  alias Converger.Repo
   alias Converger.Channels.HealthCheck
+  alias Converger.Repo
 
   def health_check_fixture(channel, attrs \\ %{}) do
     {:ok, health_check} =

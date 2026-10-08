@@ -26,8 +26,8 @@ defmodule Converger.Conversations do
   Keyset-paginated conversations on `(inserted_at, id)`, newest first by default.
 
   Filters (string or atom keys, `""` ignored): `tenant_id`, `channel_id`,
-  `status`, and `q` (a conversation id; anything that is not a UUID matches
-  nothing). Options: `:limit`, `:cursor`, `:direction` (`:desc` | `:asc`),
+  `status`, `external_id` (the participant's provider id), and `q` (a
+  conversation id; anything that is not a UUID matches nothing). Options: `:limit`, `:cursor`, `:direction` (`:desc` | `:asc`),
   `:preload`. See `Converger.Pagination.keyset/2`.
 
   Returns `{:ok, %Converger.Pagination.Page{}}` or `{:error, :invalid_cursor}`.
@@ -52,8 +52,19 @@ defmodule Converger.Conversations do
       {:channel_id, value}, q when value != "" -> where(q, channel_id: ^value)
       {"status", value}, q when value != "" -> where(q, status: ^value)
       {:status, value}, q when value != "" -> where(q, status: ^value)
+      {"external_id", value}, q when is_binary(value) -> where_external_id(q, value)
+      {:external_id, value}, q when is_binary(value) -> where_external_id(q, value)
       {_, _}, q -> q
     end)
+  end
+
+  # Conversations whose participant (on the conversation's channel) has this
+  # external id, e.g. a WhatsApp phone number.
+  defp where_external_id(query, external_id) do
+    from(c in query,
+      join: p in assoc(c, :participant),
+      where: p.external_id == ^external_id and p.channel_id == c.channel_id
+    )
   end
 
   def get_conversation(id), do: Repo.get(Conversation, id)

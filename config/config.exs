@@ -33,6 +33,28 @@ config :converger, :pagination,
   # (tenants, channels, routing rules, admin users)
   lookup_limit: 1000
 
+# Serialize migration runs with a session-level Postgres advisory lock instead
+# of the default table lock. Concurrent `Converger.Release.migrate/0` calls
+# (e.g. several replicas or init containers starting at once) wait for the
+# lock holder, then find nothing pending, so each migration runs exactly once.
+# Unlike the table lock it also works with `@disable_ddl_transaction`
+# migrations such as `create index(..., concurrently: true)`.
+# Requires a session-mode connection (not PgBouncer transaction pooling).
+config :converger, Converger.Repo,
+  migration_lock: :pg_advisory_lock,
+  migration_advisory_lock_retry_interval_ms: 1_000
+
+# File uploads / attachments. Backends, CDN options and env vars are
+# documented in docs/storage.md; production values come from runtime.exs.
+config :converger, Converger.Uploads,
+  storage: Converger.Uploads.LocalStorage,
+  # Not under priv/static: files are only served through the authenticated
+  # GET /api/v1/converger/attachments/:id endpoint.
+  storage_opts: [dir: "priv/uploads"],
+  max_file_size: 10 * 1024 * 1024,
+  signed_url_ttl: 300,
+  cdn: nil
+
 # Configures the endpoint
 config :converger, ConvergerWeb.Endpoint,
   url: [host: "localhost"],

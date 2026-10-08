@@ -3,10 +3,10 @@ defmodule ConvergerWeb.Admin.ConversationLive do
 
   alias Converger.Repo
 
-  alias Converger.Tenants
-  alias Converger.Channels
   alias Converger.Activities
+  alias Converger.Channels
   alias Converger.Deliveries
+  alias Converger.Tenants
 
   @filter_keys ~w(tenant_id channel_id status q sort per_page)
   @per_page_options [25, 50, 100]

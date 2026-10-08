@@ -44,7 +44,7 @@ In recent stress tests on a live PostgreSQL database:
 ## 🚀 Quick Start
 
 ### Prerequisites
-- Elixir 1.15+
+- Elixir 1.19 / OTP 28 (see `.tool-versions`; the `Dockerfile` uses the same versions)
 - PostgreSQL 14+
 - Docker (optional, for observability stack)
 
@@ -103,8 +103,15 @@ Every list endpoint and admin table is bounded. Page sizes are set in `config :c
 Converger comes pre-configured with a full observability stack. To launch it:
 
 ```bash
-docker-compose up -d
+cp .env.example .env   # then fill in every secret; compose refuses to start without them
+docker compose up -d
 ```
+
+`mix ecto.setup` (and `bin/converger eval "Converger.Release.seed_admin()"` in a
+release) creates the first super admin. Set `ADMIN_EMAIL` / `ADMIN_PASSWORD`, or
+a random password is printed once and must be changed at first login.
+Production setup, migrations, backups and upgrades are covered in
+[docs/deployment.md](docs/deployment.md).
 
 - **Grafana**: `http://localhost:3000` (Dashboards enabled)
 - **Jaeger**: `http://localhost:16686` (Distributed Tracing)
