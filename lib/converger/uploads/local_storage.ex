@@ -17,7 +17,10 @@ defmodule Converger.Uploads.LocalStorage do
 
   @default_dir "priv/uploads"
 
+  # Keys are generated server-side and path_for/2 rejects any key that would
+  # escape the base directory, so the File calls below cannot traverse.
   @impl true
+  # sobelow_skip ["Traversal.FileModule"]
   def put(config, key, binary, _opts \\ []) do
     with {:ok, path} <- path_for(config, key),
          :ok <- File.mkdir_p(Path.dirname(path)) do
@@ -26,6 +29,7 @@ defmodule Converger.Uploads.LocalStorage do
   end
 
   @impl true
+  # sobelow_skip ["Traversal.FileModule"]
   def get(config, key) do
     with {:ok, path} <- path_for(config, key) do
       case File.read(path) do
@@ -37,6 +41,7 @@ defmodule Converger.Uploads.LocalStorage do
   end
 
   @impl true
+  # sobelow_skip ["Traversal.FileModule"]
   def delete(config, key) do
     with {:ok, path} <- path_for(config, key) do
       case File.rm(path) do

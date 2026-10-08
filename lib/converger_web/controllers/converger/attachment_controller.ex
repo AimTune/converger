@@ -41,12 +41,18 @@ defmodule ConvergerWeb.ConvergerAPI.AttachmentController do
     |> redirect(external: url)
   end
 
+  # `path` comes from the storage backend (LocalStorage.path_for/2 confines
+  # it to the upload directory), never from the request.
+  # sobelow_skip ["Traversal.SendFile"]
   defp send_attachment(conn, attachment, {:file, path}) do
     conn
     |> put_file_headers(attachment)
     |> send_file(200, path)
   end
 
+  # Stored bytes are served with nosniff, a sandboxing CSP and a
+  # content-disposition header (see put_file_headers/2).
+  # sobelow_skip ["XSS.SendResp"]
   defp send_attachment(conn, attachment, {:data, data}) do
     conn
     |> put_file_headers(attachment)
@@ -61,6 +67,9 @@ defmodule ConvergerWeb.ConvergerAPI.AttachmentController do
     |> json(%{error: "Attachment storage unavailable"})
   end
 
+  # The content type was sniffed and allow-listed at upload time
+  # (Converger.Uploads.MimeSniffer), not taken from the request.
+  # sobelow_skip ["XSS.ContentType"]
   defp put_file_headers(conn, attachment) do
     conn
     |> put_resp_content_type(attachment.content_type, charset(attachment.content_type))

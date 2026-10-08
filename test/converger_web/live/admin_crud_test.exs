@@ -62,7 +62,11 @@ defmodule ConvergerWeb.Admin.CrudTest do
       %{tenant: tenant}
     end
 
-    test "lists, creates, updates, and deletes channels", %{conn: conn, tenant: tenant, admin: admin} do
+    test "lists, creates, updates, and deletes channels", %{
+      conn: conn,
+      tenant: tenant,
+      admin: admin
+    } do
       conn = admin_conn(conn, admin)
       {:ok, view, _html} = live(conn, ~p"/admin/channels")
 

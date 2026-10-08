@@ -31,6 +31,9 @@ defmodule ConvergerWeb.InboundController do
     end
   end
 
+  # Meta's webhook handshake requires echoing `hub.challenge` verbatim once the
+  # verify token matches.
+  # sobelow_skip ["XSS.SendResp"]
   def verify(conn, %{"channel_id" => channel_id} = params) do
     with {:ok, channel} <- Channels.get_active_channel(channel_id) do
       case channel.type do

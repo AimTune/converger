@@ -28,14 +28,10 @@ defmodule Converger.Pipeline.Broadway.KafkaPush do
     client_id = Keyword.get(config, :client_id, :converger_kafka_client)
 
     case Code.ensure_loaded(:brod) do
-      {:module, :brod} ->
-        apply(:brod, :produce_sync, [
-          client_id,
-          topic,
-          :hash,
-          message.activity_id,
-          Jason.encode!(message)
-        ])
+      # :brod is an optional dependency; calling it through the bound
+      # variable keeps the compiler from flagging an undefined module.
+      {:module, brod} ->
+        brod.produce_sync(client_id, topic, :hash, message.activity_id, Jason.encode!(message))
 
         :ok
 

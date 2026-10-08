@@ -7,8 +7,8 @@ defmodule Converger.AuditLogs do
   """
 
   import Ecto.Query, warn: false
-  alias Converger.Repo
   alias Converger.AuditLogs.AuditLog
+  alias Converger.Repo
 
   def build_audit_log_entry(attrs) do
     %AuditLog{}
