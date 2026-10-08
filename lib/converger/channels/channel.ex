@@ -13,6 +13,7 @@ defmodule Converger.Channels.Channel do
     field :mode, :string, default: "duplex"
     field :secret, Converger.Encrypted.Binary, redact: true
     field :secret_hash, :binary, redact: true
+    field :require_signature, :boolean, default: true
     field :status, :string, default: "active"
 
     field :config, Converger.Encrypted.Map,
@@ -32,11 +33,22 @@ defmodule Converger.Channels.Channel do
   @doc false
   def changeset(channel, attrs) do
     channel
-    |> cast(attrs, [:name, :status, :tenant_id, :type, :mode, :secret, :config, :transformations])
+    |> cast(attrs, [
+      :name,
+      :status,
+      :tenant_id,
+      :type,
+      :mode,
+      :secret,
+      :require_signature,
+      :config,
+      :transformations
+    ])
     |> validate_required([:name, :status, :tenant_id])
     |> validate_inclusion(:type, @channel_types)
     |> validate_inclusion(:mode, @channel_modes)
     |> validate_channel_config()
+    |> validate_signature_config()
     |> validate_mode_compatibility()
     |> validate_transformations()
     |> unique_constraint([:tenant_id, :name])
@@ -52,6 +64,25 @@ defmodule Converger.Channels.Channel do
     case Converger.Channels.Adapter.validate_config(type, config) do
       :ok -> changeset
       {:error, message} -> add_error(changeset, :config, message)
+    end
+  end
+
+  # WhatsApp Meta signs webhooks with the app secret, so a channel that
+  # requires signatures cannot accept anything without it.
+  defp validate_signature_config(changeset) do
+    type = get_field(changeset, :type)
+    config = get_field(changeset, :config) || %{}
+    app_secret = config["app_secret"]
+
+    if type == "whatsapp_meta" and get_field(changeset, :require_signature) == true and
+         (not is_binary(app_secret) or app_secret == "") do
+      add_error(
+        changeset,
+        :config,
+        "whatsapp_meta config missing: app_secret (required when require_signature is true)"
+      )
+    else
+      changeset
     end
   end
 

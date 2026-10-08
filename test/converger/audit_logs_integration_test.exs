@@ -201,7 +201,8 @@ defmodule Converger.AuditLogsIntegrationTest do
           config: %{
             "phone_number_id" => "1234567890",
             "access_token" => "EAAG-old-access-token-value",
-            "verify_token" => "old-verify-token-value"
+            "verify_token" => "old-verify-token-value",
+            "app_secret" => "old-app-secret-value"
           }
         })
 
@@ -212,7 +213,8 @@ defmodule Converger.AuditLogsIntegrationTest do
             config: %{
               "phone_number_id" => "1234567890",
               "access_token" => "EAAG-new-access-token-value",
-              "verify_token" => "new-verify-token-value"
+              "verify_token" => "new-verify-token-value",
+              "app_secret" => "new-app-secret-value"
             }
           },
           @admin_actor
@@ -226,6 +228,8 @@ defmodule Converger.AuditLogsIntegrationTest do
             "EAAG-new-access-token-value",
             "old-verify-token-value",
             "new-verify-token-value",
+            "old-app-secret-value",
+            "new-app-secret-value",
             channel.secret
           ] do
         refute encoded =~ value
@@ -235,6 +239,7 @@ defmodule Converger.AuditLogsIntegrationTest do
         config = log.changes[side]["config"]
         assert config["access_token"] == "[REDACTED]"
         assert config["verify_token"] == "[REDACTED]"
+        assert config["app_secret"] == "[REDACTED]"
         assert config["phone_number_id"] == "1234567890"
       end
     end

@@ -6,6 +6,8 @@ defmodule Converger.Conversations.Conversation do
   @foreign_key_type :binary_id
   schema "conversations" do
     field :status, :string, default: "active"
+    # Highest activity `seq` handed out in this conversation (server-managed).
+    field :last_seq, :integer, default: 0
     field :metadata, :map, default: %{}
 
     belongs_to :tenant, Converger.Tenants.Tenant

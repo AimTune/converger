@@ -26,7 +26,8 @@ defmodule Converger.SecretsAtRestTest do
         config: %{
           "phone_number_id" => "1234567890",
           "access_token" => "EAAG-plaintext-access-token",
-          "verify_token" => "plaintext-verify-token"
+          "verify_token" => "plaintext-verify-token",
+          "app_secret" => "plaintext-app-secret"
         }
       })
 
@@ -41,6 +42,7 @@ defmodule Converger.SecretsAtRestTest do
       assert is_binary(raw.config)
       refute raw.config =~ "EAAG-plaintext-access-token"
       refute raw.config =~ "plaintext-verify-token"
+      refute raw.config =~ "plaintext-app-secret"
       refute raw.config =~ "1234567890"
       assert {:error, _} = Jason.decode(raw.config)
 

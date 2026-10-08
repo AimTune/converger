@@ -71,6 +71,16 @@ The API will be available at `http://localhost:4000`.
 
 ---
 
+## 🔐 Inbound Webhook Signatures
+
+`POST /api/v1/channels/:id/inbound` and `POST /api/v1/channels/:id/status` verify a signature over the raw request body.
+
+- **Generic (webhook, infobip, ...)**: send `x-converger-signature: t=<unix seconds>,v1=<hex HMAC-SHA256("<t>.<raw body>", channel secret)>`. The timestamp must be within 300 seconds of the server clock (`config :converger, :inbound_signature_tolerance_seconds`).
+- **WhatsApp Meta**: Meta's `X-Hub-Signature-256` is verified with the `app_secret` channel config key.
+- Each channel has a `require_signature` flag. It defaults to `true` for new channels: unsigned requests and the legacy `sha256=<hex HMAC(raw body)>` format get `401`. Channels created before this flag existed were migrated with `require_signature: false`. They still accept unsigned or legacy-signed requests and log a deprecation warning. An invalid signature always gets `401`.
+
+---
+
 ## 📊 Observability
 
 Converger comes pre-configured with a full observability stack. To launch it:

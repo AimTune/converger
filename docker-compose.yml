@@ -32,6 +32,7 @@ services:
       PHX_HOST: localhost
       PORT: "4000"
       PROMETHEUS_PORT: "9568"
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
 
   prometheus:
     image: prom/prometheus:latest

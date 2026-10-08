@@ -41,11 +41,17 @@ defmodule ConvergerWeb.Endpoint do
     plug Phoenix.Ecto.CheckRepoStatus, otp_app: :converger
   end
 
+  # Must run before anything that reads conn.remote_ip (AdminAuth, RateLimit).
+  plug ConvergerWeb.Plugs.TrustedProxies
+
   plug Plug.RequestId
   plug Plug.Telemetry, event_prefix: [:phoenix, :endpoint]
 
+  # Origins are resolved on every request (see `cors_origins/0`) so that
+  # `CORS_ORIGINS` set in config/runtime.exs takes effect on releases
+  # without recompiling.
   plug CORSPlug,
-    origin: Application.compile_env(:converger, :cors_origins, ["http://localhost:5500"]),
+    origin: &__MODULE__.cors_origins/0,
     headers: ["x-channel-token", "x-api-key", "authorization"] ++ CORSPlug.defaults()[:headers]
 
   plug Plug.Parsers,
@@ -58,4 +64,11 @@ defmodule ConvergerWeb.Endpoint do
   plug Plug.Head
   plug Plug.Session, @session_options
   plug ConvergerWeb.Router
+
+  @doc """
+  Returns the allowed CORS origins, read from the `:cors_origins` application
+  env at request time (configured via `CORS_ORIGINS` in config/runtime.exs).
+  """
+  @spec cors_origins() :: [String.t()]
+  def cors_origins, do: Application.get_env(:converger, :cors_origins, [])
 end

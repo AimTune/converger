@@ -17,18 +17,21 @@ defmodule ConvergerWeb.ConvergerAPI.ActivityController do
 
       from = params["from"] || %{}
 
-      activity_params = %{
+      client_params = %{
         "type" => params["type"] || "message",
-        "sender" => from["id"] || "user",
         "text" => params["text"],
         "attachments" => params["attachments"] || [],
-        "metadata" => params["channelData"] || params["metadata"] || %{},
+        "metadata" => params["channelData"] || params["metadata"] || %{}
+      }
+
+      system_attrs = %{
+        "sender" => from["id"] || "user",
         "tenant_id" => claims["tenant_id"],
         "conversation_id" => conversation_id,
         "idempotency_key" => idempotency_key
       }
 
-      case Activities.create_activity(activity_params) do
+      case Activities.create_client_activity(client_params, system_attrs) do
         {:ok, activity} ->
           conn
           |> put_status(:ok)
@@ -55,7 +58,7 @@ defmodule ConvergerWeb.ConvergerAPI.ActivityController do
       new_watermark =
         case List.last(activities) do
           nil -> params["watermark"]
-          last -> Watermark.encode(last.id)
+          last -> Watermark.encode(last.seq)
         end
 
       conn
@@ -68,21 +71,10 @@ defmodule ConvergerWeb.ConvergerAPI.ActivityController do
     end
   end
 
-  defp list_from_watermark(conversation_id, nil) do
-    Activities.list_activities_for_conversation(conversation_id)
-  end
-
   defp list_from_watermark(conversation_id, watermark) do
     case Watermark.decode(watermark) do
-      {:ok, nil} ->
-        Activities.list_activities_for_conversation(conversation_id)
-
-      {:ok, activity_id} ->
-        Activities.list_activities_after_watermark(conversation_id, activity_id)
-
-      {:error, _} ->
-        Activities.list_activities_for_conversation(conversation_id)
+      {:ok, position} -> Activities.list_activities_since(conversation_id, position)
+      {:error, _} -> Activities.list_activities_for_conversation(conversation_id)
     end
   end
-
 end
