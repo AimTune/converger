@@ -82,6 +82,13 @@ defmodule ConvergerWeb.Router do
     post "/conversations/:conversation_id/upload", UploadController, :create
   end
 
+  # Attachment downloads: no `accepts ["json"]`, clients ask for image/*, etc.
+  scope "/api/v1/converger", ConvergerWeb.ConvergerAPI do
+    pipe_through [:converger_token_auth]
+
+    get "/attachments/:id", AttachmentController, :show
+  end
+
   # Admin login (IP whitelist protected)
   scope "/admin", ConvergerWeb do
     pipe_through [:browser, :admin_auth, :admin_session]

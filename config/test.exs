@@ -41,5 +41,17 @@ config :converger, pipeline: [backend: Converger.Pipeline.Inline]
 # Use a different port for metrics in test to avoid conflicts with dev server
 config :converger, :prometheus_port, 9569
 
+# Store test uploads in a temp dir (per partition)
+config :converger, Converger.Uploads,
+  storage: Converger.Uploads.LocalStorage,
+  storage_opts: [
+    dir:
+      Path.join(
+        System.tmp_dir!(),
+        "converger_test_uploads#{System.get_env("MIX_TEST_PARTITION")}"
+      )
+  ],
+  max_file_size: 1024 * 1024
+
 # Disable OpenTelemetry span export in test
 config :opentelemetry, traces_exporter: :none

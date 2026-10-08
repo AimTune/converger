@@ -49,7 +49,7 @@ defmodule ConvergerWeb.Endpoint do
     headers: ["x-channel-token", "x-api-key", "authorization"] ++ CORSPlug.defaults()[:headers]
 
   plug Plug.Parsers,
-    parsers: [:urlencoded, :multipart, :json],
+    parsers: [:urlencoded, ConvergerWeb.MultipartParser, :json],
     pass: ["*/*"],
     body_reader: {ConvergerWeb.CacheBodyReader, :read_body, []},
     json_decoder: Phoenix.json_library()
