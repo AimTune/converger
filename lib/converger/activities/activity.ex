@@ -2,6 +2,8 @@ defmodule Converger.Activities.Activity do
   use Ecto.Schema
   import Ecto.Changeset
 
+  @type t :: %__MODULE__{}
+
   @types ~w(message event typing conversationUpdate endOfConversation)
 
   # Fields a client (REST body, WebSocket payload, inbound webhook) may set.

@@ -4,11 +4,11 @@ defmodule Converger.Accounts do
   """
 
   import Ecto.Query, warn: false
-  alias Ecto.Multi
-  alias Converger.Repo
   alias Converger.Accounts.{AdminUser, TenantUser}
   alias Converger.AuditLogs
   alias Converger.AuditLogs.Changes
+  alias Converger.Repo
+  alias Ecto.Multi
 
   # --- Admin Users ---
 
@@ -116,6 +116,91 @@ defmodule Converger.Accounts do
 
   def change_admin_user(%AdminUser{} = user, attrs \\ %{}) do
     AdminUser.changeset(user, attrs)
+  end
+
+  @doc """
+  Changes an admin user's own password after verifying the current one.
+  Clears `must_change_password`. `attrs` takes `"password"` and
+  `"password_confirmation"`.
+  """
+  def change_admin_password(%AdminUser{} = user, current_password, attrs) do
+    changeset = AdminUser.password_changeset(user, attrs)
+
+    if AdminUser.valid_password?(user, current_password) do
+      Multi.new()
+      |> Multi.update(:admin_user, changeset)
+      |> Multi.insert(:audit_log, fn _ ->
+        AuditLogs.build_audit_log_entry(%{
+          actor_type: "admin",
+          actor_id: user.id,
+          action: "update",
+          resource_type: "admin_user",
+          resource_id: user.id,
+          changes: %{"password" => "[changed]"}
+        })
+      end)
+      |> Repo.transaction()
+      |> case do
+        {:ok, %{admin_user: updated}} -> {:ok, updated}
+        {:error, :admin_user, changeset, _} -> {:error, changeset}
+      end
+    else
+      {:error,
+       changeset
+       |> Ecto.Changeset.add_error(:current_password, "is not valid")
+       |> Map.put(:action, :update)}
+    end
+  end
+
+  @doc """
+  Creates the initial `super_admin` if no admin user exists.
+
+  Options:
+
+    * `:email` - defaults to `"admin@converger.local"` when nil or blank.
+    * `:password` - when nil or blank, a random password is generated and the
+      account is flagged `must_change_password`.
+
+  Returns `{:ok, user, :generated | :provided, password}`, `:exists` when
+  admin users already exist, or `{:error, changeset}`.
+  """
+  def bootstrap_super_admin(opts \\ []) do
+    if Repo.exists?(AdminUser) do
+      :exists
+    else
+      email = presence(opts[:email]) || "admin@converger.local"
+
+      {password, source} =
+        if presence(opts[:password]),
+          do: {opts[:password], :provided},
+          else: {generate_password(), :generated}
+
+      %AdminUser{must_change_password: source == :generated}
+      |> AdminUser.registration_changeset(%{
+        email: email,
+        password: password,
+        name: "Super Admin",
+        role: "super_admin"
+      })
+      |> Repo.insert()
+      |> case do
+        {:ok, user} -> {:ok, user, source, password}
+        {:error, changeset} -> {:error, changeset}
+      end
+    end
+  end
+
+  defp presence(value) when is_binary(value) do
+    case String.trim(value) do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  defp presence(_), do: nil
+
+  defp generate_password do
+    :crypto.strong_rand_bytes(18) |> Base.url_encode64(padding: false)
   end
 
   # --- Tenant Users ---

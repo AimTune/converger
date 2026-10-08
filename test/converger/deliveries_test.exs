@@ -57,7 +57,7 @@ defmodule Converger.DeliveriesTest do
 
   describe "apply_status_update/2" do
     test "advances from sent to delivered", %{delivery: delivery, channel: channel} do
-      {:ok, sent} = Deliveries.mark_sent(delivery, %{whatsapp_message_id: "wamid.123"})
+      {:ok, _sent} = Deliveries.mark_sent(delivery, %{whatsapp_message_id: "wamid.123"})
 
       assert {:ok, updated} =
                Deliveries.apply_status_update(channel.id, %{

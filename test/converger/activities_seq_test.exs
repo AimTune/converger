@@ -194,7 +194,9 @@ defmodule Converger.ActivitiesSeqTest do
         Code.require_file("priv/repo/migrations/20261008150000_add_seq_to_activities.exs")
       end
 
-      # apply/3: the migration module is only loaded at runtime.
+      # apply/3: the migration module is only loaded at runtime, so a direct
+      # call would be a compile-time "undefined module" warning.
+      # credo:disable-for-next-line Credo.Check.Refactor.Apply
       @migration |> apply(:backfill_statements, []) |> Enum.each(&Repo.query!/1)
     end
   end

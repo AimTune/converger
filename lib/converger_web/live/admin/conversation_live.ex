@@ -3,10 +3,10 @@ defmodule ConvergerWeb.Admin.ConversationLive do
 
   alias Converger.Repo
 
-  alias Converger.Tenants
-  alias Converger.Channels
   alias Converger.Activities
+  alias Converger.Channels
   alias Converger.Deliveries
+  alias Converger.Tenants
 
   def mount(_params, _session, socket) do
     {:ok,

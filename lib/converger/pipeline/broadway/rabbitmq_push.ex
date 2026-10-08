@@ -30,10 +30,10 @@ defmodule Converger.Pipeline.Broadway.RabbitmqPush do
 
     case Code.ensure_loaded(amqp_conn) do
       {:module, _} ->
-        {:ok, conn} = apply(amqp_conn, :open, [conn_opts])
-        {:ok, chan} = apply(amqp_chan, :open, [conn])
-        apply(amqp_basic, :publish, [chan, "", queue, Jason.encode!(message)])
-        apply(amqp_conn, :close, [conn])
+        {:ok, conn} = amqp_conn.open(conn_opts)
+        {:ok, chan} = amqp_chan.open(conn)
+        amqp_basic.publish(chan, "", queue, Jason.encode!(message))
+        amqp_conn.close(conn)
         :ok
 
       {:error, _} ->
