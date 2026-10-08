@@ -31,6 +31,21 @@ defmodule ConvergerWeb.ConnCase do
     end
   end
 
+  @doc """
+  POSTs `params` as a JSON body signed with the channel secret using the
+  generic `x-converger-signature` scheme (`t=...,v1=...`).
+  """
+  def signed_post(conn, path, channel, params, opts \\ []) do
+    body = Jason.encode!(params)
+    timestamp = Keyword.get(opts, :timestamp, System.system_time(:second))
+    signature = Converger.Channels.InboundSignature.sign(channel.secret, body, timestamp)
+
+    conn
+    |> Plug.Conn.put_req_header("content-type", "application/json")
+    |> Plug.Conn.put_req_header("x-converger-signature", signature)
+    |> Phoenix.ConnTest.dispatch(ConvergerWeb.Endpoint, :post, path, body)
+  end
+
   setup tags do
     Converger.DataCase.setup_sandbox(tags)
     {:ok, conn: Phoenix.ConnTest.build_conn()}

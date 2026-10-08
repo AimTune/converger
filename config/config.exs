@@ -13,7 +13,9 @@ config :converger,
   generators: [timestamp_type: :utc_datetime],
   cors_origins: ["http://127.0.0.1:5500", "http://localhost:5500"],
   admin_ip_whitelist: ["127.0.0.1", "::1"],
-  pipeline: [backend: Converger.Pipeline.Oban]
+  pipeline: [backend: Converger.Pipeline.Oban],
+  # Allowed clock skew for timestamped `x-converger-signature` inbound signatures
+  inbound_signature_tolerance_seconds: 300
 
 # Configures the endpoint
 config :converger, ConvergerWeb.Endpoint,
