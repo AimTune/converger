@@ -1,3 +1,8 @@
+---
+sidebar_label: Client IPs, proxies and admin access
+description: How Converger resolves the client IP behind trusted reverse proxies, the admin IP whitelist, and rotating leaked secrets.
+---
+
 # Security: client IPs, proxies and admin access
 
 ## Client IP behind a reverse proxy

@@ -1,3 +1,8 @@
+---
+sidebar_label: File storage
+description: Attachment uploads, validation, the authenticated download endpoint, and the local, S3, GCS and Azure storage backends with optional CDN.
+---
+
 # File storage and attachments
 
 Files uploaded with `POST /api/v1/converger/conversations/:id/upload` are

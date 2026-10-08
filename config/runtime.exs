@@ -71,6 +71,27 @@ if pagination_overrides != [] do
   config :converger, :pagination, pagination_overrides
 end
 
+# Oban Lifeline: jobs left `executing` by a node that died (SIGKILL, OOM, lost
+# host) are made available again after OBAN_LIFELINE_RESCUE_AFTER_SECONDS
+# (default 30 minutes, config/config.exs), checked every
+# OBAN_LIFELINE_INTERVAL_SECONDS (Oban default 60). Lower values deliver such
+# jobs sooner after a crash, but must stay well above the longest job runtime
+# (webhook deliveries time out after at most ~90 s), or a slow job that is
+# still running is executed twice. See docs/chaos.md.
+lifeline_overrides =
+  for {key, var} <- [
+        rescue_after: "OBAN_LIFELINE_RESCUE_AFTER_SECONDS",
+        interval: "OBAN_LIFELINE_INTERVAL_SECONDS"
+      ],
+      value = System.get_env(var),
+      value not in [nil, ""] do
+    {key, :timer.seconds(String.to_integer(value))}
+  end
+
+if lifeline_overrides != [] do
+  config :converger, :oban_lifeline, lifeline_overrides
+end
+
 # Reverse proxies / load balancers allowed to set X-Forwarded-For
 # (comma-separated IPs or CIDR ranges, e.g. "10.0.0.0/8,fd00::/8").
 # When unset, forwarding headers are ignored and conn.remote_ip is the TCP peer.

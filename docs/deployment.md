@@ -1,3 +1,8 @@
+---
+sidebar_label: Deployment
+description: Environment variables, secrets, TLS/HSTS, migrations, initial admin, backups and the upgrade/rollback runbook for running Converger in production.
+---
+
 # Deployment
 
 Converger ships as a standard Elixir release (see the `Dockerfile`). All
@@ -78,6 +83,19 @@ See [TLS, HSTS and WebSocket origins](#tls-hsts-and-websocket-origins).
 | --- | --- | --- |
 | `DNS_CLUSTER_QUERY` | unset | DNS name queried by `DNSCluster` to discover and connect other nodes (prod only). Clustering is disabled when unset. |
 | `PROMETHEUS_PORT` | `9568` | Port of the Prometheus metrics exporter. Not started in `test` unless set. |
+
+### Background jobs (Oban)
+
+Deliveries are Oban jobs inserted in the same transaction as the activity
+(transactional outbox). A job that was running when its node died
+(`SIGKILL`, OOM kill, lost host) stays `executing` until Oban's Lifeline
+plugin rescues it; only then is the delivery retried. See
+[chaos testing](chaos.md).
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `OBAN_LIFELINE_RESCUE_AFTER_SECONDS` | `1800` (30 min) | Seconds after which a job still `executing` is considered orphaned and made available again. Lower it to re-deliver sooner after a crash, but keep it well above the longest job runtime (a webhook delivery takes at most about 90 s: connect plus receive timeout), or a slow job that is still running is executed a second time. Receivers de-duplicate by `x-converger-delivery-id` either way. |
+| `OBAN_LIFELINE_INTERVAL_SECONDS` | `60` | How often Lifeline looks for orphaned jobs. |
 
 ### Rate limiting
 

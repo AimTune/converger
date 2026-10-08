@@ -1,0 +1,48 @@
+/**
+ * Global Infima overrides for the Converger docs.
+ * Brand colour is a deep teal (#0f766e); several streams converging on a hub.
+ */
+
+:root {
+  --ifm-color-primary: #0f766e;
+  --ifm-color-primary-dark: #0e6a63;
+  --ifm-color-primary-darker: #0d645e;
+  --ifm-color-primary-darkest: #0a524d;
+  --ifm-color-primary-light: #108279;
+  --ifm-color-primary-lighter: #11887e;
+  --ifm-color-primary-lightest: #139a8f;
+  --ifm-code-font-size: 92%;
+  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.08);
+
+  --converger-hero-gradient-start: #042f2e;
+  --converger-hero-gradient-end: #0f766e;
+}
+
+[data-theme="dark"] {
+  --ifm-color-primary: #2dd4bf;
+  --ifm-color-primary-dark: #22c5b0;
+  --ifm-color-primary-darker: #20baa6;
+  --ifm-color-primary-darkest: #1a9989;
+  --ifm-color-primary-light: #4adbc8;
+  --ifm-color-primary-lighter: #57ddcc;
+  --ifm-color-primary-lightest: #7fe6d8;
+  --docusaurus-highlighted-code-line-bg: rgba(255, 255, 255, 0.08);
+
+  --converger-hero-gradient-start: #042f2e;
+  --converger-hero-gradient-end: #115e59;
+}
+
+/* Full-width tables for config and endpoint references. */
+table {
+  display: table;
+  width: 100%;
+}
+
+article header h1 {
+  font-size: 2.4rem;
+}
+
+/* ADR metadata table: no header row. */
+.markdown table thead th:empty {
+  display: none;
+}

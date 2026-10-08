@@ -1,16 +1,16 @@
 ---
-title: "ADR 0026: Converger Protocol v1 is a superset profile of mekik/1"
+title: "ADR-0024: Converger Protocol v1 is a superset profile of mekik/1"
+sidebar_label: "0024 Protocol v1 and mekik/1"
+description: Converger Protocol v1 is identical to mekik/1 wherever mekik/1 defines something and only adds hub-specific frames, so unmodified mekik clients such as chativa's connector-mekik can talk to Converger.
 ---
 
-# ADR 0026: Converger Protocol v1 is a superset profile of mekik/1
-
-- **Status:** Proposed
-- **Date:** 2026-10-09
-- **Issues:** [#21](https://github.com/AimTune/converger/issues/21) (spec),
-  [#63](https://github.com/AimTune/converger/issues/63) (mekik/1 compatibility),
-  [#68](https://github.com/AimTune/converger/issues/68) (rich message vocabulary)
-- **PR:** the pull request that adds `docs/protocol/v1.md`
-- **Spec:** [Converger Protocol v1](../protocol/v1.md), [Rich message vocabulary](../protocol/messages.md)
+| | |
+| --- | --- |
+| **Status** | Accepted |
+| **Date** | 2026-10-08 (decision in #63), 2026-10-09 (spec and owner review) |
+| **Issues** | [#21](https://github.com/AimTune/converger/issues/21) (spec), [#63](https://github.com/AimTune/converger/issues/63) (mekik/1 compatibility), [#68](https://github.com/AimTune/converger/issues/68) (rich message vocabulary) |
+| **Pull request** | [#106](https://github.com/AimTune/converger/pull/106) (`docs/protocol/v1.md`, `docs/protocol/messages.md`, `priv/protocol/v1/`) |
+| **Related** | [ADR-0006](0006-per-conversation-seq-and-opaque-watermarks.md), [ADR-0017](0017-conversation-lifecycle-enforced-under-the-seq-lock.md), [ADR-0018](0018-keyset-pagination.md), [ADR-0020](0020-per-subject-socket-ids-and-presence.md), [ADR-0013](0013-cluster-wide-rate-limiting-with-hammer-and-pubsub.md) |
 
 ## Context
 

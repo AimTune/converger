@@ -13,7 +13,7 @@ Documentation and schemas only; no server behaviour changes.
   its issue.
 - `docs/protocol/messages.md`: the rich message vocabulary (chativa-compatible) and
   the per-channel downgrade matrix.
-- `docs/adr/0026-protocol-v1-superset-of-mekik.md`: the decisions behind the spec.
+- `docs/adr/0024-converger-protocol-v1-as-superset-of-mekik-1.md`: the decisions behind the spec (merged with the ADR from the docs site).
 - JSON Schemas (draft 2020-12) for every frame and message type in `priv/protocol/v1/`,
   with example sessions.
 - `test/protocol/`: conformance suite validating the schemas, the examples in the
@@ -22,6 +22,20 @@ Documentation and schemas only; no server behaviour changes.
 - Announced change: from v3.0 (#22) the watermark becomes the integer `seq` in v1 frames
   and in the REST `activitySet`; the opaque base64url watermarks stay accepted for one
   more release (`docs/protocol/v1.md`, section 6.5).
+
+### Chaos test: kill the node during load (#57)
+
+- New chaos harness (`test/chaos/run.sh`, docs/chaos.md, manual/nightly
+  `Chaos` workflow): SIGKILLs the app container while REST and WebSocket
+  clients send, then verifies zero acked messages lost, no duplicates,
+  gap-free `seq` and complete webhook delivery.
+- Fixed: re-pushing a legacy WebSocket `new_activity` after a lost reply
+  stored the message twice. The push now takes an optional `idempotency_key`
+  (stored as `ws:<sender>:<key>`, unique per conversation) and the `ok` reply
+  carries the activity `id` and `seq`.
+- Added `OBAN_LIFELINE_RESCUE_AFTER_SECONDS` / `OBAN_LIFELINE_INTERVAL_SECONDS`
+  to re-deliver jobs orphaned by a crashed node sooner than the 30 minute
+  default (unchanged).
 
 ### Dependency and platform upgrades (#56)
 

@@ -4,6 +4,18 @@
 
 Converger is a scalable messaging infrastructure built with **Elixir** and **Phoenix Channels**. It enables applications to create isolated conversations, exchange activities, and stream messages in real-time with ultra-low latency.
 
+## Documentation
+
+Full documentation lives at **[converger.aimtune.dev](https://converger.aimtune.dev)**: getting started, concepts,
+architecture, channel adapters, REST and WebSocket APIs, security and operations.
+
+- [Getting started](https://converger.aimtune.dev/getting-started)
+- [Architecture decision records (ADR index)](https://converger.aimtune.dev/adr) ([source](docs/adr/index.md))
+- [Contributing](https://converger.aimtune.dev/contributing): every PR updates the relevant `docs/` pages and adds an
+  ADR for architectural decisions.
+
+The site is built with Docusaurus from [`website/`](website/) and uses [`docs/`](docs/) as its content.
+
 ---
 
 ## ✨ Key Features
@@ -13,7 +25,8 @@ Converger is a scalable messaging infrastructure built with **Elixir** and **Pho
 - **High Performance**: Validated to handle **5,000+ messages/second** on a single node.
 - **Observability Stack**: Built-in support for **OpenTelemetry**, Prometheus, Grafana, Jaeger, and Loki.
 - **Reliability & Safety**:
-    - **Idempotency**: `x-idempotency-key` support to prevent duplicate activities.
+    - **Idempotency**: `x-idempotency-key` header (REST) and `idempotency_key` field on the legacy WebSocket `new_activity` push, so clients can retry after a lost reply without duplicates.
+    - **Crash-tested**: a [chaos test](docs/chaos.md) kills the node under REST + WebSocket load and checks that no acknowledged message is lost.
     - **Transaction Safety**: Atomic persistence before real-time broadcast.
     - **Rate Limiting**: Tenant and IP-level throttling.
 - **Admin Panel**: IP-restricted LiveView interface for managing tenants, channels, and conversations.
