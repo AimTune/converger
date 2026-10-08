@@ -31,13 +31,13 @@ defmodule ConvergerWeb.ActivityController do
     with %Conversations.Conversation{} = conversation <-
            Conversations.get_conversation(conversation_id, tenant.id),
          {:ok, %Activities.Activity{} = activity} <-
-           Activities.create_activity(
-             activity_params
-             |> Map.put("tenant_id", tenant.id)
-             |> Map.put("conversation_id", conversation.id)
-             |> Map.put("idempotency_key", idempotency_key)
-             |> Map.put_new("sender", "user")
-           ) do
+           Activities.create_client_activity(activity_params, %{
+             tenant_id: tenant.id,
+             conversation_id: conversation.id,
+             idempotency_key: idempotency_key,
+             # Server-to-server API (tenant API key): the caller names the sender.
+             sender: sender(activity_params)
+           }) do
       require Logger
 
       Logger.info("Activity created",
@@ -51,4 +51,7 @@ defmodule ConvergerWeb.ActivityController do
       |> render(:show, activity: activity)
     end
   end
+
+  defp sender(%{"sender" => sender}) when is_binary(sender) and sender != "", do: sender
+  defp sender(_params), do: "user"
 end

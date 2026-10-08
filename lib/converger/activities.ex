@@ -49,6 +49,29 @@ defmodule Converger.Activities do
 
   def get_activity!(id), do: Repo.get!(Activity, id)
 
+  @doc """
+  Create an activity from untrusted client input.
+
+  Only `Activity.client_fields/0` are taken from `client_params` (REST body,
+  WebSocket payload, parsed inbound webhook); everything else, such as
+  `inserted_at` or `idempotency_key`, is ignored. Server-controlled fields
+  (`tenant_id`, `conversation_id`, `sender`, `idempotency_key`) come from
+  `system_attrs` only.
+  """
+  def create_client_activity(client_params, system_attrs) when is_map(client_params) do
+    client_keys = Enum.map(Activity.client_fields(), &Atom.to_string/1)
+
+    client_params
+    |> Map.new(fn {k, v} -> {to_string(k), v} end)
+    |> Map.take(client_keys)
+    |> Map.merge(Map.new(system_attrs, fn {k, v} -> {to_string(k), v} end))
+    |> create_activity()
+  end
+
+  @doc """
+  Create an activity from trusted, server-built attributes. Use
+  `create_client_activity/2` for anything that originates from a client.
+  """
   def create_activity(attrs \\ %{}) do
     # 1. Optimistic fetch to avoid transaction poisoning
     case fetch_existing_activity(attrs) do
