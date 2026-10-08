@@ -36,6 +36,9 @@ defmodule Converger.Pipeline do
   `Converger.Pipeline.Broadway`).
   """
 
+  alias Converger.Channels.DeliveryError
+  alias Converger.Pipeline.RetryPolicy
+
   @type activity :: Converger.Activities.Activity.t()
 
   @doc """
@@ -182,6 +185,10 @@ defmodule Converger.Pipeline do
     end
   end
 
+  defp error_message(%DeliveryError{} = error), do: DeliveryError.message(error)
+  defp error_message(reason) when is_binary(reason), do: reason
+  defp error_message(reason), do: inspect(reason)
+
   defp attempt_delivery(delivery, activity, channel) do
     alias Converger.{Deliveries, Channels.Adapter}
     alias Converger.Pipeline.Middleware
@@ -201,8 +208,15 @@ defmodule Converger.Pipeline do
             Deliveries.mark_sent(delivery, response_meta)
             :ok
 
+          # Permanent provider error (e.g. 400 invalid recipient): no retries.
+          {:error, %DeliveryError{retryable?: false} = error} ->
+            Deliveries.mark_dead(delivery, DeliveryError.message(error))
+            {:error, {:dead_lettered, error}}
+
           {:error, reason} ->
-            case Deliveries.mark_attempt_failed(delivery, inspect(reason)) do
+            policy = RetryPolicy.for_channel(channel)
+
+            case Deliveries.mark_attempt_failed(delivery, error_message(reason), policy) do
               {:ok, %{status: "failed"}} -> {:error, {:dead_lettered, reason}}
               _ -> {:error, reason}
             end
@@ -224,13 +238,25 @@ defmodule Converger.Pipeline do
 
   Used by non-Oban backends: "Broadway for throughput, Oban for retries".
   """
-  def schedule_retry(%{activity_id: activity_id, channel_id: channel_id}, attempt) do
+  def schedule_retry(%{activity_id: activity_id, channel_id: channel_id}, attempt, opts \\ []) do
+    policy = RetryPolicy.for_channel(Keyword.get(opts, :channel))
+    delay_ms = retry_delay_ms(policy, attempt, Keyword.get(opts, :error))
+
     %{activity_id: activity_id, channel_id: channel_id}
-    |> Converger.Workers.ActivityDeliveryWorker.new(
-      schedule_in: Converger.Pipeline.RetryPolicy.backoff(attempt)
-    )
+    |> Converger.Workers.ActivityDeliveryWorker.new(schedule_in: max(div(delay_ms, 1000), 1))
     |> Oban.insert()
   end
+
+  @doc """
+  Delay before the retry following `attempt`: the provider's `Retry-After`
+  when the error carries one, otherwise the policy backoff.
+  """
+  def retry_delay_ms(policy, attempt, error \\ nil)
+
+  def retry_delay_ms(_policy, _attempt, %DeliveryError{retry_after_ms: ms}) when is_integer(ms),
+    do: ms
+
+  def retry_delay_ms(policy, attempt, _error), do: RetryPolicy.backoff_ms(policy, attempt)
 
   defp backend do
     config = Application.get_env(:converger, :pipeline, [])

@@ -3,6 +3,9 @@ defmodule Converger.Channels.Adapters.WhatsAppInfobip do
 
   require Logger
 
+  alias Converger.Channels.DeliveryError
+  alias Converger.Pipeline.RetryPolicy
+
   @impl true
   def supported_modes, do: ~w(inbound outbound duplex)
 
@@ -25,7 +28,10 @@ defmodule Converger.Channels.Adapters.WhatsAppInfobip do
     recipient = activity.metadata["recipient_phone"] || activity.metadata["to"]
 
     if is_nil(recipient) do
-      {:error, "activity metadata must include 'recipient_phone' or 'to' for Infobip delivery"}
+      {:error,
+       DeliveryError.permanent(
+         "activity metadata must include 'recipient_phone' or 'to' for Infobip delivery"
+       )}
     else
       url = "#{base_url}/whatsapp/1/message/text"
 
@@ -35,23 +41,27 @@ defmodule Converger.Channels.Adapters.WhatsAppInfobip do
         content: %{text: activity.text}
       }
 
-      case Req.post(url,
-             json: payload,
-             headers: [
-               {"authorization", "App #{api_key}"},
-               {"content-type", "application/json"}
-             ],
-             receive_timeout: 15_000
-           ) do
+      options =
+        [
+          json: payload,
+          headers: [
+            {"authorization", "App #{api_key}"},
+            {"content-type", "application/json"}
+          ],
+          receive_timeout: RetryPolicy.for_channel(channel).timeout_ms
+        ]
+        |> Keyword.merge(Application.get_env(:converger, :whatsapp_req_options, []))
+
+      case Req.post(url, options) do
         {:ok, %Req.Response{status: status, body: body}} when status in 200..299 ->
           message_id = get_in(body, ["messages", Access.at(0), "messageId"])
           {:ok, %{infobip_message_id: message_id}}
 
-        {:ok, %Req.Response{status: status, body: body}} ->
-          {:error, "Infobip API returned #{status}: #{inspect(body)}"}
+        {:ok, %Req.Response{status: status, headers: headers, body: body}} ->
+          {:error, DeliveryError.from_http(status, headers, body, "Infobip API")}
 
         {:error, reason} ->
-          {:error, "Infobip API request failed: #{inspect(reason)}"}
+          {:error, DeliveryError.from_transport(reason, "Infobip API")}
       end
     end
   end

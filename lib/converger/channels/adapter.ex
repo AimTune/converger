@@ -48,7 +48,14 @@ defmodule Converger.Channels.Adapter do
               raw_body :: binary() | nil
             ) :: :ok | :legacy | :missing | {:error, term()}
 
-  @optional_callbacks [parse_status_update: 2, verify_inbound_signature: 3]
+  @doc """
+  Adapter-specific retry policy defaults (e.g. `%{timeout_ms: 10_000}`), merged
+  over the global defaults and under the channel's own `retry_policy`. See
+  `Converger.Pipeline.RetryPolicy`.
+  """
+  @callback retry_policy() :: map()
+
+  @optional_callbacks [parse_status_update: 2, verify_inbound_signature: 3, retry_policy: 0]
 
   @callback supported_modes() :: [String.t()]
 
@@ -119,6 +126,16 @@ defmodule Converger.Channels.Adapter do
 
       {:error, _} = err ->
         err
+    end
+  end
+
+  @doc "Retry policy defaults of the adapter for `type` (empty when it defines none)."
+  def retry_policy(type) do
+    with {:ok, mod} <- adapter_for(type),
+         true <- Code.ensure_loaded?(mod) and function_exported?(mod, :retry_policy, 0) do
+      mod.retry_policy()
+    else
+      _ -> %{}
     end
   end
 

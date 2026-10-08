@@ -3,6 +3,8 @@ defmodule Converger.Channels.Adapters.Webhook do
 
   require Logger
 
+  alias Converger.Channels.DeliveryError
+
   @impl true
   def supported_modes, do: ~w(inbound outbound duplex)
 
@@ -40,20 +42,29 @@ defmodule Converger.Channels.Adapters.Webhook do
     header_list = Enum.map(headers, fn {k, v} -> {k, v} end)
 
     req_options =
-      [method: method, url: url, json: payload, headers: header_list, receive_timeout: 10_000]
+      [
+        method: method,
+        url: url,
+        json: payload,
+        headers: header_list,
+        receive_timeout: Converger.Pipeline.RetryPolicy.for_channel(channel).timeout_ms
+      ]
       |> Keyword.merge(Application.get_env(:converger, :webhook_req_options, []))
 
     case Req.request(req_options) do
       {:ok, %Req.Response{status: status}} when status in 200..299 ->
         :ok
 
-      {:ok, %Req.Response{status: status, body: body}} ->
-        {:error, "webhook returned status #{status}: #{inspect(body)}"}
+      {:ok, %Req.Response{status: status, headers: headers, body: body}} ->
+        {:error, DeliveryError.from_http(status, headers, body, "webhook")}
 
       {:error, reason} ->
-        {:error, "webhook request failed: #{inspect(reason)}"}
+        {:error, DeliveryError.from_transport(reason, "webhook")}
     end
   end
+
+  @impl true
+  def retry_policy, do: %{timeout_ms: 10_000}
 
   @impl true
   def parse_inbound(_channel, params) do
