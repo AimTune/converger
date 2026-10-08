@@ -6,13 +6,18 @@ defmodule Converger.Pipeline.Broadway.Pipeline do
   1. Producer (memory/Kafka/RabbitMQ)
   2. Processor (resolve activity + channel, decide batcher)
   3. Delivery batcher (batch deliver to external channels)
+
+  Transient delivery failures are handed off to `Converger.Workers.ActivityDeliveryWorker`
+  (Oban) for durable retries with `Converger.Pipeline.RetryPolicy` backoff.
+  Deliveries that are out of retries or halted by middleware are dead-lettered
+  (`status: "failed"`, see `Converger.Deliveries.list_dead_letters/1`).
   """
 
   use Broadway
 
   require Logger
 
-  alias Converger.{Activities, Channels}
+  alias Converger.{Activities, Channels, Deliveries}
   alias Converger.Pipeline
 
   @impl true
@@ -53,16 +58,39 @@ defmodule Converger.Pipeline.Broadway.Pipeline do
 
           message
 
-        {:error, reason} ->
+        {:error, reason} = result ->
           Logger.warning("Broadway delivery failed",
             activity_id: activity.id,
             channel_id: channel.id,
             error: inspect(reason)
           )
 
-          Broadway.Message.failed(message, inspect(reason))
+          if Pipeline.retryable?(result),
+            do: hand_off_retry(message, activity, channel),
+            else: Broadway.Message.failed(message, inspect(reason))
       end
     end)
+  end
+
+  # Broadway for throughput, Oban for retries: a transient failure becomes a
+  # durable, backed-off Oban job and the message is acked, since Oban now owns
+  # the delivery. Only if the hand-off itself fails is the message failed.
+  defp hand_off_retry(message, activity, channel) do
+    delivery = Deliveries.get_delivery_for_activity_and_channel(activity.id, channel.id)
+
+    case Pipeline.schedule_retry(delivery, delivery.attempts) do
+      {:ok, _job} ->
+        message
+
+      {:error, reason} ->
+        Logger.error("Broadway retry hand-off failed",
+          activity_id: activity.id,
+          channel_id: channel.id,
+          error: inspect(reason)
+        )
+
+        Broadway.Message.failed(message, "retry hand-off failed: #{inspect(reason)}")
+    end
   end
 
   @impl true

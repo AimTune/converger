@@ -7,8 +7,10 @@ defmodule Converger.Deliveries do
   """
 
   import Ecto.Query, warn: false
+  require Logger
   alias Converger.Repo
   alias Converger.Deliveries.Delivery
+  alias Converger.Pipeline.RetryPolicy
 
   def list_deliveries(filters \\ %{}) do
     Delivery
@@ -79,17 +81,70 @@ defmodule Converger.Deliveries do
     mark_sent(delivery, response_metadata)
   end
 
+  @doc """
+  Record a failed delivery attempt.
+
+  The delivery stays `pending` (eligible for retry) until the attempts reach
+  `RetryPolicy.max_attempts/0`, then it is dead-lettered (`failed`).
+  """
   def mark_attempt_failed(delivery, error_message) do
     new_attempts = delivery.attempts + 1
-    status = if new_attempts >= 5, do: "failed", else: "pending"
 
-    delivery
-    |> Delivery.changeset(%{
-      status: status,
-      attempts: new_attempts,
-      last_error: error_message
-    })
-    |> Repo.update()
+    if RetryPolicy.exhausted?(new_attempts) do
+      dead_letter(delivery, new_attempts, error_message)
+    else
+      delivery
+      |> Delivery.changeset(%{
+        status: "pending",
+        attempts: new_attempts,
+        last_error: error_message
+      })
+      |> Repo.update()
+    end
+  end
+
+  @doc """
+  Record a failed attempt that must not be retried (e.g. a middleware halt)
+  and dead-letter the delivery immediately.
+  """
+  def mark_dead(delivery, error_message) do
+    dead_letter(delivery, delivery.attempts + 1, error_message)
+  end
+
+  @doc "List dead-lettered deliveries (`status: \"failed\"`), newest first."
+  def list_dead_letters(filters \\ %{}) do
+    Delivery
+    |> where(status: "failed")
+    |> apply_filters(Map.delete(filters, :status))
+    |> order_by(desc: :updated_at)
+    |> Repo.all()
+  end
+
+  defp dead_letter(delivery, attempts, error_message) do
+    result =
+      delivery
+      |> Delivery.changeset(%{status: "failed", attempts: attempts, last_error: error_message})
+      |> Repo.update()
+
+    with {:ok, dead} <- result do
+      :telemetry.execute([:converger, :deliveries, :dead_lettered], %{attempts: attempts}, %{
+        delivery_id: dead.id,
+        activity_id: dead.activity_id,
+        channel_id: dead.channel_id,
+        error: error_message
+      })
+
+      Logger.warning("Delivery dead-lettered",
+        delivery_id: dead.id,
+        activity_id: dead.activity_id,
+        channel_id: dead.channel_id,
+        attempts: attempts
+      )
+
+      broadcast_status_update(dead)
+    end
+
+    result
   end
 
   # --- Receipt / Status Update Processing ---

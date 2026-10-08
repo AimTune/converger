@@ -161,17 +161,31 @@ defmodule Converger.Pipeline do
   Execute the actual delivery via middleware + adapter + delivery tracking.
 
   The middleware chain (from `channel.transformations`) runs before the adapter.
-  If any middleware halts, the delivery is marked as failed and skipped.
+  If any middleware halts, the delivery is dead-lettered immediately.
+
+  Returns:
+
+    * `:ok` - delivered (or already delivered earlier, nothing re-sent)
+    * `{:error, {:halted, reason}}` - halted by middleware, dead-lettered, do not retry
+    * `{:error, {:dead_lettered, reason}}` - failed and out of retries, do not retry
+    * `{:error, reason}` - failed, retry according to `Converger.Pipeline.RetryPolicy`
   """
   def deliver(activity, channel) do
+    alias Converger.Deliveries
+
+    case Deliveries.get_or_create_delivery(activity.id, channel.id) do
+      %{status: status} when status in ~w(sent delivered read) -> :ok
+      delivery -> attempt_delivery(delivery, activity, channel)
+    end
+  end
+
+  defp attempt_delivery(delivery, activity, channel) do
     alias Converger.{Deliveries, Channels.Adapter}
     alias Converger.Pipeline.Middleware
 
-    delivery = Deliveries.get_or_create_delivery(activity.id, channel.id)
-
     case Middleware.run(activity, channel) do
       {:halt, reason} ->
-        Deliveries.mark_attempt_failed(delivery, "halted: #{reason}")
+        Deliveries.mark_dead(delivery, "halted: #{reason}")
         {:error, {:halted, reason}}
 
       {:ok, transformed_activity} ->
@@ -185,10 +199,34 @@ defmodule Converger.Pipeline do
             :ok
 
           {:error, reason} ->
-            Deliveries.mark_attempt_failed(delivery, inspect(reason))
-            {:error, reason}
+            case Deliveries.mark_attempt_failed(delivery, inspect(reason)) do
+              {:ok, %{status: "failed"}} -> {:error, {:dead_lettered, reason}}
+              _ -> {:error, reason}
+            end
         end
     end
+  end
+
+  @doc """
+  Whether a `deliver/2` result is a transient failure that should be retried.
+  """
+  def retryable?({:error, {:halted, _}}), do: false
+  def retryable?({:error, {:dead_lettered, _}}), do: false
+  def retryable?({:error, _}), do: true
+  def retryable?(_), do: false
+
+  @doc """
+  Schedule a durable retry for a delivery that just failed its `attempt`-th
+  attempt, honouring `Converger.Pipeline.RetryPolicy` backoff.
+
+  Used by non-Oban backends: "Broadway for throughput, Oban for retries".
+  """
+  def schedule_retry(%{activity_id: activity_id, channel_id: channel_id}, attempt) do
+    %{activity_id: activity_id, channel_id: channel_id}
+    |> Converger.Workers.ActivityDeliveryWorker.new(
+      schedule_in: Converger.Pipeline.RetryPolicy.backoff(attempt)
+    )
+    |> Oban.insert()
   end
 
   defp backend do
