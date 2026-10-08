@@ -157,7 +157,25 @@ defmodule Converger.Pipeline do
       |> Enum.filter(&(&1.status == "active"))
       |> Enum.filter(&(&1.mode in ["outbound", "duplex"]))
 
-    (primary ++ additional) |> Enum.uniq_by(& &1.id)
+    echo_channel_id = participant_echo_channel_id(activity, conversation)
+
+    (primary ++ additional)
+    |> Enum.uniq_by(& &1.id)
+    |> Enum.reject(&(&1.id == echo_channel_id))
+  end
+
+  # An inbound message from the conversation's participant (e.g. a WhatsApp
+  # user) is never delivered back to that participant on their own channel.
+  # Returns that channel's id, or nil.
+  defp participant_echo_channel_id(activity, conversation) do
+    case conversation.participant_id &&
+           Converger.Participants.get_participant(conversation.participant_id) do
+      %{external_id: external_id, channel_id: channel_id} when external_id == activity.sender ->
+        channel_id
+
+      _ ->
+        nil
+    end
   end
 
   @doc """

@@ -2,6 +2,7 @@ defmodule Converger.Channels.Adapters.WhatsAppMeta do
   @behaviour Converger.Channels.Adapter
 
   alias Converger.Channels.InboundSignature
+  alias Converger.Participants
 
   require Logger
 
@@ -27,10 +28,14 @@ defmodule Converger.Channels.Adapters.WhatsAppMeta do
   def deliver_activity(channel, activity) do
     phone_number_id = channel.config["phone_number_id"]
     access_token = channel.config["access_token"]
-    recipient = activity.metadata["recipient_phone"] || activity.metadata["to"]
+
+    recipient =
+      activity.metadata["recipient_phone"] || activity.metadata["to"] ||
+        Participants.recipient_for(activity, Map.get(channel, :id))
 
     if is_nil(recipient) do
-      {:error, "activity metadata must include 'recipient_phone' or 'to' for WhatsApp delivery"}
+      {:error,
+       "no recipient: set activity metadata 'recipient_phone' or 'to', or reply in a conversation with a participant on this channel"}
     else
       url = "https://graph.facebook.com/#{graph_api_version(channel)}/#{phone_number_id}/messages"
 
@@ -42,11 +47,17 @@ defmodule Converger.Channels.Adapters.WhatsAppMeta do
         text: %{body: activity.text}
       }
 
-      case Req.post(url,
-             json: payload,
-             headers: [{"authorization", "Bearer #{access_token}"}],
-             receive_timeout: 15_000
-           ) do
+      req_options =
+        Keyword.merge(
+          [
+            json: payload,
+            headers: [{"authorization", "Bearer #{access_token}"}],
+            receive_timeout: 15_000
+          ],
+          Application.get_env(:converger, :whatsapp_req_options, [])
+        )
+
+      case Req.post(url, req_options) do
         {:ok, %Req.Response{status: 200, body: body}} ->
           {:ok, %{whatsapp_message_id: get_in(body, ["messages", Access.at(0), "id"])}}
 
@@ -141,7 +152,8 @@ defmodule Converger.Channels.Adapters.WhatsAppMeta do
       "type" => activity_type,
       "attachments" => attachments,
       "metadata" => metadata,
-      "idempotency_key" => message["id"]
+      "idempotency_key" => message["id"],
+      "participant" => %{"external_id" => from, "display_name" => metadata["profile_name"]}
     }
   end
 

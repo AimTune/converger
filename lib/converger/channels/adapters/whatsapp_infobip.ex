@@ -1,6 +1,8 @@
 defmodule Converger.Channels.Adapters.WhatsAppInfobip do
   @behaviour Converger.Channels.Adapter
 
+  alias Converger.Participants
+
   require Logger
 
   @impl true
@@ -22,10 +24,14 @@ defmodule Converger.Channels.Adapters.WhatsAppInfobip do
     base_url = channel.config["base_url"]
     api_key = channel.config["api_key"]
     sender = channel.config["sender"]
-    recipient = activity.metadata["recipient_phone"] || activity.metadata["to"]
+
+    recipient =
+      activity.metadata["recipient_phone"] || activity.metadata["to"] ||
+        Participants.recipient_for(activity, Map.get(channel, :id))
 
     if is_nil(recipient) do
-      {:error, "activity metadata must include 'recipient_phone' or 'to' for Infobip delivery"}
+      {:error,
+       "no recipient: set activity metadata 'recipient_phone' or 'to', or reply in a conversation with a participant on this channel"}
     else
       url = "#{base_url}/whatsapp/1/message/text"
 
@@ -35,14 +41,20 @@ defmodule Converger.Channels.Adapters.WhatsAppInfobip do
         content: %{text: activity.text}
       }
 
-      case Req.post(url,
-             json: payload,
-             headers: [
-               {"authorization", "App #{api_key}"},
-               {"content-type", "application/json"}
-             ],
-             receive_timeout: 15_000
-           ) do
+      req_options =
+        Keyword.merge(
+          [
+            json: payload,
+            headers: [
+              {"authorization", "App #{api_key}"},
+              {"content-type", "application/json"}
+            ],
+            receive_timeout: 15_000
+          ],
+          Application.get_env(:converger, :whatsapp_req_options, [])
+        )
+
+      case Req.post(url, req_options) do
         {:ok, %Req.Response{status: status, body: body}} when status in 200..299 ->
           message_id = get_in(body, ["messages", Access.at(0), "messageId"])
           {:ok, %{infobip_message_id: message_id}}
@@ -99,7 +111,11 @@ defmodule Converger.Channels.Adapters.WhatsAppInfobip do
       "type" => activity_type,
       "attachments" => attachments,
       "metadata" => metadata,
-      "idempotency_key" => result["messageId"]
+      "idempotency_key" => result["messageId"],
+      "participant" => %{
+        "external_id" => result["from"],
+        "display_name" => metadata["profile_name"]
+      }
     }
   end
 

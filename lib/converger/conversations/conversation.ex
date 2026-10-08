@@ -12,6 +12,9 @@ defmodule Converger.Conversations.Conversation do
 
     belongs_to :tenant, Converger.Tenants.Tenant
     belongs_to :channel, Converger.Channels.Channel
+    # External party of the conversation (e.g. a WhatsApp number), set by
+    # inbound participant resolution; never cast. See Converger.Participants.
+    belongs_to :participant, Converger.Participants.Participant
 
     has_many :activities, Converger.Activities.Activity
 

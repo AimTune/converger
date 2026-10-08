@@ -52,7 +52,7 @@ defmodule ConvergerWeb.Router do
 
     post "/tokens", TokenController, :create
 
-    resources "/conversations", ConversationController, only: [:create, :show] do
+    resources "/conversations", ConversationController, only: [:index, :create, :show] do
       resources "/activities", ActivityController, only: [:create, :index]
     end
 
