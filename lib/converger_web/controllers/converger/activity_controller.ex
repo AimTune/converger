@@ -58,7 +58,7 @@ defmodule ConvergerWeb.ConvergerAPI.ActivityController do
       new_watermark =
         case List.last(activities) do
           nil -> params["watermark"]
-          last -> Watermark.encode(last.id)
+          last -> Watermark.encode(last.seq)
         end
 
       conn
@@ -71,20 +71,10 @@ defmodule ConvergerWeb.ConvergerAPI.ActivityController do
     end
   end
 
-  defp list_from_watermark(conversation_id, nil) do
-    Activities.list_activities_for_conversation(conversation_id)
-  end
-
   defp list_from_watermark(conversation_id, watermark) do
     case Watermark.decode(watermark) do
-      {:ok, nil} ->
-        Activities.list_activities_for_conversation(conversation_id)
-
-      {:ok, activity_id} ->
-        Activities.list_activities_after_watermark(conversation_id, activity_id)
-
-      {:error, _} ->
-        Activities.list_activities_for_conversation(conversation_id)
+      {:ok, position} -> Activities.list_activities_since(conversation_id, position)
+      {:error, _} -> Activities.list_activities_for_conversation(conversation_id)
     end
   end
 end

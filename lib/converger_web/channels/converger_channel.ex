@@ -31,23 +31,16 @@ defmodule ConvergerWeb.ConvergerChannel do
   def handle_info({:after_join, watermark}, socket) do
     conversation_id = socket.assigns.conversation_id
 
+    # Without a watermark the client starts live (no replay).
     activities =
-      case watermark do
-        nil ->
-          []
-
-        wm ->
-          case Watermark.decode(wm) do
-            {:ok, activity_id} when is_binary(activity_id) ->
-              Activities.list_activities_after_watermark(conversation_id, activity_id)
-
-            _ ->
-              []
-          end
+      case Watermark.decode(watermark) do
+        {:ok, nil} -> []
+        {:ok, position} -> Activities.list_activities_since(conversation_id, position)
+        {:error, _} -> []
       end
 
     if activities != [] do
-      new_watermark = activities |> List.last() |> Map.get(:id) |> Watermark.encode()
+      new_watermark = activities |> List.last() |> Map.get(:seq) |> Watermark.encode()
 
       push(socket, "activitySet", %{
         activities: Enum.map(activities, &ActivityJSON.activity_data/1),
@@ -61,7 +54,7 @@ defmodule ConvergerWeb.ConvergerChannel do
   # Handle PubSub broadcasts from the pipeline (conversation:{id} topic)
   @impl true
   def handle_info(%Phoenix.Socket.Broadcast{event: "new_activity", payload: payload}, socket) do
-    watermark = Watermark.encode(payload.id)
+    watermark = Watermark.encode(payload.seq)
 
     activity_set = %{
       activities: [ActivityJSON.activity_data(payload)],
@@ -94,5 +87,4 @@ defmodule ConvergerWeb.ConvergerChannel do
   end
 
   defp authorized?(_, _), do: false
-
 end
