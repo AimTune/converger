@@ -115,19 +115,21 @@ defmodule Converger.Pipeline do
     :ok
   end
 
-  @external_delivery_types ~w(webhook whatsapp_meta whatsapp_infobip)
+  # Channel types delivered through an adapter. `websocket` is excluded: its
+  # clients are reached by the PubSub broadcast.
+  @delivery_types ~w(echo webhook whatsapp_meta whatsapp_infobip)
 
   @doc """
   Resolve all channels that should receive a delivery for this activity.
   Returns a list of Channel structs (may be empty).
-  Includes: primary channel (if external) + routing rule targets (if external and active).
+  Includes: primary channel (if deliverable) + routing rule targets (if deliverable and active).
   """
   def resolve_delivery_channels(activity) do
     conversation = Converger.Conversations.get_conversation!(activity.conversation_id)
     primary_channel = Converger.Channels.get_channel!(conversation.channel_id)
 
     primary =
-      if primary_channel.type in @external_delivery_types and
+      if primary_channel.type in @delivery_types and
            primary_channel.mode in ["outbound", "duplex"],
          do: [primary_channel],
          else: []
@@ -150,7 +152,7 @@ defmodule Converger.Pipeline do
         end
       end)
       |> Enum.reject(&is_nil/1)
-      |> Enum.filter(&(&1.type in @external_delivery_types))
+      |> Enum.filter(&(&1.type in @delivery_types))
       |> Enum.filter(&(&1.status == "active"))
       |> Enum.filter(&(&1.mode in ["outbound", "duplex"]))
 

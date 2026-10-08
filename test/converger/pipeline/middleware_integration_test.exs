@@ -58,11 +58,13 @@ defmodule Converger.Pipeline.MiddlewareIntegrationTest do
       conversation = conversation_fixture(tenant, channel)
       activity = activity_fixture(tenant, conversation, %{text: "This is blocked content"})
 
-      assert {:error, {:halted, _reason}} = Pipeline.deliver(activity, channel)
-
+      # Creating the activity already ran it through the pipeline once.
       delivery = Deliveries.get_or_create_delivery(activity.id, channel.id)
+      assert delivery.status == "failed"
       assert delivery.attempts == 1
       assert delivery.last_error =~ "halted"
+
+      assert {:error, {:halted, _reason}} = Pipeline.deliver(activity, channel)
     end
 
     test "chains multiple transformations", %{tenant: tenant} do

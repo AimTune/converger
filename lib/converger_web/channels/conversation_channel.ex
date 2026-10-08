@@ -4,7 +4,6 @@ defmodule ConvergerWeb.ConversationChannel do
   require Logger
 
   alias Converger.{Activities, Conversations, Channels}
-  alias Converger.Channels.Adapter
 
   @impl true
   def join("conversation:" <> conversation_id, payload, socket) do
@@ -34,9 +33,10 @@ defmodule ConvergerWeb.ConversationChannel do
       |> Map.put("conversation_id", conversation_id)
       |> Map.put_new("sender", "user")
 
+    # The pipeline (run by create_activity) is the only delivery path: it
+    # applies middleware, tracks deliveries, retries and fans out via routing rules.
     case Activities.create_activity(activity_params) do
       {:ok, _activity} ->
-        handle_activity(socket.assigns[:channel], activity_params)
         {:reply, :ok, socket}
 
       {:error, _changeset} ->
@@ -75,23 +75,6 @@ defmodule ConvergerWeb.ConversationChannel do
     end
 
     {:noreply, socket}
-  end
-
-  defp handle_activity(channel, activity_params) do
-    Task.start(fn ->
-      Adapter.deliver_activity(
-        channel,
-        struct(Converger.Activities.Activity, %{
-          tenant_id: activity_params["tenant_id"],
-          conversation_id: activity_params["conversation_id"],
-          text: activity_params["text"],
-          sender: activity_params["sender"],
-          type: activity_params["type"] || "message",
-          metadata: activity_params["metadata"] || %{},
-          attachments: activity_params["attachments"] || []
-        })
-      )
-    end)
   end
 
   defp authorized?(conversation_id, %{"conversation_id" => claim_cid}) do

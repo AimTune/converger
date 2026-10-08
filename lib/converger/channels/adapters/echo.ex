@@ -1,4 +1,13 @@
 defmodule Converger.Channels.Adapters.Echo do
+  @moduledoc """
+  Replies to every activity with a copy sent by `"bot"`.
+
+  Delivered through the pipeline like any other outbound adapter. Replies are
+  tagged with `metadata["echo_of"]` and are not echoed again (no loop), and use
+  an idempotency key derived from the original activity, so a retried delivery
+  never produces a second reply.
+  """
+
   @behaviour Converger.Channels.Adapter
 
   @impl true
@@ -8,15 +17,23 @@ defmodule Converger.Channels.Adapters.Echo do
   def validate_config(_config), do: :ok
 
   @impl true
-  def deliver_activity(_channel, activity) do
-    Converger.Activities.create_activity(%{
-      "tenant_id" => activity.tenant_id,
-      "conversation_id" => activity.conversation_id,
-      "text" => activity.text,
-      "sender" => "bot"
-    })
+  def deliver_activity(_channel, %{metadata: %{"echo_of" => _}}), do: :ok
 
-    :ok
+  def deliver_activity(_channel, activity) do
+    result =
+      Converger.Activities.create_activity(%{
+        "tenant_id" => activity.tenant_id,
+        "conversation_id" => activity.conversation_id,
+        "text" => activity.text,
+        "sender" => "bot",
+        "metadata" => %{"echo_of" => activity.id},
+        "idempotency_key" => "echo:#{activity.id}"
+      })
+
+    case result do
+      {:ok, _reply} -> :ok
+      {:error, reason} -> {:error, {:echo_failed, reason}}
+    end
   end
 
   @impl true
