@@ -26,6 +26,7 @@ defmodule Converger.Conversations.Conversation do
     conversation
     |> cast(attrs, [:status, :metadata, :tenant_id, :channel_id])
     |> validate_required([:status, :tenant_id, :channel_id])
+    |> validate_inclusion(:status, ~w(active closed))
     |> foreign_key_constraint(:tenant_id)
     |> foreign_key_constraint(:channel_id)
   end

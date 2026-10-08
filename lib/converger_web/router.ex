@@ -55,6 +55,8 @@ defmodule ConvergerWeb.Router do
 
     resources "/conversations", ConversationController, only: [:index, :create, :show] do
       resources "/activities", ActivityController, only: [:create, :index]
+      post "/close", ConversationController, :close
+      post "/reopen", ConversationController, :reopen
     end
 
     resources "/routing_rules", RoutingRuleController,
@@ -89,6 +91,8 @@ defmodule ConvergerWeb.Router do
     post "/tokens/refresh", TokenController, :refresh
     post "/conversations", ConversationController, :create
     get "/conversations/:id", ConversationController, :show
+    post "/conversations/:id/close", ConversationController, :close
+    post "/conversations/:id/reopen", ConversationController, :reopen
     post "/conversations/:conversation_id/activities", ActivityController, :create
     get "/conversations/:conversation_id/activities", ActivityController, :index
     post "/conversations/:conversation_id/upload", UploadController, :create

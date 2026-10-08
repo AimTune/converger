@@ -7,6 +7,8 @@ defmodule Converger.Activities do
   require Logger
   alias Converger.Repo
   alias Converger.Activities.Activity
+  alias Converger.Conversations
+  alias Converger.Conversations.Conversation
 
   # Activities are ordered by their per-conversation sequence number `seq`,
   # assigned under a row lock on the conversation when the activity is
@@ -172,8 +174,21 @@ defmodule Converger.Activities do
   @doc """
   Create an activity from trusted, server-built attributes. Use
   `create_client_activity/2` for anything that originates from a client.
+
+  Activities are only accepted while the conversation is open (see
+  `Converger.Conversations.open?/1`); otherwise this returns
+  `{:error, :conversation_closed}`. The status check happens in the same
+  statement that allocates the activity's `seq`, under the conversation row
+  lock, so it is consistent with a concurrent close: an activity is either
+  committed before the close or rejected.
+
+  ## Options
+
+    * `:allow_closed` - accept the activity even when the conversation is
+      closed. Reserved for server-generated lifecycle events (the
+      `conversationUpdate` emitted when a conversation is closed).
   """
-  def create_activity(attrs \\ %{}) do
+  def create_activity(attrs \\ %{}, opts \\ []) do
     # 1. Optimistic fetch to avoid transaction poisoning
     case fetch_existing_activity(attrs) do
       %Activity{} = activity ->
@@ -184,7 +199,7 @@ defmodule Converger.Activities do
         #    (transactional outbox): either both commit or neither does.
         result =
           Repo.transaction(fn ->
-            with {:ok, activity} <- insert_with_seq(attrs),
+            with {:ok, activity} <- insert_with_seq(attrs, opts),
                  :ok <- enqueue_deliveries(activity) do
               activity
             else
@@ -202,8 +217,8 @@ defmodule Converger.Activities do
             Converger.Pipeline.after_commit(activity)
             {:ok, activity}
 
-          {:error, :delivery_enqueue_failed} ->
-            {:error, :delivery_enqueue_failed}
+          {:error, reason} when reason in [:delivery_enqueue_failed, :conversation_closed] ->
+            {:error, reason}
 
           {:error, changeset} ->
             if has_idempotency_error?(changeset) do
@@ -222,15 +237,21 @@ defmodule Converger.Activities do
   # last_seq takes a row lock that is held until commit, so concurrent inserts
   # into one conversation (on any node) are numbered strictly 1, 2, 3, ...;
   # a rollback also rolls back the increment, so there are no gaps.
-  defp insert_with_seq(attrs) do
+  # The same statement enforces the conversation status (a concurrent close
+  # either commits first and rejects this insert, or waits for it) and bumps
+  # `updated_at`, which the expiration worker treats as "last activity".
+  defp insert_with_seq(attrs, opts) do
     changeset = Activity.changeset(%Activity{}, attrs)
 
     with {:ok, _} <- Ecto.Changeset.apply_action(changeset, :insert) do
       conversation_id = Ecto.Changeset.get_field(changeset, :conversation_id)
 
-      case next_seq(conversation_id) do
+      case next_seq(conversation_id, Keyword.get(opts, :allow_closed, false)) do
         {:ok, seq} ->
           changeset |> Ecto.Changeset.put_change(:seq, seq) |> Repo.insert()
+
+        {:error, :conversation_closed} ->
+          {:error, :conversation_closed}
 
         :error ->
           changeset
@@ -240,16 +261,26 @@ defmodule Converger.Activities do
     end
   end
 
-  defp next_seq(conversation_id) do
+  defp next_seq(conversation_id, allow_closed?) do
     query =
-      from(c in Converger.Conversations.Conversation,
+      from(c in Conversation,
         where: c.id == ^conversation_id,
         select: c.last_seq
       )
 
-    case Repo.update_all(query, inc: [last_seq: 1]) do
-      {1, [seq]} -> {:ok, seq}
-      {0, _} -> :error
+    query =
+      if allow_closed?,
+        do: query,
+        else: where(query, [c], c.status == ^Conversations.open_status())
+
+    case Repo.update_all(query, inc: [last_seq: 1], set: [updated_at: DateTime.utc_now()]) do
+      {1, [seq]} ->
+        {:ok, seq}
+
+      {0, _} ->
+        if Repo.exists?(from(c in Conversation, where: c.id == ^conversation_id)),
+          do: {:error, :conversation_closed},
+          else: :error
     end
   end
 

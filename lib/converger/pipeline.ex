@@ -162,6 +162,7 @@ defmodule Converger.Pipeline do
     (primary ++ additional)
     |> Enum.uniq_by(& &1.id)
     |> Enum.reject(&(&1.id == echo_channel_id))
+    |> Enum.filter(&accepts_activity?(&1, activity))
   end
 
   # An inbound message from the conversation's participant (e.g. a WhatsApp
@@ -176,6 +177,14 @@ defmodule Converger.Pipeline do
       _ ->
         nil
     end
+  end
+
+  # Conversation lifecycle events (close/reopen) carry no message content:
+  # only generic webhooks receive them. WebSocket clients get them through the
+  # PubSub broadcast; messaging adapters (WhatsApp, echo) would otherwise send
+  # an empty message or reply into a closed conversation.
+  defp accepts_activity?(channel, activity) do
+    not Converger.Conversations.lifecycle_event?(activity) or channel.type == "webhook"
   end
 
   @doc """

@@ -15,8 +15,10 @@ defmodule ConvergerWeb.ConvergerAPI.UploadController do
     tenant_id = claims["tenant_id"]
 
     with :ok <- authorize_conversation(claims, conversation_id),
-         %Conversations.Conversation{} = _conversation <-
+         %Conversations.Conversation{} = conversation <-
            Conversations.get_conversation(conversation_id, tenant_id),
+         # Fail fast before storing the file; create_activity re-checks atomically.
+         :ok <- Conversations.ensure_open(conversation),
          {:ok, attachment} <- upload_file(params, tenant_id, conversation_id) do
       # Parse optional activity JSON from multipart
       activity_meta = parse_activity_metadata(params)
@@ -83,7 +85,8 @@ defmodule ConvergerWeb.ConvergerAPI.UploadController do
       {:error, %Ecto.Changeset{}} = error ->
         error
 
-      {:error, reason} when reason in [:forbidden, :not_found] ->
+      # Handled by the fallback controller (409 for a closed conversation).
+      {:error, reason} when reason in [:forbidden, :not_found, :conversation_closed] ->
         {:error, reason}
 
       {:error, reason} ->

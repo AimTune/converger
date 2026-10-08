@@ -40,6 +40,9 @@ defmodule ConvergerWeb.ConversationChannel do
       {:ok, _activity} ->
         {:reply, :ok, socket}
 
+      {:error, :conversation_closed} ->
+        {:reply, {:error, %{reason: "conversation_closed"}}, socket}
+
       {:error, %Ecto.Changeset{} = changeset} ->
         {:reply, {:error, %{reason: "invalid_activity", errors: errors(changeset)}}, socket}
 
