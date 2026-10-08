@@ -16,6 +16,7 @@ defmodule Converger.Application do
         Converger.Repo,
         {DNSCluster, query: Application.get_env(:converger, :dns_cluster_query) || :ignore},
         {Phoenix.PubSub, name: Converger.PubSub},
+        ConvergerWeb.SocketPresence,
         {Oban, Application.fetch_env!(:converger, Oban)}
       ] ++
         Converger.Pipeline.child_specs() ++

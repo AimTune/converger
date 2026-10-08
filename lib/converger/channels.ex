@@ -54,7 +54,21 @@ defmodule Converger.Channels do
     end
   end
 
+  @doc """
+  Update a channel. When the channel stops being active, its connected client
+  sockets are disconnected (and cannot reconnect while it stays inactive).
+  """
   def update_channel(%Channel{} = channel, attrs, actor \\ nil) do
+    result = do_update_channel(channel, attrs, actor)
+
+    with {:ok, %Channel{status: status} = updated} when status != "active" <- result do
+      ConvergerWeb.Sockets.disconnect_channel(updated.id)
+    end
+
+    result
+  end
+
+  defp do_update_channel(channel, attrs, actor) do
     changeset = Channel.changeset(channel, attrs)
 
     if actor do
@@ -81,7 +95,18 @@ defmodule Converger.Channels do
     end
   end
 
+  @doc "Delete a channel and disconnect its client sockets."
   def delete_channel(%Channel{} = channel, actor \\ nil) do
+    result = do_delete_channel(channel, actor)
+
+    with {:ok, deleted} <- result do
+      ConvergerWeb.Sockets.disconnect_channel(deleted.id)
+    end
+
+    result
+  end
+
+  defp do_delete_channel(channel, actor) do
     if actor do
       Multi.new()
       |> Multi.insert(:audit_log, fn _ ->

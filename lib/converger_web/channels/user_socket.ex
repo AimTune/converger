@@ -20,6 +20,7 @@ defmodule ConvergerWeb.UserSocket do
   def connect(_params, _socket, _connect_info), do: :error
 
   @impl true
-  def id(%{assigns: %{claims: %{"sub" => user_id}}}), do: "user_socket:#{user_id}"
+  # Tenant-scoped: the same user id in two tenants is two different users.
+  def id(%{assigns: %{claims: claims}}), do: ConvergerWeb.Sockets.user_socket_id(claims)
   def id(_socket), do: nil
 end
