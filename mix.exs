@@ -94,7 +94,7 @@ defmodule Converger.MixProject do
       {:logger_json, "~> 7.0"},
       {:phoenix_live_view, "~> 1.1.0"},
       {:lazy_html, ">= 0.1.0", only: :test},
-      {:gettext, "~> 0.20"},
+      {:gettext, "~> 1.0"},
       {:cors_plug, "~> 3.0"},
       {:broadway, "~> 1.3"},
       {:hammer, "~> 7.5"},
