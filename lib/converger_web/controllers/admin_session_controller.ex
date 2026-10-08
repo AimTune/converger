@@ -16,9 +16,10 @@ defmodule ConvergerWeb.AdminSessionController do
   def create(conn, %{"email" => email, "password" => password}) do
     account = "admin:" <> email
 
-    with :ok <- LoginThrottle.check(conn.remote_ip, account) do
-      authenticate(conn, email, password, account)
-    else
+    case LoginThrottle.check(conn.remote_ip, account) do
+      :ok ->
+        authenticate(conn, email, password, account)
+
       {:error, retry_after_ms} ->
         seconds = RateLimit.retry_after_seconds(retry_after_ms)
 

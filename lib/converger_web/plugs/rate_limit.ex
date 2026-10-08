@@ -29,25 +29,31 @@ defmodule ConvergerWeb.Plugs.RateLimit do
   def init(opts), do: opts
 
   def call(conn, opts) do
-    {id, tenant_ref} = identify(conn, opts[:scope] || :ip)
-    bucket = opts[:bucket] || opts[:key_prefix] || "rl"
+    scope = opts[:scope] || :ip
+    {id, tenant_ref} = identify(conn, scope)
 
-    check_opts =
-      if opts[:limit] || opts[:scale_ms] || !opts[:bucket],
-        do: [tenant: tenant_ref, default: {opts[:limit] || 10, opts[:scale_ms] || 60_000}],
-        else: [tenant: tenant_ref]
-
-    case RateLimit.check(bucket, "#{opts[:scope] || :ip}:#{id}", check_opts) do
-      {:allow, _count} ->
-        conn
-
-      {:deny, retry_after_ms, _spec} ->
-        conn
-        |> put_resp_header("retry-after", Integer.to_string(retry_after_seconds(retry_after_ms)))
-        |> put_status(:too_many_requests)
-        |> json(%{error: "Too many requests. Please try again later."})
-        |> halt()
+    case RateLimit.check(bucket(opts), "#{scope}:#{id}", check_opts(opts, tenant_ref)) do
+      {:allow, _count} -> conn
+      {:deny, retry_after_ms, _spec} -> deny(conn, retry_after_ms)
     end
+  end
+
+  defp bucket(opts), do: opts[:bucket] || opts[:key_prefix] || "rl"
+
+  # An explicit :limit / :scale_ms (or an ad-hoc key without a bucket) is the
+  # fallback when no bucket limit is configured.
+  defp check_opts(opts, tenant_ref) do
+    if opts[:limit] || opts[:scale_ms] || !opts[:bucket],
+      do: [tenant: tenant_ref, default: {opts[:limit] || 10, opts[:scale_ms] || 60_000}],
+      else: [tenant: tenant_ref]
+  end
+
+  defp deny(conn, retry_after_ms) do
+    conn
+    |> put_resp_header("retry-after", Integer.to_string(retry_after_seconds(retry_after_ms)))
+    |> put_status(:too_many_requests)
+    |> json(%{error: "Too many requests. Please try again later."})
+    |> halt()
   end
 
   @doc false

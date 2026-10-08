@@ -16,9 +16,10 @@ defmodule ConvergerWeb.TenantSessionController do
   def create(conn, %{"email" => email, "password" => password, "tenant_name" => tenant_name}) do
     account = "tenant:" <> tenant_name <> ":" <> email
 
-    with :ok <- LoginThrottle.check(conn.remote_ip, account) do
-      authenticate(conn, email, password, tenant_name, account)
-    else
+    case LoginThrottle.check(conn.remote_ip, account) do
+      :ok ->
+        authenticate(conn, email, password, tenant_name, account)
+
       {:error, retry_after_ms} ->
         seconds = RateLimit.retry_after_seconds(retry_after_ms)
 
