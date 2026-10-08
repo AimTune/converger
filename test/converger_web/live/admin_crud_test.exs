@@ -32,13 +32,34 @@ defmodule ConvergerWeb.Admin.CrudTest do
       {:ok, view, _html} = live(conn, ~p"/admin/tenants")
 
       # Create
-      assert view
-             |> form("form", tenant: %{name: "New Tenant"})
-             |> render_submit() =~ "Tenant created"
+      html =
+        view
+        |> form("form", tenant: %{name: "New Tenant"})
+        |> render_submit()
 
-      tenant = Tenants.get_tenant_by_api_key(hd(Tenants.list_tenants()).api_key)
+      assert html =~ "Tenant created"
+
+      # The full key is revealed exactly once, right after creation.
+      [_, api_key] = Regex.run(~r/(cvg_live_[A-Za-z0-9_-]{20,})/, html)
+      tenant = Tenants.get_tenant_by_api_key(api_key)
       assert tenant.name == "New Tenant"
       assert tenant.status == "active"
+
+      html = view |> element("button[phx-click='dismiss_key']") |> render_click()
+      refute html =~ api_key
+      assert html =~ Converger.Tenants.Tenant.masked_api_key(tenant)
+
+      # Rotation reveals a new key; the old key keeps working during the grace period.
+      html =
+        view
+        |> element("button[phx-click='rotate_api_key'][phx-value-id='#{tenant.id}']")
+        |> render_click()
+
+      assert html =~ "API key rotated"
+      [_, new_key] = Regex.run(~r/(cvg_live_[A-Za-z0-9_-]{20,})/, html)
+      assert new_key != api_key
+      assert Tenants.get_tenant_by_api_key(new_key).id == tenant.id
+      assert Tenants.get_tenant_by_api_key(api_key).id == tenant.id
 
       # Toggle Status (Update)
       assert view
@@ -85,6 +106,12 @@ defmodule ConvergerWeb.Admin.CrudTest do
       channel = hd(Channels.list_channels())
       assert channel.name == "New Channel"
       assert channel.tenant_id == tenant.id
+
+      # The channel secret is shown once after creation, then hidden.
+      assert render(view) =~ channel.secret
+
+      refute view |> element("button[phx-click='dismiss_secret']") |> render_click() =~
+               channel.secret
 
       # Toggle Status
       assert view

@@ -217,6 +217,22 @@ if config_env() == :prod do
       You can generate one by calling: mix phx.gen.secret
       """
 
+  # Key used to encrypt channel secrets and configs at rest (base64, 32 bytes).
+  # Generate one with: mix run -e 'IO.puts(Converger.Vault.generate_key())'
+  # For key rotation, put the previous key(s) in CLOAK_RETIRED_KEYS
+  # (comma-separated) and run Converger.Release.reencrypt_secrets/0.
+  cloak_key =
+    System.get_env("CLOAK_KEY") ||
+      raise """
+      environment variable CLOAK_KEY is missing.
+      It must be a base64-encoded 32 byte key, e.g. generated with:
+      mix run -e 'IO.puts(Converger.Vault.generate_key())'
+      """
+
+  config :converger, Converger.Vault,
+    key: cloak_key,
+    retired_keys: String.split(System.get_env("CLOAK_RETIRED_KEYS") || "", ",", trim: true)
+
   host = System.get_env("PHX_HOST") || "example.com"
   port = String.to_integer(System.get_env("PORT") || "4000")
 

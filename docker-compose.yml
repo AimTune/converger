@@ -26,6 +26,8 @@ services:
     environment:
       DATABASE_URL: ecto://postgres:postgres@db/converger_prod
       SECRET_KEY_BASE: "hJk3F8xZq2Lm9Rn5Tp7Wv0Yd4Bg6Ai1Cj8Ek0Fl2Gn4Ho6Ip8Jq0Kr2Lt4Mu6Nv8Ow0Px2Qy4Rz6Sa8Tb0Uc2Vd4We"
+      # Demo encryption key for local docker-compose only. Generate your own for production.
+      CLOAK_KEY: "Y29udmVyZ2VyLWNvbXBvc2UtZGVtby1rZXktMzJieSE="
       PHX_SERVER: "true"
       PHX_HOST: localhost
       PORT: "4000"

@@ -55,3 +55,6 @@ config :converger, Converger.Uploads,
 
 # Disable OpenTelemetry span export in test
 config :opentelemetry, traces_exporter: :none
+
+# Deterministic encryption key for tests only.
+config :converger, Converger.Vault, key: Base.encode64("converger-tst-cloak-key-32bytes!")
