@@ -57,6 +57,14 @@ defmodule ConvergerWeb.FallbackController do
     |> json(%{error: "Activity could not be accepted, please retry"})
   end
 
+  # The conversation is closed (manually or by inactivity) and does not accept
+  # activities until it is reopened.
+  def call(conn, {:error, :conversation_closed}) do
+    conn
+    |> put_status(:conflict)
+    |> json(%{error: "conversation_closed", detail: "Conversation is closed"})
+  end
+
   def call(conn, {:error, message}) when is_binary(message) do
     conn
     |> put_status(:bad_request)

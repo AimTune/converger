@@ -66,17 +66,51 @@ defmodule Converger.Channels.Adapters.Webhook do
   @impl true
   def retry_policy, do: %{timeout_ms: 10_000}
 
+  @doc """
+  A generic webhook carries one message per request. A body that is a
+  delivery receipt (see `parse_status_update/2`) carries no message.
+
+  An optional string `"idempotency_key"` makes re-delivery of the same
+  message safe: it is unique per conversation (or, for requests without a
+  `conversation_id`, per channel). An optional `"external_id"` (plus
+  `"display_name"`) identifies the external party, so that requests without
+  a `conversation_id` join that participant's active conversation.
+  """
   @impl true
-  def parse_inbound(_channel, params) do
-    {:ok,
-     %{
-       "sender" => params["sender"] || params["from"] || "external",
-       "text" => params["text"] || params["message"] || params["body"],
-       "type" => params["type"] || "message",
-       "metadata" => params["metadata"] || %{},
-       "attachments" => params["attachments"] || []
-     }}
+  def parse_inbound(channel, params) do
+    case parse_status_update(channel, params) do
+      {:ok, _receipts} ->
+        {:ok, []}
+
+      :ignore ->
+        {:ok, [inbound_message(params)]}
+    end
   end
+
+  defp inbound_message(params) do
+    %{
+      "sender" => params["sender"] || params["from"] || "external",
+      "text" => params["text"] || params["message"] || params["body"],
+      "type" => params["type"] || "message",
+      "metadata" => params["metadata"] || %{},
+      "attachments" => params["attachments"] || [],
+      "idempotency_key" => string_or_nil(params["idempotency_key"]),
+      "participant" => participant(params)
+    }
+  end
+
+  # Opt-in participant resolution: with an "external_id" (and no
+  # conversation_id), messages from the same external party share their
+  # open conversation instead of each starting a new one.
+  defp participant(params) do
+    case string_or_nil(params["external_id"]) do
+      nil -> nil
+      external_id -> %{"external_id" => external_id, "display_name" => params["display_name"]}
+    end
+  end
+
+  defp string_or_nil(value) when is_binary(value) and value != "", do: value
+  defp string_or_nil(_), do: nil
 
   @impl true
   def parse_status_update(_channel, params) do

@@ -2,10 +2,16 @@ defmodule ConvergerWeb.ConvergerAPI.ActivityJSON do
   alias Converger.Activities.Activity
   alias Converger.Activities.Serializer
 
-  def activity_set(%{activities: activities, watermark: watermark}) do
+  @doc """
+  An activity set: a page of activities, the watermark to resume after them,
+  and `has_more` (true when more activities follow; fetch them by passing
+  `watermark` back).
+  """
+  def activity_set(%{activities: activities, watermark: watermark} = assigns) do
     %{
       activities: Enum.map(activities, &activity_data/1),
-      watermark: watermark
+      watermark: watermark,
+      has_more: Map.get(assigns, :has_more, false)
     }
   end
 

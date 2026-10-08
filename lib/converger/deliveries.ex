@@ -12,10 +12,23 @@ defmodule Converger.Deliveries do
   alias Converger.Deliveries.Delivery
   alias Converger.Pipeline.RetryPolicy
 
-  def list_deliveries(filters \\ %{}) do
+  @doc """
+  First page of deliveries matching `filters`, newest first (bounded, see
+  `paginate_deliveries/2`).
+  """
+  def list_deliveries(filters \\ %{}, opts \\ []) do
+    {:ok, page} = paginate_deliveries(filters, Keyword.delete(opts, :cursor))
+    page.entries
+  end
+
+  @doc """
+  Keyset-paginated deliveries on `(inserted_at, id)`, newest first.
+  Options: `:limit`, `:cursor` (see `Converger.Pagination.keyset/2`).
+  """
+  def paginate_deliveries(filters \\ %{}, opts \\ []) do
     Delivery
     |> apply_filters(filters)
-    |> Repo.all()
+    |> Converger.Pagination.keyset(opts)
   end
 
   def get_delivery!(id), do: Repo.get!(Delivery, id)
@@ -112,13 +125,24 @@ defmodule Converger.Deliveries do
     dead_letter(delivery, delivery.attempts + 1, error_message)
   end
 
-  @doc "List dead-lettered deliveries (`status: \"failed\"`), newest first."
-  def list_dead_letters(filters \\ %{}) do
+  @doc """
+  First page of dead-lettered deliveries (`status: "failed"`), most recently
+  failed first. Bounded; see `paginate_dead_letters/2` for further pages.
+  """
+  def list_dead_letters(filters \\ %{}, opts \\ []) do
+    {:ok, page} = paginate_dead_letters(filters, Keyword.delete(opts, :cursor))
+    page.entries
+  end
+
+  @doc """
+  Keyset-paginated dead letters on `(updated_at, id)`, most recently failed first.
+  Options: `:limit`, `:cursor` (see `Converger.Pagination.keyset/2`).
+  """
+  def paginate_dead_letters(filters \\ %{}, opts \\ []) do
     Delivery
     |> where(status: "failed")
     |> apply_filters(Map.delete(filters, :status))
-    |> order_by(desc: :updated_at)
-    |> Repo.all()
+    |> Converger.Pagination.keyset(Keyword.put(opts, :field, :updated_at))
   end
 
   defp dead_letter(delivery, attempts, error_message) do

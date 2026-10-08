@@ -1,6 +1,8 @@
 defmodule Converger.Channels.Adapters.WhatsAppInfobip do
   @behaviour Converger.Channels.Adapter
 
+  alias Converger.Participants
+
   require Logger
 
   alias Converger.Channels.DeliveryError
@@ -25,12 +27,15 @@ defmodule Converger.Channels.Adapters.WhatsAppInfobip do
     base_url = channel.config["base_url"]
     api_key = channel.config["api_key"]
     sender = channel.config["sender"]
-    recipient = activity.metadata["recipient_phone"] || activity.metadata["to"]
+
+    recipient =
+      activity.metadata["recipient_phone"] || activity.metadata["to"] ||
+        Participants.recipient_for(activity, Map.get(channel, :id))
 
     if is_nil(recipient) do
       {:error,
        DeliveryError.permanent(
-         "activity metadata must include 'recipient_phone' or 'to' for Infobip delivery"
+         "no recipient: set activity metadata 'recipient_phone' or 'to', or reply in a conversation with a participant on this channel"
        )}
     else
       url = "#{base_url}/whatsapp/1/message/text"
@@ -66,43 +71,145 @@ defmodule Converger.Channels.Adapters.WhatsAppInfobip do
     end
   end
 
+  @doc """
+  Parses every inbound message of an Infobip webhook (`results` is a batch).
+  Each message gets its Infobip `messageId` as `"idempotency_key"`. Delivery
+  reports (results with a `status`) are not messages and are skipped here;
+  see `parse_status_update/2`.
+  """
   @impl true
-  def parse_inbound(_channel, params) do
-    with [result | _] <- params["results"] || [] do
-      {:ok,
-       %{
-         "sender" => result["from"],
-         "text" => get_in(result, ["message", "text"]) || result["text"] || "",
-         "type" => "message",
-         "metadata" => %{
-           "infobip_message_id" => result["messageId"],
-           "received_at" => result["receivedAt"]
-         }
-       }}
-    else
-      _ -> {:error, "unable to parse Infobip webhook payload"}
-    end
+  def parse_inbound(_channel, %{"results" => results}) when is_list(results) do
+    messages =
+      for result <- results,
+          is_map(result),
+          not delivery_report?(result),
+          do: parse_message(result)
+
+    {:ok, messages}
+  end
+
+  def parse_inbound(_channel, _params), do: {:error, "unable to parse Infobip webhook payload"}
+
+  defp delivery_report?(result), do: match?(%{"groupName" => _}, result["status"])
+
+  defp parse_message(result) do
+    message = if is_map(result["message"]), do: result["message"], else: %{}
+    type = message["type"] || "TEXT"
+    {activity_type, text, attachments, extra} = parse_content(type, message, result)
+
+    metadata =
+      %{
+        "infobip_message_id" => result["messageId"],
+        "whatsapp_type" => String.downcase(type),
+        "received_at" => result["receivedAt"],
+        "profile_name" => get_in(result, ["contact", "name"]),
+        "reply_to" => get_in(message, ["context", "id"])
+      }
+      |> Map.merge(extra)
+      |> reject_nil_values()
+
+    %{
+      "sender" => result["from"],
+      "text" => text,
+      "type" => activity_type,
+      "attachments" => attachments,
+      "metadata" => metadata,
+      "idempotency_key" => result["messageId"],
+      "participant" => %{
+        "external_id" => result["from"],
+        "display_name" => metadata["profile_name"]
+      }
+    }
+  end
+
+  @media_types %{
+    "IMAGE" => "image/*",
+    "VIDEO" => "video/*",
+    "AUDIO" => "audio/*",
+    "VOICE" => "audio/*",
+    "DOCUMENT" => "application/octet-stream",
+    "STICKER" => "image/webp"
+  }
+
+  # Returns {activity_type, text, attachments, extra_metadata}.
+  defp parse_content("TEXT", message, result),
+    do: {"message", message["text"] || result["text"] || "", [], %{}}
+
+  defp parse_content(type, message, _result) when is_map_key(@media_types, type) do
+    attachment =
+      reject_nil_values(%{
+        "contentType" => message["mimeType"] || Map.fetch!(@media_types, type),
+        "name" => message["filename"] || message["fileName"],
+        "provider" => "whatsapp_infobip",
+        "providerMediaId" => message["id"],
+        "providerMediaUrl" => message["url"]
+      })
+
+    {"message", message["caption"] || "", [attachment], %{}}
+  end
+
+  defp parse_content("LOCATION", message, _result) do
+    content =
+      reject_nil_values(%{
+        "latitude" => message["latitude"],
+        "longitude" => message["longitude"],
+        "name" => message["name"],
+        "address" => message["address"],
+        "url" => message["url"]
+      })
+
+    text = Enum.join(Enum.reject([message["name"], message["address"]], &is_nil/1), ", ")
+
+    {"message", text,
+     [%{"contentType" => "application/vnd.converger.location", "content" => content}], %{}}
+  end
+
+  defp parse_content(type, message, _result)
+       when type in ["INTERACTIVE_BUTTON_REPLY", "INTERACTIVE_LIST_REPLY", "BUTTON"] do
+    {"message", message["title"] || message["text"] || "", [],
+     %{
+       "interactive_reply" =>
+         reject_nil_values(%{
+           "type" => String.downcase(type),
+           "id" => message["id"],
+           "title" => message["title"],
+           "description" => message["description"],
+           "payload" => message["payload"]
+         })
+     }}
+  end
+
+  # CONTACT, ORDER, UNSUPPORTED and future types: keep the activity (no
+  # silent loss); consumers can look at metadata.whatsapp_type.
+  defp parse_content(_type, message, result),
+    do: {"message", message["text"] || result["text"] || "", [], %{}}
+
+  defp reject_nil_values(map) do
+    map |> Enum.reject(fn {_k, v} -> is_nil(v) end) |> Map.new()
   end
 
   @impl true
-  def parse_status_update(_channel, params) do
-    with [result | _] <- params["results"] || [],
-         %{"groupName" => group_name} <- result["status"] do
-      updates = [
+  def parse_status_update(_channel, %{"results" => results}) when is_list(results) do
+    updates =
+      for result <- results,
+          is_map(result),
+          delivery_report?(result) do
         %{
           "provider_message_id" => result["messageId"],
-          "status" => normalize_dlr_status(group_name),
+          "status" => normalize_dlr_status(result["status"]["groupName"]),
           "timestamp" => result["doneAt"] || result["sentAt"],
           "recipient_id" => result["to"],
           "error" => get_in(result, ["error", "description"])
         }
-      ]
+      end
 
-      {:ok, updates}
-    else
-      _ -> :ignore
+    case updates do
+      [] -> :ignore
+      updates -> {:ok, updates}
     end
   end
+
+  def parse_status_update(_channel, _params), do: :ignore
 
   defp normalize_dlr_status("DELIVERED"), do: "delivered"
   defp normalize_dlr_status("SEEN"), do: "read"
