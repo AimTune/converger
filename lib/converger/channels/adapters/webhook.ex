@@ -45,13 +45,11 @@ defmodule Converger.Channels.Adapters.Webhook do
 
     header_list = Enum.map(headers, fn {k, v} -> {k, v} end)
 
-    case Req.request(
-           method: method,
-           url: url,
-           json: payload,
-           headers: header_list,
-           receive_timeout: 10_000
-         ) do
+    req_options =
+      [method: method, url: url, json: payload, headers: header_list, receive_timeout: 10_000]
+      |> Keyword.merge(Application.get_env(:converger, :webhook_req_options, []))
+
+    case Req.request(req_options) do
       {:ok, %Req.Response{status: status}} when status in 200..299 ->
         :ok
 
