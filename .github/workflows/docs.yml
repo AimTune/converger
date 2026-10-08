@@ -1,0 +1,132 @@
+name: Docs
+
+# Documentation site (https://converger.aimtune.dev), built with Docusaurus
+# from website/ with the repository's docs/ folder as content.
+#
+# - pull_request: build the site (broken links fail the build) and check that
+#   code changes come with documentation changes ("Docs required").
+# - push to main / manual run: build and deploy to GitHub Pages.
+
+on:
+  pull_request:
+    # labeled/unlabeled re-run "Docs required" when the no-docs label changes.
+    types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  docs-required:
+    name: Docs required
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Require docs/ changes when code changes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          NO_DOCS_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'no-docs') }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          files=$(gh api --paginate "repos/${REPO}/pulls/${PR_NUMBER}/files" --jq '.[].filename')
+
+          code=$(grep -E '^(lib/|config/|priv/repo/migrations/)' <<<"$files" || true)
+          docs=$(grep -E '^docs/' <<<"$files" || true)
+
+          {
+            echo "## Docs required"
+            echo
+            echo "Code files changed (lib/, config/, priv/repo/migrations/): $(grep -c . <<<"$code" || true)"
+            echo "Docs files changed (docs/): $(grep -c . <<<"$docs" || true)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ -z "$code" ]; then
+            echo "No changes under lib/, config/ or priv/repo/migrations/. Nothing to check."
+            exit 0
+          fi
+
+          if [ -n "$docs" ]; then
+            echo "Code changes come with documentation changes:"
+            echo "$docs"
+            exit 0
+          fi
+
+          if [ "$NO_DOCS_LABEL" = "true" ]; then
+            echo "::notice title=Docs required::Skipped: the PR has the 'no-docs' label. State the reason in the PR description."
+            echo "Skipped via the \`no-docs\` label." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          echo "Changed code files:"
+          echo "$code"
+          echo "::error title=Docs required::This PR changes lib/, config/ or priv/repo/migrations/ but nothing under docs/. Update the relevant docs pages (and add or update an ADR in docs/adr/ for architectural decisions). If the change really has no documentation impact, a maintainer can add the 'no-docs' label; explain why in the PR description. See https://converger.aimtune.dev/contributing#documentation-with-every-change"
+          exit 1
+
+  build:
+    name: Build site
+    # Label changes only affect "Docs required"; do not rebuild the site for them.
+    if: github.event.action != 'labeled' && github.event.action != 'unlabeled'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+
+      - name: Install dependencies
+        working-directory: website
+        run: npm ci
+
+      - name: Build Docusaurus site
+        working-directory: website
+        run: npm run build
+
+      - name: Publish protocol JSON Schemas at /schemas/protocol/v1
+        shell: bash
+        run: |
+          # The schemas' $id URLs point at https://converger.aimtune.dev/schemas/protocol/v1/...
+          if [ -d priv/protocol/v1 ]; then
+            mkdir -p website/build/schemas/protocol/v1
+            cp -R priv/protocol/v1/. website/build/schemas/protocol/v1/
+            echo "Published $(find priv/protocol/v1 -type f | wc -l) schema file(s)."
+          else
+            echo "priv/protocol/v1 does not exist yet; skipping."
+          fi
+          touch website/build/.nojekyll
+
+      - name: Upload Pages artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: website/build
+
+  deploy:
+    name: Deploy to GitHub Pages
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    # One deployment at a time; never cancel a deployment that is running.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
