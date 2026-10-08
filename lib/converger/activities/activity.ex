@@ -27,6 +27,8 @@ defmodule Converger.Activities.Activity do
     field :attachments, {:array, :map}, default: []
     field :metadata, :map, default: %{}
     field :idempotency_key, :string
+    # Per-conversation sequence number, assigned by the server on insert.
+    field :seq, :integer
 
     belongs_to :tenant, Converger.Tenants.Tenant
     belongs_to :conversation, Converger.Conversations.Conversation

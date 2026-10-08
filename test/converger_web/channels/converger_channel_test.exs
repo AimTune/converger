@@ -145,7 +145,7 @@ defmodule ConvergerWeb.ConvergerChannelTest do
 
     {:ok, _, _socket} =
       subscribe_and_join(socket, ConvergerChannel, "converger:conversation:#{conversation.id}", %{
-        "watermark" => Converger.ConvergerAPI.Watermark.encode(first.id)
+        "watermark" => Converger.ConvergerAPI.Watermark.encode(first.seq)
       })
 
     assert_push "activitySet", %{activities: [replayed]}
