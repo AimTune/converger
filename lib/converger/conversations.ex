@@ -13,6 +13,22 @@ defmodule Converger.Conversations do
     |> Repo.all()
   end
 
+  @doc """
+  A tenant's conversations matching `filters` (`"channel_id"`, `"status"`,
+  `"external_id"`), newest first, at most `limit`, with the participant
+  preloaded. The tenant always comes from `tenant_id`, never from `filters`.
+  """
+  def search_conversations(tenant_id, filters, limit) do
+    filters
+    |> Map.drop(["tenant_id", :tenant_id])
+    |> Map.put("tenant_id", tenant_id)
+    |> then(&apply_filters(Conversation, &1))
+    |> order_by(desc: :inserted_at)
+    |> limit(^limit)
+    |> preload(:participant)
+    |> Repo.all()
+  end
+
   def list_conversations_for_tenant(tenant_id) do
     list_conversations(%{"tenant_id" => tenant_id})
   end
@@ -25,8 +41,19 @@ defmodule Converger.Conversations do
       {:channel_id, value}, q when value != "" -> where(q, channel_id: ^value)
       {"status", value}, q when value != "" -> where(q, status: ^value)
       {:status, value}, q when value != "" -> where(q, status: ^value)
+      {"external_id", value}, q when is_binary(value) -> where_external_id(q, value)
+      {:external_id, value}, q when is_binary(value) -> where_external_id(q, value)
       {_, _}, q -> q
     end)
+  end
+
+  # Conversations whose participant (on the conversation's channel) has this
+  # external id, e.g. a WhatsApp phone number.
+  defp where_external_id(query, external_id) do
+    from(c in query,
+      join: p in assoc(c, :participant),
+      where: p.external_id == ^external_id and p.channel_id == c.channel_id
+    )
   end
 
   def get_conversation(id), do: Repo.get(Conversation, id)

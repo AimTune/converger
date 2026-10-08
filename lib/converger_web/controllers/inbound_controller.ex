@@ -3,7 +3,7 @@ defmodule ConvergerWeb.InboundController do
 
   require Logger
 
-  alias Converger.{Channels, Activities, Conversations, Deliveries}
+  alias Converger.{Channels, Activities, Conversations, Deliveries, Participants}
   alias Converger.Channels.Adapter
 
   action_fallback ConvergerWeb.FallbackController
@@ -161,8 +161,21 @@ defmodule ConvergerWeb.InboundController do
         {:duplicate, existing}
 
       nil ->
-        with {:ok, conversation} <- resolve_or_create_conversation(channel, params) do
-          create_inbound_activity(channel, conversation, message)
+        case resolve_or_create_conversation(channel, params, message) do
+          {:ok, conversation} ->
+            create_inbound_activity(channel, conversation, message)
+
+          # e.g. an external id the participant schema rejects: permanent.
+          {:error, %Ecto.Changeset{} = changeset} ->
+            Logger.warning("Rejected inbound message: invalid participant or conversation",
+              channel_id: channel.id,
+              errors: inspect(changeset.errors)
+            )
+
+            {:rejected, changeset}
+
+          {:error, _} = error ->
+            error
         end
     end
   end
@@ -273,20 +286,36 @@ defmodule ConvergerWeb.InboundController do
   defp deprecation_reason(:missing), do: "no signature"
   defp deprecation_reason(:legacy), do: "a legacy (non-timestamped) signature"
 
-  defp resolve_or_create_conversation(channel, params) do
+  # Conversation for an inbound message, in order of precedence:
+  #   1. an explicit `conversation_id` in the request (tenant-scoped);
+  #   2. the participant's active conversation on this channel, or a new one
+  #      for the participant (see Converger.Participants);
+  #   3. a new, participant-less conversation (adapters without an external id).
+  defp resolve_or_create_conversation(channel, params, message) do
     conversation_id = params["conversation_id"]
 
-    if conversation_id do
-      case Conversations.get_conversation(conversation_id, channel.tenant_id) do
-        %Conversations.Conversation{} = conv -> {:ok, conv}
-        nil -> {:error, :not_found}
-      end
-    else
-      Conversations.create_conversation(%{
-        "tenant_id" => channel.tenant_id,
-        "channel_id" => channel.id,
-        "metadata" => %{"source" => "inbound_webhook"}
-      })
+    cond do
+      conversation_id ->
+        case Conversations.get_conversation(conversation_id, channel.tenant_id) do
+          %Conversations.Conversation{} = conv -> {:ok, conv}
+          nil -> {:error, :not_found}
+        end
+
+      participant = participant_attrs(message) ->
+        Participants.resolve_conversation(channel, participant)
+
+      true ->
+        Conversations.create_conversation(%{
+          "tenant_id" => channel.tenant_id,
+          "channel_id" => channel.id,
+          "metadata" => %{"source" => "inbound_webhook"}
+        })
     end
   end
+
+  defp participant_attrs(%{"participant" => %{"external_id" => external_id} = participant})
+       when is_binary(external_id) and external_id != "",
+       do: participant
+
+  defp participant_attrs(_message), do: nil
 end
