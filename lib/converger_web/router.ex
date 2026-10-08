@@ -28,6 +28,10 @@ defmodule ConvergerWeb.Router do
     plug :require_admin_user
   end
 
+  pipeline :require_admin_login do
+    plug :require_admin_session
+  end
+
   pipeline :tenant_session do
     plug :fetch_tenant_user
   end
@@ -89,6 +93,14 @@ defmodule ConvergerWeb.Router do
     get "/login", AdminSessionController, :new
     post "/login", AdminSessionController, :create
     delete "/logout", AdminSessionController, :delete
+  end
+
+  # Own password change (also the forced change for `must_change_password`)
+  scope "/admin", ConvergerWeb do
+    pipe_through [:browser, :admin_auth, :admin_session, :require_admin_login]
+
+    get "/password", AdminPasswordController, :edit
+    put "/password", AdminPasswordController, :update
   end
 
   # Admin panel (IP whitelist + session auth)

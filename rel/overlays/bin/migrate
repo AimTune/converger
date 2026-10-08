@@ -1,0 +1,20 @@
+#!/bin/sh
+# Runs pending database migrations and exits. Run this as a separate
+# deploy step (init container, pre-deploy/release command, the compose
+# `migrate` service), never as part of every replica's start command.
+#
+# Converger.Release.migrate/0 holds a Postgres advisory lock while it
+# migrates, so concurrent invocations are serialized and each migration
+# is applied exactly once.
+#
+# Set CREATE_DB=true to create the database first (needs CREATEDB rights;
+# leave it unset for managed databases that already exist).
+set -eu
+
+cd -P -- "$(dirname -- "$0")"
+
+if [ "${CREATE_DB:-false}" = "true" ]; then
+  ./converger eval "Converger.Release.create_db()"
+fi
+
+exec ./converger eval "Converger.Release.migrate()"

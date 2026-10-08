@@ -1,0 +1,4 @@
+# Release scripts run inside Linux containers: keep LF line endings even
+# when core.autocrlf is enabled on Windows checkouts.
+*.sh text eol=lf
+rel/overlays/bin/* text eol=lf

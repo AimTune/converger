@@ -106,6 +106,35 @@ if config_env() == :prod do
       You can generate one by calling: mix phx.gen.secret
       """
 
+  if byte_size(secret_key_base) < 64 do
+    raise """
+    environment variable SECRET_KEY_BASE is too short (#{byte_size(secret_key_base)} bytes).
+    It must be at least 64 bytes. Generate one with: mix phx.gen.secret
+    """
+  end
+
+  # SHA-256 fingerprints of secrets that were published in this repository
+  # (the SECRET_KEY_BASE formerly hardcoded in docker-compose.yml
+  # and the demo CLOAK_KEY proposed alongside it). They are public knowledge,
+  # so refuse to boot with them. See docs/security.md.
+  leaked_secret_fingerprints = [
+    "d759ffb9f77efdcea1576616cc59e9b9834eed3e84c1a67f95c265dd9d06ab5b",
+    "43cf796f773e59d3e3729463263820ec49ca51bf04431344a7803931ee46d16c"
+  ]
+
+  for {var, value} <- [
+        {"SECRET_KEY_BASE", secret_key_base},
+        {"CLOAK_KEY", System.get_env("CLOAK_KEY")}
+      ],
+      is_binary(value),
+      Base.encode16(:crypto.hash(:sha256, value), case: :lower) in leaked_secret_fingerprints do
+    raise """
+    environment variable #{var} is set to a value that was published in the
+    Converger git repository and must be considered compromised.
+    Generate a new secret and rotate it (see docs/security.md).
+    """
+  end
+
   host = System.get_env("PHX_HOST") || "example.com"
   port = String.to_integer(System.get_env("PORT") || "4000")
 
@@ -122,6 +151,55 @@ if config_env() == :prod do
       port: port
     ],
     secret_key_base: secret_key_base
+
+  # Allowed origins for browser WebSocket connections (LiveView and the
+  # Phoenix sockets). Comma-separated, e.g.
+  # "https://converger.example.com,//*.example.com". When unset, Phoenix only
+  # accepts the host of the endpoint `url` (PHX_HOST). Non-browser clients
+  # that send no Origin header are not affected.
+  if check_origin = System.get_env("CHECK_ORIGIN") do
+    origins =
+      check_origin
+      |> String.split(",", trim: true)
+      |> Enum.map(&String.trim/1)
+      |> Enum.reject(&(&1 == ""))
+
+    if origins == [] do
+      raise "environment variable CHECK_ORIGIN is set but contains no origins"
+    end
+
+    config :converger, ConvergerWeb.Endpoint, check_origin: origins
+  end
+
+  # HTTPS enforcement (ConvergerWeb.Plugs.ForceSSL). Enabled by default in
+  # production: plain HTTP requests are redirected to https://PHX_HOST and
+  # HTTPS responses carry an HSTS header. Behind a TLS-terminating proxy, set
+  # TRUSTED_PROXIES so its X-Forwarded-Proto header is honoured; the header is
+  # ignored from any other peer. Set FORCE_SSL=false only when TLS is
+  # enforced elsewhere and the app never receives plain HTTP from clients.
+  truthy? = fn var, default ->
+    case System.get_env(var) do
+      nil -> default
+      value -> String.downcase(String.trim(value)) in ~w(true 1 yes on)
+    end
+  end
+
+  if truthy?.("FORCE_SSL", true) do
+    exclude_paths =
+      (System.get_env("FORCE_SSL_EXCLUDE_PATHS") || "")
+      |> String.split(",", trim: true)
+      |> Enum.map(&String.trim/1)
+      |> Enum.reject(&(&1 == ""))
+
+    config :converger, :force_ssl,
+      hsts: truthy?.("HSTS", true),
+      expires: String.to_integer(System.get_env("HSTS_MAX_AGE") || "31536000"),
+      subdomains: truthy?.("HSTS_INCLUDE_SUBDOMAINS", false),
+      preload: truthy?.("HSTS_PRELOAD", false),
+      exclude: [hosts: ["localhost", "127.0.0.1"], paths: exclude_paths]
+  else
+    config :converger, :force_ssl, false
+  end
 
   # ## SSL Support
   #
@@ -147,13 +225,9 @@ if config_env() == :prod do
   # "priv/ssl/server.key". For all supported SSL configuration
   # options, see https://hexdocs.pm/plug/Plug.SSL.html#configure/1
   #
-  # We also recommend setting `force_ssl` in your config/prod.exs,
-  # ensuring no data is ever sent via http, always redirecting to https:
-  #
-  #     config :converger, ConvergerWeb.Endpoint,
-  #       force_ssl: [hsts: true]
-  #
-  # Check `Plug.SSL` for all available options in `force_ssl`.
+  # HTTP -> HTTPS redirects and HSTS are handled by the FORCE_SSL settings
+  # above (ConvergerWeb.Plugs.ForceSSL), not by the endpoint's compile-time
+  # `force_ssl` option.
 
   # ## Configuring the mailer
   #

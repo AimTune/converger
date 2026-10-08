@@ -18,6 +18,17 @@ config :converger,
   # Allowed clock skew for timestamped `x-converger-signature` inbound signatures
   inbound_signature_tolerance_seconds: 300
 
+# Serialize migration runs with a session-level Postgres advisory lock instead
+# of the default table lock. Concurrent `Converger.Release.migrate/0` calls
+# (e.g. several replicas or init containers starting at once) wait for the
+# lock holder, then find nothing pending, so each migration runs exactly once.
+# Unlike the table lock it also works with `@disable_ddl_transaction`
+# migrations such as `create index(..., concurrently: true)`.
+# Requires a session-mode connection (not PgBouncer transaction pooling).
+config :converger, Converger.Repo,
+  migration_lock: :pg_advisory_lock,
+  migration_advisory_lock_retry_interval_ms: 1_000
+
 # Configures the endpoint
 config :converger, ConvergerWeb.Endpoint,
   url: [host: "localhost"],

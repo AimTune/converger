@@ -1,0 +1,80 @@
+<div style="max-width: 400px; margin: 80px auto;">
+  <div class="card" style="padding: 30px;">
+    <h2 style="text-align: center; margin-bottom: 20px;">Change Password</h2>
+    <p :if={@forced} style="text-align: center; color: #666; margin-bottom: 25px;">
+      Your account uses a temporary password. Choose a new one to continue.
+    </p>
+
+    <div
+      :if={@errors != []}
+      style="background: #f8d7da; color: #721c24; padding: 10px 15px; border-radius: 4px; margin-bottom: 15px; font-size: 0.9em;"
+    >
+      <div :for={error <- @errors}>{error}</div>
+    </div>
+
+    <form action="/admin/password" method="post">
+      <input type="hidden" name="_csrf_token" value={get_csrf_token()} />
+      <input type="hidden" name="_method" value="put" />
+
+      <div style="margin-bottom: 15px;">
+        <label
+          for="admin_password_current_password"
+          style="display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.85em; color: #555;"
+        >
+          Current password
+        </label>
+        <input
+          type="password"
+          id="admin_password_current_password"
+          name="admin_password[current_password]"
+          autocomplete="current-password"
+          required
+          style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; font-size: 1em;"
+        />
+      </div>
+
+      <div style="margin-bottom: 15px;">
+        <label
+          for="admin_password_password"
+          style="display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.85em; color: #555;"
+        >
+          New password
+        </label>
+        <input
+          type="password"
+          id="admin_password_password"
+          name="admin_password[password]"
+          autocomplete="new-password"
+          minlength="8"
+          required
+          style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; font-size: 1em;"
+        />
+      </div>
+
+      <div style="margin-bottom: 20px;">
+        <label
+          for="admin_password_password_confirmation"
+          style="display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.85em; color: #555;"
+        >
+          Confirm new password
+        </label>
+        <input
+          type="password"
+          id="admin_password_password_confirmation"
+          name="admin_password[password_confirmation]"
+          autocomplete="new-password"
+          minlength="8"
+          required
+          style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; font-size: 1em;"
+        />
+      </div>
+
+      <button
+        type="submit"
+        style="width: 100%; padding: 12px; background: #007bff; color: white; border: none; border-radius: 4px; font-size: 1em; cursor: pointer;"
+      >
+        Update password
+      </button>
+    </form>
+  </div>
+</div>
