@@ -4,6 +4,18 @@
 
 Converger is a scalable messaging infrastructure built with **Elixir** and **Phoenix Channels**. It enables applications to create isolated conversations, exchange activities, and stream messages in real-time with ultra-low latency.
 
+## Documentation
+
+Full documentation lives at **[converger.aimtune.dev](https://converger.aimtune.dev)**: getting started, concepts,
+architecture, channel adapters, REST and WebSocket APIs, security and operations.
+
+- [Getting started](https://converger.aimtune.dev/getting-started)
+- [Architecture decision records (ADR index)](https://converger.aimtune.dev/adr) ([source](docs/adr/index.md))
+- [Contributing](https://converger.aimtune.dev/contributing): every PR updates the relevant `docs/` pages and adds an
+  ADR for architectural decisions.
+
+The site is built with Docusaurus from [`website/`](website/) and uses [`docs/`](docs/) as its content.
+
 ---
 
 ## ✨ Key Features
