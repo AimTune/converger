@@ -105,6 +105,10 @@ dev as well: to send dev traces to the local collector from `docker-compose.yml`
 start the server with `OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318`.
 Export is always disabled in the test environment.
 
+Spans are produced for Phoenix requests, Ecto queries, Oban job executions
+(`opentelemetry_oban`), and outbound HTTP calls made through `Converger.HTTP`
+(`opentelemetry_req`).
+
 | Variable | Default | Description |
 | --- | --- | --- |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | unset | Base URL of the OTLP collector, e.g. `http://otel-collector:4318`. `/v1/traces` is appended for traces. Setting it enables trace export. |

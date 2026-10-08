@@ -67,3 +67,11 @@ one instead:
   with an issued certificate can reach the admin UI.
 
 All of these sit in front of the existing admin login and do not replace it.
+
+## Oban dashboard
+
+The Oban Web dashboard is mounted at `/admin/oban` and goes through the same
+pipelines as the rest of `/admin` (IP whitelist and admin session).
+`ConvergerWeb.ObanResolver` then maps admin roles to dashboard access:
+`super_admin` and `admin` can retry, cancel and delete jobs and pause queues,
+and `viewer` gets read-only access.

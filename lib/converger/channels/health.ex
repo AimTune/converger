@@ -179,7 +179,7 @@ defmodule Converger.Channels.Health do
       }
 
       Task.start(fn ->
-        case Req.post(tenant.alert_webhook_url, json: payload, receive_timeout: 10_000) do
+        case Converger.HTTP.post(tenant.alert_webhook_url, json: payload, receive_timeout: 10_000) do
           {:ok, %{status: status}} when status in 200..299 ->
             Logger.info(
               "Health alert sent for channel #{channel.id} to #{tenant.alert_webhook_url}"

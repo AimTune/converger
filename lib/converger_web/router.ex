@@ -2,6 +2,7 @@ defmodule ConvergerWeb.Router do
   use ConvergerWeb, :router
 
   import ConvergerWeb.Plugs.Auth
+  import Oban.Web.Router
 
   pipeline :api do
     plug :accepts, ["json"]
@@ -108,6 +109,18 @@ defmodule ConvergerWeb.Router do
       live "/users", AdminUserLive
       live "/tenant_users", TenantUserLive
     end
+  end
+
+  # Oban Web dashboard (IP whitelist + admin session; role checks in
+  # ConvergerWeb.ObanResolver). Kept outside the aliased admin scope because
+  # oban_dashboard mounts Oban.Web modules.
+  scope "/admin" do
+    pipe_through [:browser, :admin_auth, :admin_session, :require_admin]
+
+    oban_dashboard("/oban",
+      resolver: ConvergerWeb.ObanResolver,
+      on_mount: [{ConvergerWeb.Live.AuthHooks, :ensure_admin_user}]
+    )
   end
 
   # Tenant portal login (no IP whitelist)
