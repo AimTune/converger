@@ -35,7 +35,8 @@ defmodule Converger.Channels.Adapters.Webhook do
 
   require Logger
 
-  alias Converger.Channels.{InboundSignature, UrlGuard}
+  alias Converger.Channels.{DeliveryError, InboundSignature, UrlGuard}
+  alias Converger.Pipeline.RetryPolicy
 
   @methods %{"POST" => :post, "PUT" => :put, "PATCH" => :patch}
 
@@ -93,7 +94,7 @@ defmodule Converger.Channels.Adapters.Webhook do
           retry: false,
           decode_body: false,
           compressed: false,
-          receive_timeout: limit(config, "receive_timeout"),
+          receive_timeout: receive_timeout(channel, config),
           connect_options: connect_options(target, limit(config, "connect_timeout")),
           into: limited_body(max_bytes)
         ]
@@ -104,29 +105,69 @@ defmodule Converger.Channels.Adapters.Webhook do
         {:ok, %Req.Response{status: status}} when status in 200..299 ->
           :ok
 
-        {:ok, %Req.Response{status: status, body: body}} ->
-          {:error, "webhook returned status #{status}: #{inspect(body)}"}
+        {:ok, %Req.Response{status: status, headers: headers, body: body}} ->
+          {:error, DeliveryError.from_http(status, headers, body, "webhook")}
 
         {:error, reason} ->
-          {:error, "webhook request failed: #{inspect(reason)}"}
+          {:error, DeliveryError.from_transport(reason, "webhook")}
       end
     end
   end
 
   @impl true
-  def parse_inbound(_channel, params) do
-    parsed = %{
+  def retry_policy, do: %{timeout_ms: 10_000}
+
+  @doc """
+  A generic webhook carries one message per request. A body that is a
+  delivery receipt (see `parse_status_update/2`) carries no message, and a
+  `message` with neither text nor attachments is rejected
+  (`{:error, :empty_inbound_message}`).
+
+  An optional string `"idempotency_key"` makes re-delivery of the same
+  message safe: it is unique per conversation (or, for requests without a
+  `conversation_id`, per channel). An optional `"external_id"` (plus
+  `"display_name"`) identifies the external party, so that requests without
+  a `conversation_id` join that participant's active conversation.
+  """
+  @impl true
+  def parse_inbound(channel, params) do
+    case parse_status_update(channel, params) do
+      {:ok, _receipts} ->
+        {:ok, []}
+
+      :ignore ->
+        message = inbound_message(params)
+
+        if empty_message?(message),
+          do: {:error, :empty_inbound_message},
+          else: {:ok, [message]}
+    end
+  end
+
+  defp inbound_message(params) do
+    %{
       "sender" => params["sender"] || params["from"] || "external",
       "text" => params["text"] || params["message"] || params["body"],
       "type" => params["type"] || "message",
       "metadata" => params["metadata"] || %{},
-      "attachments" => params["attachments"] || []
+      "attachments" => params["attachments"] || [],
+      "idempotency_key" => string_or_nil(params["idempotency_key"]),
+      "participant" => participant(params)
     }
-
-    if empty_message?(parsed),
-      do: {:error, :empty_inbound_message},
-      else: {:ok, parsed}
   end
+
+  # Opt-in participant resolution: with an "external_id" (and no
+  # conversation_id), messages from the same external party share their
+  # open conversation instead of each starting a new one.
+  defp participant(params) do
+    case string_or_nil(params["external_id"]) do
+      nil -> nil
+      external_id -> %{"external_id" => external_id, "display_name" => params["display_name"]}
+    end
+  end
+
+  defp string_or_nil(value) when is_binary(value) and value != "", do: value
+  defp string_or_nil(_), do: nil
 
   @impl true
   def parse_status_update(_channel, params) do
@@ -237,13 +278,38 @@ defmodule Converger.Channels.Adapters.Webhook do
 
   defp fetch_method(_), do: method_error()
 
-  defp method_error,
-    do: {:error, "webhook config 'method' must be one of: #{Enum.join(Map.keys(@methods), ", ")}"}
+  # A misconfigured method never succeeds on retry: dead-letter immediately.
+  defp method_error do
+    {:error,
+     DeliveryError.permanent(
+       "webhook config 'method' must be one of: #{Enum.join(Map.keys(@methods), ", ")}"
+     )}
+  end
 
+  # An unresolvable host may be a transient DNS failure (retried); an invalid
+  # URL or a blocked private target is permanent.
   defp resolve_target(url) do
     case UrlGuard.resolve(url || "") do
-      {:ok, target} -> {:ok, target}
-      {:error, reason} -> {:error, "webhook target rejected: #{UrlGuard.format_error(reason)}"}
+      {:ok, target} ->
+        {:ok, target}
+
+      {:error, {:unresolvable, _host} = reason} ->
+        {:error, %DeliveryError{reason: "webhook target rejected: #{UrlGuard.format_error(reason)}"}}
+
+      {:error, reason} ->
+        {:error,
+         DeliveryError.permanent("webhook target rejected: #{UrlGuard.format_error(reason)}")}
+    end
+  end
+
+  # An explicit webhook `receive_timeout` wins; otherwise the channel's retry
+  # policy `timeout_ms` (Converger.Pipeline.RetryPolicy). Both are capped.
+  defp receive_timeout(channel, config) do
+    if Map.has_key?(config, "receive_timeout") do
+      limit(config, "receive_timeout")
+    else
+      {_name, _default, max} = Map.fetch!(@limits, "receive_timeout")
+      min(RetryPolicy.for_channel(channel).timeout_ms, max)
     end
   end
 

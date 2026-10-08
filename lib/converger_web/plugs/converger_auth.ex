@@ -64,7 +64,7 @@ defmodule ConvergerWeb.Plugs.ConvergerAuth do
   end
 
   defp find_channel_by_secret(secret) do
-    case Converger.Repo.get_by(Channel, secret: secret) do
+    case Converger.Channels.get_channel_by_secret(secret) do
       %Channel{status: "active"} = channel -> {:ok, channel}
       %Channel{} -> {:error, :channel_inactive}
       nil -> {:error, :not_found}

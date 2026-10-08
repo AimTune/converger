@@ -3,8 +3,6 @@ defmodule ConvergerWeb.Integration.ConversationLifecycleTest do
 
   import Converger.TenantsFixtures
   import Converger.ChannelsFixtures
-  alias Converger.Conversations
-  alias Converger.Activities
 
   setup %{conn: conn} do
     tenant = tenant_fixture()
@@ -19,7 +17,7 @@ defmodule ConvergerWeb.Integration.ConversationLifecycleTest do
 
   test "full end-to-end conversation flow via API", %{
     conn: conn,
-    tenant: tenant,
+    tenant: _tenant,
     channel: channel
   } do
     # 1. Generate Channel Token (Normally done by tenant backend)

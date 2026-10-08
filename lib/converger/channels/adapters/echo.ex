@@ -32,6 +32,8 @@ defmodule Converger.Channels.Adapters.Echo do
 
     case result do
       {:ok, _reply} -> :ok
+      # Closed since the original was accepted: nothing to reply into.
+      {:error, :conversation_closed} -> :ok
       {:error, reason} -> {:error, {:echo_failed, reason}}
     end
   end

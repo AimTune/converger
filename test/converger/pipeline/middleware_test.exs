@@ -6,10 +6,10 @@ defmodule Converger.Pipeline.MiddlewareTest do
   alias Converger.Pipeline.Middleware.{
     AddPrefix,
     AddSuffix,
-    TextReplace,
-    TruncateText,
+    ContentFilter,
     SetMetadata,
-    ContentFilter
+    TextReplace,
+    TruncateText
   }
 
   # Stub activity struct for unit tests
