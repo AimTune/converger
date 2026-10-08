@@ -13,6 +13,7 @@ config :converger,
   generators: [timestamp_type: :utc_datetime],
   cors_origins: ["http://127.0.0.1:5500", "http://localhost:5500"],
   admin_ip_whitelist: ["127.0.0.1", "::1"],
+  trusted_proxies: [],
   pipeline: [backend: Converger.Pipeline.Oban]
 
 # Configures the endpoint

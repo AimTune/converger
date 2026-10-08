@@ -32,7 +32,15 @@ end
 
 if admin_ips = System.get_env("ADMIN_IP_WHITELIST") do
   config :converger,
-    admin_ip_whitelist: String.split(admin_ips, ",", trim: true)
+    admin_ip_whitelist: admin_ips |> String.split(",", trim: true) |> Enum.map(&String.trim/1)
+end
+
+# Reverse proxies / load balancers allowed to set X-Forwarded-For
+# (comma-separated IPs or CIDR ranges, e.g. "10.0.0.0/8,fd00::/8").
+# When unset, forwarding headers are ignored and conn.remote_ip is the TCP peer.
+if trusted_proxies = System.get_env("TRUSTED_PROXIES") do
+  config :converger,
+    trusted_proxies: trusted_proxies |> String.split(",", trim: true) |> Enum.map(&String.trim/1)
 end
 
 if config_env() == :prod do
