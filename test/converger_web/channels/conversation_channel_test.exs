@@ -56,6 +56,27 @@ defmodule ConvergerWeb.ConversationChannelTest do
     assert_reply ref, :error, %{reason: "invalid_activity", errors: %{type: [_]}}
   end
 
+  test "closing notifies subscribers and later pushes reply conversation_closed", %{
+    socket: socket,
+    conversation: conversation
+  } do
+    {:ok, _, socket} =
+      subscribe_and_join(socket, ConversationChannel, "conversation:#{conversation.id}")
+
+    {:ok, _} = Converger.Conversations.close_conversation(conversation)
+
+    assert_broadcast "new_activity", %{
+      type: "conversationUpdate",
+      metadata: %{"event" => "conversation_closed"}
+    }
+
+    ref = push(socket, "new_activity", %{"text" => "too late"})
+    assert_reply ref, :error, %{reason: "conversation_closed"}
+
+    assert [%{type: "conversationUpdate"}] =
+             Converger.Activities.list_activities_for_conversation(conversation.id)
+  end
+
   test "joins successfully with valid token", %{socket: socket, conversation: conversation} do
     {:ok, _, socket} =
       subscribe_and_join(socket, ConversationChannel, "conversation:#{conversation.id}")

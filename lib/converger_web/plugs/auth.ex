@@ -32,7 +32,31 @@ defmodule ConvergerWeb.Plugs.Auth do
     end
   end
 
-  def require_admin_user(conn, _opts) do
+  @doc """
+  Requires a logged-in admin who does not have a pending forced password
+  change; admins flagged `must_change_password` are sent to
+  `/admin/password` first.
+  """
+  def require_admin_user(conn, opts) do
+    conn = require_admin_session(conn, opts)
+
+    case conn.assigns[:current_admin_user] do
+      %{must_change_password: true} when not conn.halted ->
+        conn
+        |> put_flash(:error, "You must change your password before continuing.")
+        |> redirect(to: "/admin/password")
+        |> halt()
+
+      _ ->
+        conn
+    end
+  end
+
+  @doc """
+  Requires a logged-in admin, without enforcing `must_change_password`.
+  Used by the password change page itself.
+  """
+  def require_admin_session(conn, _opts) do
     if conn.assigns[:current_admin_user] do
       conn
     else

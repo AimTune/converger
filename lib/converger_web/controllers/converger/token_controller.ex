@@ -3,15 +3,18 @@ defmodule ConvergerWeb.ConvergerAPI.TokenController do
 
   alias Converger.Auth.ConvergerToken
 
-  plug ConvergerWeb.Plugs.RateLimit,
-       [scope: :ip, key_prefix: "cg_token", limit: 10, scale_ms: 60_000]
+  # Limited per channel (the secret's channel for generate, the token's channel
+  # for refresh) rather than per IP, so tenants behind a shared NAT do not
+  # share a bucket.
+  plug ConvergerWeb.Plugs.RateLimit, bucket: :token_generate, scope: :channel
 
   action_fallback ConvergerWeb.FallbackController
 
-  def generate(conn, _params) do
+  def generate(conn, params) do
     case conn.assigns do
       %{auth_mode: :secret, channel: channel} ->
-        {:ok, token, _claims} = ConvergerToken.generate_token(channel)
+        {:ok, token, _claims} =
+          ConvergerToken.generate_token(channel, user_id: get_in(params, ["user", "id"]))
 
         conn
         |> put_status(:ok)
@@ -36,7 +39,8 @@ defmodule ConvergerWeb.ConvergerAPI.TokenController do
 
         {:ok, token, _claims} =
           ConvergerToken.generate_token(channel,
-            conversation_id: claims["conversation_id"]
+            conversation_id: claims["conversation_id"],
+            user_id: claims["user_id"]
           )
 
         conn

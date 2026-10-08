@@ -17,7 +17,9 @@ defmodule ConvergerWeb.ConvergerAPI.ConversationController do
              "metadata" => %{"source" => "converger"}
            }),
          {:ok, token, _claims} <-
-           ConvergerToken.generate_conversation_token(channel, conversation.id) do
+           ConvergerToken.generate_conversation_token(channel, conversation.id,
+             user_id: claims["user_id"]
+           ) do
       stream_url = build_stream_url(conn, conversation.id, token)
 
       conn
@@ -40,7 +42,9 @@ defmodule ConvergerWeb.ConvergerAPI.ConversationController do
       channel = Channels.get_channel!(claims["channel_id"])
 
       {:ok, token, _claims} =
-        ConvergerToken.generate_conversation_token(channel, conversation_id)
+        ConvergerToken.generate_conversation_token(channel, conversation_id,
+          user_id: claims["user_id"]
+        )
 
       watermark = params["watermark"]
       stream_url = build_stream_url(conn, conversation_id, token, watermark)
@@ -53,6 +57,32 @@ defmodule ConvergerWeb.ConvergerAPI.ConversationController do
         expires_in: ConvergerToken.default_expiry(),
         streamUrl: stream_url
       })
+    else
+      nil -> {:error, :not_found}
+      error -> error
+    end
+  end
+
+  @doc "POST /conversations/:id/close"
+  def close(conn, %{"id" => conversation_id}) do
+    change_status(conn, conversation_id, &Conversations.close_conversation/1)
+  end
+
+  @doc "POST /conversations/:id/reopen"
+  def reopen(conn, %{"id" => conversation_id}) do
+    change_status(conn, conversation_id, &Conversations.reopen_conversation/1)
+  end
+
+  defp change_status(conn, conversation_id, fun) do
+    claims = conn.assigns.converger_claims
+
+    with :ok <- authorize_conversation(claims, conversation_id),
+         %Conversations.Conversation{} = conversation <-
+           Conversations.get_conversation(conversation_id, claims["tenant_id"]),
+         {:ok, conversation} <- fun.(conversation) do
+      conn
+      |> put_status(:ok)
+      |> json(%{conversationId: conversation.id, status: conversation.status})
     else
       nil -> {:error, :not_found}
       error -> error

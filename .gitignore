@@ -25,3 +25,14 @@ erl_crash.dump
 # Ignore package tarball (built via "mix hex.build").
 converger-*.tar
 
+
+# Local secrets for docker compose (see .env.example). Never commit.
+/.env
+/.env.*
+!/.env.example
+
+# Local attachment storage (LocalStorage backend).
+/priv/uploads/
+
+# Dialyzer PLTs (cached in CI).
+/priv/plts/

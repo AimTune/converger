@@ -9,16 +9,32 @@ defmodule ConvergerWeb.ConversationChannel do
   def join("conversation:" <> conversation_id, payload, socket) do
     claims = socket.assigns[:claims] || %{}
 
-    if authorized?(conversation_id, claims) do
-      send(self(), {:after_join, payload})
-      {:ok, socket}
-    else
-      Logger.warning("WebSocket channel join unauthorized",
-        conversation_id: conversation_id,
-        claims: claims
-      )
+    cond do
+      not authorized?(conversation_id, claims) ->
+        Logger.warning("WebSocket channel join unauthorized",
+          conversation_id: conversation_id,
+          claims: claims
+        )
 
-      {:error, %{reason: "unauthorized"}}
+        {:error, %{reason: "unauthorized"}}
+
+      # Sockets of a deactivated channel are disconnected; don't let them rejoin.
+      not channel_active?(conversation_id, claims["tenant_id"]) ->
+        {:error, %{reason: "channel_inactive"}}
+
+      true ->
+        send(self(), {:after_join, payload})
+        {:ok, socket}
+    end
+  end
+
+  defp channel_active?(conversation_id, tenant_id) do
+    with %Conversations.Conversation{channel_id: channel_id} <-
+           Conversations.get_conversation(conversation_id, tenant_id),
+         {:ok, _channel} <- Channels.get_active_channel(channel_id, tenant_id) do
+      true
+    else
+      _ -> false
     end
   end
 
@@ -39,6 +55,9 @@ defmodule ConvergerWeb.ConversationChannel do
     case Activities.create_client_activity(payload, system_attrs) do
       {:ok, _activity} ->
         {:reply, :ok, socket}
+
+      {:error, :conversation_closed} ->
+        {:reply, {:error, %{reason: "conversation_closed"}}, socket}
 
       {:error, %Ecto.Changeset{} = changeset} ->
         {:reply, {:error, %{reason: "invalid_activity", errors: errors(changeset)}}, socket}
@@ -68,18 +87,37 @@ defmodule ConvergerWeb.ConversationChannel do
       |> assign(:channel_type, channel.type)
       |> assign(:channel, channel)
 
+    ConvergerWeb.Sockets.track(socket, channel.id, %{
+      tenant_id: conversation.tenant_id,
+      conversation_id: conversation_id
+    })
+
     Logger.info("WebSocket channel joined",
       conversation_id: conversation_id,
       tenant_id: conversation.tenant_id
     )
 
     if last_id = payload["last_activity_id"] do
-      conversation_id
-      |> Activities.list_activities_after(last_id)
-      |> Enum.each(fn activity ->
+      # Replay is capped at :ws_replay_limit activities. When more are
+      # pending, a `replay_truncated` event carries the id of the last
+      # replayed activity; the client rejoins with it as `last_activity_id`
+      # to continue.
+      {activities, has_more} =
+        Activities.page_activities_since(conversation_id, {:activity_id, last_id},
+          limit: Converger.Pagination.config(:ws_replay_limit)
+        )
+
+      Enum.each(activities, fn activity ->
         # Same payload as the live `new_activity` broadcast.
         push(socket, "new_activity", Converger.Activities.Serializer.canonical(activity))
       end)
+
+      if has_more do
+        push(socket, "replay_truncated", %{
+          has_more: true,
+          last_activity_id: List.last(activities).id
+        })
+      end
     end
 
     {:noreply, socket}

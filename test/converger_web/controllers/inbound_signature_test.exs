@@ -229,7 +229,7 @@ defmodule ConvergerWeb.InboundSignatureTest do
           {"x-hub-signature-256", signature}
         ])
 
-      assert json_response(conn, 201)["status"] == "accepted"
+      assert json_response(conn, 200)["status"] == "accepted"
     end
 
     test "invalid signature returns 401", %{conn: conn, channel: channel} do

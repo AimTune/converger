@@ -29,6 +29,14 @@ defmodule Converger.Auth.ConvergerToken do
         do: Map.put(claims, "conversation_id", conversation_id),
         else: claims
 
+    # Optional end-user id (Direct Line style `user.id`), used for the
+    # per-user socket id so one user can be disconnected individually.
+    claims =
+      case Keyword.get(opts, :user_id) do
+        user_id when is_binary(user_id) and user_id != "" -> Map.put(claims, "user_id", user_id)
+        _ -> claims
+      end
+
     generate_and_sign(claims, Converger.Auth.Signer.signer())
   end
 
@@ -51,6 +59,7 @@ defmodule Converger.Auth.ConvergerToken do
 
         generate_token(channel,
           conversation_id: claims["conversation_id"],
+          user_id: claims["user_id"],
           expires_in: @default_expiry
         )
 
@@ -60,5 +69,4 @@ defmodule Converger.Auth.ConvergerToken do
   end
 
   def default_expiry, do: @default_expiry
-
 end

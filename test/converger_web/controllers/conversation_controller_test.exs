@@ -5,6 +5,8 @@ defmodule ConvergerWeb.ConversationControllerTest do
   import Converger.ChannelsFixtures
   import Converger.ConversationsFixtures
 
+  alias Converger.Auth.Token
+
   setup do
     tenant = tenant_fixture()
     channel = channel_fixture(tenant)
@@ -13,7 +15,7 @@ defmodule ConvergerWeb.ConversationControllerTest do
 
   describe "create conversation" do
     test "creates conversation with valid channel token", %{channel: channel} do
-      {:ok, token, _} = Converger.Auth.Token.generate_channel_token(channel)
+      {:ok, token, _} = Token.generate_channel_token(channel)
 
       conn =
         build_conn()
@@ -29,7 +31,7 @@ defmodule ConvergerWeb.ConversationControllerTest do
       channel: channel,
       tenant: tenant
     } do
-      {:ok, token, _} = Converger.Auth.Token.generate_channel_token(channel)
+      {:ok, token, _} = Token.generate_channel_token(channel)
       conn = conn |> put_req_header("x-channel-token", token)
 
       params = %{

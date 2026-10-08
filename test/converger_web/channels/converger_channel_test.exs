@@ -83,6 +83,23 @@ defmodule ConvergerWeb.ConvergerChannelTest do
     assert is_binary(url)
   end
 
+  test "closing the conversation pushes a conversationUpdate activitySet", %{
+    conversation: conversation,
+    token: token
+  } do
+    conn =
+      token
+      |> api_conn()
+      |> post("/api/v1/converger/conversations/#{conversation.id}/close")
+
+    assert json_response(conn, 200)["status"] == "closed"
+
+    assert_push "activitySet", %{activities: [frame]}
+    frame = wire(frame)
+    assert frame["type"] == "conversationUpdate"
+    assert frame["channelData"]["event"] == "conversation_closed"
+  end
+
   test "REST GET activities and WS activitySet produce identical activity objects", %{
     conversation: conversation,
     token: token

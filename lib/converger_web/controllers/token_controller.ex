@@ -5,7 +5,7 @@ defmodule ConvergerWeb.TokenController do
   alias Converger.Auth.Token
 
   plug ConvergerWeb.Plugs.RateLimit,
-       [scope: :ip, key_prefix: "token_create", limit: 10, scale_ms: 60_000]
+       [bucket: :token_create, scope: :ip]
        when action in [:create]
 
   plug ConvergerWeb.Plugs.TenantAuth when action not in [:create]

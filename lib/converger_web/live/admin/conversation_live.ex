@@ -3,19 +3,34 @@ defmodule ConvergerWeb.Admin.ConversationLive do
 
   alias Converger.Repo
 
-  alias Converger.Tenants
-  alias Converger.Channels
   alias Converger.Activities
+  alias Converger.Channels
   alias Converger.Deliveries
+  alias Converger.Tenants
+
+  @filter_keys ~w(tenant_id channel_id status q sort per_page)
+  @per_page_options [25, 50, 100]
 
   def mount(_params, _session, socket) do
     {:ok,
      assign(socket,
        tenants: Tenants.list_tenants(),
        channels: Channels.list_channels(),
-       filters: %{"tenant_id" => "", "channel_id" => "", "status" => ""},
+       filters: default_filters(),
+       per_page_options: @per_page_options,
        page_title: "Conversations"
      )}
+  end
+
+  defp default_filters do
+    %{
+      "tenant_id" => "",
+      "channel_id" => "",
+      "status" => "",
+      "q" => "",
+      "sort" => "desc",
+      "per_page" => to_string(Converger.Pagination.default_limit(:default))
+    }
   end
 
   def handle_params(params, _url, socket) do
@@ -23,14 +38,11 @@ defmodule ConvergerWeb.Admin.ConversationLive do
   end
 
   defp apply_action(socket, :index, params) do
-    filters = Map.merge(socket.assigns.filters, params)
+    filters = Map.merge(default_filters(), Map.take(params, @filter_keys))
 
-    conversations =
-      Converger.Conversations.list_conversations(filters)
-      |> Repo.preload([:tenant, :channel])
-      |> Enum.sort_by(& &1.inserted_at, :desc)
-
-    assign(socket, conversations: conversations, filters: filters)
+    socket
+    |> assign(filters: filters, next_cursor: nil, loaded_count: 0)
+    |> load_conversations(reset: true)
   end
 
   defp apply_action(socket, :show, %{"id" => id}) do
@@ -38,9 +50,70 @@ defmodule ConvergerWeb.Admin.ConversationLive do
       Converger.Conversations.get_conversation!(id)
       |> Repo.preload([:tenant, :channel])
 
-    activities = Activities.list_activities_for_conversation(id)
+    # Subscribe to real-time status updates
+    if connected?(socket) do
+      ConvergerWeb.Endpoint.subscribe("conversation:#{id}")
+    end
 
-    # Build delivery status map for all activities
+    # Open on the most recent page; older activities load on demand.
+    {activities, has_older} = Activities.page_recent_activities(id)
+
+    socket
+    |> assign(
+      conversation: conversation,
+      delivery_map: %{},
+      has_older: has_older,
+      oldest_seq: activities |> List.first() |> seq_or(nil),
+      newest_seq: activities |> List.last() |> seq_or(nil),
+      activity_count: length(activities)
+    )
+    |> assign_deliveries(activities)
+    |> stream(:activities, activities, reset: true)
+  end
+
+  defp seq_or(nil, default), do: default
+  defp seq_or(%{seq: seq}, _default), do: seq
+
+  # Keyset page of conversations; `reset: true` starts over (filter change).
+  defp load_conversations(socket, opts) do
+    reset = Keyword.get(opts, :reset, false)
+    filters = socket.assigns.filters
+    cursor = if reset, do: nil, else: socket.assigns.next_cursor
+
+    page =
+      case Converger.Conversations.paginate_conversations(
+             Map.take(filters, ~w(tenant_id channel_id status q)),
+             cursor: cursor,
+             limit: per_page(filters),
+             direction: sort_direction(filters),
+             preload: [:tenant, :channel]
+           ) do
+        {:ok, page} -> page
+        {:error, :invalid_cursor} -> %Converger.Pagination.Page{}
+      end
+
+    loaded = if reset, do: 0, else: socket.assigns.loaded_count
+
+    socket
+    |> stream(:conversations, page.entries, reset: reset)
+    |> assign(
+      next_cursor: page.next_cursor,
+      has_more: page.has_more,
+      loaded_count: loaded + length(page.entries)
+    )
+  end
+
+  defp per_page(filters) do
+    case Integer.parse(filters["per_page"] || "") do
+      {n, ""} when n in @per_page_options -> n
+      _ -> Converger.Pagination.default_limit(:default)
+    end
+  end
+
+  defp sort_direction(%{"sort" => "asc"}), do: :asc
+  defp sort_direction(_), do: :desc
+
+  defp assign_deliveries(socket, activities) do
     activity_ids = Enum.map(activities, & &1.id)
     deliveries = Deliveries.list_deliveries_for_activities(activity_ids)
 
@@ -56,20 +129,48 @@ defmodule ConvergerWeb.Admin.ConversationLive do
         {activity_id, best}
       end)
 
-    # Subscribe to real-time status updates
-    if connected?(socket) do
-      ConvergerWeb.Endpoint.subscribe("conversation:#{id}")
-    end
-
-    assign(socket,
-      conversation: conversation,
-      activities: activities,
-      delivery_map: delivery_map
-    )
+    assign(socket, delivery_map: Map.merge(socket.assigns.delivery_map, delivery_map))
   end
 
   def handle_event("filter", %{"filters" => filters}, socket) do
-    {:noreply, push_patch(socket, to: ~p"/admin/conversations?#{filters}")}
+    params = Map.take(filters, @filter_keys)
+    {:noreply, push_patch(socket, to: ~p"/admin/conversations?#{params}")}
+  end
+
+  def handle_event("load_more", _params, socket) do
+    if socket.assigns.has_more do
+      {:noreply, load_conversations(socket, reset: false)}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_event("load_older", _params, socket) do
+    %{conversation: conversation, oldest_seq: oldest_seq} = socket.assigns
+
+    if socket.assigns.has_older and is_integer(oldest_seq) do
+      {activities, has_older} =
+        Activities.page_recent_activities(conversation.id, before_seq: oldest_seq)
+
+      socket =
+        socket
+        |> assign_deliveries(activities)
+        |> assign(
+          has_older: has_older,
+          oldest_seq: activities |> List.first() |> seq_or(oldest_seq),
+          activity_count: socket.assigns.activity_count + length(activities)
+        )
+
+      # Prepend: inserting newest-first at index 0 keeps ascending order.
+      socket =
+        activities
+        |> Enum.reverse()
+        |> Enum.reduce(socket, &stream_insert(&2, :activities, &1, at: 0))
+
+      {:noreply, socket}
+    else
+      {:noreply, socket}
+    end
   end
 
   def handle_info(
@@ -84,10 +185,29 @@ defmodule ConvergerWeb.Admin.ConversationLive do
         read_at: payload.read_at
       })
 
-    {:noreply, assign(socket, delivery_map: delivery_map)}
+    socket = assign(socket, delivery_map: delivery_map)
+
+    # Stream rows only re-render when re-inserted; refresh the row if it is
+    # within the loaded window.
+    {:noreply, refresh_activity_row(socket, payload.activity_id)}
   end
 
   def handle_info(%{topic: "conversation:" <> _}, socket), do: {:noreply, socket}
+
+  defp refresh_activity_row(%{assigns: %{live_action: :show}} = socket, activity_id) do
+    %{conversation: conversation, oldest_seq: oldest, newest_seq: newest} = socket.assigns
+
+    with true <- is_integer(oldest) and is_integer(newest),
+         %Activities.Activity{} = activity <- Converger.Repo.get(Activities.Activity, activity_id),
+         true <- activity.conversation_id == conversation.id,
+         true <- activity.seq >= oldest and activity.seq <= newest do
+      stream_insert(socket, :activities, activity)
+    else
+      _ -> socket
+    end
+  end
+
+  defp refresh_activity_row(socket, _activity_id), do: socket
 
   def render(assigns) do
     case assigns.live_action do
@@ -136,6 +256,40 @@ defmodule ConvergerWeb.Admin.ConversationLive do
             </select>
           </div>
 
+          <div style="margin-bottom: 0;">
+            <.input
+              type="text"
+              id="filters_q"
+              name="filters[q]"
+              value={@filters["q"]}
+              label="Conversation ID"
+              placeholder="Exact UUID"
+              phx-debounce="400"
+            />
+          </div>
+
+          <div style="margin-bottom: 0;">
+            <.input
+              type="select"
+              id="filters_sort"
+              name="filters[sort]"
+              value={@filters["sort"]}
+              label="Sort"
+              options={[{"Newest first", "desc"}, {"Oldest first", "asc"}]}
+            />
+          </div>
+
+          <div style="margin-bottom: 0;">
+            <.input
+              type="select"
+              id="filters_per_page"
+              name="filters[per_page]"
+              value={@filters["per_page"]}
+              label="Page size"
+              options={Enum.map(@per_page_options, &{to_string(&1), to_string(&1)})}
+            />
+          </div>
+
           <a href={~p"/admin/conversations"} class="button button-outline" style="margin-bottom: 2px;">Reset</a>
         </div>
       </form>
@@ -153,8 +307,8 @@ defmodule ConvergerWeb.Admin.ConversationLive do
             <th>Actions</th>
           </tr>
         </thead>
-        <tbody>
-          <tr :for={c <- @conversations}>
+        <tbody id="conversations" phx-update="stream">
+          <tr :for={{dom_id, c} <- @streams.conversations} id={dom_id}>
             <td><small><%= c.id %></small></td>
             <td><%= c.tenant.name %></td>
             <td>
@@ -175,6 +329,13 @@ defmodule ConvergerWeb.Admin.ConversationLive do
           </tr>
         </tbody>
       </table>
+      <p :if={@loaded_count == 0} style="text-align: center; color: #999;">No conversations found</p>
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;">
+        <small style="color: #666;">Showing <%= @loaded_count %> conversations</small>
+        <button :if={@has_more} id="load-more-conversations" phx-click="load_more" class="button button-outline">
+          Load more
+        </button>
+      </div>
     </div>
     """
   end
@@ -213,6 +374,11 @@ defmodule ConvergerWeb.Admin.ConversationLive do
 
     <h2>Events (Activities)</h2>
     <div class="card">
+      <div :if={@has_older} style="text-align: center; margin-bottom: 10px;">
+        <button id="load-older-activities" phx-click="load_older" class="button button-outline">
+          &uarr; Load earlier activities
+        </button>
+      </div>
       <table>
         <thead>
           <tr>
@@ -222,18 +388,16 @@ defmodule ConvergerWeb.Admin.ConversationLive do
             <th>Delivery</th>
           </tr>
         </thead>
-        <tbody>
-          <tr :for={a <- @activities}>
+        <tbody id="activities" phx-update="stream">
+          <tr :for={{dom_id, a} <- @streams.activities} id={dom_id}>
             <td style="white-space: nowrap;"><small><%= a.inserted_at %></small></td>
             <td><strong><%= a.sender %></strong></td>
             <td><%= a.text %></td>
             <td><%= delivery_badge(Map.get(@delivery_map, a.id)) %></td>
           </tr>
-          <tr :if={Enum.empty?(@activities)}>
-            <td colspan="4" style="text-align: center; color: #999;">No activities found</td>
-          </tr>
         </tbody>
       </table>
+      <p :if={@activity_count == 0} style="text-align: center; color: #999;">No activities found</p>
     </div>
     """
   end

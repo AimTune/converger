@@ -4,16 +4,17 @@ defmodule Converger.Accounts do
   """
 
   import Ecto.Query, warn: false
-  alias Ecto.Multi
-  alias Converger.Repo
   alias Converger.Accounts.{AdminUser, TenantUser}
   alias Converger.AuditLogs
   alias Converger.AuditLogs.Changes
+  alias Converger.Repo
+  alias Ecto.Multi
 
   # --- Admin Users ---
 
   def list_admin_users do
-    Repo.all(from u in AdminUser, order_by: [desc: u.inserted_at])
+    from(u in AdminUser, order_by: [desc: u.inserted_at, desc: u.id])
+    |> Converger.Pagination.bounded_all()
   end
 
   def get_admin_user!(id), do: Repo.get!(AdminUser, id)
@@ -118,20 +119,127 @@ defmodule Converger.Accounts do
     AdminUser.changeset(user, attrs)
   end
 
+  @doc """
+  Changes an admin user's own password after verifying the current one.
+  Clears `must_change_password`. `attrs` takes `"password"` and
+  `"password_confirmation"`.
+  """
+  def change_admin_password(%AdminUser{} = user, current_password, attrs) do
+    changeset = AdminUser.password_changeset(user, attrs)
+
+    if AdminUser.valid_password?(user, current_password) do
+      Multi.new()
+      |> Multi.update(:admin_user, changeset)
+      |> Multi.insert(:audit_log, fn _ ->
+        AuditLogs.build_audit_log_entry(%{
+          actor_type: "admin",
+          actor_id: user.id,
+          action: "update",
+          resource_type: "admin_user",
+          resource_id: user.id,
+          changes: %{"password" => "[changed]"}
+        })
+      end)
+      |> Repo.transaction()
+      |> case do
+        {:ok, %{admin_user: updated}} -> {:ok, updated}
+        {:error, :admin_user, changeset, _} -> {:error, changeset}
+      end
+    else
+      {:error,
+       changeset
+       |> Ecto.Changeset.add_error(:current_password, "is not valid")
+       |> Map.put(:action, :update)}
+    end
+  end
+
+  @doc """
+  Creates the initial `super_admin` if no admin user exists.
+
+  Options:
+
+    * `:email` - defaults to `"admin@converger.local"` when nil or blank.
+    * `:password` - when nil or blank, a random password is generated and the
+      account is flagged `must_change_password`.
+
+  Returns `{:ok, user, :generated | :provided, password}`, `:exists` when
+  admin users already exist, or `{:error, changeset}`.
+  """
+  def bootstrap_super_admin(opts \\ []) do
+    if Repo.exists?(AdminUser) do
+      :exists
+    else
+      email = presence(opts[:email]) || "admin@converger.local"
+
+      {password, source} =
+        if presence(opts[:password]),
+          do: {opts[:password], :provided},
+          else: {generate_password(), :generated}
+
+      %AdminUser{must_change_password: source == :generated}
+      |> AdminUser.registration_changeset(%{
+        email: email,
+        password: password,
+        name: "Super Admin",
+        role: "super_admin"
+      })
+      |> Repo.insert()
+      |> case do
+        {:ok, user} -> {:ok, user, source, password}
+        {:error, changeset} -> {:error, changeset}
+      end
+    end
+  end
+
+  defp presence(value) when is_binary(value) do
+    case String.trim(value) do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  defp presence(_), do: nil
+
+  defp generate_password do
+    :crypto.strong_rand_bytes(18) |> Base.url_encode64(padding: false)
+  end
+
   # --- Tenant Users ---
 
+  @doc """
+  A tenant's users, newest first, under the `lookup_limit` safety cap (the
+  tenant portal's user table). Use `paginate_tenant_users/2` for the
+  cross-tenant admin table.
+  """
   def list_tenant_users(tenant_id) do
     from(u in TenantUser,
       where: u.tenant_id == ^tenant_id,
-      order_by: [desc: u.inserted_at],
-      preload: [:tenant]
+      order_by: [desc: u.inserted_at, desc: u.id]
     )
-    |> Repo.all()
+    |> Converger.Pagination.bounded_all()
+    |> Repo.preload(:tenant)
   end
 
-  def list_all_tenant_users do
-    from(u in TenantUser, order_by: [desc: u.inserted_at], preload: [:tenant])
-    |> Repo.all()
+  @doc "First page of all tenant users, newest first. See `paginate_tenant_users/2`."
+  def list_all_tenant_users(opts \\ []) do
+    {:ok, page} = paginate_tenant_users(%{}, Keyword.delete(opts, :cursor))
+    page.entries
+  end
+
+  @doc """
+  Keyset-paginated tenant users, newest first (`Converger.Pagination.keyset/2`).
+
+  Filters: `"tenant_id"`. Options: `:limit`, `:cursor`.
+  Returns `{:ok, %Converger.Pagination.Page{}}` or `{:error, :invalid_cursor}`.
+  """
+  def paginate_tenant_users(filters \\ %{}, opts \\ []) do
+    query =
+      case Map.get(filters, "tenant_id", Map.get(filters, :tenant_id)) do
+        id when is_binary(id) and id != "" -> from(u in TenantUser, where: u.tenant_id == ^id)
+        _ -> TenantUser
+      end
+
+    Converger.Pagination.keyset(query, Keyword.put(opts, :preload, [:tenant]))
   end
 
   def get_tenant_user!(id) do

@@ -9,13 +9,17 @@ defmodule Converger.Application do
   def start(_type, _args) do
     OpentelemetryPhoenix.setup(adapter: :bandit)
     OpentelemetryEcto.setup([:converger, :repo])
+    OpentelemetryOban.setup()
 
     children =
       [
         ConvergerWeb.Telemetry,
+        Converger.Vault,
         Converger.Repo,
         {DNSCluster, query: Application.get_env(:converger, :dns_cluster_query) || :ignore},
         {Phoenix.PubSub, name: Converger.PubSub},
+        ConvergerWeb.SocketPresence,
+        Converger.RateLimit.Supervisor,
         {Oban, Application.fetch_env!(:converger, Oban)}
       ] ++
         Converger.Pipeline.child_specs() ++

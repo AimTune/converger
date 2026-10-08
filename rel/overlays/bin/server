@@ -1,0 +1,7 @@
+#!/bin/sh
+# Starts the release with the HTTP endpoint enabled. It does NOT run
+# migrations: run bin/migrate as a separate deploy step first.
+set -eu
+
+cd -P -- "$(dirname -- "$0")"
+PHX_SERVER=true exec ./converger start

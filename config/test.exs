@@ -39,7 +39,30 @@ config :phoenix, :plug_init_mode, :runtime
 config :converger, pipeline: [backend: Converger.Pipeline.Inline]
 
 # Use a different port for metrics in test to avoid conflicts with dev server
-config :converger, :prometheus_port, 9569
+config :converger, :prometheus_port, false
+
+# Store test uploads in a temp dir (per partition)
+config :converger, Converger.Uploads,
+  storage: Converger.Uploads.LocalStorage,
+  storage_opts: [
+    dir:
+      Path.join(
+        System.tmp_dir!(),
+        "converger_test_uploads#{System.get_env("MIX_TEST_PARTITION")}"
+      )
+  ],
+  max_file_size: 1024 * 1024
 
 # Disable OpenTelemetry span export in test
 config :opentelemetry, traces_exporter: :none
+
+# Deterministic DNS for the webhook SSRF guard (no network lookups in tests).
+# Deliveries that are not stubbed with Req.Test fail fast instead of waiting
+# for the default connect timeout.
+config :converger, :webhook,
+  resolver: {Converger.TestDnsResolver, :resolve},
+  connect_timeout: 200,
+  receive_timeout: 1_000
+
+# Deterministic encryption key for tests only.
+config :converger, Converger.Vault, key: Base.encode64("converger-tst-cloak-key-32bytes!")
