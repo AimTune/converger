@@ -22,6 +22,40 @@ defmodule ConvergerWeb.ConversationChannelTest do
     %{socket: socket, conversation: conversation, tenant: tenant, token: token}
   end
 
+  test "WS payload cannot set sender, inserted_at or idempotency_key", %{
+    socket: socket,
+    conversation: conversation
+  } do
+    {:ok, _, socket} =
+      subscribe_and_join(socket, ConversationChannel, "conversation:#{conversation.id}")
+
+    ref =
+      push(socket, "new_activity", %{
+        "text" => "spoof",
+        "sender" => "bot",
+        "inserted_at" => "2001-01-01T00:00:00Z",
+        "idempotency_key" => "from-client"
+      })
+
+    assert_reply ref, :ok
+
+    [activity] = Converger.Activities.list_activities_for_conversation(conversation.id)
+    assert activity.sender == "user-1"
+    assert activity.idempotency_key == nil
+    assert activity.inserted_at.year >= 2026
+  end
+
+  test "invalid WS payload replies with field-level errors", %{
+    socket: socket,
+    conversation: conversation
+  } do
+    {:ok, _, socket} =
+      subscribe_and_join(socket, ConversationChannel, "conversation:#{conversation.id}")
+
+    ref = push(socket, "new_activity", %{"text" => "x", "type" => "bogus"})
+    assert_reply ref, :error, %{reason: "invalid_activity", errors: %{type: [_]}}
+  end
+
   test "joins successfully with valid token", %{socket: socket, conversation: conversation} do
     {:ok, _, socket} =
       subscribe_and_join(socket, ConversationChannel, "conversation:#{conversation.id}")
@@ -46,6 +80,32 @@ defmodule ConvergerWeb.ConversationChannelTest do
     })
 
     assert_broadcast "new_activity", %{text: "hello folks"}
+  end
+
+  test "broadcast carries the full canonical activity", %{
+    socket: socket,
+    conversation: conversation,
+    tenant: tenant
+  } do
+    {:ok, _, _socket} =
+      subscribe_and_join(socket, ConversationChannel, "conversation:#{conversation.id}")
+
+    {:ok, activity} =
+      Converger.Activities.create_activity(%{
+        type: "event",
+        sender: "user-2",
+        text: "with file",
+        attachments: [%{"contentType" => "image/png", "contentUrl" => "https://x/a.png"}],
+        metadata: %{"k" => "v"},
+        tenant_id: tenant.id,
+        conversation_id: conversation.id
+      })
+
+    assert_broadcast "new_activity", payload
+    assert payload == Converger.Activities.Serializer.canonical(activity)
+    assert payload.type == "event"
+    assert [%{"contentUrl" => "https://x/a.png"}] = payload.attachments
+    assert payload.metadata == %{"k" => "v"}
   end
 
   test "replays missed activities on reconnection", %{conversation: conversation, tenant: tenant} do
@@ -87,7 +147,7 @@ defmodule ConvergerWeb.ConversationChannelTest do
     push(socket, "new_activity", %{"text" => "echo me"})
 
     # Assert broadcast of user message
-    assert_broadcast "new_activity", %{text: "echo me", sender: "user"}
+    assert_broadcast "new_activity", %{text: "echo me", sender: "user-echo"}
     # Assert broadcast of echo message from bot
     assert_broadcast "new_activity", %{text: "echo me", sender: "bot"}
     # Exactly one echo, and the echo itself is not echoed again

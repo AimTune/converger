@@ -77,11 +77,11 @@ defmodule ConvergerWeb.InboundController do
          {:ok, parsed} <- Adapter.parse_inbound(channel, params),
          {:ok, conversation} <- resolve_or_create_conversation(channel, params),
          {:ok, activity} <-
-           Activities.create_activity(
-             parsed
-             |> Map.put("tenant_id", channel.tenant_id)
-             |> Map.put("conversation_id", conversation.id)
-           ) do
+           Activities.create_client_activity(parsed, %{
+             tenant_id: channel.tenant_id,
+             conversation_id: conversation.id,
+             sender: parsed["sender"]
+           }) do
       Logger.info("Inbound activity received",
         channel_id: channel.id,
         activity_id: activity.id

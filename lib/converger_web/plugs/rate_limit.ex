@@ -27,7 +27,7 @@ defmodule ConvergerWeb.Plugs.RateLimit do
   end
 
   defp make_key(conn, :ip, prefix) do
-    ip = conn.remote_ip |> Tuple.to_list() |> Enum.join(".")
+    ip = conn.remote_ip |> :inet.ntoa() |> to_string()
     "#{prefix}:ip:#{ip}"
   end
 

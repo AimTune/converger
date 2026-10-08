@@ -1,5 +1,6 @@
 defmodule ConvergerWeb.ConvergerAPI.ActivityJSON do
   alias Converger.Activities.Activity
+  alias Converger.Activities.Serializer
 
   def activity_set(%{activities: activities, watermark: watermark}) do
     %{
@@ -13,31 +14,26 @@ defmodule ConvergerWeb.ConvergerAPI.ActivityJSON do
   end
 
   @doc """
-  Formats an Activity struct into the Converger API response shape.
-  Also accepts plain maps (e.g. PubSub broadcast payloads).
+  Formats an activity into the Converger API response shape.
+
+  Accepts an `Activity` struct or the canonical map from
+  `Converger.Activities.Serializer.canonical/1` (the PubSub broadcast payload).
+  Both go through the same clause, so REST and WebSocket frames are identical.
   """
   def activity_data(%Activity{} = activity) do
-    %{
-      id: activity.id,
-      type: activity.type,
-      from: %{id: activity.sender},
-      text: activity.text,
-      timestamp: activity.inserted_at,
-      attachments: activity.attachments || [],
-      conversationId: activity.conversation_id,
-      channelData: activity.metadata
-    }
+    activity |> Serializer.canonical() |> activity_data()
   end
 
-  def activity_data(%{} = payload) do
+  def activity_data(%{} = canonical) do
     %{
-      id: payload.id,
-      type: Map.get(payload, :type, "message"),
-      from: %{id: payload.sender},
-      text: payload.text,
-      timestamp: payload.inserted_at,
-      attachments: Map.get(payload, :attachments, []),
-      conversationId: Map.get(payload, :conversation_id)
+      id: canonical.id,
+      type: canonical.type,
+      from: %{id: canonical.sender},
+      text: canonical.text,
+      timestamp: canonical.inserted_at,
+      attachments: canonical.attachments,
+      conversationId: canonical.conversation_id,
+      channelData: canonical.metadata
     }
   end
 end

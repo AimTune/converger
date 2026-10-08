@@ -31,17 +31,11 @@ defmodule Converger.Channels.Adapters.Webhook do
       |> String.downcase()
       |> String.to_existing_atom()
 
-    payload = %{
-      id: activity.id,
-      type: activity.type,
-      sender: activity.sender,
-      text: activity.text,
-      attachments: activity.attachments,
-      metadata: activity.metadata,
-      conversation_id: activity.conversation_id,
-      tenant_id: activity.tenant_id,
-      timestamp: activity.inserted_at
-    }
+    # Canonical activity plus `timestamp`, kept for existing integrations.
+    payload =
+      activity
+      |> Converger.Activities.Serializer.canonical()
+      |> Map.put(:timestamp, activity.inserted_at)
 
     header_list = Enum.map(headers, fn {k, v} -> {k, v} end)
 

@@ -17,18 +17,21 @@ defmodule ConvergerWeb.ConvergerAPI.ActivityController do
 
       from = params["from"] || %{}
 
-      activity_params = %{
+      client_params = %{
         "type" => params["type"] || "message",
-        "sender" => from["id"] || "user",
         "text" => params["text"],
         "attachments" => params["attachments"] || [],
-        "metadata" => params["channelData"] || params["metadata"] || %{},
+        "metadata" => params["channelData"] || params["metadata"] || %{}
+      }
+
+      system_attrs = %{
+        "sender" => from["id"] || "user",
         "tenant_id" => claims["tenant_id"],
         "conversation_id" => conversation_id,
         "idempotency_key" => idempotency_key
       }
 
-      case Activities.create_activity(activity_params) do
+      case Activities.create_client_activity(client_params, system_attrs) do
         {:ok, activity} ->
           conn
           |> put_status(:ok)
@@ -84,5 +87,4 @@ defmodule ConvergerWeb.ConvergerAPI.ActivityController do
         Activities.list_activities_for_conversation(conversation_id)
     end
   end
-
 end
