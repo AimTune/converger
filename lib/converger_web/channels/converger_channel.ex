@@ -31,6 +31,12 @@ defmodule ConvergerWeb.ConvergerChannel do
   @impl true
   def handle_info({:after_join, watermark}, socket) do
     conversation_id = socket.assigns.conversation_id
+    claims = socket.assigns.converger_claims
+
+    ConvergerWeb.Sockets.track(socket, claims["channel_id"], %{
+      tenant_id: claims["tenant_id"],
+      conversation_id: conversation_id
+    })
 
     # Without a watermark the client starts live (no replay). Replay is capped
     # at :ws_replay_limit activities (the oldest ones after the watermark);

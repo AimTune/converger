@@ -9,16 +9,32 @@ defmodule ConvergerWeb.ConversationChannel do
   def join("conversation:" <> conversation_id, payload, socket) do
     claims = socket.assigns[:claims] || %{}
 
-    if authorized?(conversation_id, claims) do
-      send(self(), {:after_join, payload})
-      {:ok, socket}
-    else
-      Logger.warning("WebSocket channel join unauthorized",
-        conversation_id: conversation_id,
-        claims: claims
-      )
+    cond do
+      not authorized?(conversation_id, claims) ->
+        Logger.warning("WebSocket channel join unauthorized",
+          conversation_id: conversation_id,
+          claims: claims
+        )
 
-      {:error, %{reason: "unauthorized"}}
+        {:error, %{reason: "unauthorized"}}
+
+      # Sockets of a deactivated channel are disconnected; don't let them rejoin.
+      not channel_active?(conversation_id, claims["tenant_id"]) ->
+        {:error, %{reason: "channel_inactive"}}
+
+      true ->
+        send(self(), {:after_join, payload})
+        {:ok, socket}
+    end
+  end
+
+  defp channel_active?(conversation_id, tenant_id) do
+    with %Conversations.Conversation{channel_id: channel_id} <-
+           Conversations.get_conversation(conversation_id, tenant_id),
+         {:ok, _channel} <- Channels.get_active_channel(channel_id, tenant_id) do
+      true
+    else
+      _ -> false
     end
   end
 
@@ -70,6 +86,11 @@ defmodule ConvergerWeb.ConversationChannel do
       socket
       |> assign(:channel_type, channel.type)
       |> assign(:channel, channel)
+
+    ConvergerWeb.Sockets.track(socket, channel.id, %{
+      tenant_id: conversation.tenant_id,
+      conversation_id: conversation_id
+    })
 
     Logger.info("WebSocket channel joined",
       conversation_id: conversation_id,

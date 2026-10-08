@@ -17,7 +17,9 @@ defmodule ConvergerWeb.ConvergerAPI.ConversationController do
              "metadata" => %{"source" => "converger"}
            }),
          {:ok, token, _claims} <-
-           ConvergerToken.generate_conversation_token(channel, conversation.id) do
+           ConvergerToken.generate_conversation_token(channel, conversation.id,
+             user_id: claims["user_id"]
+           ) do
       stream_url = build_stream_url(conn, conversation.id, token)
 
       conn
@@ -40,7 +42,9 @@ defmodule ConvergerWeb.ConvergerAPI.ConversationController do
       channel = Channels.get_channel!(claims["channel_id"])
 
       {:ok, token, _claims} =
-        ConvergerToken.generate_conversation_token(channel, conversation_id)
+        ConvergerToken.generate_conversation_token(channel, conversation_id,
+          user_id: claims["user_id"]
+        )
 
       watermark = params["watermark"]
       stream_url = build_stream_url(conn, conversation_id, token, watermark)
