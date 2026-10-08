@@ -85,7 +85,8 @@ defmodule ConvergerWeb.ConvergerAPI.UploadController do
       {:error, %Ecto.Changeset{}} = error ->
         error
 
-      {:error, reason} when reason in [:forbidden, :not_found] ->
+      # Handled by the fallback controller (409 for a closed conversation).
+      {:error, reason} when reason in [:forbidden, :not_found, :conversation_closed] ->
         {:error, reason}
 
       {:error, reason} ->
