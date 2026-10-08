@@ -4,7 +4,10 @@ defmodule ConvergerWeb.ConvergerAPI.TokenController do
   alias Converger.Auth.ConvergerToken
 
   plug ConvergerWeb.Plugs.RateLimit,
-       [scope: :ip, key_prefix: "cg_token", limit: 10, scale_ms: 60_000]
+    scope: :ip,
+    key_prefix: "cg_token",
+    limit: 10,
+    scale_ms: 60_000
 
   action_fallback ConvergerWeb.FallbackController
 

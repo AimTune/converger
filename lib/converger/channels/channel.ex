@@ -2,6 +2,8 @@ defmodule Converger.Channels.Channel do
   use Ecto.Schema
   import Ecto.Changeset
 
+  @type t :: %__MODULE__{}
+
   @channel_types ~w(echo webhook websocket whatsapp_meta whatsapp_infobip)
   @channel_modes ~w(inbound outbound duplex)
 

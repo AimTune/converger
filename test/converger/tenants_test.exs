@@ -49,7 +49,6 @@ defmodule Converger.TenantsTest do
 
     test "create_tenant/1 enforces api_key uniqueness" do
       tenant = tenant_fixture()
-      api_key = tenant.api_key
 
       # Bypass create_tenant mapping to ensure we try the SAME api_key
       # Actually, let's just use the same name and see if we can manually set it if schema allows

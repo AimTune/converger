@@ -79,6 +79,9 @@ defmodule Converger.Uploads do
   """
   def create_attachment(tenant_id, upload, opts \\ [])
 
+  # `upload.path` is the temp file Plug created for the multipart part, not a
+  # client-supplied path.
+  # sobelow_skip ["Traversal.FileModule"]
   def create_attachment(tenant_id, %Plug.Upload{} = upload, opts) do
     with :ok <- check_file_size(upload.path),
          {:ok, binary} <- File.read(upload.path) do

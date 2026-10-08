@@ -90,8 +90,11 @@ defmodule Converger.Channels.Adapter do
   def parse_status_update(%{type: type} = channel, params) do
     case adapter_for(type) do
       {:ok, mod} ->
+        Code.ensure_loaded(mod)
+
         if function_exported?(mod, :parse_status_update, 2) do
-          mod.parse_status_update(channel, params)
+          # apply/3 because the callback is optional and not every adapter defines it
+          apply(mod, :parse_status_update, [channel, params])
         else
           :ignore
         end

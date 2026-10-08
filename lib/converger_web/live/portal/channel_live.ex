@@ -16,29 +16,33 @@ defmodule ConvergerWeb.Portal.ChannelLive do
   end
 
   def handle_event("toggle_status", %{"id" => id}, socket) do
-    if not socket.assigns.can_edit do
-      {:noreply, put_flash(socket, :error, "You don't have permission to do this.")}
-    else
+    if socket.assigns.can_edit do
       channel = Channels.get_channel!(id)
 
       # Ensure channel belongs to this tenant
-      if channel.tenant_id != socket.assigns.current_tenant.id do
-        {:noreply, put_flash(socket, :error, "Unauthorized")}
+      if channel.tenant_id == socket.assigns.current_tenant.id do
+        toggle_channel_status(socket, channel)
       else
-        new_status = if channel.status == "active", do: "inactive", else: "active"
-
-        case Channels.update_channel(channel, %{status: new_status}, build_actor(socket)) do
-          {:ok, _} ->
-            {:noreply,
-             assign(socket,
-               channels: Channels.list_channels_for_tenant(socket.assigns.current_tenant.id)
-             )
-             |> put_flash(:info, "Status updated")}
-
-          {:error, _} ->
-            {:noreply, put_flash(socket, :error, "Failed to update status")}
-        end
+        {:noreply, put_flash(socket, :error, "Unauthorized")}
       end
+    else
+      {:noreply, put_flash(socket, :error, "You don't have permission to do this.")}
+    end
+  end
+
+  defp toggle_channel_status(socket, channel) do
+    new_status = if channel.status == "active", do: "inactive", else: "active"
+
+    case Channels.update_channel(channel, %{status: new_status}, build_actor(socket)) do
+      {:ok, _} ->
+        {:noreply,
+         assign(socket,
+           channels: Channels.list_channels_for_tenant(socket.assigns.current_tenant.id)
+         )
+         |> put_flash(:info, "Status updated")}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Failed to update status")}
     end
   end
 
