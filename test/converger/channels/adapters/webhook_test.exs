@@ -27,7 +27,13 @@ defmodule Converger.Channels.Adapters.WebhookTest do
     end
 
     test "rejects reserved and non-string headers" do
-      for name <- ["Host", "content-length", "Transfer-Encoding", "Connection", "X-Converger-Event"] do
+      for name <- [
+            "Host",
+            "content-length",
+            "Transfer-Encoding",
+            "Connection",
+            "X-Converger-Event"
+          ] do
         assert {:error, message} =
                  Webhook.validate_config(%{"url" => @url, "headers" => %{name => "x"}})
 
@@ -52,13 +58,15 @@ defmodule Converger.Channels.Adapters.WebhookTest do
 
       assert {:error, _} = Webhook.validate_config(%{"url" => @url, "connect_timeout" => 0})
       assert {:error, _} = Webhook.validate_config(%{"url" => @url, "receive_timeout" => 600_000})
-      assert {:error, _} = Webhook.validate_config(%{"url" => @url, "max_response_bytes" => "big"})
+
+      assert {:error, _} =
+               Webhook.validate_config(%{"url" => @url, "max_response_bytes" => "big"})
     end
   end
 
   describe "parse_inbound/2" do
     test "parses a text message" do
-      assert {:ok, %{"text" => "hi", "sender" => "u1"}} =
+      assert {:ok, [%{"text" => "hi", "sender" => "u1"}]} =
                Webhook.parse_inbound(@channel, %{"text" => "hi", "sender" => "u1"})
     end
 
@@ -71,7 +79,8 @@ defmodule Converger.Channels.Adapters.WebhookTest do
       assert {:ok, _} =
                Webhook.parse_inbound(@channel, %{"attachments" => [%{"url" => "https://x/y"}]})
 
-      assert {:ok, %{"type" => "typing"}} = Webhook.parse_inbound(@channel, %{"type" => "typing"})
+      assert {:ok, [%{"type" => "typing"}]} =
+               Webhook.parse_inbound(@channel, %{"type" => "typing"})
     end
   end
 

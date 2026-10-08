@@ -4,6 +4,7 @@ defmodule Converger.Channels.Adapters.WebhookDeliveryTest do
 
   alias Converger.Activities.Activity
   alias Converger.Channels.Adapters.Webhook
+  alias Converger.Channels.DeliveryError
   alias Converger.Channels.InboundSignature
   alias Converger.TestDnsResolver
 
@@ -150,7 +151,9 @@ defmodule Converger.Channels.Adapters.WebhookDeliveryTest do
       assert {:error, message} =
                Webhook.deliver_activity(channel(%{"method" => "frobnicate"}), activity())
 
-      assert message =~ "method"
+      assert DeliveryError.message(message) =~ "method"
+      # A misconfigured method never succeeds: dead-letter, do not retry.
+      refute message.retryable?
       refute_received {:webhook_request, _, _}
     end
 
@@ -169,7 +172,8 @@ defmodule Converger.Channels.Adapters.WebhookDeliveryTest do
       end)
 
       assert {:error, message} = Webhook.deliver_activity(channel(%{}), activity())
-      assert message =~ "status 302"
+      assert DeliveryError.message(message) =~ "returned 302"
+      refute message.retryable?
       assert_received {:webhook_request, _, _}
       refute_received {:webhook_request, _, _}
     end
@@ -182,9 +186,10 @@ defmodule Converger.Channels.Adapters.WebhookDeliveryTest do
       assert {:error, message} =
                Webhook.deliver_activity(channel(%{"max_response_bytes" => 100}), activity())
 
-      assert message =~ "status 500"
-      assert message =~ String.duplicate("x", 100)
-      refute message =~ String.duplicate("x", 101)
+      assert DeliveryError.message(message) =~ "returned 500"
+      assert message.retryable?
+      assert DeliveryError.message(message) =~ String.duplicate("x", 100)
+      refute DeliveryError.message(message) =~ String.duplicate("x", 101)
     end
   end
 
@@ -197,7 +202,8 @@ defmodule Converger.Channels.Adapters.WebhookDeliveryTest do
       TestDnsResolver.put("rebind.test", {:ok, [{127, 0, 0, 1}]})
 
       assert {:error, message} = Webhook.deliver_activity(channel(config), activity())
-      assert message =~ "rejected"
+      assert DeliveryError.message(message) =~ "rejected"
+      refute message.retryable?
       refute_received {:webhook_request, _, _}
     end
 
@@ -218,7 +224,9 @@ defmodule Converger.Channels.Adapters.WebhookDeliveryTest do
                  activity()
                )
 
-      assert message =~ "could not be resolved"
+      assert DeliveryError.message(message) =~ "could not be resolved"
+      # DNS failures may be transient.
+      assert message.retryable?
     end
 
     test "allowed targets can be reached" do

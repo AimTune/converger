@@ -204,15 +204,13 @@ defmodule Converger.Channels.Adapters.Webhook do
   defp validate_url(url) when is_binary(url) and url != "" do
     uri = URI.parse(url)
 
-    cond do
-      uri.scheme not in ["http", "https"] or is_nil(uri.host) or uri.host == "" ->
-        {:error, "webhook config 'url' must be a valid HTTP/HTTPS URL"}
-
-      true ->
-        case UrlGuard.check(url) do
-          :ok -> :ok
-          {:error, message} -> {:error, "webhook config 'url' is not allowed: #{message}"}
-        end
+    if uri.scheme not in ["http", "https"] or is_nil(uri.host) or uri.host == "" do
+      {:error, "webhook config 'url' must be a valid HTTP/HTTPS URL"}
+    else
+      case UrlGuard.check(url) do
+        :ok -> :ok
+        {:error, message} -> {:error, "webhook config 'url' is not allowed: #{message}"}
+      end
     end
   end
 
@@ -221,7 +219,7 @@ defmodule Converger.Channels.Adapters.Webhook do
   defp validate_method(method) do
     case fetch_method(method) do
       {:ok, _} -> :ok
-      {:error, message} -> {:error, message}
+      {:error, %DeliveryError{} = error} -> {:error, DeliveryError.message(error)}
     end
   end
 
@@ -294,7 +292,8 @@ defmodule Converger.Channels.Adapters.Webhook do
         {:ok, target}
 
       {:error, {:unresolvable, _host} = reason} ->
-        {:error, %DeliveryError{reason: "webhook target rejected: #{UrlGuard.format_error(reason)}"}}
+        {:error,
+         %DeliveryError{reason: "webhook target rejected: #{UrlGuard.format_error(reason)}"}}
 
       {:error, reason} ->
         {:error,

@@ -10,7 +10,7 @@ A `webhook` channel delivers every activity to the configured URL as JSON.
 | `method` | `POST` | One of `POST`, `PUT`, `PATCH`. Anything else is a config validation error. |
 | `headers` | `{}` | Extra headers, string values only. `host`, `content-length`, `content-type`, hop-by-hop headers (`connection`, `transfer-encoding`, ...) and `x-converger-*` are reserved. |
 | `connect_timeout` | `5000` | Milliseconds, at most `30000`. |
-| `receive_timeout` | `10000` | Milliseconds, at most `60000`. |
+| `receive_timeout` | `10000` | Milliseconds, at most `60000`. When unset, the channel's `retry_policy.timeout_ms` is used (see `Converger.Pipeline.RetryPolicy`). |
 | `max_response_bytes` | `1048576` | Bytes of the response that are read, at most 10 MB. The rest is discarded. |
 
 Redirects are not followed. A `3xx` response counts as a failed delivery.
@@ -130,3 +130,12 @@ subdomain, and IP/CIDR entries match resolved addresses. In development,
 
 `POST /api/v1/channels/:id/inbound` on a webhook channel returns `422` when a
 `message` has neither text (`text`, `message` or `body`) nor attachments.
+
+## Retries
+
+Failed deliveries are retried according to the channel's `retry_policy`
+(`max_attempts`, `backoff`, `base_ms`, `max_ms`; see
+`Converger.Pipeline.RetryPolicy`). A `429` honours `Retry-After`. Other `4xx`
+responses, redirects, an invalid `method` and targets blocked by the SSRF
+guard are permanent: the delivery is dead-lettered after one attempt. `408`,
+`425`, `5xx`, transport errors and hosts that cannot be resolved are retried.
