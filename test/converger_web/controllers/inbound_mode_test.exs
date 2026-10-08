@@ -14,9 +14,7 @@ defmodule ConvergerWeb.InboundModeTest do
       channel = webhook_channel_fixture(tenant, %{mode: "outbound"})
 
       conn =
-        build_conn()
-        |> put_req_header("x-converger-signature", "")
-        |> post(~p"/api/v1/channels/#{channel.id}/inbound", %{
+        signed_post(build_conn(), ~p"/api/v1/channels/#{channel.id}/inbound", channel, %{
           "text" => "hello",
           "sender" => "user1"
         })
@@ -28,8 +26,7 @@ defmodule ConvergerWeb.InboundModeTest do
       channel = webhook_channel_fixture(tenant, %{mode: "duplex"})
 
       conn =
-        build_conn()
-        |> post(~p"/api/v1/channels/#{channel.id}/inbound", %{
+        signed_post(build_conn(), ~p"/api/v1/channels/#{channel.id}/inbound", channel, %{
           "text" => "hello",
           "sender" => "user1"
         })
@@ -41,8 +38,7 @@ defmodule ConvergerWeb.InboundModeTest do
       channel = webhook_channel_fixture(tenant, %{mode: "inbound"})
 
       conn =
-        build_conn()
-        |> post(~p"/api/v1/channels/#{channel.id}/inbound", %{
+        signed_post(build_conn(), ~p"/api/v1/channels/#{channel.id}/inbound", channel, %{
           "text" => "hello",
           "sender" => "user1"
         })

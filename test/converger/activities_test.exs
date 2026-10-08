@@ -18,32 +18,34 @@ defmodule Converger.ActivitiesTest do
       %{tenant: tenant, conversation: conversation}
     end
 
-    test "list_activities_for_conversation/1 returns activities in chronological order", %{
+    test "list_activities_for_conversation/1 orders by seq, not by clock", %{
       tenant: tenant,
       conversation: conversation
     } do
-      # Insert out of order
-      _a2 =
+      # Clocks disagree with insertion order (e.g. skew between nodes):
+      # the per-conversation sequence still decides.
+      a1 =
         activity_fixture(tenant, conversation, %{
-          inserted_at: ~U[2024-01-01 10:01:00Z],
-          text: "second"
-        })
-
-      _a1 =
-        activity_fixture(tenant, conversation, %{
-          inserted_at: ~U[2024-01-01 10:00:00Z],
+          inserted_at: ~U[2024-01-01 10:02:00Z],
           text: "first"
         })
 
-      _a3 =
+      a2 =
         activity_fixture(tenant, conversation, %{
-          inserted_at: ~U[2024-01-01 10:02:00Z],
+          inserted_at: ~U[2024-01-01 10:00:00Z],
+          text: "second"
+        })
+
+      a3 =
+        activity_fixture(tenant, conversation, %{
+          inserted_at: ~U[2024-01-01 10:01:00Z],
           text: "third"
         })
 
+      assert {a1.seq, a2.seq, a3.seq} == {1, 2, 3}
+
       activities = Activities.list_activities_for_conversation(conversation.id)
-      texts = Enum.map(activities, & &1.text)
-      assert texts == ["first", "second", "third"]
+      assert Enum.map(activities, & &1.text) == ["first", "second", "third"]
     end
 
     test "activities are scoped to tenant", %{tenant: tenant, conversation: conversation} do

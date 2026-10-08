@@ -4,7 +4,17 @@ defmodule Converger.ActivitiesFixtures do
   entities via the `Converger.Activities` context.
   """
 
+  import Ecto.Query
+
+  @doc """
+  Creates an activity. `inserted_at` cannot be set through the changeset
+  (the server timestamp always wins), so a given `:inserted_at` is applied
+  directly to the row afterwards to backdate test data.
+  """
   def activity_fixture(tenant, conversation, attrs \\ %{}) do
+    attrs = Map.new(attrs)
+    {inserted_at, attrs} = Map.pop(attrs, :inserted_at)
+
     {:ok, activity} =
       attrs
       |> Enum.into(%{
@@ -16,6 +26,13 @@ defmodule Converger.ActivitiesFixtures do
       })
       |> Converger.Activities.create_activity()
 
-    activity
+    if inserted_at do
+      from(a in Converger.Activities.Activity, where: a.id == ^activity.id)
+      |> Converger.Repo.update_all(set: [inserted_at: inserted_at])
+
+      Converger.Repo.reload!(activity)
+    else
+      activity
+    end
   end
 end

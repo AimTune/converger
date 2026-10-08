@@ -24,15 +24,56 @@ config :converger,
        :prometheus_port,
        String.to_integer(System.get_env("PROMETHEUS_PORT") || "9568")
 
-# Configurable CORS origins and admin IP whitelist
+# Configurable CORS origins and admin IP whitelist.
+# CORS origins are read per request by ConvergerWeb.Endpoint, so this takes
+# effect on releases without recompiling.
 if cors_origins = System.get_env("CORS_ORIGINS") do
   config :converger,
-    cors_origins: String.split(cors_origins, ",", trim: true)
+    cors_origins:
+      cors_origins
+      |> String.split(",", trim: true)
+      |> Enum.map(&String.trim/1)
+      |> Enum.reject(&(&1 == ""))
 end
 
 if admin_ips = System.get_env("ADMIN_IP_WHITELIST") do
   config :converger,
-    admin_ip_whitelist: String.split(admin_ips, ",", trim: true)
+    admin_ip_whitelist: admin_ips |> String.split(",", trim: true) |> Enum.map(&String.trim/1)
+end
+
+# Reverse proxies / load balancers allowed to set X-Forwarded-For
+# (comma-separated IPs or CIDR ranges, e.g. "10.0.0.0/8,fd00::/8").
+# When unset, forwarding headers are ignored and conn.remote_ip is the TCP peer.
+if trusted_proxies = System.get_env("TRUSTED_PROXIES") do
+  config :converger,
+    trusted_proxies: trusted_proxies |> String.split(",", trim: true) |> Enum.map(&String.trim/1)
+end
+
+# OpenTelemetry trace export.
+#
+# Spans are exported over OTLP only when an endpoint is configured through the
+# standard OTEL_EXPORTER_OTLP_ENDPOINT or OTEL_EXPORTER_OTLP_TRACES_ENDPOINT env
+# vars; otherwise export is disabled (`traces_exporter: :none`) so no requests
+# are attempted. The exporter itself reads the remaining standard OTLP vars
+# (OTEL_EXPORTER_OTLP_PROTOCOL, OTEL_EXPORTER_OTLP_HEADERS,
+# OTEL_EXPORTER_OTLP_COMPRESSION and their *_TRACES_* variants), and the SDK
+# honours OTEL_SERVICE_NAME, OTEL_RESOURCE_ATTRIBUTES and OTEL_SDK_DISABLED.
+# Export is always disabled in the test environment.
+otel_endpoint =
+  Enum.find_value(
+    ["OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "OTEL_EXPORTER_OTLP_ENDPOINT"],
+    fn var ->
+      case System.get_env(var) do
+        nil -> nil
+        value -> if String.trim(value) == "", do: nil, else: value
+      end
+    end
+  )
+
+if otel_endpoint && config_env() != :test do
+  config :opentelemetry, traces_exporter: {:opentelemetry_exporter, %{}}
+else
+  config :opentelemetry, traces_exporter: :none
 end
 
 # File storage for attachments (see docs/storage.md). Only applied when
