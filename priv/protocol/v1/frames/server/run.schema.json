@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://converger.aimtune.dev/schemas/protocol/v1/frames/server/run.schema.json",
+  "title": "server -> client: run (transient, mekik/1)",
+  "description": "Bot run lifecycle, relayed from the conversation's bot channel. Never persisted.",
+  "type": "object",
+  "required": ["type", "data"],
+  "properties": {
+    "type": { "const": "run" },
+    "data": {
+      "type": "object",
+      "required": ["status"],
+      "properties": { "status": { "enum": ["started", "finished", "interrupted", "error", "aborted"] } }
+    }
+  },
+  "examples": [{ "type": "run", "data": { "status": "started" } }, { "type": "run", "data": { "status": "finished" } }]
+}

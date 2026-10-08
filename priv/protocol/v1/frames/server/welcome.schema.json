@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://converger.aimtune.dev/schemas/protocol/v1/frames/server/welcome.schema.json",
+  "title": "server -> client: welcome (transient)",
+  "description": "Handshake response (mekik/1 welcome) plus Converger fields. `watermark` is the conversation's head seq at handshake time: replayed frames carry seq <= watermark, live ones seq > watermark. On a channel-scoped connection (scope = channel) there is no single conversation, so conversationId, userId, watermark and pending are absent.",
+  "type": "object",
+  "required": ["type", "data"],
+  "properties": {
+    "type": { "const": "welcome" },
+    "data": {
+      "type": "object",
+      "required": ["protocol", "compat", "connectionId"],
+      "properties": {
+        "protocol": { "const": "converger/1" },
+        "compat": { "type": "array", "contains": { "const": "mekik/1" }, "items": { "type": "string" } },
+        "conversationId": { "$ref": "../../common.schema.json#/$defs/conversationId" },
+        "userId": { "type": "string" },
+        "connectionId": { "$ref": "../../common.schema.json#/$defs/id" },
+        "watermark": { "$ref": "../../common.schema.json#/$defs/watermark" },
+        "pending": { "type": "array", "items": { "$ref": "../../common.schema.json#/$defs/pendingView" } },
+        "scope": { "enum": ["conversation", "channel"] },
+        "channelId": { "type": "string" },
+        "expiresAt": { "$ref": "../../common.schema.json#/$defs/timestamp" },
+        "capabilities": {
+          "type": "object",
+          "description": "Feature flags. regenerate/edit are the mekik/chativa flags; the rest are Converger.",
+          "properties": {
+            "regenerate": { "type": "boolean" },
+            "edit": { "type": "boolean" },
+            "acks": { "type": "boolean" },
+            "receipts": { "type": "boolean" },
+            "presence": { "type": "boolean" },
+            "typing": { "type": "boolean" },
+            "messageTypes": { "type": "array", "items": { "$ref": "../../common.schema.json#/$defs/messageType" } }
+          }
+        },
+        "limits": {
+          "type": "object",
+          "properties": {
+            "maxFrameBytes": { "type": "integer", "minimum": 1 },
+            "maxTextBytes": { "type": "integer", "minimum": 1 },
+            "maxMetadataBytes": { "type": "integer", "minimum": 1 },
+            "maxInFlight": { "type": "integer", "minimum": 1 },
+            "heartbeatIntervalMs": { "type": "integer", "minimum": 1000 },
+            "idleTimeoutMs": { "type": "integer", "minimum": 1000 },
+            "replayBatch": { "type": "integer", "minimum": 1 },
+            "replayMax": { "type": "integer", "minimum": 1 },
+            "maxConversations": { "type": "integer", "minimum": 1 }
+          }
+        }
+      },
+      "if": { "properties": { "scope": { "const": "channel" } }, "required": ["scope"] },
+      "then": { "required": ["channelId"] },
+      "else": { "required": ["conversationId", "userId", "watermark", "pending"] }
+    }
+  },
+  "examples": [
+    {
+      "type": "welcome",
+      "data": {
+        "protocol": "converger/1",
+        "compat": ["mekik/1"],
+        "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70",
+        "userId": "user-42",
+        "connectionId": "conn-8f3a",
+        "watermark": 17,
+        "pending": [],
+        "scope": "conversation",
+        "expiresAt": 1750001800000,
+        "capabilities": { "acks": true, "receipts": true, "presence": true, "typing": true, "regenerate": false, "edit": false },
+        "limits": { "maxFrameBytes": 131072, "maxTextBytes": 65536, "maxMetadataBytes": 16384, "maxInFlight": 32, "heartbeatIntervalMs": 30000, "idleTimeoutMs": 60000, "replayBatch": 100, "replayMax": 10000 }
+      }
+    },
+    {
+      "type": "welcome",
+      "data": { "protocol": "converger/1", "compat": ["mekik/1"], "connectionId": "conn-91bc", "scope": "channel", "channelId": "7e1f0c2a-9b8d-4e6f-a5c4-3b2a1f0e9d8c", "limits": { "maxConversations": 5000 } }
+    }
+  ]
+}

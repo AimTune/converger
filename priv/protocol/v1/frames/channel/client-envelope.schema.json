@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://converger.aimtune.dev/schemas/protocol/v1/frames/channel/client-envelope.schema.json",
+  "title": "client -> server on a channel-scoped connection: conversation envelope (#64/#67)",
+  "description": "An agent (or a mekik transport) addresses one conversation of its channel. `frame` is any conversation-level client frame: a message, typing, read, sync, resume, ... Connection-level frames (hello, auth, ping) are sent bare.",
+  "type": "object",
+  "required": ["conversationId", "frame"],
+  "not": { "required": ["type"] },
+  "properties": {
+    "conversationId": { "$ref": "../../common.schema.json#/$defs/conversationId" },
+    "frame": { "$ref": "../../client-frame.schema.json" }
+  },
+  "examples": [
+    { "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "frame": { "type": "buttons", "clientId": "agent-c-3", "data": { "text": "Pick one", "buttons": [{ "label": "Refund", "value": "refund" }, { "label": "Replace", "value": "replace" }] } } },
+    { "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "frame": { "type": "sync", "watermark": 12 } }
+  ]
+}

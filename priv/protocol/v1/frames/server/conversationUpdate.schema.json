@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://converger.aimtune.dev/schemas/protocol/v1/frames/server/conversationUpdate.schema.json",
+  "title": "server -> client: conversationUpdate (persistent, Converger)",
+  "description": "A conversation lifecycle or membership change. Today the server emits it (as a `conversationUpdate` activity with sender `system`) when a conversation is closed, expires or is reopened; `data` is that activity's metadata. Participant changes are planned (#25).",
+  "type": "object",
+  "required": ["type", "id", "seq", "from", "data", "timestamp"],
+  "properties": {
+    "type": { "const": "conversationUpdate" },
+    "id": { "$ref": "../../common.schema.json#/$defs/id" },
+    "seq": { "$ref": "../../common.schema.json#/$defs/seq" },
+    "from": { "$ref": "../../common.schema.json#/$defs/from" },
+    "data": {
+      "type": "object",
+      "properties": {
+        "event": { "type": "string", "description": "e.g. conversation_closed, conversation_reopened, participant_joined, participant_left" },
+        "status": { "type": "string", "description": "The conversation status after the change, e.g. active, closed." },
+        "reason": { "type": "string", "description": "e.g. manual, expired" },
+        "participants": {
+          "type": "object",
+          "properties": {
+            "added": { "type": "array", "items": { "$ref": "../../common.schema.json#/$defs/sender" } },
+            "removed": { "type": "array", "items": { "$ref": "../../common.schema.json#/$defs/sender" } }
+          }
+        },
+        "text": { "type": "string" }
+      }
+    },
+    "timestamp": { "$ref": "../../common.schema.json#/$defs/timestamp" },
+    "sender": { "$ref": "../../common.schema.json#/$defs/sender" }
+  },
+  "examples": [
+    {
+      "type": "conversationUpdate", "id": "0b9a6c3e-2d4f-4e5a-8b7c-9d0e1f2a3b4c", "seq": 30, "from": "bot",
+      "sender": { "id": "system", "role": "system" },
+      "data": { "event": "conversation_closed", "status": "closed", "reason": "expired" },
+      "timestamp": 1750000009000
+    }
+  ]
+}

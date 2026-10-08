@@ -133,6 +133,10 @@ graph TD
     OTEL --> Loki
 ```
 
+The WebSocket wire protocol (Converger Protocol v1, a superset of mekik/1) is specified in
+[docs/protocol/v1.md](docs/protocol/v1.md), with the rich message vocabulary in
+[docs/protocol/messages.md](docs/protocol/messages.md) and JSON Schemas in `priv/protocol/v1/`.
+
 ---
 
 ## 📄 License

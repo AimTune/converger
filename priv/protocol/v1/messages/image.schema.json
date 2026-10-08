@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://converger.aimtune.dev/schemas/protocol/v1/messages/image.schema.json",
+  "title": "image message data",
+  "description": "An image (chativa ImageMessage, mekik ImageMessageData). mimeType, size, width and height are Converger additions for adapters.",
+  "type": "object",
+  "required": ["src"],
+  "properties": {
+    "src": { "$ref": "../common.schema.json#/$defs/url" },
+    "alt": { "type": "string", "maxLength": 1024 },
+    "caption": { "type": "string", "maxLength": 4096 },
+    "mimeType": { "type": "string", "maxLength": 255 },
+    "size": { "type": "integer", "minimum": 0 },
+    "width": { "type": "integer", "minimum": 1 },
+    "height": { "type": "integer", "minimum": 1 },
+    "text": { "type": "string", "maxLength": 4096, "description": "Fallback text for renderers without image support." },
+    "extensions": { "$ref": "../common.schema.json#/$defs/extensions" }
+  },
+  "examples": [{ "src": "https://example.test/receipt.png", "caption": "Your receipt" }]
+}

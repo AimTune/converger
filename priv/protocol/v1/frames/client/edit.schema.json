@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://converger.aimtune.dev/schemas/protocol/v1/frames/client/edit.schema.json",
+  "title": "client -> server: edit (chativa / mekik connector)",
+  "description": "Replace the latest user message and re-run the turn from it. Only valid when welcome.data.capabilities.edit is true. Message edits as activity revisions are #28.",
+  "type": "object",
+  "required": ["type", "messageId", "data"],
+  "properties": { "type": { "const": "edit" }, "messageId": { "type": "string", "minLength": 1 }, "data": { "type": "object" } },
+  "examples": [{ "type": "edit", "messageId": "a2f7d9e4-3b1c-4d5e-8f9a-0b1c2d3e4f50", "data": { "text": "Where is order ORD-43?" } }]
+}

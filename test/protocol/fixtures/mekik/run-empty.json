@@ -1,0 +1,13 @@
+{
+  "name": "run-empty",
+  "description": "A run that produces no output: run_start -> run{started}, run_end{done} -> run{finished} only. No stream was opened, so no stream_done; no replyChannel, so no text.",
+  "startSeq": 0,
+  "events": [
+    { "type": "run_start", "runId": "run-1", "threadId": "conv-1", "seq": 1, "ns": [] },
+    { "type": "run_end", "status": "done", "state": {}, "runId": "run-1", "threadId": "conv-1", "seq": 2, "ns": [] }
+  ],
+  "expectedFrames": [
+    { "type": "run", "data": { "status": "started" } },
+    { "type": "run", "data": { "status": "finished" } }
+  ]
+}

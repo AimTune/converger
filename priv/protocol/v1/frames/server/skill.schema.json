@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://converger.aimtune.dev/schemas/protocol/v1/frames/server/skill.schema.json",
+  "title": "server -> client: skill (persistent, mekik/1)",
+  "description": "A skill use, upserted by data.id (mekik/1 section 12.5). Relayed from the bot channel unchanged.",
+  "type": "object",
+  "required": ["type", "seq", "data"],
+  "properties": {
+    "type": { "const": "skill" },
+    "seq": { "$ref": "../../common.schema.json#/$defs/seq" },
+    "data": {
+      "type": "object",
+      "required": ["id", "name", "status"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "status": { "enum": ["loaded", "error"] },
+        "source": { "enum": ["server", "client"] },
+        "error": { "type": "string" }
+      }
+    }
+  },
+  "examples": [
+    { "type": "skill", "seq": 7, "data": { "id": "conv-1:ckpt-a:agent/0:skill:0", "name": "pdf", "status": "loaded", "source": "server" } }
+  ]
+}

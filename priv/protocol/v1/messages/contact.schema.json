@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://converger.aimtune.dev/schemas/protocol/v1/messages/contact.schema.json",
+  "title": "contact message data",
+  "description": "A contact card. Converger-defined: chativa has no contact renderer yet and falls back to data.text. The arrays map onto WhatsApp contacts and vCard.",
+  "type": "object",
+  "required": ["name"],
+  "properties": {
+    "name": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "organization": { "type": "string", "maxLength": 256 },
+    "phones": {
+      "type": "array",
+      "maxItems": 10,
+      "items": {
+        "type": "object",
+        "required": ["number"],
+        "properties": { "number": { "type": "string", "minLength": 1, "maxLength": 64 }, "label": { "type": "string", "maxLength": 64 } }
+      }
+    },
+    "emails": {
+      "type": "array",
+      "maxItems": 10,
+      "items": {
+        "type": "object",
+        "required": ["address"],
+        "properties": { "address": { "type": "string", "minLength": 3, "maxLength": 320 }, "label": { "type": "string", "maxLength": 64 } }
+      }
+    },
+    "url": { "$ref": "../common.schema.json#/$defs/url" },
+    "text": { "type": "string", "maxLength": 4096 },
+    "extensions": { "$ref": "../common.schema.json#/$defs/extensions" }
+  },
+  "examples": [
+    {
+      "name": "Support desk",
+      "phones": [{ "number": "+90 212 000 00 00", "label": "work" }],
+      "emails": [{ "address": "support@example.com" }],
+      "text": "Support desk: +90 212 000 00 00"
+    }
+  ]
+}

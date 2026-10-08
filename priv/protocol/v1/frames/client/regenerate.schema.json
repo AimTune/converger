@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://converger.aimtune.dev/schemas/protocol/v1/frames/client/regenerate.schema.json",
+  "title": "client -> server: regenerate (chativa / mekik connector)",
+  "description": "Ask the bot to re-run the latest turn. Only valid when welcome.data.capabilities.regenerate is true; forwarded to the bot channel.",
+  "type": "object",
+  "required": ["type", "messageId"],
+  "properties": { "type": { "const": "regenerate" }, "messageId": { "type": "string", "minLength": 1 } },
+  "examples": [{ "type": "regenerate", "messageId": "msg-1" }]
+}

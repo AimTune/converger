@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://converger.aimtune.dev/schemas/protocol/v1/frames/client/auth.schema.json",
+  "title": "client -> server: auth (Converger)",
+  "description": "Present a fresh token mid-session (obtained from POST /api/v1/converger/tokens/refresh) before the current one expires. Its channel, tenant, conversation and user claims must match the session's; the server answers tokenRefreshed, or error unauthorized/forbidden.",
+  "type": "object",
+  "required": ["type", "token"],
+  "properties": { "type": { "const": "auth" }, "token": { "type": "string", "minLength": 1 } },
+  "examples": [{ "type": "auth", "token": "eyJhbGciOiJIUzI1NiJ9.e30.sig" }]
+}

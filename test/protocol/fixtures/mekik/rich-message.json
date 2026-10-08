@@ -1,0 +1,70 @@
+{
+  "name": "rich-message",
+  "description": "mekik.message customs become persistent rich message frames (PROTOCOL.md §4.5): the text envelope under a client message-renderer type, data passed through untouched. A caller-supplied id overrides the minted one. A reserved protocol frame type is dropped, not emitted.",
+  "startSeq": 5,
+  "events": [
+    { "type": "run_start", "runId": "run-1", "threadId": "conv-1", "seq": 1, "ns": [] },
+    {
+      "type": "custom",
+      "payload": {
+        "$mekik": "message",
+        "messageType": "image",
+        "data": { "src": "https://example.test/receipt.png", "caption": "Your receipt" }
+      },
+      "runId": "run-1",
+      "threadId": "conv-1",
+      "seq": 2,
+      "ns": []
+    },
+    {
+      "type": "custom",
+      "payload": {
+        "$mekik": "message",
+        "messageType": "card",
+        "id": "card-ORD-1",
+        "data": {
+          "title": "ORD-1",
+          "subtitle": "$249.90",
+          "buttons": [{ "label": "Track", "value": "/track ORD-1" }]
+        }
+      },
+      "runId": "run-1",
+      "threadId": "conv-1",
+      "seq": 3,
+      "ns": []
+    },
+    {
+      "type": "custom",
+      "payload": { "$mekik": "message", "messageType": "run", "data": { "sneaky": true } },
+      "runId": "run-1",
+      "threadId": "conv-1",
+      "seq": 4,
+      "ns": []
+    },
+    { "type": "run_end", "status": "done", "state": {}, "runId": "run-1", "threadId": "conv-1", "seq": 5, "ns": [] }
+  ],
+  "expectedFrames": [
+    { "type": "run", "data": { "status": "started" } },
+    {
+      "type": "image",
+      "id": "msg-1",
+      "seq": 6,
+      "from": "bot",
+      "data": { "src": "https://example.test/receipt.png", "caption": "Your receipt" },
+      "timestamp": 1750000000000
+    },
+    {
+      "type": "card",
+      "id": "card-ORD-1",
+      "seq": 7,
+      "from": "bot",
+      "data": {
+        "title": "ORD-1",
+        "subtitle": "$249.90",
+        "buttons": [{ "label": "Track", "value": "/track ORD-1" }]
+      },
+      "timestamp": 1750000000000
+    },
+    { "type": "run", "data": { "status": "finished" } }
+  ]
+}

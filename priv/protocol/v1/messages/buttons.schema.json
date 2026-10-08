@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://converger.aimtune.dev/schemas/protocol/v1/messages/buttons.schema.json",
+  "title": "buttons message data",
+  "description": "An optional prompt followed by a vertical list of buttons (chativa ButtonsMessage, mekik ButtonsMessageData).",
+  "type": "object",
+  "required": ["buttons"],
+  "properties": {
+    "text": { "type": "string", "maxLength": 4096 },
+    "persistent": { "type": "boolean", "description": "Buttons stay tappable after a selection (default false: one-time)." },
+    "buttons": { "$ref": "../common.schema.json#/$defs/messageActions" },
+    "extensions": { "$ref": "../common.schema.json#/$defs/extensions" }
+  },
+  "examples": [
+    {
+      "text": "How would you like to continue?",
+      "buttons": [
+        { "label": "Track an order", "value": "/track" },
+        { "label": "Talk to a human", "value": "/agent" },
+        { "label": "Pricing", "url": "https://example.com/pricing" }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://converger.aimtune.dev/schemas/protocol/v1/frames/client/hello.schema.json",
+  "title": "client -> server: hello",
+  "description": "The handshake (mekik/1 hello) plus Converger fields. Every field is optional and may also travel in the WebSocket query string. A server ignores a field of the wrong type as if it were absent (mekik/1 rule), so this schema describes what a conforming client sends, not what a server rejects.",
+  "type": "object",
+  "required": ["type"],
+  "properties": {
+    "type": { "const": "hello" },
+    "userId": { "type": "string" },
+    "conversationId": { "$ref": "../../common.schema.json#/$defs/conversationId" },
+    "watermark": { "$ref": "../../common.schema.json#/$defs/legacyWatermark" },
+    "token": { "type": "string", "minLength": 1 },
+    "meta": { "$ref": "../../common.schema.json#/$defs/meta" },
+    "componentsHash": { "type": "string" },
+    "tools": { "type": "array", "items": { "type": "object" } },
+    "skillsHash": { "type": "string" },
+    "skills": { "type": "array", "items": { "type": "object" } },
+    "protocol": { "type": "string", "description": "Converger: the protocol the client speaks, e.g. converger/1. Absent means mekik/1 semantics." },
+    "watermarks": {
+      "description": "Converger, channel scope only: per-conversation watermarks to replay from on (re)connect.",
+      "type": "object",
+      "additionalProperties": { "$ref": "../../common.schema.json#/$defs/watermark" }
+    }
+  },
+  "examples": [
+    { "type": "hello", "protocol": "converger/1", "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "watermark": 12, "token": "eyJhbGciOiJIUzI1NiJ9.e30.sig" },
+    { "type": "hello", "userId": "user-42", "conversationId": "conv-1", "watermark": 0 },
+    { "type": "hello", "protocol": "converger/1", "token": "eyJhbGciOiJIUzI1NiJ9.e30.sig", "watermarks": { "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70": 17 } }
+  ]
+}

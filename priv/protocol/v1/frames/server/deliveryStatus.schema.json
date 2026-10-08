@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://converger.aimtune.dev/schemas/protocol/v1/frames/server/deliveryStatus.schema.json",
+  "title": "server -> client: deliveryStatus (transient, Converger, #25)",
+  "description": "Delivery progress of one activity towards one target channel, or a read receipt covering every activity up to `upToSeq`. Statuses only move forward: queued < sent < delivered < read; failed is terminal for that attempt series.",
+  "type": "object",
+  "required": ["type", "data"],
+  "properties": {
+    "type": { "const": "deliveryStatus" },
+    "data": {
+      "type": "object",
+      "required": ["status", "timestamp"],
+      "properties": {
+        "activityId": { "$ref": "../../common.schema.json#/$defs/id" },
+        "seq": { "$ref": "../../common.schema.json#/$defs/seq" },
+        "upToSeq": { "$ref": "../../common.schema.json#/$defs/seq" },
+        "channelId": { "type": "string" },
+        "status": { "enum": ["queued", "sent", "delivered", "read", "failed"] },
+        "by": { "$ref": "../../common.schema.json#/$defs/sender" },
+        "attempt": { "type": "integer", "minimum": 1 },
+        "error": {
+          "type": "object",
+          "required": ["code"],
+          "properties": { "code": { "type": "string" }, "message": { "type": "string" }, "retryable": { "type": "boolean" } }
+        },
+        "timestamp": { "$ref": "../../common.schema.json#/$defs/timestamp" }
+      },
+      "anyOf": [{ "required": ["activityId", "seq"] }, { "required": ["upToSeq"] }]
+    }
+  },
+  "examples": [
+    { "type": "deliveryStatus", "data": { "activityId": "a2f7d9e4-3b1c-4d5e-8f9a-0b1c2d3e4f50", "seq": 18, "channelId": "wa-main", "status": "delivered", "timestamp": 1750000005000 } },
+    { "type": "deliveryStatus", "data": { "upToSeq": 18, "status": "read", "by": { "id": "user-42", "role": "user" }, "timestamp": 1750000006000 } },
+    { "type": "deliveryStatus", "data": { "activityId": "b3e8c0f5-4c2d-4e6f-9a0b-1c2d3e4f5a61", "seq": 19, "channelId": "wa-main", "status": "failed", "attempt": 5, "error": { "code": "131026", "message": "Message undeliverable", "retryable": false }, "timestamp": 1750000007000 } }
+  ]
+}

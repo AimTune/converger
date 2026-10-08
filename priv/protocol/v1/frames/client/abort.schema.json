@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://converger.aimtune.dev/schemas/protocol/v1/frames/client/abort.schema.json",
+  "title": "client -> server: abort (mekik/1)",
+  "description": "Cancel the bot's in-flight run. Forwarded to the bot channel.",
+  "type": "object",
+  "required": ["type"],
+  "properties": { "type": { "const": "abort" } },
+  "examples": [{ "type": "abort" }]
+}

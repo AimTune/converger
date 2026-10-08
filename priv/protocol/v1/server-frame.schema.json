@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://converger.aimtune.dev/schemas/protocol/v1/server-frame.schema.json",
+  "title": "Converger Protocol v1 - any server -> client frame",
+  "description": "Dispatches on `type`. Every type that is not one of the protocol's own frames is a message frame (frames/server/message.schema.json), which rejects the remaining reserved names. A receiver applying the unknown-frame rule ignores frames it does not understand instead of rejecting them; this schema is for senders and conformance tests.",
+  "type": "object",
+  "required": ["type"],
+  "properties": { "type": { "type": "string" } },
+  "allOf": [
+    { "if": { "properties": { "type": { "const": "welcome" } } }, "then": { "$ref": "frames/server/welcome.schema.json" } },
+    { "if": { "properties": { "type": { "const": "tool_call" } } }, "then": { "$ref": "frames/server/tool_call.schema.json" } },
+    { "if": { "properties": { "type": { "const": "skill" } } }, "then": { "$ref": "frames/server/skill.schema.json" } },
+    { "if": { "properties": { "type": { "const": "genui" } } }, "then": { "$ref": "frames/server/genui.schema.json" } },
+    { "if": { "properties": { "type": { "const": "interrupt" } } }, "then": { "$ref": "frames/server/interrupt.schema.json" } },
+    { "if": { "properties": { "type": { "const": "interrupt_resolved" } } }, "then": { "$ref": "frames/server/interrupt_resolved.schema.json" } },
+    { "if": { "properties": { "type": { "const": "event" } } }, "then": { "$ref": "frames/server/event.schema.json" } },
+    { "if": { "properties": { "type": { "const": "conversationUpdate" } } }, "then": { "$ref": "frames/server/conversationUpdate.schema.json" } },
+    { "if": { "properties": { "type": { "const": "typing" } } }, "then": { "$ref": "frames/server/typing.schema.json" } },
+    { "if": { "properties": { "type": { "const": "run" } } }, "then": { "$ref": "frames/server/run.schema.json" } },
+    { "if": { "properties": { "type": { "const": "error" } } }, "then": { "$ref": "frames/server/error.schema.json" } },
+    { "if": { "properties": { "type": { "const": "genui_components" } } }, "then": { "$ref": "frames/server/genui_components.schema.json" } },
+    { "if": { "properties": { "type": { "const": "skills" } } }, "then": { "$ref": "frames/server/skills.schema.json" } },
+    { "if": { "properties": { "type": { "const": "ack" } } }, "then": { "$ref": "frames/server/ack.schema.json" } },
+    { "if": { "properties": { "type": { "const": "deliveryStatus" } } }, "then": { "$ref": "frames/server/deliveryStatus.schema.json" } },
+    { "if": { "properties": { "type": { "const": "presence" } } }, "then": { "$ref": "frames/server/presence.schema.json" } },
+    { "if": { "properties": { "type": { "const": "heartbeat" } } }, "then": { "$ref": "frames/server/heartbeat.schema.json" } },
+    { "if": { "properties": { "type": { "const": "tokenRefreshed" } } }, "then": { "$ref": "frames/server/tokenRefreshed.schema.json" } },
+    { "if": { "properties": { "type": { "const": "replayTruncated" } } }, "then": { "$ref": "frames/server/replayTruncated.schema.json" } },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "not": {
+              "enum": [
+                "welcome", "tool_call", "skill", "genui", "interrupt", "interrupt_resolved", "event", "conversationUpdate",
+                "typing", "run", "error", "genui_components", "skills", "ack", "deliveryStatus", "presence", "heartbeat",
+                "tokenRefreshed", "replayTruncated"
+              ]
+            }
+          }
+        }
+      },
+      "then": { "$ref": "frames/server/message.schema.json" }
+    }
+  ]
+}

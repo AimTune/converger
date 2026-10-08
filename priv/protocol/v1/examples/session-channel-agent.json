@@ -1,0 +1,25 @@
+{
+  "description": "A channel-scoped agent console connection (#64/#67): connection-level frames are bare, conversation-level frames travel in {conversationId, frame} envelopes. `direction` c2s-envelope / s2c-envelope marks enveloped frames.",
+  "frames": [
+    { "direction": "c2s", "frame": { "type": "hello", "protocol": "converger/1", "token": "eyJhbGciOiJIUzI1NiJ9.e30.sig", "watermarks": { "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70": 18 } } },
+    { "direction": "s2c", "frame": { "type": "welcome", "data": { "protocol": "converger/1", "compat": ["mekik/1"], "connectionId": "conn-91bc", "scope": "channel", "channelId": "7e1f0c2a-9b8d-4e6f-a5c4-3b2a1f0e9d8c", "limits": { "maxConversations": 5000 } } } },
+    { "direction": "s2c-envelope", "frame": { "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "frame": { "type": "text", "id": "b1c2d3e4-0000-4000-8000-000000000019", "seq": 19, "from": "user", "data": { "text": "Is anyone there?" }, "timestamp": 1750000008000 } } },
+    { "direction": "c2s-envelope", "frame": { "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "frame": { "type": "typing", "isTyping": true } } },
+    {
+      "direction": "c2s-envelope",
+      "frame": {
+        "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70",
+        "frame": { "type": "buttons", "clientId": "agent-c-3", "data": { "text": "Yes! What do you need?", "buttons": [{ "label": "Track", "value": "/track" }, { "label": "Refund", "value": "/refund" }] } }
+      }
+    },
+    { "direction": "s2c-envelope", "frame": { "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "frame": { "type": "ack", "clientId": "agent-c-3", "id": "b1c2d3e4-0000-4000-8000-000000000020", "seq": 20, "timestamp": 1750000009000 } } },
+    {
+      "direction": "s2c-envelope",
+      "frame": {
+        "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70",
+        "frame": { "type": "deliveryStatus", "data": { "activityId": "b1c2d3e4-0000-4000-8000-000000000020", "seq": 20, "channelId": "wa-main", "status": "delivered", "timestamp": 1750000009500 } }
+      }
+    },
+    { "direction": "s2c", "frame": { "type": "heartbeat", "timestamp": 1750000039500 } }
+  ]
+}

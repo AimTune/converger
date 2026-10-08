@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://converger.aimtune.dev/schemas/protocol/v1/messages/quick-reply.schema.json",
+  "title": "quick-reply message data",
+  "description": "A prompt with inline chips (chativa QuickReplyMessage, mekik QuickReplyMessageData).",
+  "type": "object",
+  "required": ["text", "actions"],
+  "properties": {
+    "text": { "type": "string", "maxLength": 4096 },
+    "actions": { "$ref": "../common.schema.json#/$defs/messageActions" },
+    "keepActions": { "type": "boolean", "description": "Keep the chips rendered after a tap." },
+    "extensions": { "$ref": "../common.schema.json#/$defs/extensions" }
+  },
+  "examples": [
+    { "text": "Was this helpful?", "actions": [{ "label": "Yes", "value": "yes" }, { "label": "No", "value": "no" }] }
+  ]
+}

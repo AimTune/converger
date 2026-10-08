@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://converger.aimtune.dev/schemas/protocol/v1/frames/server/error.schema.json",
+  "title": "server -> client: error (transient)",
+  "description": "mekik/1 error `{type, data:{code, message}}` plus Converger fields. Sent only to the connection that caused it. `code` is the stable string key; `number` and `retryable` follow the table in docs/protocol/v1.md. Codes relayed from a bot channel that this spec does not list are passed through unchanged, so `code` is not restricted to the known list.",
+  "type": "object",
+  "required": ["type", "data"],
+  "properties": {
+    "type": { "const": "error" },
+    "data": {
+      "type": "object",
+      "required": ["code", "message"],
+      "properties": {
+        "code": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$" },
+        "message": { "type": "string" },
+        "number": { "type": "integer", "minimum": 1000, "maximum": 9999 },
+        "retryable": { "type": "boolean" },
+        "retryAfterMs": { "type": "integer", "minimum": 0 },
+        "clientId": { "$ref": "../../common.schema.json#/$defs/clientId" },
+        "frameType": { "type": "string", "description": "The `type` of the client frame this error answers, when known." },
+        "details": { "type": "object" }
+      }
+    }
+  },
+  "examples": [
+    { "type": "error", "data": { "code": "unauthorized", "message": "invalid token", "number": 2000, "retryable": false } },
+    { "type": "error", "data": { "code": "rate_limited", "message": "too many messages", "number": 3000, "retryable": true, "retryAfterMs": 1500, "clientId": "c-17", "frameType": "text" } },
+    { "type": "error", "data": { "code": "conversation_closed", "message": "Conversation is closed", "number": 4000, "retryable": false, "clientId": "c-18" } },
+    { "type": "error", "data": { "code": "busy", "message": "a run is already in flight", "number": 5000, "retryable": true } }
+  ]
+}

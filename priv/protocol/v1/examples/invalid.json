@@ -1,0 +1,22 @@
+{
+  "description": "Frames a conforming sender must never produce. The conformance suite asserts that each one fails validation, so the schemas cannot silently become permissive.",
+  "frames": [
+    { "direction": "s2c", "reason": "persistent message frame without seq", "frame": { "type": "text", "id": "m1", "from": "bot", "data": { "text": "hi" }, "timestamp": 1 } },
+    { "direction": "s2c", "reason": "seq is 1-based", "frame": { "type": "text", "id": "m1", "seq": 0, "from": "bot", "data": { "text": "hi" }, "timestamp": 1 } },
+    { "direction": "s2c", "reason": "from is user or bot only", "frame": { "type": "text", "id": "m1", "seq": 1, "from": "agent", "data": { "text": "hi" }, "timestamp": 1 } },
+    { "direction": "s2c", "reason": "a reserved frame type cannot be a rich message", "frame": { "type": "run", "id": "m1", "seq": 1, "from": "bot", "data": { "sneaky": true }, "timestamp": 1 } },
+    { "direction": "s2c", "reason": "buttons needs at least one button", "frame": { "type": "buttons", "id": "m1", "seq": 1, "from": "bot", "data": { "buttons": [] }, "timestamp": 1 } },
+    { "direction": "s2c", "reason": "card needs a title", "frame": { "type": "card", "id": "m1", "seq": 1, "from": "bot", "data": { "subtitle": "x" }, "timestamp": 1 } },
+    { "direction": "s2c", "reason": "location latitude out of range", "frame": { "type": "location", "id": "m1", "seq": 1, "from": "bot", "data": { "latitude": 91, "longitude": 0 }, "timestamp": 1 } },
+    { "direction": "s2c", "reason": "watermark in v1 frames is an integer, not the legacy base64 string", "frame": { "type": "welcome", "data": { "protocol": "converger/1", "compat": ["mekik/1"], "conversationId": "c", "userId": "u", "connectionId": "x", "watermark": "c2VxOjU", "pending": [] } } },
+    { "direction": "s2c", "reason": "welcome must list mekik/1 in compat", "frame": { "type": "welcome", "data": { "protocol": "converger/1", "compat": [], "conversationId": "c", "userId": "u", "connectionId": "x", "watermark": 0, "pending": [] } } },
+    { "direction": "s2c", "reason": "ack needs the persisted seq", "frame": { "type": "ack", "clientId": "c-1", "id": "a1", "timestamp": 1 } },
+    { "direction": "s2c", "reason": "tool_call status enum", "frame": { "type": "tool_call", "seq": 3, "data": { "id": "t1", "name": "x", "status": "done" } } },
+    { "direction": "s2c", "reason": "deliveryStatus needs activityId+seq or upToSeq", "frame": { "type": "deliveryStatus", "data": { "status": "delivered", "timestamp": 1 } } },
+    { "direction": "c2s", "reason": "clientId charset", "frame": { "type": "text", "clientId": "has space", "data": { "text": "hi" } } },
+    { "direction": "c2s", "reason": "text turn without data.text", "frame": { "type": "text", "data": {} } },
+    { "direction": "c2s", "reason": "resume without answers", "frame": { "type": "resume" } },
+    { "direction": "c2s", "reason": "a client cannot send a server frame type", "frame": { "type": "ack", "data": {} } },
+    { "direction": "c2s-envelope", "reason": "an envelope has no type", "frame": { "type": "text", "conversationId": "c", "frame": { "type": "ping" } } }
+  ]
+}

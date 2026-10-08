@@ -1,0 +1,37 @@
+{
+  "description": "An end-user widget reconnects with watermark 15, gets the two frames it missed, sends a turn with a clientId, and receives the ack, a typing indicator, a bot reply with chips and a delivery receipt. `direction` is c2s (client to server) or s2c (server to client).",
+  "frames": [
+    { "direction": "c2s", "frame": { "type": "hello", "protocol": "converger/1", "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "watermark": 15, "token": "eyJhbGciOiJIUzI1NiJ9.e30.sig" } },
+    {
+      "direction": "s2c",
+      "frame": {
+        "type": "welcome",
+        "data": {
+          "protocol": "converger/1", "compat": ["mekik/1"], "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "userId": "user-42",
+          "connectionId": "conn-8f3a", "watermark": 17, "pending": [], "scope": "conversation", "expiresAt": 1750001800000,
+          "capabilities": { "acks": true, "receipts": true, "presence": true, "typing": true },
+          "limits": { "maxFrameBytes": 131072, "maxInFlight": 32, "heartbeatIntervalMs": 30000, "idleTimeoutMs": 60000, "replayBatch": 100, "replayMax": 10000 }
+        }
+      }
+    },
+    { "direction": "s2c", "frame": { "type": "text", "id": "b1c2d3e4-0000-4000-8000-000000000016", "seq": 16, "from": "bot", "data": { "text": "Your order ORD-42 has shipped." }, "timestamp": 1750000000000 } },
+    { "direction": "s2c", "frame": { "type": "image", "id": "b1c2d3e4-0000-4000-8000-000000000017", "seq": 17, "from": "bot", "data": { "src": "https://example.test/label.png", "caption": "Shipping label" }, "timestamp": 1750000000100 } },
+    { "direction": "c2s", "frame": { "type": "text", "clientId": "c-17", "data": { "text": "When will it arrive?" } } },
+    { "direction": "s2c", "frame": { "type": "ack", "clientId": "c-17", "id": "b1c2d3e4-0000-4000-8000-000000000018", "seq": 18, "timestamp": 1750000004000 } },
+    { "direction": "s2c", "frame": { "type": "typing", "isTyping": true, "from": "bot", "sender": { "id": "agent-7", "role": "agent" } } },
+    {
+      "direction": "s2c",
+      "frame": {
+        "type": "text", "id": "b1c2d3e4-0000-4000-8000-000000000019", "seq": 19, "from": "bot",
+        "sender": { "id": "agent-7", "role": "agent", "name": "Ayse" },
+        "data": { "text": "Tomorrow before noon. Want a reminder?" },
+        "actions": [{ "label": "Yes", "value": "yes" }, { "label": "No", "value": "no" }],
+        "timestamp": 1750000006000
+      }
+    },
+    { "direction": "c2s", "frame": { "type": "read", "watermark": 19 } },
+    { "direction": "s2c", "frame": { "type": "deliveryStatus", "data": { "upToSeq": 18, "status": "read", "by": { "id": "agent-7", "role": "agent" }, "timestamp": 1750000006500 } } },
+    { "direction": "c2s", "frame": { "type": "ping", "nonce": "p-1" } },
+    { "direction": "s2c", "frame": { "type": "heartbeat", "timestamp": 1750000007000, "nonce": "p-1", "headSeq": 19 } }
+  ]
+}

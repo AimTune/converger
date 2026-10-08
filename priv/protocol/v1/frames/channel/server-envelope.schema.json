@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://converger.aimtune.dev/schemas/protocol/v1/frames/channel/server-envelope.schema.json",
+  "title": "server -> client on a channel-scoped connection: conversation envelope (#64/#67)",
+  "description": "On a connection whose token has scope channel, every conversation-level frame is wrapped as {conversationId, frame}. The envelope has no `type`, which is how a receiver tells it from a bare connection-level frame (welcome, error, heartbeat, tokenRefreshed).",
+  "type": "object",
+  "required": ["conversationId", "frame"],
+  "not": { "required": ["type"] },
+  "properties": {
+    "conversationId": { "$ref": "../../common.schema.json#/$defs/conversationId" },
+    "frame": { "$ref": "../../server-frame.schema.json" }
+  },
+  "examples": [
+    { "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "frame": { "type": "text", "id": "msg-9", "seq": 19, "from": "user", "data": { "text": "Where is my order?" }, "timestamp": 1750000004000 } },
+    { "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "frame": { "type": "ack", "clientId": "agent-c-3", "id": "a2f7d9e4-3b1c-4d5e-8f9a-0b1c2d3e4f50", "seq": 20, "timestamp": 1750000005000 } }
+  ]
+}

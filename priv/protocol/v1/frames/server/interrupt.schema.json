@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://converger.aimtune.dev/schemas/protocol/v1/frames/server/interrupt.schema.json",
+  "title": "server -> client: interrupt (persistent, mekik/1)",
+  "description": "A human-in-the-loop pause. `id` is the thread-scoped interrupt id a `resume` answers. data.event = waiting for a component interaction, data.tool = a client tool call; neither gets default Approve/Cancel chips.",
+  "type": "object",
+  "required": ["type", "seq", "id", "data"],
+  "properties": {
+    "type": { "const": "interrupt" },
+    "seq": { "$ref": "../../common.schema.json#/$defs/seq" },
+    "id": { "$ref": "../../common.schema.json#/$defs/id" },
+    "data": { "$ref": "../../common.schema.json#/$defs/interruptData" }
+  },
+  "examples": [
+    {
+      "type": "interrupt",
+      "seq": 7,
+      "id": "approve/0:interrupt#0",
+      "data": {
+        "payload": { "title": "249.90 TRY refund" },
+        "ui": { "component": "approval-form", "props": { "orderId": "ORD-42", "amount": 249.9 } },
+        "actions": [{ "label": "Approve", "value": { "approved": true } }, { "label": "Reject", "value": { "approved": false } }]
+      }
+    },
+    { "type": "interrupt", "seq": 12, "id": "call/0:tool:pick_date", "data": { "payload": {}, "tool": { "name": "pick_date", "params": { "min": "2026-08-01" } } } }
+  ]
+}

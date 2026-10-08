@@ -1,0 +1,192 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://converger.aimtune.dev/schemas/protocol/v1/common.schema.json",
+  "title": "Converger Protocol v1 - shared definitions",
+  "description": "Building blocks referenced by every frame and message schema. See docs/protocol/v1.md. Receivers MUST ignore unknown fields, so no definition here forbids additional properties.",
+  "$defs": {
+    "seq": {
+      "description": "Per-conversation, 1-based, strictly monotonic sequence number of a persistent frame (mekik/1 seq).",
+      "type": "integer",
+      "minimum": 1
+    },
+    "watermark": {
+      "description": "The highest persistent-frame seq a client has durably seen. 0 means 'nothing seen'.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "legacyWatermark": {
+      "description": "Watermark as accepted during the migration window: the integer seq (canonical), its decimal string form, or a pre-v1 opaque base64url string (`seq:<n>` or a legacy activity UUID). Servers emit only the integer form in v1 frames.",
+      "oneOf": [
+        { "$ref": "#/$defs/watermark" },
+        { "type": "string", "pattern": "^(0|[1-9][0-9]{0,18})$" },
+        { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_-]{3,127}$" }
+      ]
+    },
+    "timestamp": {
+      "description": "Milliseconds since the Unix epoch (UTC), as in mekik/1.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "id": {
+      "description": "An opaque identifier (activity id, connection id, interrupt id). Servers mint UUIDs for activities; clients MUST NOT parse ids.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "conversationId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "clientId": {
+      "description": "Client-chosen id of a send, used for the ack and for exactly-once persistence (dedupe per conversation).",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._:~-]{1,128}$"
+    },
+    "from": {
+      "description": "Which side of the conversation produced the frame, relative to the end user. mekik/1 values only: every non-end-user sender (bot, human agent, system) is \"bot\". The finer role is in `sender.role`.",
+      "enum": ["user", "bot"]
+    },
+    "sender": {
+      "description": "Converger extension: who sent a persistent frame.",
+      "type": "object",
+      "required": ["id"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "role": { "enum": ["user", "bot", "agent", "system"] },
+        "name": { "type": "string", "maxLength": 256 }
+      }
+    },
+    "messageType": {
+      "description": "A message (renderer) type name. Lowercase letters, digits, `_` and `-`.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+    },
+    "reservedFrameType": {
+      "description": "Frame types owned by the protocol (either direction). A rich message frame MUST NOT use one of these, except `text`. Superset of mekik/1 RESERVED_FRAME_TYPES.",
+      "enum": [
+        "hello", "welcome", "text", "resume", "genui_event", "client_tools", "client_skills", "abort",
+        "tool_call", "skill", "skills", "genui", "genui_components", "interrupt", "interrupt_resolved",
+        "run", "error", "typing",
+        "survey", "regenerate", "edit",
+        "ack", "deliveryStatus", "presence", "conversationUpdate", "endOfConversation", "event", "heartbeat",
+        "ping", "read", "sync", "auth", "tokenRefreshed", "replayTruncated",
+        "subscribe", "unsubscribe", "subscribed", "unsubscribed", "message", "activity", "activitySet", "frame"
+      ]
+    },
+    "metadata": {
+      "description": "Converger activity metadata (REST `channelData`). Stored with the activity; at most limits.maxMetadataBytes (16 KiB) as JSON.",
+      "type": "object"
+    },
+    "meta": {
+      "description": "mekik/1 per-turn client context map, relayed to the conversation's bot channel; never stored.",
+      "type": "object"
+    },
+    "extensions": {
+      "description": "Provider / vendor passthrough, keyed by a namespace (e.g. `whatsapp`, `telegram`, `x-acme`). Renderers ignore it. At most 8 KiB as JSON.",
+      "type": "object",
+      "propertyNames": { "pattern": "^[a-z][a-z0-9_.-]{0,63}$" },
+      "additionalProperties": { "type": "object" }
+    },
+    "url": {
+      "description": "An absolute http(s) URL, or a Converger attachment URL returned by the upload endpoint.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048,
+      "pattern": "^(https?://|/api/v1/converger/attachments/)"
+    },
+    "messageAction": {
+      "description": "A tappable chip / button. Union of chativa's MessageAction and mekik/1's: `value` omitted means the answer is `label`; `url` makes it a link. Outside interrupts, `value` SHOULD be a string (chativa sends it as the reply text).",
+      "type": "object",
+      "required": ["label"],
+      "properties": {
+        "label": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "value": true,
+        "url": { "$ref": "#/$defs/url" }
+      }
+    },
+    "messageActions": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 10,
+      "items": { "$ref": "#/$defs/messageAction" }
+    },
+    "errorCode": {
+      "description": "Stable string error codes. See docs/protocol/v1.md 'Error codes' for the numeric code and retryability of each.",
+      "enum": [
+        "bad_request", "no_session", "unsupported_protocol", "invalid_watermark", "invalid_message",
+        "unauthorized", "token_expired", "forbidden", "channel_inactive",
+        "rate_limited", "payload_too_large", "too_many_in_flight", "too_many_subscriptions",
+        "conversation_closed", "conversation_not_found",
+        "busy", "interrupted", "not_interrupted", "incomplete_resume", "bot_unavailable",
+        "internal", "unavailable"
+      ]
+    },
+    "aiChunk": {
+      "description": "A GenUI chunk, identical to mekik/1 and chativa AIChunk.",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["type", "component"],
+          "properties": {
+            "type": { "const": "ui" },
+            "component": { "type": "string", "minLength": 1 },
+            "props": { "type": "object" },
+            "id": { "type": ["string", "integer"] }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type", "content"],
+          "properties": {
+            "type": { "const": "text" },
+            "content": { "type": "string" },
+            "id": { "type": ["string", "integer"] }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type", "name"],
+          "properties": {
+            "type": { "const": "event" },
+            "name": { "type": "string", "minLength": 1 },
+            "payload": true,
+            "id": { "type": ["string", "integer"] },
+            "for": { "type": ["string", "integer"] }
+          }
+        }
+      ]
+    },
+    "pendingView": {
+      "description": "An open interrupt as re-announced in welcome.data.pending (mekik/1 PendingView).",
+      "type": "object",
+      "required": ["id", "data"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "data": { "$ref": "#/$defs/interruptData" }
+      }
+    },
+    "interruptData": {
+      "type": "object",
+      "required": ["payload"],
+      "properties": {
+        "payload": true,
+        "ui": {
+          "type": "object",
+          "required": ["component"],
+          "properties": {
+            "component": { "type": "string", "minLength": 1 },
+            "props": { "type": "object" }
+          }
+        },
+        "actions": { "type": "array", "items": { "$ref": "#/$defs/messageAction" } },
+        "event": { "type": "string" },
+        "tool": {
+          "type": "object",
+          "required": ["name"],
+          "properties": { "name": { "type": "string" }, "params": true }
+        }
+      }
+    }
+  }
+}

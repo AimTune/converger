@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://converger.aimtune.dev/schemas/protocol/v1/messages/tool-call.schema.json",
+  "title": "ToolCall",
+  "description": "One tool invocation (the data of a tool_call frame), upserted by id as it advances running -> completed/error. Identical to mekik/1 and chativa ToolCall.",
+  "type": "object",
+  "required": ["id", "name", "status"],
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "name": { "type": "string", "minLength": 1 },
+    "description": { "type": "string" },
+    "status": { "enum": ["running", "completed", "error"] },
+    "params": { "type": "object" },
+    "result": true,
+    "error": { "type": "string" },
+    "startedAt": { "type": "number" },
+    "endedAt": { "type": "number" }
+  },
+  "examples": [{ "id": "t1", "name": "get_order", "status": "running", "params": { "id": "ORD-42" } }]
+}

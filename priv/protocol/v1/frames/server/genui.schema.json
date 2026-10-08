@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://converger.aimtune.dev/schemas/protocol/v1/frames/server/genui.schema.json",
+  "title": "server -> client: genui (persistent, mekik/1)",
+  "description": "One Generative UI chunk of stream `streamId`. A chunk whose id is already on screen updates that element in place. Exactly the mekik/1 shape.",
+  "type": "object",
+  "required": ["type", "seq", "streamId", "done", "chunk"],
+  "properties": {
+    "type": { "const": "genui" },
+    "seq": { "$ref": "../../common.schema.json#/$defs/seq" },
+    "streamId": { "type": "string", "minLength": 1 },
+    "done": { "type": "boolean" },
+    "chunk": { "$ref": "../../common.schema.json#/$defs/aiChunk" }
+  },
+  "examples": [
+    { "type": "genui", "seq": 13, "streamId": "stream-1", "done": false, "chunk": { "type": "ui", "component": "order-card", "props": { "id": "ORD-42", "total": 249.9 }, "id": 1 } },
+    { "type": "genui", "seq": 14, "streamId": "stream-1", "done": false, "chunk": { "type": "text", "content": "Processing", "id": 2 } },
+    { "type": "genui", "seq": 16, "streamId": "stream-1", "done": true, "chunk": { "type": "event", "name": "stream_done", "id": 3 } }
+  ]
+}

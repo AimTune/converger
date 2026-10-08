@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://converger.aimtune.dev/schemas/protocol/v1/messages/file.schema.json",
+  "title": "file message data",
+  "description": "A downloadable file (chativa FileMessage, mekik FileMessageData).",
+  "type": "object",
+  "required": ["url", "name"],
+  "properties": {
+    "url": { "$ref": "../common.schema.json#/$defs/url" },
+    "name": { "type": "string", "minLength": 1, "maxLength": 255 },
+    "size": { "type": "integer", "minimum": 0, "description": "Bytes." },
+    "mimeType": { "type": "string", "maxLength": 255 },
+    "caption": { "type": "string", "maxLength": 4096, "description": "Converger addition." },
+    "text": { "type": "string", "maxLength": 4096 },
+    "extensions": { "$ref": "../common.schema.json#/$defs/extensions" }
+  },
+  "examples": [
+    { "url": "/api/v1/converger/attachments/9b7c4c1e-5a5f-4a0e-9a53-0e8d2f3f1a10", "name": "invoice.pdf", "size": 48213, "mimeType": "application/pdf" }
+  ]
+}

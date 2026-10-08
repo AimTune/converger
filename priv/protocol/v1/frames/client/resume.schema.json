@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://converger.aimtune.dev/schemas/protocol/v1/frames/client/resume.schema.json",
+  "title": "client -> server: resume (mekik/1)",
+  "description": "Answer the open interrupts, keyed by thread-scoped interrupt id. Forwarded to the conversation's bot channel. Not the replay request: that is `sync`.",
+  "type": "object",
+  "required": ["type", "answers"],
+  "properties": {
+    "type": { "const": "resume" },
+    "answers": { "type": "object", "minProperties": 1 },
+    "clientId": { "$ref": "../../common.schema.json#/$defs/clientId" }
+  },
+  "examples": [
+    { "type": "resume", "answers": { "approve/0:interrupt#0": { "approved": true } } },
+    { "type": "resume", "answers": { "call/0:tool:pick_date": { "ok": true, "result": { "date": "2026-08-15" } } } }
+  ]
+}
