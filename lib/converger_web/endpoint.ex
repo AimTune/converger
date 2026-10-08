@@ -41,6 +41,9 @@ defmodule ConvergerWeb.Endpoint do
     plug Phoenix.Ecto.CheckRepoStatus, otp_app: :converger
   end
 
+  # Must run before anything that reads conn.remote_ip (AdminAuth, RateLimit).
+  plug ConvergerWeb.Plugs.TrustedProxies
+
   plug Plug.RequestId
   plug Plug.Telemetry, event_prefix: [:phoenix, :endpoint]
 
