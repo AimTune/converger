@@ -25,7 +25,15 @@ defmodule Converger.MixProject do
           "CVE-2026-43966",
           # EEF-CVE-2026-43969: cow_cookie:cookie/1 builds client Cookie
           # request headers; we never act as a cowboy/gun HTTP client.
-          "CVE-2026-43969"
+          "CVE-2026-43969",
+          # cloak 1.1.4 / cloak_ecto 1.3.0, no fixed releases yet. Neither
+          # affected code path is used (enforced by test/converger/vault_test.exs):
+          # EEF-CVE-2026-95105: Cloak.Ciphers.AES.CTR is unauthenticated; the
+          # Vault only configures Cloak.Ciphers.AES.GCM (authenticated).
+          "CVE-2026-95105",
+          # EEF-CVE-2026-94206: Cloak.Ecto.PBKDF2 ignores the iteration count;
+          # we only use Cloak.Ecto.Binary / Cloak.Ecto.Map fields.
+          "CVE-2026-94206"
         ]
       ],
       dialyzer: [
