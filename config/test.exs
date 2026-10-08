@@ -43,3 +43,11 @@ config :converger, :prometheus_port, 9569
 
 # Disable OpenTelemetry span export in test
 config :opentelemetry, traces_exporter: :none
+
+# Deterministic DNS for the webhook SSRF guard (no network lookups in tests).
+# Deliveries that are not stubbed with Req.Test fail fast instead of waiting
+# for the default connect timeout.
+config :converger, :webhook,
+  resolver: {Converger.TestDnsResolver, :resolve},
+  connect_timeout: 200,
+  receive_timeout: 1_000
