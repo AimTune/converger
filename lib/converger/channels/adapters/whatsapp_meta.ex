@@ -5,7 +5,9 @@ defmodule Converger.Channels.Adapters.WhatsAppMeta do
 
   require Logger
 
-  @default_graph_api_version "v23.0"
+  # Latest Graph API version as of 2026-07-29 (v26.0); override per channel
+  # with `graph_api_version` or globally in config.
+  @default_graph_api_version "v26.0"
 
   @impl true
   def supported_modes, do: ~w(inbound outbound duplex)

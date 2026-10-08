@@ -290,7 +290,7 @@ Supported adapters:
 - **Echo** — Echoes messages back as bot responses (testing)
 - **WebSocket** — No-op delivery (PubSub handles it)
 - **Webhook** — HTTP POST to configured URL
-- **WhatsApp Meta** — Meta Cloud API (Graph API v23.0 by default, configurable per channel via `graph_api_version`)
+- **WhatsApp Meta** — Meta Cloud API (Graph API v26.0 by default, configurable per channel via `graph_api_version`)
 - **WhatsApp Infobip** — Infobip WhatsApp API
 
 ---
