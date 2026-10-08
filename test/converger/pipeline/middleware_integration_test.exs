@@ -86,6 +86,61 @@ defmodule Converger.Pipeline.MiddlewareIntegrationTest do
     end
   end
 
+  describe "custom middleware" do
+    setup do
+      Application.put_env(:converger, :extra_middleware, %{
+        "channel_name_prefix" => Converger.Test.Middleware.ChannelNamePrefix,
+        "crashing" => Converger.Test.Middleware.Crashing
+      })
+
+      on_exit(fn -> Application.delete_env(:converger, :extra_middleware) end)
+    end
+
+    test "receives the channel struct as second argument", %{tenant: tenant} do
+      channel =
+        channel_fixture(tenant, %{
+          name: "support-desk",
+          type: "echo",
+          mode: "outbound",
+          transformations: [%{"type" => "channel_name_prefix"}]
+        })
+
+      conversation = conversation_fixture(tenant, channel)
+      activity = activity_fixture(tenant, conversation, %{text: "Hello"})
+
+      assert {:ok, transformed} = Converger.Pipeline.Middleware.run(activity, channel)
+      assert transformed.text == "[support-desk] Hello"
+    end
+
+    test "an exception halts the chain and dead-letters the delivery", %{tenant: tenant} do
+      :telemetry_test.attach_event_handlers(self(), [[:converger, :middleware, :exception]])
+
+      channel =
+        channel_fixture(tenant, %{
+          type: "echo",
+          mode: "outbound",
+          transformations: [%{"type" => "crashing"}]
+        })
+
+      conversation = conversation_fixture(tenant, channel)
+
+      # Creating the activity runs it through the pipeline once; it must not crash.
+      activity = activity_fixture(tenant, conversation, %{text: "Hello"})
+
+      delivery = Deliveries.get_or_create_delivery(activity.id, channel.id)
+      assert delivery.status == "failed"
+      assert delivery.last_error =~ "middleware crashed: crashing: boom"
+
+      assert {:error, {:halted, "middleware crashed: crashing: boom"}} =
+               Pipeline.deliver(activity, channel)
+
+      assert_received {[:converger, :middleware, :exception], _ref, %{count: 1},
+                       %{type: "crashing", kind: :error, channel_id: channel_id}}
+
+      assert channel_id == channel.id
+    end
+  end
+
   describe "Channel changeset with transformations" do
     test "accepts valid transformations", %{tenant: tenant} do
       channel =

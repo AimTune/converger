@@ -138,6 +138,35 @@ defmodule ConvergerWeb.Admin.ChannelLive do
     end
   end
 
+  def handle_event("toggle_require_signature", %{"id" => id}, socket) do
+    channel = Channels.get_channel!(id)
+
+    case Channels.update_channel(
+           channel,
+           %{require_signature: !channel.require_signature},
+           socket.assigns.actor
+         ) do
+      {:ok, _} ->
+        channels = load_channels(socket.assigns.mode_filter)
+
+        {:noreply,
+         assign(socket, channels: channels, health_map: load_health_map(channels))
+         |> put_flash(:info, "Signature requirement updated")}
+
+      {:error, %Ecto.Changeset{} = changeset} ->
+        message =
+          case Keyword.get_values(changeset.errors, :config) do
+            [{msg, _} | _] -> msg
+            _ -> "Failed to update signature requirement"
+          end
+
+        {:noreply, put_flash(socket, :error, message)}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Failed to update signature requirement")}
+    end
+  end
+
   def handle_event("delete", %{"id" => id}, socket) do
     channel = Channels.get_channel!(id)
 
@@ -293,7 +322,7 @@ defmodule ConvergerWeb.Admin.ChannelLive do
     config
     |> Enum.reject(fn {_k, v} -> v == "" end)
     |> Enum.map_join("\n", fn {k, v} ->
-      if k in ["access_token", "api_key", "verify_token"],
+      if k in ["access_token", "api_key", "verify_token", "app_secret"],
         do: "#{k}: ****",
         else: "#{k}: #{v}"
     end)
@@ -310,7 +339,8 @@ defmodule ConvergerWeb.Admin.ChannelLive do
     [
       {"phone_number_id", "Phone Number ID", "e.g. 1234567890", :text},
       {"access_token", "Access Token", "Graph API access token", :password},
-      {"verify_token", "Verify Token", "Webhook verify token", :password}
+      {"verify_token", "Verify Token", "Webhook verify token", :password},
+      {"app_secret", "App Secret", "Signs X-Hub-Signature-256", :password}
     ]
   end
 
@@ -369,7 +399,15 @@ defmodule ConvergerWeb.Admin.ChannelLive do
             <label style="display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.85em; color: #555;">Name</label>
             <.input field={@form[:name]} placeholder="Channel Name" />
           </div>
+          <div style="padding-bottom: 8px;">
+            <.input
+              type="checkbox"
+              field={@form[:require_signature]}
+              label="Require signed inbound webhooks"
+            />
+          </div>
         </div>
+        <.error :for={{msg, _} <- Keyword.get_values(@form.errors, :config)}><%= msg %></.error>
 
         <div :if={config_fields(@selected_type) != []} style="margin-top: 12px; padding: 12px; background: #f8f9fa; border-radius: 6px; border: 1px solid #e9ecef;">
           <h4 style="margin: 0 0 10px 0; font-size: 0.9em; color: #555;">Configuration</h4>
@@ -564,6 +602,15 @@ defmodule ConvergerWeb.Admin.ChannelLive do
             <td style="white-space: nowrap;">
               <button phx-click="toggle_status" phx-value-id={channel.id} class="badge">
                 <%= if channel.status == "active", do: "Disable", else: "Enable" %>
+              </button>
+              <button
+                phx-click="toggle_require_signature"
+                phx-value-id={channel.id}
+                class="badge"
+                style="margin-left: 4px;"
+                title="Whether unsigned inbound webhooks are rejected"
+              >
+                <%= if channel.require_signature, do: "Signature: required", else: "Signature: optional" %>
               </button>
               <button phx-click="delete" phx-value-id={channel.id} phx-confirm="Are you sure?" class="badge badge-inactive" style="margin-left: 4px;">
                 Delete

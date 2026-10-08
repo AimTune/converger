@@ -1,6 +1,8 @@
 defmodule Converger.Channels.Adapters.WhatsAppMeta do
   @behaviour Converger.Channels.Adapter
 
+  alias Converger.Channels.InboundSignature
+
   require Logger
 
   @graph_api_version "v18.0"
@@ -74,6 +76,35 @@ defmodule Converger.Channels.Adapters.WhatsAppMeta do
        }}
     else
       _ -> {:error, "unable to parse WhatsApp Meta webhook payload"}
+    end
+  end
+
+  @doc """
+  Verifies Meta's `X-Hub-Signature-256` header (`sha256=<hex HMAC-SHA256 of
+  the raw body, keyed with the app secret>`). The app secret is read from
+  the channel config key `"app_secret"`.
+
+  Returns `:missing` when the header is absent or no `app_secret` is
+  configured, so the controller can apply the channel's `require_signature`
+  policy.
+  """
+  @impl true
+  def verify_inbound_signature(channel, headers, raw_body) do
+    app_secret = (channel.config || %{})["app_secret"]
+
+    case InboundSignature.get_header(headers, "x-hub-signature-256") do
+      nil ->
+        :missing
+
+      _signature when not is_binary(app_secret) or app_secret == "" ->
+        :missing
+
+      signature ->
+        expected = "sha256=" <> InboundSignature.hmac_hex(app_secret, raw_body || "")
+
+        if Plug.Crypto.secure_compare(expected, String.downcase(signature)),
+          do: :ok,
+          else: {:error, :invalid_signature}
     end
   end
 

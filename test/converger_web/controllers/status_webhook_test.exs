@@ -36,7 +36,7 @@ defmodule ConvergerWeb.StatusWebhookTest do
       delivery: delivery
     } do
       conn =
-        post(conn, ~p"/api/v1/channels/#{channel.id}/status", %{
+        signed_post(conn, ~p"/api/v1/channels/#{channel.id}/status", channel, %{
           "provider_message_id" => "wamid.test-123",
           "status" => "delivered"
         })
@@ -55,7 +55,7 @@ defmodule ConvergerWeb.StatusWebhookTest do
       delivery: delivery
     } do
       conn =
-        post(conn, ~p"/api/v1/channels/#{channel.id}/status", %{
+        signed_post(conn, ~p"/api/v1/channels/#{channel.id}/status", channel, %{
           "delivery_id" => delivery.id,
           "status" => "read"
         })
@@ -75,7 +75,7 @@ defmodule ConvergerWeb.StatusWebhookTest do
       {:ok, _} = Deliveries.mark_sent(delivery, %{"whatsapp_message_id" => "wamid.out-123"})
 
       conn =
-        post(conn, ~p"/api/v1/channels/#{outbound_channel.id}/status", %{
+        signed_post(conn, ~p"/api/v1/channels/#{outbound_channel.id}/status", outbound_channel, %{
           "provider_message_id" => "wamid.out-123",
           "status" => "delivered"
         })
@@ -85,7 +85,7 @@ defmodule ConvergerWeb.StatusWebhookTest do
 
     test "returns 200 for unknown provider_message_id", %{conn: conn, channel: channel} do
       conn =
-        post(conn, ~p"/api/v1/channels/#{channel.id}/status", %{
+        signed_post(conn, ~p"/api/v1/channels/#{channel.id}/status", channel, %{
           "provider_message_id" => "unknown-id",
           "status" => "delivered"
         })
@@ -109,7 +109,8 @@ defmodule ConvergerWeb.StatusWebhookTest do
           config: %{
             "phone_number_id" => "123456",
             "access_token" => "token",
-            "verify_token" => "verify"
+            "verify_token" => "verify",
+            "app_secret" => "meta-app-secret"
           }
         })
 
@@ -149,7 +150,16 @@ defmodule ConvergerWeb.StatusWebhookTest do
         ]
       }
 
-      conn = post(conn, ~p"/api/v1/channels/#{channel.id}/inbound", params)
+      body = Jason.encode!(params)
+
+      signature =
+        "sha256=" <> Converger.Channels.InboundSignature.hmac_hex("meta-app-secret", body)
+
+      conn =
+        conn
+        |> put_req_header("content-type", "application/json")
+        |> put_req_header("x-hub-signature-256", signature)
+        |> post(~p"/api/v1/channels/#{channel.id}/inbound", body)
 
       assert json_response(conn, 200)["status"] == "accepted"
       assert json_response(conn, 200)["receipts_processed"] == 1
