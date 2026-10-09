@@ -38,7 +38,7 @@ defmodule ConvergerWeb.ProtocolSocket do
 
   require Logger
 
-  alias Converger.{Activities, Channels, Conversations, RateLimit}
+  alias Converger.{Activities, Channels, Conversations, Inbound, RateLimit}
   alias Converger.Auth.ConvergerToken
   alias ConvergerWeb.{ConversationSignals, Protocol, SocketGuard}
   alias ConvergerWeb.Protocol.{Codec, Feed, Frames}
@@ -582,7 +582,7 @@ defmodule ConvergerWeb.ProtocolSocket do
 
     opts = [client_id: client_id, frame_type: "text"]
 
-    case Activities.create_client_activity(params, system_attrs) do
+    case store(params, system_attrs, state) do
       {:ok, activity} ->
         state = %{state | feed: Feed.own(state.feed, activity.seq)}
 
@@ -592,6 +592,10 @@ defmodule ConvergerWeb.ProtocolSocket do
 
       {:error, :conversation_closed} ->
         reply([error("conversation_closed", "the conversation is closed", opts)], state)
+
+      {:error, :inbound_not_supported} ->
+        message = "the channel does not accept messages (mode outbound)"
+        reply([error("forbidden", message, opts)], state)
 
       {:error, %Ecto.Changeset{} = changeset} ->
         details = Frames.changeset_details(changeset)
@@ -604,6 +608,27 @@ defmodule ConvergerWeb.ProtocolSocket do
       {:error, reason} ->
         Logger.warning("Protocol send failed", reason: inspect(reason))
         reply([error("internal", "the message could not be accepted, retry", opts)], state)
+    end
+  end
+
+  # On a `websocket` channel the socket is the channel's own transport: the
+  # message is the channel's inbound message (Converger.Inbound, mode checked),
+  # as on the Phoenix binding. Tokens of other channel types write directly.
+  defp store(params, system_attrs, state) do
+    case Channels.get_active_channel(state.claims["channel_id"], state.claims["tenant_id"]) do
+      {:ok, %{type: "websocket"} = channel} ->
+        message = Map.merge(params, Map.take(system_attrs, ["sender", "idempotency_key"]))
+
+        case Inbound.receive_message(channel, message,
+               conversation_id: system_attrs["conversation_id"]
+             ) do
+          {tag, activity} when tag in [:created, :duplicate] -> {:ok, activity}
+          {:rejected, changeset} -> {:error, changeset}
+          {:error, _} = error -> error
+        end
+
+      _ ->
+        Activities.create_client_activity(params, system_attrs)
     end
   end
 

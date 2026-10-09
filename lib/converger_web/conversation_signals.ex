@@ -39,12 +39,17 @@ defmodule ConvergerWeb.ConversationSignals do
 
   @doc """
   The participant identity of a connection, from its token claims: the
-  token's `user_id`, or `"anonymous"` without one.
-
-  Client tokens are conversation tokens of end users, so every participant
-  has role `"user"` for now; agent consoles get their own role with
-  channel-scoped sockets (#64/#67).
+  token's `user_id`, or `"anonymous"` without one. A channel-scoped token
+  (`scope: "channel"`, an agent console) has role `"agent"`; conversation
+  tokens have role `"user"`.
   """
+  def participant(%{"scope" => "channel"} = claims) do
+    case claims["user_id"] do
+      user_id when is_binary(user_id) and user_id != "" -> %{id: user_id, role: "agent"}
+      _ -> %{id: "agent", role: "agent"}
+    end
+  end
+
   def participant(claims) do
     case claims["user_id"] do
       user_id when is_binary(user_id) and user_id != "" -> %{id: user_id, role: "user"}
@@ -53,21 +58,25 @@ defmodule ConvergerWeb.ConversationSignals do
   end
 
   @doc """
-  Whether presence is on for a connection. The conversation's channel decides
+  Whether presence is on for a connection. The token's channel decides
   (config key `"presence"`):
 
     * `"identified"` (default) - every connection with a `user_id`
     * `"all"` - anonymous end users too (one `"anonymous"` participant)
     * `"off"` - no presence frames at all
+
+  `presence?/1` loads the channel from the claims; `presence?/2` takes it
+  when the caller already has it.
   """
   def presence?(claims) do
-    mode =
-      case Channels.get_active_channel(claims["channel_id"], claims["tenant_id"]) do
-        {:ok, channel} -> (channel.config || %{})["presence"]
-        _ -> "off"
-      end
+    case Channels.get_active_channel(claims["channel_id"], claims["tenant_id"]) do
+      {:ok, channel} -> presence?(channel, claims)
+      _ -> false
+    end
+  end
 
-    case mode do
+  def presence?(channel, claims) do
+    case (channel.config || %{})["presence"] do
       "off" -> false
       "all" -> true
       _ -> participant(claims).id != "anonymous"

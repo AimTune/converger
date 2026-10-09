@@ -233,13 +233,15 @@ defmodule ConvergerWeb.ProtocolSocketTest do
       {_welcome, client} = join(ctx.port, token(ctx.channel, ctx.conversation, user_id: "alice"))
       frame = %{"type" => "text", "clientId" => "c-1", "data" => %{"text" => "hi"}}
 
+      # The websocket channel delivers the send, so the sender also gets
+      # deliveryStatus receipts for it; only the acks matter here.
       client = Client.push(client, frame)
-      {ack, client} = Client.recv(client)
+      {ack, client} = Client.recv_type(client, "ack")
       assert %{"type" => "ack", "clientId" => "c-1", "seq" => 1, "id" => id} = ack
       refute Map.has_key?(ack, "duplicate")
 
       client = Client.push(client, frame)
-      {again, client} = Client.recv(client)
+      {again, client} = Client.recv_type(client, "ack")
       assert %{"type" => "ack", "clientId" => "c-1", "seq" => 1, "id" => ^id} = again
       assert again["duplicate"] == true
 
@@ -247,7 +249,7 @@ defmodule ConvergerWeb.ProtocolSocketTest do
                Repo.all(Activity)
 
       # Echo rule: the sending connection does not get its own turn back.
-      Client.refute_frame(client)
+      Client.refute_frame(client, 200, ["deliveryStatus"])
     end
 
     test "other connections receive the turn with the acked seq", ctx do
@@ -314,7 +316,7 @@ defmodule ConvergerWeb.ProtocolSocketTest do
     test "a send without any id is persisted without an ack", ctx do
       {_welcome, client} = join(ctx.port, token(ctx.channel, ctx.conversation))
       client = Client.push(client, %{"type" => "text", "data" => %{"text" => "x"}})
-      Client.refute_frame(client)
+      Client.refute_frame(client, 200, ["deliveryStatus"])
       assert [%Activity{text: "x"}] = Repo.all(Activity)
     end
 
@@ -336,16 +338,30 @@ defmodule ConvergerWeb.ProtocolSocketTest do
       assert Map.has_key?(details, "text")
     end
 
+    test "an outbound-only websocket channel refuses sends with forbidden", ctx do
+      channel = channel_fixture(ctx.tenant, %{mode: "outbound"})
+      conversation = conversation_fixture(ctx.tenant, channel)
+      {_welcome, client} = join(ctx.port, token(channel, conversation))
+
+      client =
+        Client.push(client, %{"type" => "text", "clientId" => "c-9", "data" => %{"text" => "x"}})
+
+      assert {%{"data" => %{"code" => "forbidden", "clientId" => "c-9"}}, _client} =
+               Client.recv(client)
+
+      assert {[], false} = Activities.page_activities_since(conversation.id, nil)
+    end
+
     test "a closed conversation draws conversation_closed", ctx do
       {_welcome, client} = join(ctx.port, token(ctx.channel, ctx.conversation))
       {:ok, _} = Conversations.close_conversation(ctx.conversation)
-      {%{"type" => "conversationUpdate"}, client} = Client.recv(client)
+      {%{"type" => "conversationUpdate"}, client} = Client.recv_type(client, "conversationUpdate")
 
       client =
         Client.push(client, %{"type" => "text", "clientId" => "c-3", "data" => %{"text" => "x"}})
 
       assert {%{"data" => %{"code" => "conversation_closed", "clientId" => "c-3"}}, _client} =
-               Client.recv(client)
+               Client.recv_type(client, "error")
     end
 
     test "malformed frames draw bad_request and keep the connection", ctx do
@@ -415,12 +431,12 @@ defmodule ConvergerWeb.ProtocolSocketTest do
       {_welcome, client} = join(ctx.port, token(ctx.channel, ctx.conversation))
       activity!(ctx.conversation, "one")
       activity!(ctx.conversation, "two")
-      {_, client} = Client.recv(client)
-      {_, client} = Client.recv(client)
+      {%{"seq" => 1}, client} = Client.recv_type(client, "text")
+      {%{"seq" => 2}, client} = Client.recv_type(client, "text")
 
       client = Client.push(client, %{"type" => "sync", "watermark" => 1})
-      assert {%{"seq" => 2}, client} = Client.recv(client)
-      Client.refute_frame(client)
+      assert {%{"seq" => 2}, client} = Client.recv_type(client, "text")
+      Client.refute_frame(client, 200, ["deliveryStatus"])
     end
 
     test "a forced disconnect closes with 4403", ctx do

@@ -3,7 +3,7 @@ defmodule ConvergerWeb.InboundController do
 
   require Logger
 
-  alias Converger.{Channels, Activities, Conversations, Deliveries, Participants}
+  alias Converger.{Channels, Deliveries, Inbound}
   alias Converger.Channels.Adapter
 
   # Per channel, keyed by the channel_id path parameter, so floods are rejected
@@ -130,11 +130,13 @@ defmodule ConvergerWeb.InboundController do
   end
 
   defp process_inbound_messages(conn, channel, params, messages, receipts) do
-    case verify_inbound_capable(channel) do
-      :ok ->
+    cond do
+      Inbound.accepts_inbound?(channel) ->
         messages
         |> Enum.reduce_while([], fn message, acc ->
-          case process_inbound_message(channel, params, message) do
+          case Inbound.receive_message(channel, message,
+                 conversation_id: params["conversation_id"]
+               ) do
             {:error, _} = error -> {:halt, error}
             result -> {:cont, [result | acc]}
           end
@@ -143,7 +145,7 @@ defmodule ConvergerWeb.InboundController do
 
       # Statuses for an outbound-only channel arrived together with messages:
       # acknowledge the statuses, drop the messages the channel does not accept.
-      {:error, _} when receipts > 0 ->
+      receipts > 0 ->
         Logger.warning("Dropped inbound messages on a channel that is not inbound-capable",
           channel_id: channel.id,
           count: length(messages)
@@ -153,70 +155,8 @@ defmodule ConvergerWeb.InboundController do
         |> put_status(:ok)
         |> json(%{status: "accepted", receipts_processed: receipts})
 
-      {:error, _} = error ->
-        error
-    end
-  end
-
-  # Returns {:created, activity}, {:duplicate, activity}, {:rejected, changeset}
-  # or {:error, reason} (request-level or transient: stop and let the sender retry).
-  defp process_inbound_message(channel, params, message) do
-    key = message["idempotency_key"]
-
-    case Activities.get_activity_by_channel_idempotency_key(channel.id, key) do
-      %Activities.Activity{} = existing ->
-        Logger.info("Duplicate inbound message ignored",
-          channel_id: channel.id,
-          activity_id: existing.id
-        )
-
-        {:duplicate, existing}
-
-      nil ->
-        case resolve_or_create_conversation(channel, params, message) do
-          {:ok, conversation} ->
-            create_inbound_activity(channel, conversation, message)
-
-          # e.g. an external id the participant schema rejects: permanent.
-          {:error, %Ecto.Changeset{} = changeset} ->
-            Logger.warning("Rejected inbound message: invalid participant or conversation",
-              channel_id: channel.id,
-              errors: inspect(changeset.errors)
-            )
-
-            {:rejected, changeset}
-
-          {:error, _} = error ->
-            error
-        end
-    end
-  end
-
-  defp create_inbound_activity(channel, conversation, message) do
-    case Activities.create_client_activity(message, %{
-           tenant_id: channel.tenant_id,
-           conversation_id: conversation.id,
-           sender: message["sender"],
-           idempotency_key: message["idempotency_key"]
-         }) do
-      {:ok, activity} ->
-        Logger.info("Inbound activity received",
-          channel_id: channel.id,
-          activity_id: activity.id
-        )
-
-        {:created, activity}
-
-      {:error, %Ecto.Changeset{} = changeset} ->
-        Logger.warning("Rejected inbound message",
-          channel_id: channel.id,
-          errors: inspect(changeset.errors)
-        )
-
-        {:rejected, changeset}
-
-      {:error, _} = error ->
-        error
+      true ->
+        {:error, :inbound_not_supported}
     end
   end
 
@@ -249,9 +189,6 @@ defmodule ConvergerWeb.InboundController do
       })
     end
   end
-
-  defp verify_inbound_capable(%{mode: mode}) when mode in ["inbound", "duplex"], do: :ok
-  defp verify_inbound_capable(_channel), do: {:error, :inbound_not_supported}
 
   # Signature policy:
   #   * a signature that is present but invalid is always rejected (401);
@@ -297,37 +234,4 @@ defmodule ConvergerWeb.InboundController do
 
   defp deprecation_reason(:missing), do: "no signature"
   defp deprecation_reason(:legacy), do: "a legacy (non-timestamped) signature"
-
-  # Conversation for an inbound message, in order of precedence:
-  #   1. an explicit `conversation_id` in the request (tenant-scoped);
-  #   2. the participant's active conversation on this channel, or a new one
-  #      for the participant (see Converger.Participants);
-  #   3. a new, participant-less conversation (adapters without an external id).
-  defp resolve_or_create_conversation(channel, params, message) do
-    conversation_id = params["conversation_id"]
-
-    cond do
-      conversation_id ->
-        case Conversations.get_conversation(conversation_id, channel.tenant_id) do
-          %Conversations.Conversation{} = conv -> {:ok, conv}
-          nil -> {:error, :not_found}
-        end
-
-      participant = participant_attrs(message) ->
-        Participants.resolve_conversation(channel, participant)
-
-      true ->
-        Conversations.create_conversation(%{
-          "tenant_id" => channel.tenant_id,
-          "channel_id" => channel.id,
-          "metadata" => %{"source" => "inbound_webhook"}
-        })
-    end
-  end
-
-  defp participant_attrs(%{"participant" => %{"external_id" => external_id} = participant})
-       when is_binary(external_id) and external_id != "",
-       do: participant
-
-  defp participant_attrs(_message), do: nil
 end

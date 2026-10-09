@@ -1,6 +1,6 @@
 ---
-title: "ADR-0033: Native transports share the signals core, the client WebSocket limits and draining"
-sidebar_label: "0033 Native signals, limits, draining"
+title: "ADR-0035: Native transports share the signals core, the client WebSocket limits and draining"
+sidebar_label: "0035 Native signals, limits, draining"
 description: The native Protocol v1 WebSocket and the SSE stream reuse one extracted module for receipts, typing and presence, apply the SocketGuard limits themselves, and are drained on shutdown through a node-local Registry.
 ---
 
@@ -10,7 +10,7 @@ description: The native Protocol v1 WebSocket and the SSE stream reuse one extra
 | **Date** | 2026-10-10 |
 | **Issues** | [#26](https://github.com/AimTune/converger/issues/26) (follow-up), [#25](https://github.com/AimTune/converger/issues/25), [#27](https://github.com/AimTune/converger/issues/27) |
 | **Pull request** | [#123](https://github.com/AimTune/converger/pull/123) |
-| **Related** | [ADR-0030](0030-native-websocket-endpoint-and-fallback-transports.md), [ADR-0032](0032-transient-conversation-signals.md), [ADR-0027](0027-websocket-limits-backpressure-and-draining.md) |
+| **Related** | [ADR-0033](0033-websocket-channel-adapter-delivery.md), [ADR-0030](0030-native-websocket-endpoint-and-fallback-transports.md), [ADR-0032](0032-transient-conversation-signals.md), [ADR-0027](0027-websocket-limits-backpressure-and-draining.md) |
 
 ## Context and problem statement
 

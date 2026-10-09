@@ -89,7 +89,7 @@ is the endpoint's `SECRET_KEY_BASE`.
 
 | Token | Module | Claims | Lifetime | Issued by |
 | --- | --- | --- | --- | --- |
-| Converger token | `Converger.Auth.ConvergerToken` | `type: "converger"`, `channel_id`, `tenant_id`, `sub`, optional `conversation_id` and `user_id` | 1800 s | `POST /api/v1/converger/tokens/generate` (channel secret), `POST /api/v1/converger/tokens/refresh` (valid token) |
+| Converger token | `Converger.Auth.ConvergerToken` | `type: "converger"`, `channel_id`, `tenant_id`, `sub`, optional `conversation_id`, `user_id` and `scope` (only `"channel"`, never combined with `conversation_id`) | 1800 s | `POST /api/v1/converger/tokens/generate` (channel secret), `POST /api/v1/converger/tokens/refresh` (valid token) |
 | Conversation token (legacy, deprecated) | `Converger.Auth.Token` | `conversation_id`, `tenant_id`, `sub` | 3600 s | `POST /api/v1/tokens` |
 | Channel token (legacy, deprecated) | `Converger.Auth.Token.generate_channel_token/1` | `channel_id`, `tenant_id`, `sub: "channel_<id>"` | 3600 s | Shown on the admin channel page (`/admin/channels`) |
 
@@ -116,18 +116,20 @@ token's channel is still `active` (`403` otherwise). Consequences of the statele
 - Rotating `SECRET_KEY_BASE` invalidates every token and every session at once (see
   [Rotating leaked secrets](../security.md#rotating-leaked-secrets)).
 
-Revocation, refresh rotation, scoped tokens and a dedicated signing key with `kid` are Planned
+Revocation, refresh rotation, scopes beyond `channel` and a dedicated signing key with `kid` are Planned
 ([#52](https://github.com/AimTune/converger/issues/52)).
 
 ### WebSocket authentication
 
 | Socket | Connect parameter | Join rule |
 | --- | --- | --- |
-| `/socket/converger` (`ConvergerWeb.ConvergerSocket`) | `token`: a Converger token; the channel must be active for the token's tenant | `converger:conversation:<id>`: allowed when the token's `conversation_id` equals `<id>`, or, for a channel-level token, when the conversation belongs to the token's tenant and channel |
+| `/socket/converger` (`ConvergerWeb.ConvergerSocket`) | `token`: a Converger token; the channel must be active for the token's tenant | `converger:conversation:<id>`: allowed when the token's `conversation_id` equals `<id>`, or, for a `scope: "channel"` token, when the conversation belongs to the token's tenant and either to the token's channel (owned) or, for a `websocket` channel, to a channel that an enabled routing rule routes to it (routed). An unscoped channel-level token cannot join. `converger:channel:<id>`: only a `scope: "channel"` token of that `websocket` channel |
 | `/socket` (`ConvergerWeb.UserSocket`, legacy, deprecated) | `token`: a conversation token (Converger tokens and channel tokens are refused at connect) | `conversation:<id>`: only the conversation named in the token, and only while its channel is active |
 
-Sockets get a per-subject id (`converger_socket:<tenant_id>:user:<user_id>` or `...:conversation:<id>`), never a
-per-channel one, so a forced disconnect affects one end user only
+Sockets get a per-subject id (`converger_socket:<tenant_id>:user:<user_id>`, `...:conversation:<id>`, or
+`...:channel:<channel_id>` for a `scope: "channel"` token without `user_id`), so a forced disconnect affects one end
+user (or one agent console token) only. Channel-level tokens with none of these get no id: their sockets are still
+counted in presence but cannot be disconnected by id
 ([`ConvergerWeb.Sockets`](https://github.com/AimTune/converger/blob/main/lib/converger_web/sockets.ex),
 [ADR-0020](../adr/0020-per-subject-socket-ids-and-presence.md)). Browser connections are also checked against
 `CHECK_ORIGIN` (default: the `PHX_HOST` host); clients that send no `Origin` header are not affected. The wire

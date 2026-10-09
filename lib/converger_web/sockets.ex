@@ -32,11 +32,15 @@ defmodule ConvergerWeb.Sockets do
 
   def user_socket_id(_claims), do: nil
 
-  # End-user id when the token names one, otherwise the conversation.
-  # Channel-level tokens without either get no id (they cannot join a
-  # conversation without one, see ConvergerChannel authorization).
+  # End-user id when the token names one, otherwise the channel for a
+  # channel-scoped token (agent console), otherwise the conversation.
+  # Channel-level tokens without any of them get no id (they cannot join, see
+  # ConvergerChannel authorization).
   defp subject(%{"user_id" => user_id}) when is_binary(user_id) and user_id != "",
     do: "user:#{user_id}"
+
+  defp subject(%{"scope" => "channel", "channel_id" => channel_id}) when is_binary(channel_id),
+    do: "channel:#{channel_id}"
 
   defp subject(%{"conversation_id" => conversation_id}) when is_binary(conversation_id),
     do: "conversation:#{conversation_id}"
@@ -70,6 +74,20 @@ defmodule ConvergerWeb.Sockets do
 
   @doc "Number of distinct sockets currently joined to conversations of `channel_id`."
   def count(channel_id), do: channel_id |> tracked_ids() |> length()
+
+  @doc """
+  Number of joined channel processes of `channel_id` that receive live
+  activities of `conversation_id`: sockets joined to that conversation and
+  sockets following the whole channel (`scope: "channel"`). Used by the
+  `websocket` adapter to tell whether a delivery reached a client.
+  """
+  def count_connections(channel_id, conversation_id) do
+    channel_id
+    |> topic()
+    |> SocketPresence.list()
+    |> Enum.flat_map(fn {_key, %{metas: metas}} -> metas end)
+    |> Enum.count(&(&1[:scope] == "channel" or &1[:conversation_id] == conversation_id))
+  end
 
   @doc """
   Track the calling channel process (a joined channel) under its socket id.
