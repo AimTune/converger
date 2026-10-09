@@ -9,7 +9,7 @@ description: Channel adapters declare their type, capabilities and config schema
 | **Status** | Accepted |
 | **Date** | 2026-10-10 |
 | **Issue** | [#36](https://github.com/AimTune/converger/issues/36) |
-| **Pull request** | to be added when the PR is opened |
+| **Pull request** | [#130](https://github.com/AimTune/converger/pull/130) |
 | **Related** | [ADR-0003](0003-pipeline-is-the-only-delivery-path.md), [ADR-0009](0009-inbound-signature-scheme-and-per-channel-enforcement.md), [ADR-0019](0019-per-channel-retry-policy-delivery-error-and-lifeline.md), [ADR-0033](0033-websocket-channel-adapter-delivery.md), [ADR-0036](0036-rich-activity-model.md) |
 
 ## Context and problem statement
