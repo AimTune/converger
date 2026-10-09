@@ -261,7 +261,7 @@ Go to **Admin, Channels** and pick the tenant, type `echo`, mode `outbound` (the
 export CHANNEL_SECRET='...'
 ```
 
-Tenant users can sign in to the tenant portal (`/portal/login`, with tenant name, email and password) to see the tenant's channels, conversations and routing rules. They cannot create channels or tenants. An admin creates tenant users under **Admin, Tenant Users**.
+Tenant users can sign in to the tenant portal (`/portal/login`, with tenant name, email and password) to see the tenant's channels, conversations, routing rules and deliveries (including failed ones, which they can replay). They cannot create channels or tenants. An admin creates tenant users under **Admin, Tenant Users**.
 
 ### 3. Get a client token
 

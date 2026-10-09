@@ -111,6 +111,7 @@ These events are emitted but not yet exported. Attach your own handler (or add a
 | Event | Measurements | Metadata |
 | --- | --- | --- |
 | `[:converger, :deliveries, :dead_lettered]` | `attempts` | `delivery_id`, `activity_id`, `channel_id`, `error` |
+| `[:converger, :deliveries, :retried]` | `count` | `delivery_ids` (dead letters replayed by one transaction: a single retry or one bulk chunk) |
 | `[:converger, :middleware, :exception]` | `count` | `middleware`, `type`, `activity_id`, `channel_id`, `kind`, `reason`, `stacktrace` |
 | `[:converger, :rate_limit, :exceeded]` | `count` | `bucket`, `key`, `limit`, `scale_ms`, `retry_after_ms` (exported as the counter above, by `bucket`) |
 | `[:converger, :deprecated, :use]` | `count` (always 1) | `surface` (`:legacy_socket`, `:token_endpoint` for `POST /api/v1/tokens`, `:channel_token` for other `x-channel-token` uses), `tenant_id`, and `conversation_id` for the socket |

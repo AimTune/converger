@@ -33,6 +33,14 @@ config :converger, :pagination,
   # (tenants, channels, routing rules, admin users)
   lookup_limit: 1000
 
+# Dead-letter replay and export (see Converger.Deliveries.retry_dead_letters/3
+# and ConvergerWeb.DeliveryExportController).
+config :converger, :dead_letters,
+  # Max deliveries replayed by one bulk retry call
+  bulk_retry_limit: 10_000,
+  # Max rows in one CSV export
+  export_limit: 10_000
+
 # Serialize migration runs with a session-level Postgres advisory lock instead
 # of the default table lock. Concurrent `Converger.Release.migrate/0` calls
 # (e.g. several replicas or init containers starting at once) wait for the

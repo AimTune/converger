@@ -1,11 +1,11 @@
 ---
 title: Tenant API
-description: Reference for the server-to-server tenant API under /api/v1 - conversation tokens, conversations, activities and routing rules.
+description: Reference for the server-to-server tenant API under /api/v1 - conversation tokens, conversations, activities, routing rules and dead-letter deliveries.
 sidebar_position: 2
 ---
 
 The tenant API is the server-to-server API under `/api/v1`. Your backend, bots and agent tools use it to
-open conversations, post and read activities, close and reopen conversations, and manage routing rules. It
+open conversations, post and read activities, close and reopen conversations, manage routing rules, and inspect and replay failed deliveries. It
 authenticates with the tenant API key (`x-api-key`) or a channel token (`x-channel-token`); see
 [authentication](overview.md#authentication). Shared conventions (errors, rate limits, pagination, idempotency)
 are described in the [overview](overview.md).
@@ -24,7 +24,8 @@ Converger API tokens) are refused with `401`.
 Controllers: [`ConvergerWeb.TokenController`](https://github.com/AimTune/converger/blob/main/lib/converger_web/controllers/token_controller.ex),
 [`ConversationController`](https://github.com/AimTune/converger/blob/main/lib/converger_web/controllers/conversation_controller.ex),
 [`ActivityController`](https://github.com/AimTune/converger/blob/main/lib/converger_web/controllers/activity_controller.ex),
-[`RoutingRuleController`](https://github.com/AimTune/converger/blob/main/lib/converger_web/controllers/routing_rule_controller.ex).
+[`RoutingRuleController`](https://github.com/AimTune/converger/blob/main/lib/converger_web/controllers/routing_rule_controller.ex),
+[`DeliveryController`](https://github.com/AimTune/converger/blob/main/lib/converger_web/controllers/delivery_controller.ex).
 
 ## Endpoints
 
@@ -43,6 +44,9 @@ Controllers: [`ConvergerWeb.TokenController`](https://github.com/AimTune/converg
 | `POST` | `/api/v1/routing_rules` | `x-api-key` or `x-channel-token` | Create a routing rule |
 | `PATCH` / `PUT` | `/api/v1/routing_rules/:id` | `x-api-key` or `x-channel-token` | Update a routing rule |
 | `DELETE` | `/api/v1/routing_rules/:id` | `x-api-key` or `x-channel-token` | Delete a routing rule |
+| `GET` | `/api/v1/deliveries` | `x-api-key` only | List deliveries, e.g. the dead-letter queue (keyset-paginated, filterable) |
+| `POST` | `/api/v1/deliveries/:id/retry` | `x-api-key` only | Replay one dead letter |
+| `POST` | `/api/v1/channels/:channel_id/deliveries/retry` | `x-api-key` only | Replay a channel's dead letters |
 
 On the routes marked `x-api-key` or `x-channel-token`, only the `x-channel-token` option is deprecated.
 
@@ -144,6 +148,48 @@ Rendered by [`ConvergerWeb.RoutingRuleJSON`](https://github.com/AimTune/converge
 
 Routing rule timestamps have second precision; conversation and activity timestamps have microseconds. See
 [routing rules](../concepts/routing-rules.md) for how rules select delivery targets.
+
+### Delivery
+
+Rendered by [`ConvergerWeb.DeliveryJSON`](https://github.com/AimTune/converger/blob/main/lib/converger_web/controllers/delivery_json.ex):
+
+```json
+{
+  "id": "1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f",
+  "activity_id": "0e7d4c1a-2b3c-4d5e-8f6a-7b8c9d0e1f2a",
+  "channel_id": "0d2f4b6a-8c0e-4a2c-9e4b-6d8f0a2c4e6b",
+  "status": "failed",
+  "attempts": 5,
+  "last_error": "webhook returned HTTP 503",
+  "provider_message_id": null,
+  "sent_at": null,
+  "delivered_at": null,
+  "read_at": null,
+  "retry_count": 0,
+  "retried_by": null,
+  "retried_at": null,
+  "payload": {
+    "id": "0e7d4c1a-2b3c-4d5e-8f6a-7b8c9d0e1f2a",
+    "type": "message",
+    "sender": "user-1",
+    "text": "Where is my order?",
+    "attachments": [],
+    "metadata": { "api_key": "[REDACTED]" },
+    "idempotency_key": null,
+    "seq": 12,
+    "conversation_id": "3f6d2c1e-8a4b-4c3d-9e2f-1a0b9c8d7e6f",
+    "tenant_id": "c2a4e6f8-1b3d-4f5a-9c7e-2d4f6a8b0c1e",
+    "inserted_at": "2026-10-09T12:00:00.123456Z"
+  },
+  "inserted_at": "2026-10-09T12:00:00.200000Z",
+  "updated_at": "2026-10-09T12:04:31.900000Z"
+}
+```
+
+`payload` is the canonical activity the delivery carries, with sensitive keys (`api_key`, `password`, `*_token`,
+...) replaced by `"[REDACTED]"`. It is the stored activity, before the channel's middleware transformed its copy.
+`retry_count`, `retried_by` (`"<actor type>:<actor id>"`) and `retried_at` record manual replays. See
+[deliveries](../concepts/deliveries.md) for the statuses.
 
 ## Tokens
 
@@ -581,9 +627,90 @@ curl -s -X DELETE "$CONVERGER/api/v1/routing_rules/7c9e1a3b-5d7f-4b9d-8f1a-3c5e7
 
 `204 No Content` with an empty body; `404` for an unknown or foreign rule.
 
+## Deliveries
+
+Inspect and replay dead letters: deliveries that ended `failed` after their retries ran out, a permanent provider
+error or a middleware halt. These endpoints require the tenant API key (`x-api-key`); a channel token gets `403`,
+since deliveries expose the payloads of every conversation. Fix the cause (for example the channel's webhook URL)
+before replaying. The rules are described in [Replaying dead letters](../delivery.md#replaying-dead-letters).
+
+### List deliveries
+
+`GET /api/v1/deliveries`
+
+The tenant's deliveries (through their channel), most recently changed first, keyset-paginated on
+`(updated_at, id)`. All filters are optional:
+
+| Param | Meaning |
+| --- | --- |
+| `status` | `pending`, `sent`, `delivered`, `read` or `failed`. Use `failed` for the dead-letter queue. |
+| `channel_id` | Only this channel's deliveries. |
+| `activity_id` | Only this activity's deliveries. |
+| `from`, `to` | Bounds on `updated_at` (the time of the last status change, so the failure time of a dead letter), inclusive. ISO 8601 datetimes, or dates: `from=2026-10-01` starts at 00:00 UTC, `to=2026-10-01` ends at 23:59:59.999999 UTC. |
+| `limit`, `cursor` | [Pagination](overview.md#pagination). |
+
+```bash
+curl -s "$CONVERGER/api/v1/deliveries?status=failed&channel_id=0d2f4b6a-8c0e-4a2c-9e4b-6d8f0a2c4e6b&from=2026-10-01" \
+  -H "x-api-key: $API_KEY"
+```
+
+```json
+{
+  "data": [ { "id": "1c2d3e4f-...", "status": "failed", "attempts": 5, "last_error": "webhook returned HTTP 503", "payload": { "...": "..." } } ],
+  "meta": { "next_cursor": null, "has_more": false, "limit": 50 }
+}
+```
+
+An invalid filter returns `400 {"error": "Invalid <param>"}`.
+
+### Retry a delivery
+
+`POST /api/v1/deliveries/:id/retry`
+
+Moves a `failed` delivery back to `pending`, resets `attempts` to `0`, records `retried_by` and `retried_at`,
+increments `retry_count`, writes an audit log entry and enqueues a delivery job, in one transaction.
+
+```bash
+curl -s -X POST "$CONVERGER/api/v1/deliveries/1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f/retry" \
+  -H "x-api-key: $API_KEY"
+```
+
+`202 Accepted` with the [delivery](#delivery) (`"status": "pending"`, `"attempts": 0`). The job runs
+asynchronously; follow the outcome with `GET /api/v1/deliveries?activity_id=...` or the `delivery_status` event on
+the conversation.
+
+| Status | Body | When |
+| --- | --- | --- |
+| `202` | `{"data": {...}}` | Re-enqueued |
+| `400` | `{"error": "Channel is inactive"}` | The delivery's channel is disabled; enable it first |
+| `404` | `{"errors": {"detail": "Not Found"}}` | Unknown delivery, or one of another tenant |
+| `409` | `{"error": "not_failed", "detail": "Only failed deliveries can be retried"}` | The delivery is not (or no longer) `failed` |
+
+### Retry a channel's dead letters
+
+`POST /api/v1/channels/:channel_id/deliveries/retry`
+
+Replays every `failed` delivery of the channel, oldest failure first. Optional body (or query) params narrow it
+down: `from`, `to` and `activity_id` (same format as the list filters), and `limit` (at most the server's
+`bulk_retry_limit`, default 10 000, which is also the default). Each delivery gets exactly one job: concurrent calls
+never replay the same delivery twice, and a delivery that fails again while the call runs is not picked up again.
+
+```bash
+curl -s -X POST "$CONVERGER/api/v1/channels/0d2f4b6a-8c0e-4a2c-9e4b-6d8f0a2c4e6b/deliveries/retry" \
+  -H "x-api-key: $API_KEY" -H "content-type: application/json" \
+  -d '{"from": "2026-10-09T00:00:00Z"}'
+```
+
+```json
+{ "data": { "retried": 412, "has_more": false } }
+```
+
+`has_more: true` means the limit was reached and more dead letters match: call again. `400 Channel is inactive`
+for a disabled channel, `404` for an unknown or foreign channel.
+
 ## Related
 
 - [REST API overview](overview.md)
 - [Client API](client-api.md)
 - [Inbound webhooks](inbound.md)
-- [Activities](../concepts/activities.md), [conversations](../concepts/conversations.md), [routing rules](../concepts/routing-rules.md)
+- [Activities](../concepts/activities.md), [conversations](../concepts/conversations.md), [routing rules](../concepts/routing-rules.md), [deliveries](../concepts/deliveries.md)
