@@ -1,6 +1,6 @@
 ---
-title: "ADR-0027: Transient conversation signals: receipts, typing and presence"
-sidebar_label: "0027 Receipts, typing, presence"
+title: "ADR-0032: Transient conversation signals: receipts, typing and presence"
+sidebar_label: "0032 Receipts, typing, presence"
 description: Delivery and read receipts, typing indicators and presence reach WebSocket clients as transient frames over dedicated PubSub topics; only read watermarks are stored, and external channels get them through optional adapter callbacks.
 ---
 

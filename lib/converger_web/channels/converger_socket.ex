@@ -7,6 +7,8 @@ defmodule ConvergerWeb.ConvergerSocket do
   """
 
   use Phoenix.Socket
+  # Rate, size and join limits, slow-consumer and drain handling.
+  use ConvergerWeb.SocketGuard
 
   alias Converger.Auth.ConvergerToken
 

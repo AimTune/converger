@@ -446,7 +446,7 @@ Sending the same request twice returns `"duplicates": 1` the second time.
 
 ## Typing indicator and read receipts (`whatsapp_meta`)
 
-When a WebSocket participant of a conversation types or reads ([WebSocket](../websocket.md#5a-receipts-typing-and-presence)), the `whatsapp_meta` adapter tells the WhatsApp user through the Cloud API (`send_typing/2` and `send_read_receipt/2`, see [ADR-0027](../adr/0027-transient-conversation-signals.md)). Both calls are `POST /<graph_api_version>/<phone_number_id>/messages` with the channel's `access_token`, and both need the `wamid` of a message the WhatsApp user sent (an inbound activity's `idempotency_key`); without one nothing is sent.
+When a WebSocket participant of a conversation types or reads ([WebSocket](../websocket.md#5a-receipts-typing-and-presence)), the `whatsapp_meta` adapter tells the WhatsApp user through the Cloud API (`send_typing/2` and `send_read_receipt/2`, see [ADR-0032](../adr/0032-transient-conversation-signals.md)). Both calls are `POST /<graph_api_version>/<phone_number_id>/messages` with the channel's `access_token`, and both need the `wamid` of a message the WhatsApp user sent (an inbound activity's `idempotency_key`); without one nothing is sent.
 
 | Signal | Request body | Message used |
 | --- | --- | --- |

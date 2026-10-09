@@ -38,7 +38,7 @@
   implements both (Cloud API typing indicator and mark as read).
 - The `delivery_status` PubSub payload (also pushed to the legacy socket) gains `seq`, `sender`,
   `attempts`, `last_error` and `updated_at`.
-- Migration: `20261010100000_create_conversation_reads`. ADR-0027.
+- Migration: `20261010100000_create_conversation_reads`. ADR-0032.
 
 ### Security fixes
 

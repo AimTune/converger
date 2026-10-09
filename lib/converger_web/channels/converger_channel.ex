@@ -8,7 +8,7 @@ defmodule ConvergerWeb.ConvergerChannel do
   alias Converger.ConvergerAPI.Watermark
   alias Converger.Pagination
   alias ConvergerWeb.ConvergerAPI.ActivityJSON
-  alias ConvergerWeb.{ConvergerFrames, ConversationPresence}
+  alias ConvergerWeb.{ConvergerFrames, ConversationPresence, SocketGuard}
 
   # A client sends at most one typing frame per 2 s (protocol v1, section 11);
   # repeats of the same state inside the window are dropped silently.
@@ -350,7 +350,11 @@ defmodule ConvergerWeb.ConvergerChannel do
 
   def handle_info(%Phoenix.Socket.Broadcast{event: "typing", payload: payload}, socket) do
     if payload.participant.id != socket.assigns.participant.id do
-      push(socket, "typing", ConvergerFrames.typing(payload.is_typing, payload.participant))
+      SocketGuard.push_ephemeral(
+        socket,
+        "typing",
+        ConvergerFrames.typing(payload.is_typing, payload.participant)
+      )
     end
 
     {:noreply, socket}
@@ -387,7 +391,7 @@ defmodule ConvergerWeb.ConvergerChannel do
         List.first(metas) || List.first(get_in(diff, [:leaves, id, :metas]) || []) ||
           List.first(get_in(diff, [:joins, id, :metas]) || [])
 
-      push(
+      SocketGuard.push_ephemeral(
         socket,
         "presence",
         ConvergerFrames.presence(presence_participant(id, meta), length(metas), now)
@@ -477,7 +481,7 @@ defmodule ConvergerWeb.ConvergerChannel do
     |> ConversationPresence.list()
     |> Enum.reject(fn {id, _} -> id == own_id end)
     |> Enum.each(fn {id, %{metas: metas}} ->
-      push(
+      SocketGuard.push_ephemeral(
         socket,
         "presence",
         ConvergerFrames.presence(presence_participant(id, List.first(metas)), length(metas), now)

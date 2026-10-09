@@ -201,7 +201,7 @@ Callback checklist:
 | `:is_typing` | typing only: `true` or `false` |
 | `:up_to_seq` | read receipts only: everything up to this `seq` was read |
 
-Signals are best effort: they run in a task under `Converger.TaskSupervisor`, are never retried, and an `{:error, reason}` or a raise is only logged. Do not retry inside the callback (pass `retry: false` to Req). Return `:ok` without calling the provider when there is nothing to do, for example `is_typing: false` on a provider that clears indicators on its own, or a `nil` `:provider_message_id`. Typing is forwarded at most every 20 seconds per WebSocket connection. See [ADR-0027](../adr/0027-transient-conversation-signals.md) and the WhatsApp Cloud API implementation in `whatsapp_meta.ex`.
+Signals are best effort: they run in a task under `Converger.TaskSupervisor`, are never retried, and an `{:error, reason}` or a raise is only logged. Do not retry inside the callback (pass `retry: false` to Req). Return `:ok` without calling the provider when there is nothing to do, for example `is_typing: false` on a provider that clears indicators on its own, or a `nil` `:provider_message_id`. Typing is forwarded at most every 20 seconds per WebSocket connection. See [ADR-0032](../adr/0032-transient-conversation-signals.md) and the WhatsApp Cloud API implementation in `whatsapp_meta.ex`.
 
 ## 2. Register the type
 

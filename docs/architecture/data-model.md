@@ -207,7 +207,7 @@ Columns: `tenant_id`, `channel_id`, `external_id` (not null), `display_name`, `m
 
 ### conversation_reads
 
-The read watermark of each WebSocket reader in a conversation: every activity with `seq <= read_seq` has been read by `reader_id` (the connection's participant id: the token's `user_id`, or `anonymous`). Written by `Converger.Receipts.mark_read/3` with an upsert that only ever raises `read_seq`, capped at `conversations.last_seq` ([ADR-0027](../adr/0027-transient-conversation-signals.md)).
+The read watermark of each WebSocket reader in a conversation: every activity with `seq <= read_seq` has been read by `reader_id` (the connection's participant id: the token's `user_id`, or `anonymous`). Written by `Converger.Receipts.mark_read/3` with an upsert that only ever raises `read_seq`, capped at `conversations.last_seq` ([ADR-0032](../adr/0032-transient-conversation-signals.md)).
 
 Columns: `tenant_id`, `conversation_id` (both cascade on delete), `reader_id` (text, not null), `read_seq` (bigint, not null), `read_at`. Indexes: unique `(conversation_id, reader_id)` (the upsert conflict target), `(tenant_id)`.
 

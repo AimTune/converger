@@ -26,7 +26,10 @@ defmodule Converger.Application do
       ] ++
         Converger.Pipeline.child_specs() ++
         [
-          ConvergerWeb.Endpoint
+          ConvergerWeb.Endpoint,
+          # Last: stopped first on shutdown, it flips readiness to 503 and
+          # waits before the endpoint drains its sockets.
+          ConvergerWeb.Drain
         ]
 
     # See https://hexdocs.pm/elixir/Supervisor.html
