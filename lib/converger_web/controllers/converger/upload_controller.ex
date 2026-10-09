@@ -2,7 +2,9 @@ defmodule ConvergerWeb.ConvergerAPI.UploadController do
   use ConvergerWeb, :controller
 
   alias Converger.{Activities, Conversations, Uploads}
-  import ConvergerWeb.Helpers.Authorization, only: [authorize_conversation: 2]
+
+  import ConvergerWeb.Helpers.Authorization,
+    only: [authorize_channel: 2, authorize_conversation: 2]
 
   require Logger
 
@@ -17,6 +19,7 @@ defmodule ConvergerWeb.ConvergerAPI.UploadController do
     with :ok <- authorize_conversation(claims, conversation_id),
          %Conversations.Conversation{} = conversation <-
            Conversations.get_conversation(conversation_id, tenant_id),
+         :ok <- authorize_channel(claims, conversation),
          # Fail fast before storing the file; create_activity re-checks atomically.
          :ok <- Conversations.ensure_open(conversation),
          {:ok, attachment} <- upload_file(params, tenant_id, conversation_id) do

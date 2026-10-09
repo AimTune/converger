@@ -2,15 +2,16 @@ defmodule ConvergerWeb.ConvergerAPI.AttachmentController do
   @moduledoc """
   `GET /api/v1/converger/attachments/:id`
 
-  Authenticated (converger token) and tenant scoped: an attachment of
-  another tenant, or of another conversation when the token is bound to a
-  conversation, is reported as 404. Local files are streamed; cloud
+  Authenticated (converger token): an attachment of another tenant, of a
+  conversation on another channel, or of another conversation when the
+  token is bound to one, is reported as 404. Local files are streamed; cloud
   backends redirect (302) to a short-lived signed storage or CDN URL.
   """
   use ConvergerWeb, :controller
 
-  alias Converger.Uploads
+  alias Converger.{Conversations, Uploads}
   alias Converger.Uploads.Attachment
+  alias ConvergerWeb.Helpers.Authorization
 
   defp not_found(conn) do
     conn
@@ -29,11 +30,22 @@ defmodule ConvergerWeb.ConvergerAPI.AttachmentController do
     end
   end
 
-  defp authorize_conversation(%{"conversation_id" => conv_id}, %Attachment{conversation_id: id})
-       when is_binary(conv_id) and is_binary(id) and conv_id != id,
-       do: :not_found
+  # The attachment's conversation must be visible to the token: bound to it
+  # (conversation tokens) and on the token's channel (every token).
+  # Attachments without a conversation are never served through this API.
+  defp authorize_conversation(claims, %Attachment{conversation_id: conversation_id})
+       when is_binary(conversation_id) do
+    with :ok <- Authorization.authorize_conversation(claims, conversation_id),
+         %Conversations.Conversation{} = conversation <-
+           Conversations.get_conversation(conversation_id, claims["tenant_id"]),
+         :ok <- Authorization.authorize_channel(claims, conversation) do
+      :ok
+    else
+      _ -> :not_found
+    end
+  end
 
-  defp authorize_conversation(_claims, _attachment), do: :ok
+  defp authorize_conversation(_claims, _attachment), do: :not_found
 
   defp send_attachment(conn, _attachment, {:redirect, url}) do
     conn

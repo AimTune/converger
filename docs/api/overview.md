@@ -75,8 +75,12 @@ checks, in this order:
 
 1. `x-api-key`: the key is hashed and matched against the current key or the previous key while its grace period
    lasts. The tenant must have status `active`.
-2. `x-channel-token`: the token is verified as a Converger-signed JWT and its `tenant_id` claim selects the tenant,
-   which must be `active`.
+2. `x-channel-token`: the token must be a **channel token**. Every token type is signed with the same key, so
+   the claims decide: a channel token has `typ: "channel"` (tokens issued before that claim existed are
+   recognised by `sub: "channel_<channel_id>"` and the absence of `conversation_id` and `type`). Its channel must
+   exist, be `active` and belong to the token's tenant, and the tenant must be `active`. Conversation tokens and
+   Converger client tokens (which end-user browsers hold) are rejected with `Invalid token`, even though they carry
+   a `tenant_id`.
 
 Failures return `401` with a flat string error:
 
@@ -88,9 +92,9 @@ Failures return `401` with a flat string error:
 | --- | --- |
 | `Missing authentication headers` | Neither header present |
 | `Invalid or inactive API Key` | Unknown key, expired previous key, or tenant not `active` |
-| `Invalid token` | `x-channel-token` signature, expiry or claims invalid |
-| `Tenant is not active` | Token valid, tenant suspended |
-| `Tenant not found` | Token valid, tenant deleted |
+| `Invalid token` | `x-channel-token` signature or expiry invalid, not a channel token, or its channel or tenant does not exist |
+| `Channel is not active` | Channel token valid, channel deactivated |
+| `Tenant is not active` | Channel token valid, tenant suspended |
 
 Some endpoints apply stricter rules on top. `GET /api/v1/conversations` requires `x-api-key` and answers `403` to a
 channel token. `POST /api/v1/conversations` and `POST /api/v1/tokens` do not run `TenantAuth` at all and
@@ -130,13 +134,17 @@ rotating `SECRET_KEY_BASE` invalidates every issued token. Each also carries Jok
 
 | Token | Module | Claims | TTL |
 | --- | --- | --- | --- |
-| Channel token | [`Converger.Auth.Token.generate_channel_token/1`](https://github.com/AimTune/converger/blob/main/lib/converger/auth/token.ex) | `channel_id`, `tenant_id`, `sub: "channel_<channel_id>"` | 3600 s (default `exp`) |
+| Channel token | [`Converger.Auth.Token.generate_channel_token/1`](https://github.com/AimTune/converger/blob/main/lib/converger/auth/token.ex) | `typ: "channel"`, `channel_id`, `tenant_id`, `sub: "channel_<channel_id>"` | 3600 s (default `exp`) |
 | Conversation token | `Converger.Auth.Token.generate_token/3` | `conversation_id`, `tenant_id`, `sub: <user_id>` | 3600 s (`expires_in: 3600` in the response) |
 | Converger token | [`Converger.Auth.ConvergerToken`](https://github.com/AimTune/converger/blob/main/lib/converger/auth/converger_token.ex) | `type: "converger"`, `channel_id`, `tenant_id`, `sub: "converger_<channel_id>"`, optional `conversation_id`, optional `user_id` | 1800 s (`expires_in: 1800`) |
 
-A converger token without `conversation_id` is **unscoped**: it was issued by `/tokens/generate` and can create
-conversations. A token with `conversation_id` is **conversation-bound**: requests for any other conversation id are
-answered `403` (`{"errors": {"detail": "Forbidden"}}`), and attachments of other conversations are reported as `404`.
+Every converger token is bound to **one channel**: conversations (and their activities, uploads and attachments)
+on any other channel are reported as `404`, even within the same tenant. A converger token without
+`conversation_id` is **unscoped**: it was issued by `/tokens/generate`, can create conversations and resume
+(`GET /conversations/:id`) conversations of its channel, but cannot join a conversation over the WebSocket; the
+socket needs the conversation token those endpoints return. A token with `conversation_id` is
+**conversation-bound**: requests for any other conversation id are answered `403`
+(`{"errors": {"detail": "Forbidden"}}`), and attachments of other conversations are reported as `404`.
 `user_id` is copied from `user.id` at generation time and carried through refreshes; it identifies the end user's
 socket (see [ADR-0020](../adr/0020-per-subject-socket-ids-and-presence.md)).
 

@@ -2,7 +2,9 @@ defmodule ConvergerWeb.ConvergerAPI.ConversationController do
   use ConvergerWeb, :controller
 
   alias Converger.{Conversations, Channels, Auth.ConvergerToken}
-  import ConvergerWeb.Helpers.Authorization, only: [authorize_conversation: 2]
+
+  import ConvergerWeb.Helpers.Authorization,
+    only: [authorize_channel: 2, authorize_conversation: 2]
 
   action_fallback ConvergerWeb.FallbackController
 
@@ -37,8 +39,9 @@ defmodule ConvergerWeb.ConvergerAPI.ConversationController do
     claims = conn.assigns.converger_claims
 
     with :ok <- authorize_conversation(claims, conversation_id),
-         %Conversations.Conversation{} = _conversation <-
-           Conversations.get_conversation(conversation_id, claims["tenant_id"]) do
+         %Conversations.Conversation{} = conversation <-
+           Conversations.get_conversation(conversation_id, claims["tenant_id"]),
+         :ok <- authorize_channel(claims, conversation) do
       channel = Channels.get_channel!(claims["channel_id"])
 
       {:ok, token, _claims} =
@@ -79,6 +82,7 @@ defmodule ConvergerWeb.ConvergerAPI.ConversationController do
     with :ok <- authorize_conversation(claims, conversation_id),
          %Conversations.Conversation{} = conversation <-
            Conversations.get_conversation(conversation_id, claims["tenant_id"]),
+         :ok <- authorize_channel(claims, conversation),
          {:ok, conversation} <- fun.(conversation) do
       conn
       |> put_status(:ok)

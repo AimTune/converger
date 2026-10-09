@@ -53,10 +53,11 @@ defmodule ConvergerWeb.Integration.WebSocketE2ETest do
     # assert_broadcast "new_activity", %{text: "E2E message"}
     # (No wrapper in broadcast, it uses Map/Struct directly in endpoint broadcast)
 
-    # Wait, the POST activities call returns a wrapped response
+    # The tenant API is called with the tenant credential (the channel token),
+    # never with the end-user conversation token the socket uses.
     post_resp =
       conn
-      |> put_req_header("x-channel-token", websocket_token)
+      |> put_req_header("x-channel-token", channel_token)
       |> post(~p"/api/v1/conversations/#{conversation.id}/activities", %{
         text: "E2E message",
         type: "message"
