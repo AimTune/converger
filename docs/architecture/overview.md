@@ -31,7 +31,8 @@ The application callback is [`Converger.Application`](https://github.com/AimTune
 | 7 | `Converger.RateLimit.Supervisor` | Hammer ETS counters, the per-tenant override cache and, with the `:cluster` backend, the PubSub counter replication. |
 | 8 | `Oban` | Job processing, configured from `config :converger, Oban`. |
 | 9 | `Converger.Pipeline.child_specs()` | Children of the configured pipeline backend. Empty for Oban and Inline; the Broadway pipeline for the Broadway backend. |
-| 10 | `ConvergerWeb.Endpoint` | Bandit HTTP server, sockets and the router. Started last so it only accepts traffic once everything it depends on is running. |
+| 10 | `ConvergerWeb.Endpoint` | Bandit HTTP server, sockets and the router. Started after everything it depends on, so it only accepts traffic once they are running. Client sockets are limited by `ConvergerWeb.SocketGuard`. |
+| 11 | `ConvergerWeb.Drain` | Shutdown gate. Stopped first, it turns `/health/ready` to 503 and refuses new sockets for `drain_delay_ms` before the endpoint drains its sockets in batches. See [WebSocket limits and draining](../operations/websocket-limits.md). |
 
 ```mermaid
 flowchart TD
@@ -54,6 +55,7 @@ flowchart TD
     OBAN --> PLG["plugins: Pruner, Lifeline, Cron"]
     SUP --> BW["Broadway pipeline (Broadway backend only)"]
     SUP --> EP["ConvergerWeb.Endpoint (Bandit)"]
+    SUP --> DRAIN["ConvergerWeb.Drain"]
 ```
 
 ## Components
