@@ -75,14 +75,27 @@ defmodule ConvergerWeb.Sockets do
   Track the calling channel process (a joined channel) under its socket id.
   The entry disappears automatically when the process exits.
   """
-  def track(%Phoenix.Socket{id: nil}, _channel_id, _meta), do: :ok
+  def track(%Phoenix.Socket{id: socket_id}, channel_id, meta),
+    do: track_id(socket_id, channel_id, meta)
 
-  def track(%Phoenix.Socket{id: socket_id}, channel_id, meta) do
+  @doc """
+  Track the calling process under `socket_id`, for connections that are not
+  Phoenix channels (the native protocol socket and the SSE stream). The
+  process must also subscribe to `socket_id` to receive forced disconnects.
+  """
+  def track_id(nil, _channel_id, _meta), do: :ok
+
+  def track_id(socket_id, channel_id, meta) do
     case SocketPresence.track(self(), topic(channel_id), socket_id, meta) do
       {:ok, _ref} -> :ok
       {:error, {:already_tracked, _, _, _}} -> :ok
       {:error, reason} -> {:error, reason}
     end
+  end
+
+  @doc "Stop tracking the calling process under `socket_id` (see `track_id/3`)."
+  def untrack_id(socket_id, channel_id) do
+    SocketPresence.untrack(self(), topic(channel_id), socket_id)
   end
 
   defp tracked_ids(channel_id) do

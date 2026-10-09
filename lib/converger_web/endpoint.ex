@@ -28,9 +28,13 @@ defmodule ConvergerWeb.Endpoint do
     longpoll: false,
     drainer: {ConvergerWeb.Drain, :drainer_config, []}
 
+  # Long-polling is the last-resort fallback for networks that block
+  # WebSockets (the `phoenix` JS client falls back to it automatically). The
+  # native v1 endpoint (/socket/converger/v1) and the SSE stream are routed
+  # in ConvergerWeb.Router.
   socket "/socket/converger", ConvergerWeb.ConvergerSocket,
     websocket: @client_websocket,
-    longpoll: false,
+    longpoll: true,
     drainer: {ConvergerWeb.Drain, :drainer_config, []}
 
   socket "/live", Phoenix.LiveView.Socket,

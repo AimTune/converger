@@ -308,6 +308,28 @@ config :converger, Converger.RateLimit,
 (`{limit, window_ms}`). `clean_period_ms` (default 60000) controls how often expired ETS counters are removed.
 See [Rate limiting](rate-limiting.md).
 
+### Protocol v1 transports
+
+```elixir
+config :converger, ConvergerWeb.Protocol,
+  heartbeat_interval_ms: 30_000,
+  idle_timeout_ms: 60_000,
+  max_frame_bytes: 131_072,
+  max_frame_hard_bytes: 1_048_576,
+  replay_max: 10_000
+```
+
+Settings of the native WebSocket (`/socket/converger/v1`) and the Server-Sent Events stream, announced to
+clients in `welcome.data.limits` ([Protocol v1](../protocol/v1.md), section 11). `heartbeat_interval_ms`: outbound
+silence before a `heartbeat` frame (also the SSE heartbeat period). `idle_timeout_ms`: inbound silence before the
+socket is closed with 4408. `max_frame_bytes`: larger frames are answered with `payload_too_large`;
+`max_frame_hard_bytes`: larger frames close the socket (1009). `replay_max`: frames replayed per handshake, `sync`
+or SSE connection before `replayTruncated`. The replay batch size is `ws_replay_limit` under
+[Pagination](#pagination). Keep the heartbeat below any proxy idle timeout in front of Converger.
+
+Tokens passed as `?token=` (sockets, SSE) are filtered from request logs by
+`config :phoenix, :filter_parameters, ["password", "token", "secret"]`.
+
 ### Repo and migrations
 
 ```elixir

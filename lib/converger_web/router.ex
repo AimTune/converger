@@ -117,6 +117,26 @@ defmodule ConvergerWeb.Router do
     get "/attachments/:id", AttachmentController, :show
   end
 
+  # Server-Sent Events fallback (Protocol v1 frames). EventSource cannot set
+  # headers, so the token may also come from `?token=`; no `accepts ["json"]`
+  # because EventSource asks for text/event-stream.
+  pipeline :converger_stream_auth do
+    plug ConvergerWeb.Plugs.ConvergerAuth, mode: :token, query_token: true
+  end
+
+  scope "/api/v1/converger", ConvergerWeb.ConvergerAPI do
+    pipe_through [:converger_stream_auth]
+
+    get "/conversations/:conversation_id/events", EventStreamController, :stream
+  end
+
+  # Native Converger Protocol v1 WebSocket (raw frames, no Phoenix framing).
+  # The Phoenix sockets at /socket/converger/{websocket,longpoll} are
+  # dispatched by the endpoint before the router.
+  scope "/socket/converger", ConvergerWeb do
+    get "/v1", ProtocolSocketController, :upgrade
+  end
+
   # Admin login (IP whitelist protected)
   scope "/admin", ConvergerWeb do
     pipe_through [:browser, :admin_auth, :admin_session]

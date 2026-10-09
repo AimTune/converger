@@ -81,6 +81,20 @@ defmodule ConvergerWeb.PaginationApiTest do
       assert body == %{"activities" => [], "watermark" => wm, "has_more" => false}
     end
 
+    test "accepts the integer seq of Protocol v1 as the watermark", %{
+      token: token,
+      conversation: conversation,
+      activities: activities
+    } do
+      path = "/api/v1/converger/conversations/#{conversation.id}/activities"
+      body = converger_get(token, path <> "?watermark=3")
+
+      assert Enum.map(body["activities"], & &1["id"]) ==
+               activities |> Enum.drop(3) |> Enum.map(& &1.id)
+
+      assert body["watermark"] == Watermark.encode(5)
+    end
+
     test "default and max page sizes come from config", %{token: token, conversation: c} do
       put_limits(activity_default_limit: 3, activity_max_limit: 4)
       path = "/api/v1/converger/conversations/#{c.id}/activities"
