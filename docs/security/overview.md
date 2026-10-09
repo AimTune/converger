@@ -347,3 +347,25 @@ with the affected version or commit, reproduction steps and impact. There is no 
 - [ADR-0013: Cluster-wide rate limiting with Hammer and PubSub](../adr/0013-cluster-wide-rate-limiting-with-hammer-and-pubsub.md)
 - [ADR-0014: Webhook SSRF guard and outbound signing](../adr/0014-webhook-ssrf-guard-and-outbound-signing.md)
 - [ADR-0022: Deployment hardening](../adr/0022-deployment-hardening.md)
+
+## Authorization boundaries
+
+These rules were tightened after a review of the token and URL handling (see the
+[CHANGELOG](https://github.com/AimTune/converger/blob/main/CHANGELOG.md)):
+
+- **Tenant API credentials.** Only the tenant API key and channel tokens unlock the tenant API.
+  All JWTs share one signing key, so `TenantAuth` checks what a token *is*: conversation tokens and
+  Converger client tokens carry a `tenant_id` too, but they belong to end users and are rejected.
+  See [API authentication](../api/overview.md).
+- **Channel binding.** A Converger client token is bound to its channel: conversations, activities,
+  uploads and attachments of other channels are `404`, even in the same tenant. Joining a conversation
+  over the WebSocket needs a conversation-bound token.
+- **Tenant ownership is immutable.** A routing rule's `tenant_id` is set on create from the
+  authenticated tenant and cannot be changed by an update.
+- **Delivery receipts are scoped.** A status webhook updates only deliveries of the channel it was
+  sent to, whether it identifies them by `provider_message_id` or by `delivery_id`.
+- **SSRF guard everywhere the server makes requests to configured URLs.** Webhook targets, the tenant
+  `alert_webhook_url` and the WhatsApp Infobip `base_url` are checked when saved and again before each
+  request (DNS can change, and older configurations were saved before the guard existed). Private,
+  loopback, link-local and metadata targets are refused unless explicitly allowed
+  (`WEBHOOK_ALLOWED_TARGETS`, see [webhooks](../webhooks.md)).
