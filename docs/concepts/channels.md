@@ -45,7 +45,7 @@ Each type maps to a module implementing the `Converger.Channels.Adapter` behavio
 | `whatsapp_infobip` | `inbound`, `outbound`, `duplex` | `base_url`, `api_key`, `sender` | Infobip WhatsApp API | [WhatsApp](../channels/whatsapp.md) |
 | `echo` | `outbound` | none | Writes a reply activity from `"bot"` into the same conversation (testing) | [Echo](../channels/echo.md) |
 
-See the [channels overview](../channels/overview.md) for provider setup, and [writing an adapter](../channels/writing-an-adapter.md) to add a type. The rest of adapter behaviour v2 (config schemas, beyond the `capabilities/0` callback) is Planned ([#36](https://github.com/AimTune/converger/issues/36)).
+See the [channels overview](../channels/overview.md) for provider setup, and [writing an adapter](../channels/writing-an-adapter.md) to add a type. Each type is one adapter module: the type list, the config validation above and the admin form all come from the adapters' `capabilities/0` and `config_schema/0` ([ADR-0038](../adr/0038-adapter-behaviour-v2-and-config-driven-registry.md)).
 
 One config key is read for every inbound-capable type: `conversation_idle_timeout_seconds` (positive integer). It starts a new conversation for a participant whose active conversation has been idle longer than this ([participants](participants.md)).
 

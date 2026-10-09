@@ -7,6 +7,9 @@ defmodule Converger.Application do
 
   @impl true
   def start(_type, _args) do
+    # A misconfigured `config :converger, :adapters` fails the boot, not a delivery.
+    Converger.Channels.Adapter.validate_registry!()
+
     OpentelemetryPhoenix.setup(adapter: :bandit)
     OpentelemetryEcto.setup([:converger, :repo])
     OpentelemetryOban.setup()

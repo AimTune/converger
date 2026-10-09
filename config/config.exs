@@ -57,6 +57,16 @@ config :converger, :dead_letters,
   # Max rows in one CSV export
   export_limit: 10_000
 
+# Channel adapters registered in addition to the built-in ones (echo, webhook,
+# websocket, whatsapp_meta, whatsapp_infobip), see Converger.Channels.Adapter.
+# Each module `use Converger.Channels.Adapter, type: "..."`; one with a
+# built-in type replaces the built-in. Checked at boot.
+config :converger, :adapters, []
+
+# Channel health checks (Converger.Channels.Health). A channel without
+# deliveries in the window is probed with its adapter's health_probe/1.
+config :converger, :channel_health, probe_idle_channels: true
+
 # Serialize migration runs with a session-level Postgres advisory lock instead
 # of the default table lock. Concurrent `Converger.Release.migrate/0` calls
 # (e.g. several replicas or init containers starting at once) wait for the

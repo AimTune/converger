@@ -46,6 +46,9 @@ config :phoenix, :plug_init_mode, :runtime
 # Use inline pipeline for synchronous testing
 config :converger, pipeline: [backend: Converger.Pipeline.Inline]
 
+# No health probes against real providers in tests (tests enable them per case)
+config :converger, :channel_health, probe_idle_channels: false
+
 # Use a different port for metrics in test to avoid conflicts with dev server
 config :converger, :prometheus_port, false
 

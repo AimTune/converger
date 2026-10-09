@@ -31,7 +31,7 @@ defmodule Converger.Channels.Adapters.Webhook do
   See `docs/webhooks.md` for verification snippets.
   """
 
-  @behaviour Converger.Channels.Adapter
+  use Converger.Channels.Adapter, type: "webhook"
 
   require Logger
 
@@ -54,8 +54,44 @@ defmodule Converger.Channels.Adapters.Webhook do
   }
 
   @impl true
-  def supported_modes, do: ~w(inbound outbound duplex)
+  def capabilities, do: [:inbound, :outbound, :external_delivery, :receipts, :lifecycle_events]
 
+  @impl true
+  def config_schema do
+    [
+      %{
+        name: "url",
+        type: :url,
+        required: true,
+        label: "Webhook URL",
+        placeholder: "https://example.com/webhook",
+        summary: true
+      },
+      %{name: "method", type: :string, label: "HTTP Method", placeholder: "POST"},
+      %{name: "headers", type: :map, form: false, help: "Extra request headers (string values)"},
+      %{
+        name: "connect_timeout",
+        type: :integer,
+        label: "Connect timeout (ms)",
+        placeholder: "5000"
+      },
+      %{
+        name: "receive_timeout",
+        type: :integer,
+        label: "Receive timeout (ms)",
+        placeholder: "10000"
+      },
+      %{
+        name: "max_response_bytes",
+        type: :integer,
+        label: "Max response bytes",
+        placeholder: "1048576"
+      }
+    ]
+  end
+
+  # The schema has checked presence and value types; these are the rules it
+  # cannot express (SSRF guard, methods, reserved headers, limits).
   @impl true
   def validate_config(config) do
     with :ok <- validate_url(config["url"]),

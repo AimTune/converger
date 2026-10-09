@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+### Adapter behaviour v2: capabilities, config schemas, registry (#36)
+
+- Adapters `use Converger.Channels.Adapter, type: "..."` and declare `capabilities/0` and `config_schema/0`.
+  New capabilities: `:external_delivery`, `:receipts`, `:typing`, `:lifecycle_events`, `:provider_ack`
+  (plus `:media`, `:templates`, `:reactions`, `:edits`). New optional callbacks: `verify_subscription/2`,
+  `health_probe/1`, `normalize_error/1`.
+- Registry: the built-in adapters plus `config :converger, :adapters, [...]`; a configured adapter with a
+  built-in type replaces it. Checked at boot. Nothing in `lib/` lists channel types any more: accepted
+  types, health checks, the dashboard, the admin config form, lifecycle-event delivery, the inbound `200`
+  policy and the Meta verification handshake all come from the adapters.
+- Config is validated against the schema before the adapter's own checks. `required: :with_signature`
+  replaces the hardcoded Meta `app_secret` rule. The webhook's missing-URL error is now
+  `webhook config missing: url`.
+- The admin channel form is generated from the schema (secrets as password inputs, booleans as selects);
+  the channel list summary and masking use it too.
+- Health checks: idle `whatsapp_meta` channels are probed on the Graph API (`healthy`, or `degraded` on
+  failure). Disable with `config :converger, :channel_health, probe_idle_channels: false`.
+- `deliver_activity/2` may return `provider_message_id`; `Pipeline.deliver/2` now returns retryable failures
+  as `{:error, %DeliveryError{}}`.
+- `docs/channels/writing-an-adapter.md` rewritten around the new behaviour. ADR-0038.
+
 ### Rich activity model (#28)
 
 - Activity types are a closed, documented vocabulary: `message`, `event`, `typing`,

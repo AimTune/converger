@@ -35,35 +35,60 @@ The mode decides the direction of traffic:
 - `outbound`: the pipeline delivers activities to the channel. Inbound messages are refused (`400 Channel does not accept inbound messages`); delivery receipts are still accepted.
 - `duplex`: both.
 
-The changeset rejects a mode the adapter does not support (`<type> channels only support modes: ...`). `echo` is `outbound` only; the others support all three modes.
+The changeset rejects a mode the adapter does not support (`<type> channels only support modes: ...`). The modes follow from the adapter's capabilities: `echo` is `outbound` only; the others support all three modes.
 
-Channels are created and edited in the admin panel (`/admin/channels`) and the tenant portal (`/portal/channels`). The config form fields per type are listed on each adapter page.
+Channels are created and edited in the admin panel (`/admin/channels`) and the tenant portal (`/portal/channels`). The admin config form is generated from the adapter's `config_schema/0`; the fields per type are listed on each adapter page.
 
 ## The adapter behaviour
 
-The behaviour lives in [`lib/converger/channels/adapter.ex`](https://github.com/AimTune/converger/blob/main/lib/converger/channels/adapter.ex). The module is also the dispatcher: `Adapter.adapter_for/1` maps a type string to its module, and the `Adapter.*` functions with the same names call the adapter (and handle missing optional callbacks).
+The behaviour lives in [`lib/converger/channels/adapter.ex`](https://github.com/AimTune/converger/blob/main/lib/converger/channels/adapter.ex). The module is also the registry and the dispatcher: `Adapter.adapter_for/1` maps a type string to its module, and the `Adapter.*` functions with the same names call the adapter (and handle missing optional callbacks). Adapters start with `use Converger.Channels.Adapter, type: "<type>"`, which defines `type/0` and defaults for the optional callbacks.
+
+### Registry
+
+The channel types are the registered adapters: the built-ins (`echo`, `webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip`) followed by the modules in `config :converger, :adapters`. A configured adapter with a built-in type replaces it. `Adapter.types/0` lists the types (the channel changeset and the admin type dropdown use it), and `Adapter.types_with/1` the types with a capability. The registry is checked at boot (`Adapter.validate_registry!/0`). Nothing else in the code base lists channel types: the pipeline, health checks, the admin forms and the inbound controller ask the adapter. See [Writing an adapter](writing-an-adapter.md) and [ADR-0038](../adr/0038-adapter-behaviour-v2-and-config-driven-registry.md).
+
+### Callbacks
 
 | Callback | Required | Returns | Purpose |
 | --- | --- | --- | --- |
-| `supported_modes/0` | yes | `[String.t()]` | Modes the type accepts, checked by the channel changeset. |
-| `validate_config/1` | yes | `:ok` or `{:error, message}` | Validates `channel.config` on create and update. The message becomes a `config` error on the changeset. |
+| `type/0` | yes (defined by `use`) | `String.t()` | The channel type string. |
 | `deliver_activity/2` | yes | `:ok`, `{:ok, map}`, `{:pending, map}` or `{:error, term}` | Delivers one activity to the provider. Called by the pipeline only. |
 | `parse_inbound/2` | yes | `{:ok, [message]}`, `{:ok, message}` or `{:error, term}` | Turns an inbound webhook body into zero or more messages. |
+| `supported_modes/0` | yes (derived by `use`) | `[String.t()]` | Modes the type accepts, checked by the channel changeset. `use` derives them from `:inbound` and `:outbound`. |
+| `config_schema/0` | no | `[field]` | Config fields (`name`, `type`, `required`, `secret`, `label`, `placeholder`, `help`, `summary`, `form`). Validates `channel.config` and renders the admin form. Missing callback means `[]`. See [config validation](writing-an-adapter.md#3-config-validation). |
+| `validate_config/1` | no | `:ok` or `{:error, message}` | Adapter rules beyond the schema, run after it on create and update. The message becomes a `config` error on the changeset. |
 | `parse_status_update/2` | no | `{:ok, [update]}`, `:ignore` or `{:error, term}` | Extracts delivery and read receipts. Missing callback means `:ignore`. |
 | `verify_inbound_signature/3` | no | `:ok`, `:legacy`, `:missing` or `{:error, reason}` | Provider-native signature check. Missing callback means the generic `x-converger-signature` scheme. |
+| `verify_subscription/2` | no | `{:ok, body}` or `:error` | Answers the provider's `GET` webhook handshake (Meta's `hub.challenge`). Missing callback means `200 ok`. |
 | `retry_policy/0` | no | `map` | Adapter defaults merged over the global retry policy and under the channel's `retry_policy`. |
-| `capabilities/0` | no | list of atoms and `activity_types: [String.t()]` | What the adapter can do. The pipeline delivers only to channels whose adapter has `:outbound`. An `activity_types: [...]` entry names the activity types it delivers natively; other types are downgraded to text or skipped per channel ([capabilities and downgrade](writing-an-adapter.md#capabilities-and-downgrade)). Missing callback means `[:inbound, :outbound]`; a missing `activity_types` entry means every client type. |
+| `normalize_error/1` | no | `DeliveryError` or a map with `reason`, `retryable?`, `retry_after_ms` | Classifies a delivery failure for the retry policy and the circuit breaker. Missing callback means `DeliveryError.normalize/1`. |
+| `rate_limit/0` | no | `String.t()` or `nil` | The provider's default outbound rate, see [rate limiting](../operations/rate-limiting.md). |
+| `health_probe/1` | no | `:ok` or `{:error, term}` | Checks the provider account for channels without recent deliveries, see [channel health](#channel-health). |
+| `capabilities/0` | no | list of atoms and `activity_types: [String.t()]` | What the adapter can do (below). An `activity_types: [...]` entry names the activity types it delivers natively; other types are downgraded to text or skipped per channel ([capabilities and downgrade](writing-an-adapter.md#capabilities-and-downgrade)). Missing callback means `[:inbound, :outbound]`; a missing `activity_types` entry means every client type. |
 | `send_typing/2` | no | `:ok` or `{:error, term}` | Shows a WebSocket participant's typing indicator to the channel's participant. Missing callback means the channel gets no typing. |
 | `send_read_receipt/2` | no | `:ok` or `{:error, term}` | Marks the channel participant's messages as read when a WebSocket participant reads them. Missing callback means no read receipts are sent. |
+
+### Capabilities
+
+| Capability | Effect | Built-in adapters with it |
+| --- | --- | --- |
+| `:inbound` | Accepts inbound messages; with `:outbound`, allows `duplex` | `webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip` |
+| `:outbound` | The pipeline delivers to its channels | all five |
+| `:external_delivery` | Its channels get health checks and dashboard health | `webhook`, `whatsapp_meta`, `whatsapp_infobip` |
+| `:receipts` | Reports delivery or read receipts | `webhook`, `whatsapp_meta`, `whatsapp_infobip` |
+| `:typing` | Forwards typing indicators | `whatsapp_meta` |
+| `:lifecycle_events` | Receives conversation close and reopen events | `webhook`, `websocket` |
+| `:provider_ack` | Handled inbound requests always get `200` | `whatsapp_meta`, `whatsapp_infobip` |
+| `:media`, `:templates`, `:reactions`, `:edits` | Native outbound content (planned, [#37](https://github.com/AimTune/converger/issues/37)) | none yet |
 
 ### `deliver_activity/2`
 
 - `:ok`: the delivery is marked `sent`.
-- `{:ok, map}`: marked `sent`; the map is merged into the delivery's `metadata`. If it contains `whatsapp_message_id` or `infobip_message_id`, that value is stored as the delivery's `provider_message_id`, which is how later receipts find the delivery (see `Converger.Deliveries.mark_sent/2`).
+- `{:ok, map}`: marked `sent`; the map is merged into the delivery's `metadata`. If it contains `provider_message_id` (or the older `whatsapp_message_id` / `infobip_message_id` keys), that value is stored as the delivery's `provider_message_id`, which is how later receipts find the delivery (see `Converger.Deliveries.mark_sent/2`).
 - `{:pending, map}`: handed off, but receipt is not confirmed yet. The delivery stays `pending` (`attempts` incremented, map merged into `metadata`) and is **not** retried; `Converger.Deliveries.acknowledge/3` marks it `sent` later. The `websocket` adapter returns it when no client is connected or the channel requires acks.
 - `{:error, %Converger.Channels.DeliveryError{retryable?: false}}`: the delivery is dead-lettered after this attempt (`status: "failed"`), no retry.
 - `{:error, %DeliveryError{retry_after_ms: ms}}`: retried, and the next attempt waits `ms` instead of the policy backoff.
-- any other `{:error, term}`: retryable; the next attempt follows the channel's retry policy until `max_attempts` is reached.
+- any other `{:error, term}`: classified by the adapter's `normalize_error/1` (default: retryable); the next attempt follows the channel's retry policy until `max_attempts` is reached.
 
 `DeliveryError` ([`lib/converger/channels/delivery_error.ex`](https://github.com/AimTune/converger/blob/main/lib/converger/channels/delivery_error.ex)) has the fields `reason`, `status`, `retry_after_ms` and `retryable?` (default `true`). Its helpers classify failures the same way for every adapter:
 
@@ -118,10 +143,10 @@ Status progression is monotonic (`pending` < `sent` < `delivered` < `read`): a `
 Notes:
 
 - The pipeline calls the adapter of every channel whose adapter has the `:outbound` capability (`Adapter.capability?/2`, used by `resolve_delivery_channels/1` in [`lib/converger/pipeline.ex`](https://github.com/AimTune/converger/blob/main/lib/converger/pipeline.ex)): all five types today.
-- Conversation lifecycle events (close, reopen) are delivered only to `webhook` and `websocket` channels.
+- Conversation lifecycle events (close, reopen) are delivered only to channels whose adapter has `:lifecycle_events` (`webhook` and `websocket`).
 - Activity types outside an adapter's native types (the `activity_types:` entry of `capabilities/0`) are downgraded to a text `message` (for example `messageReaction` becomes `"user reacted with 👍"`) or skipped, as set by the channel config key `unsupported_activities` (`downgrade`, the default, or `skip`). `typing` and the internal `deliveryReceipt` never reach messaging adapters. See [activities](../concepts/activities.md#delivery-to-channels).
 - An inbound message from the conversation's participant is never delivered back to that participant's own channel, unless it is a `websocket` channel (its other sockets need it).
-- Outbound WhatsApp media, templates and interactive messages are planned ([#37](https://github.com/AimTune/converger/issues/37)). `capabilities/0` drives pipeline delivery (`:outbound`) and, with its `activity_types:` entry, the downgrade of unsupported activity types ([#28](https://github.com/AimTune/converger/issues/28)); the rest of adapter behaviour v2 (config schema, registry, capability-driven health checks and admin forms) is planned ([#36](https://github.com/AimTune/converger/issues/36)).
+- Outbound WhatsApp media, templates and interactive messages are planned ([#37](https://github.com/AimTune/converger/issues/37)). `capabilities/0` drives pipeline delivery (`:outbound`), health checks (`:external_delivery`), lifecycle events, the inbound `200` policy (`:provider_ack`) and, with its `activity_types:` entry, the downgrade of unsupported activity types ([#28](https://github.com/AimTune/converger/issues/28)).
 
 ## Inbound endpoints
 
@@ -129,7 +154,7 @@ Defined in [`lib/converger_web/router.ex`](https://github.com/AimTune/converger/
 
 | Method and path | Action | Purpose |
 | --- | --- | --- |
-| `GET /api/v1/channels/:channel_id/inbound` | `verify` | Webhook verification handshake. For `whatsapp_meta` it checks `hub.verify_token` against the channel's `verify_token` and echoes `hub.challenge`; any other type answers `200 ok`. |
+| `GET /api/v1/channels/:channel_id/inbound` | `verify` | Webhook verification handshake. Answered by the adapter's `verify_subscription/2`: for `whatsapp_meta` it checks `hub.verify_token` against the channel's `verify_token` and echoes `hub.challenge` (`403` on mismatch); adapters without the callback answer `200 ok`. |
 | `POST /api/v1/channels/:channel_id/inbound` | `create` | Messages and receipts. WhatsApp sends both to the same URL. |
 | `POST /api/v1/channels/:channel_id/status` | `status` | Receipts only (delivery and read receipts). |
 
@@ -285,7 +310,7 @@ Inside the Converger code base (tests, tools), `Converger.Channels.InboundSignat
 
 ## Channel health
 
-Converger computes a health status for every active `webhook`, `whatsapp_meta` and `whatsapp_infobip` channel from its delivery failure rate.
+Converger computes a health status for every active channel whose adapter has the `:external_delivery` capability (built in: `webhook`, `whatsapp_meta` and `whatsapp_infobip`) from its delivery failure rate.
 
 - [`Converger.Channels.Health`](https://github.com/AimTune/converger/blob/main/lib/converger/channels/health.ex) counts the channel's deliveries created in the last 60 minutes and the ones with status `failed`.
 - [`Converger.Channels.HealthCheck`](https://github.com/AimTune/converger/blob/main/lib/converger/channels/health_check.ex) is the stored result (table `channel_health_checks`): `status`, `total_deliveries`, `failed_deliveries`, `failure_rate` (0.0 to 1.0, rounded to 4 decimals) and `checked_at`.
@@ -296,7 +321,11 @@ Converger computes a health status for every active `webhook`, `whatsapp_meta` a
 | `healthy` | below 10% |
 | `degraded` | 10% or more, below 50% |
 | `unhealthy` | 50% or more |
-| `unknown` | no deliveries in the window |
+| `unknown` | no deliveries in the window, and no health probe (or probes disabled) |
+
+### Health probes
+
+A channel without deliveries in the window says nothing about its provider. When its adapter implements `health_probe/1`, the check calls it: `:ok` stores `healthy`, `{:error, reason}` (or a raise) stores `degraded` and logs `Health probe failed for channel <id>: <reason>`. A failed probe never yields `unhealthy`, so a single failed call cannot open the [circuit breaker](../delivery.md#circuit-breaker). The `whatsapp_meta` adapter probes `GET https://graph.facebook.com/<version>/<phone_number_id>?fields=id` with the channel's access token (5 second timeout, no retry), which catches an expired or revoked token before the next message fails. Disable probes with `config :converger, :channel_health, probe_idle_channels: false` (they are disabled in the test environment).
 
 Each run inserts one health check per channel. When a channel's status differs from its previous check, the worker:
 

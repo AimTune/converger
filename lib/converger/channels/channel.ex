@@ -2,9 +2,10 @@ defmodule Converger.Channels.Channel do
   use Ecto.Schema
   import Ecto.Changeset
 
+  alias Converger.Channels.Adapter
+
   @type t :: %__MODULE__{}
 
-  @channel_types ~w(echo webhook websocket whatsapp_meta whatsapp_infobip)
   @channel_modes ~w(inbound outbound duplex)
 
   @primary_key {:id, :binary_id, autogenerate: true}
@@ -37,7 +38,8 @@ defmodule Converger.Channels.Channel do
     timestamps(type: :utc_datetime_usec)
   end
 
-  def channel_types, do: @channel_types
+  @doc "The registered channel types, see `Converger.Channels.Adapter.types/0`."
+  def channel_types, do: Adapter.types()
   def channel_modes, do: @channel_modes
 
   @doc false
@@ -57,11 +59,10 @@ defmodule Converger.Channels.Channel do
       :rate_limit
     ])
     |> validate_required([:name, :status, :tenant_id])
-    |> validate_inclusion(:type, @channel_types)
+    |> validate_inclusion(:type, Adapter.types())
     |> validate_inclusion(:mode, @channel_modes)
     |> validate_channel_config()
     |> validate_unsupported_activities()
-    |> validate_signature_config()
     |> validate_mode_compatibility()
     |> validate_transformations()
     |> validate_retry_policy()
@@ -72,11 +73,15 @@ defmodule Converger.Channels.Channel do
     |> unique_constraint(:secret_hash)
   end
 
+  # The adapter's config schema and checks. Fields required only on signed
+  # channels (`required: :with_signature`, e.g. Meta's app_secret) depend on
+  # `require_signature`.
   defp validate_channel_config(changeset) do
     type = get_field(changeset, :type)
     config = get_field(changeset, :config) || %{}
+    opts = [require_signature: get_field(changeset, :require_signature) == true]
 
-    case Converger.Channels.Adapter.validate_config(type, config) do
+    case Adapter.validate_config(type, config, opts) do
       :ok -> changeset
       {:error, message} -> add_error(changeset, :config, message)
     end
@@ -98,25 +103,6 @@ defmodule Converger.Channels.Channel do
         :config,
         "unsupported_activities must be one of: #{Enum.join(policies, ", ")}"
       )
-    end
-  end
-
-  # WhatsApp Meta signs webhooks with the app secret, so a channel that
-  # requires signatures cannot accept anything without it.
-  defp validate_signature_config(changeset) do
-    type = get_field(changeset, :type)
-    config = get_field(changeset, :config) || %{}
-    app_secret = config["app_secret"]
-
-    if type == "whatsapp_meta" and get_field(changeset, :require_signature) == true and
-         (not is_binary(app_secret) or app_secret == "") do
-      add_error(
-        changeset,
-        :config,
-        "whatsapp_meta config missing: app_secret (required when require_signature is true)"
-      )
-    else
-      changeset
     end
   end
 
