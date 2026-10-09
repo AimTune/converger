@@ -96,6 +96,9 @@ erDiagram
         jsonb attachments
         jsonb metadata
         text idempotency_key
+        uuid reply_to_id
+        timestamp edited_at
+        timestamp deleted_at
     }
     deliveries {
         uuid id PK
@@ -234,12 +237,14 @@ Partitioned by month on `inserted_at` (see [Partitioning and retention](#partiti
 | --- | --- | --- |
 | `tenant_id`, `conversation_id` | uuid, not null | No foreign keys; removed by `PurgeWorker` when the tenant or conversation is deleted. |
 | `seq` | bigint, not null | Per-conversation sequence number, strictly increasing and gap-free, assigned by the server ([ADR-0006](../adr/0006-per-conversation-seq-and-opaque-watermarks.md)). |
-| `type` | text | `message`, `event`, `typing`, `conversationUpdate`, `endOfConversation` (validated in the changeset). |
+| `type` | text | `message`, `event`, `typing`, `messageReaction`, `messageUpdate`, `messageDelete`, `conversationUpdate`, `endOfConversation`, `deliveryReceipt` (internal) (validated in the changeset, [ADR-0036](../adr/0036-rich-activity-model.md)). |
 | `sender` | text, not null | Set by the server from the authenticated principal or the provider payload. |
 | `text` | text | Max 65,536 bytes by default. |
-| `attachments` | jsonb, default `[]` | Max 10 entries, 4,096 bytes each (as JSON) by default. |
+| `attachments` | jsonb, default `[]` | Max 10 entries, 4,096 bytes each (as JSON) by default. Validated on write by `ActivityAttachment` (`contentType` required); older rows are returned as stored. |
 | `metadata` | jsonb, default `{}` | Max 16,384 bytes (as JSON) by default. |
 | `idempotency_key` | text, nullable | From `x-idempotency-key` or the provider message id. |
+| `reply_to_id` | uuid, nullable | No foreign key (enforced in `Activities.create_activity/2`: same conversation). A threaded reply, or the target of a reaction, edit or delete; may dangle after retention ([ADR-0036](../adr/0036-rich-activity-model.md)). |
+| `edited_at`, `deleted_at` | utc_datetime_usec, nullable | Stamped on the original when a `messageUpdate` / `messageDelete` for it is accepted. |
 
 Indexes and constraints:
 
@@ -250,6 +255,7 @@ Indexes and constraints:
 | `(idempotency_key) WHERE idempotency_key IS NOT NULL` | Lookup of a re-delivered provider message across a channel's conversations before a conversation is resolved ([ADR-0015](../adr/0015-per-message-idempotent-inbound-batches.md)). |
 | `(conversation_id, inserted_at)` | Historical ordering (before `seq`). |
 | `(tenant_id, id)` | Tenant scoping, per-tenant purge and archive export (also lists a partition's tenants with a loose index scan). |
+| `(reply_to_id) WHERE reply_to_id IS NOT NULL` | Finding the replies, reactions, edits and deletes of a message. A partitioned index: built per partition concurrently and attached (migration `20261010400000`); new partitions get it on attach. |
 
 ### deliveries
 

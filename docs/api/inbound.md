@@ -147,7 +147,8 @@ A `webhook` channel carries one message per request
 | `text` | string | | Aliases: `message`, `body` (first present wins) |
 | `sender` | string | `"external"` | Alias: `from`. Stored as the activity's `sender`. |
 | `type` | string | `message` | Activity type, validated like any activity |
-| `attachments` | array | `[]` | Attachment objects (size limits as for activities) |
+| `attachments` | array | `[]` | Attachment objects, validated as for activities: each needs a `contentType` ([attachment schema](../concepts/activities.md#attachments)) |
+| `reply_to_id` | UUID | | An activity of the same conversation this message replies to, or that a `messageReaction` / `messageUpdate` / `messageDelete` targets ([references](../concepts/activities.md#references-replies-reactions-edits-and-deletes)) |
 | `metadata` | object | `{}` | |
 | `idempotency_key` | string | | Makes re-delivery safe; see below |
 | `conversation_id` | UUID | | Post into this conversation (it must belong to the channel's tenant) |

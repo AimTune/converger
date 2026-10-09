@@ -36,6 +36,7 @@ defmodule Converger.Pipeline do
   `Converger.Pipeline.Broadway`).
   """
 
+  alias Converger.Activities.{Activity, Downgrade}
   alias Converger.Channels.DeliveryError
   alias Converger.Pipeline.RetryPolicy
 
@@ -190,9 +191,16 @@ defmodule Converger.Pipeline do
   # only generic webhooks and WebSocket clients receive them. Messaging
   # adapters (WhatsApp, echo) would otherwise send an empty message or reply
   # into a closed conversation.
+  #
+  # Types the channel's adapter cannot deliver natively are downgraded or
+  # skipped (Converger.Activities.Downgrade); skipped ones get no delivery.
+  # Routing-only pseudo activities (the transient signals of
+  # Converger.Channels.Signals, type "signal") are not activity types and
+  # are not planned.
   defp accepts_activity?(channel, activity) do
-    not Converger.Conversations.lifecycle_event?(activity) or
-      channel.type in ["webhook", "websocket"]
+    (not Converger.Conversations.lifecycle_event?(activity) or
+       channel.type in ["webhook", "websocket"]) and
+      (activity.type not in Activity.types() or Downgrade.plan(activity, channel) != :skip)
   end
 
   @doc """
@@ -223,6 +231,25 @@ defmodule Converger.Pipeline do
   defp error_message(reason), do: inspect(reason)
 
   defp attempt_delivery(delivery, activity, channel) do
+    alias Converger.Deliveries
+
+    # Re-planned at delivery time: the channel config may have changed since
+    # the delivery was enqueued.
+    case Downgrade.plan(activity, channel) do
+      :native ->
+        run_delivery(delivery, activity, channel)
+
+      {:downgrade, downgraded} ->
+        run_delivery(delivery, downgraded, channel)
+
+      :skip ->
+        reason = "unsupported activity type #{activity.type}"
+        Deliveries.mark_dead(delivery, "skipped: #{reason}")
+        {:error, {:halted, reason}}
+    end
+  end
+
+  defp run_delivery(delivery, activity, channel) do
     alias Converger.{Deliveries, Channels.Adapter}
     alias Converger.Pipeline.Middleware
 

@@ -60,6 +60,7 @@ defmodule Converger.Channels.Channel do
     |> validate_inclusion(:type, @channel_types)
     |> validate_inclusion(:mode, @channel_modes)
     |> validate_channel_config()
+    |> validate_unsupported_activities()
     |> validate_signature_config()
     |> validate_mode_compatibility()
     |> validate_transformations()
@@ -78,6 +79,25 @@ defmodule Converger.Channels.Channel do
     case Converger.Channels.Adapter.validate_config(type, config) do
       :ok -> changeset
       {:error, message} -> add_error(changeset, :config, message)
+    end
+  end
+
+  # Optional config key: what to do with activity types the adapter cannot
+  # deliver natively (Converger.Activities.Downgrade).
+  defp validate_unsupported_activities(changeset) do
+    config = get_field(changeset, :config) || %{}
+    policies = Converger.Activities.Downgrade.policies()
+
+    policy = Map.get(config, "unsupported_activities")
+
+    if is_nil(policy) or policy in policies do
+      changeset
+    else
+      add_error(
+        changeset,
+        :config,
+        "unsupported_activities must be one of: #{Enum.join(policies, ", ")}"
+      )
     end
   end
 

@@ -13,6 +13,11 @@ defmodule Converger.Channels.Adapters.Echo do
   @impl true
   def supported_modes, do: ~w(outbound)
 
+  # Echoes chat messages only; reactions, edits and deletes reach it
+  # downgraded to text (or skipped), see Converger.Activities.Downgrade.
+  @impl true
+  def capabilities, do: [:outbound, activity_types: ~w(message)]
+
   @impl true
   def validate_config(_config), do: :ok
 

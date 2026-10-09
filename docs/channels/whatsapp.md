@@ -25,6 +25,7 @@ The `config` map is encrypted at rest (see [ADR-0012](../adr/0012-secrets-at-res
 | `app_secret` | when `require_signature` is `true` (the default) | The Meta app secret; used to verify `X-Hub-Signature-256`. Without it the channel changeset fails with `whatsapp_meta config missing: app_secret (required when require_signature is true)`. |
 | `graph_api_version` | no | Overrides the Graph API version for this channel, for example `v26.0`. |
 | `conversation_idle_timeout_seconds` | no | Positive integer. After this much inactivity an inbound message starts a new conversation instead of joining the participant's active one. |
+| `unsupported_activities` | no | `downgrade` (default) or `skip`: what to do with activity types WhatsApp cannot render natively (reactions, edits, deletes, events). See [What is sent](#what-is-sent). |
 
 A missing required key fails validation with `whatsapp_meta config missing: phone_number_id, access_token` (listing every missing key). Values must be non-empty strings.
 
@@ -47,6 +48,7 @@ Example:
 | `api_key` | yes | Infobip API key, sent as `Authorization: App <api_key>`. |
 | `sender` | yes | The WhatsApp sender number registered with Infobip, used as `from`. |
 | `conversation_idle_timeout_seconds` | no | Same as for Meta. |
+| `unsupported_activities` | no | Same as for Meta. |
 
 A missing key fails with `whatsapp_infobip config missing: ...`.
 
@@ -119,7 +121,7 @@ Any `2xx` is a success. `messages[0].messageId` from the response is stored as t
 
 ### What is sent
 
-Only `activity.text` is sent, as a text message. Attachments, templates (HSM), interactive messages, locations and contacts are not sent yet: Planned ([#37](https://github.com/AimTune/converger/issues/37)). An activity with attachments and no text is still sent as a text message, with a `null` body, and its attachments are lost.
+Only `message` activities are sent natively, as a text message with `activity.text` (`capabilities/0` is `[:inbound, :outbound, activity_types: ["message"]]` for both adapters). Other types follow the channel's `unsupported_activities`: with `downgrade` (default) a `messageReaction` is sent as `"<sender> reacted with <emoji>"`, a `messageUpdate` as `"(edited) <text>"`, a `messageDelete` as `"<sender> deleted a message"` and an `event` as its text; `typing`, removed reactions and events without text are not sent. With `skip` none of them are. Native outbound reactions and edits are Planned ([#37](https://github.com/AimTune/converger/issues/37)). Attachments, templates (HSM), interactive messages, locations and contacts are not sent yet: Planned ([#37](https://github.com/AimTune/converger/issues/37)). An activity with attachments and no text is still sent as a text message, with a `null` body, and its attachments are lost.
 
 ### Errors and retries
 
@@ -245,17 +247,17 @@ It is parsed into:
 }
 ```
 
-Every `entry[]`, every `changes[]` and every `value.messages[]` is parsed; items that are not objects are skipped. `profile_name` comes from the `contacts[]` entry whose `wa_id` equals `from` (or the only contact, if there is exactly one). Keys with `nil` values are dropped from `metadata`. Additional metadata keys: `reply_to` (`context.id` of a reply) and `forwarded` (`context.forwarded`).
+Every `entry[]`, every `changes[]` and every `value.messages[]` is parsed; items that are not objects are skipped. `profile_name` comes from the `contacts[]` entry whose `wa_id` equals `from` (or the only contact, if there is exactly one). Keys with `nil` values are dropped from `metadata`. Additional metadata keys: `reply_to` (`context.id` of a reply) and `forwarded` (`context.forwarded`). A reply's `context.id` is also resolved to the activity's `reply_to_id` when it names a message Converger knows in the same conversation (an inbound message by its `wamid`, or an outbound one by its delivery's `provider_message_id`).
 
 | Meta `type` | Activity `type` | `text` | Attachments / extra metadata |
 | --- | --- | --- | --- |
 | `text` | `message` | `text.body` | none |
-| `image`, `audio`, `video`, `document`, `sticker` | `message` | `caption` or `""` | one attachment stub: `contentType` (`mime_type`, default `application/octet-stream`), `name` (`filename`), `provider: "whatsapp_meta"`, `providerMediaId`, `sha256`, `voice`, `animated` |
+| `image`, `audio`, `video`, `document`, `sticker` | `message` | `caption` or `""` | one attachment stub: `contentType` (`mime_type`, default `application/octet-stream`), `name` (`filename`), and `channelData` `{provider: "whatsapp_meta", providerMediaId, sha256, voice, animated}` |
 | `location` | `message` | `name, address` | attachment `application/vnd.converger.location` with `content` `{latitude, longitude, name, address, url}` |
 | `contacts` | `message` | contact names, comma separated | attachment `application/vnd.converger.contacts` with `content` `[{name, phones}]` |
 | `interactive` (`button_reply`, `list_reply`) | `message` | reply `title` | `metadata.interactive_reply` `{type, id, title, description}` |
 | `button` (template quick reply) | `message` | `button.text` | `metadata.interactive_reply` `{type: "button", payload}` |
-| `reaction` | `event` | the emoji | `metadata.reaction` `{message_id, emoji}` |
+| `reaction` | `messageReaction` | the emoji (`null` when the user removed the reaction) | `reply_to_id` is the reacted-to activity (resolved from `reaction.message_id`); `metadata.reaction` `{message_id, emoji}`. When the reacted-to message is unknown to Converger the activity is an `event` instead, with the same metadata |
 | `system` | `event` | `system.body` | none |
 | anything else (`unsupported`, `order`, future types) | `message` | `text.body` or `""` | none; read `metadata.whatsapp_type` |
 
@@ -279,9 +281,11 @@ becomes an activity with `text: "look"` and:
 [
   {
     "contentType": "image/jpeg",
-    "provider": "whatsapp_meta",
-    "providerMediaId": "media-42",
-    "sha256": "abc"
+    "channelData": {
+      "provider": "whatsapp_meta",
+      "providerMediaId": "media-42",
+      "sha256": "abc"
+    }
   }
 ]
 ```
@@ -315,7 +319,7 @@ Parsed into `sender: "5511999999999"`, `text: "one"`, `idempotency_key: "ib-1"`,
 | Infobip `message.type` | Activity `type` | `text` | Attachments / extra metadata |
 | --- | --- | --- | --- |
 | `TEXT` (default) | `message` | `message.text` | none |
-| `IMAGE`, `VIDEO`, `AUDIO`, `VOICE`, `DOCUMENT`, `STICKER` | `message` | `caption` or `""` | attachment stub: `contentType` (`mimeType`, or `image/*`, `video/*`, `audio/*`, `application/octet-stream`, `image/webp`), `name`, `provider: "whatsapp_infobip"`, `providerMediaId`, `providerMediaUrl` (`message.url`) |
+| `IMAGE`, `VIDEO`, `AUDIO`, `VOICE`, `DOCUMENT`, `STICKER` | `message` | `caption` or `""` | attachment stub: `contentType` (`mimeType`, or `image/*`, `video/*`, `audio/*`, `application/octet-stream`, `image/webp`), `name`, and `channelData` `{provider: "whatsapp_infobip", providerMediaId, providerMediaUrl}` (`providerMediaUrl` is `message.url`) |
 | `LOCATION` | `message` | `name, address` | attachment `application/vnd.converger.location` |
 | `INTERACTIVE_BUTTON_REPLY`, `INTERACTIVE_LIST_REPLY`, `BUTTON` | `message` | `title` or `text` | `metadata.interactive_reply` `{type, id, title, description, payload}` |
 | anything else (`CONTACT`, `ORDER`, `UNSUPPORTED`, future types) | `message` | `message.text` or `""` | none |

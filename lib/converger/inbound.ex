@@ -88,6 +88,8 @@ defmodule Converger.Inbound do
   end
 
   defp create_activity(channel, conversation, message) do
+    message = resolve_reference(channel, conversation, message)
+
     case Activities.create_client_activity(message, %{
            tenant_id: channel.tenant_id,
            conversation_id: conversation.id,
@@ -112,6 +114,39 @@ defmodule Converger.Inbound do
 
       {:error, _} = error ->
         error
+    end
+  end
+
+  # Adapters name the message a reply or reaction refers to by its provider
+  # id ("reply_to_provider_id", e.g. a WhatsApp wamid). It becomes
+  # `reply_to_id` when it resolves to a message of this conversation (an
+  # inbound one by idempotency key, or an outbound one by its delivery's
+  # provider message id). A reaction / edit / delete whose target is unknown
+  # (sent before Converger, or in another conversation) is kept as an
+  # `event` with its metadata, never dropped. Without a provider id nothing
+  # is rewritten (a client sending messageDelete without reply_to_id gets 422); a plain reply simply has no
+  # `reply_to_id` (the provider id stays in its metadata).
+  defp resolve_reference(channel, conversation, message) do
+    {provider_id, message} = Map.pop(message, "reply_to_provider_id")
+
+    target =
+      provider_id &&
+        Activities.get_activity_by_provider_message_id(channel.id, provider_id)
+
+    reference_type? = message["type"] in Activities.Activity.reference_types()
+    explicit_reference? = not is_nil(message["reply_to_id"])
+
+    case target do
+      %Activities.Activity{conversation_id: conversation_id, type: target_type, id: id}
+      when conversation_id == conversation.id and
+             (target_type == "message" or not reference_type?) ->
+        Map.put(message, "reply_to_id", id)
+
+      _ when reference_type? and is_binary(provider_id) and not explicit_reference? ->
+        Map.put(message, "type", "event")
+
+      _ ->
+        message
     end
   end
 

@@ -75,7 +75,8 @@ defmodule ConvergerWeb.Protocol.Send do
            "type" => "message",
            "text" => text,
            "attachments" => attachments,
-           "metadata" => metadata
+           "metadata" => metadata,
+           "reply_to_id" => reply_to_id(frame)
          }}
     end
   end
@@ -83,4 +84,9 @@ defmodule ConvergerWeb.Protocol.Send do
   def message_params(_frame, client_id) do
     {:error, "bad_request", "a text frame needs data.text", [client_id: client_id]}
   end
+
+  # `replyTo {id}` (section 5.3) names the activity this turn answers; it is
+  # stored as the activity's `reply_to_id` (#28).
+  defp reply_to_id(%{"replyTo" => %{"id" => id}}) when is_binary(id), do: id
+  defp reply_to_id(_frame), do: nil
 end

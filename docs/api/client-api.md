@@ -241,7 +241,10 @@ REST and socket payloads are identical ([ADR-0004](../adr/0004-single-canonical-
   "timestamp": "2026-10-09T12:05:41.004512Z",
   "attachments": [],
   "conversationId": "3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10",
-  "channelData": {}
+  "channelData": {},
+  "replyToId": null,
+  "editedAt": null,
+  "deletedAt": null
 }
 ```
 
@@ -251,6 +254,12 @@ REST and socket payloads are identical ([ADR-0004](../adr/0004-single-canonical-
 | `timestamp` | `inserted_at` (server time) |
 | `conversationId` | `conversation_id` |
 | `channelData` | `metadata` |
+| `replyToId` | `reply_to_id`: the activity this one replies to, reacts to, edits or deletes |
+| `editedAt`, `deletedAt` | `edited_at`, `deleted_at`: set on a message once a `messageUpdate` / `messageDelete` for it was accepted. The message keeps its original content; apply the update yourself. |
+
+The shape is published as a JSON Schema,
+[`priv/protocol/v1/activity.schema.json`](https://github.com/AimTune/converger/blob/main/priv/protocol/v1/activity.schema.json).
+See [activities](../concepts/activities.md#references-replies-reactions-edits-and-deletes) for the rules.
 
 `seq` and `idempotency_key` are not included; the position is carried by the watermark instead.
 
@@ -266,14 +275,15 @@ REST and socket payloads are identical ([ADR-0004](../adr/0004-single-canonical-
 
 | Body field | Type | Default | Notes |
 | --- | --- | --- | --- |
-| `type` | string | `message` | `message`, `event`, `typing`, `conversationUpdate`, `endOfConversation` |
-| `text` | string | `null` | Up to 65,536 bytes |
-| `attachments` | array | `[]` | At most 10 objects, each at most 4,096 bytes as JSON. Use the upload endpoint for files. |
+| `type` | string | `message` | `message`, `event`, `typing`, `messageReaction`, `messageUpdate`, `messageDelete`, `conversationUpdate`, `endOfConversation`. Anything else (including the internal `deliveryReceipt`) is a `422`. |
+| `text` | string | `null` | Up to 65,536 bytes. For `messageReaction` the emoji (at most 64 bytes). |
+| `attachments` | array | `[]` | At most 10 objects, each at most 4,096 bytes as JSON, each with a required `contentType` ([attachment schema](../concepts/activities.md#attachments)). Use the upload endpoint for files. |
+| `replyToId` | string | `null` | An activity of this conversation. Required for `messageReaction`, `messageUpdate` and `messageDelete`. |
 | `channelData` | object | `{}` | Stored as `metadata` (16,384 bytes max). `metadata` is accepted as an alias when `channelData` is absent. |
 | `from.id` | string | `"user"` | Stored as the activity's `sender` |
 
-These are the only fields read from the body. The client changeset casts only `type`, `text`, `attachments` and
-`metadata`; `tenant_id`, `conversation_id` and the idempotency key come from the token and headers
+These are the only fields read from the body. The client changeset casts only `type`, `text`, `attachments`,
+`metadata` and `reply_to_id`; `tenant_id`, `conversation_id` and the idempotency key come from the token and headers
 ([ADR-0005](../adr/0005-separate-client-and-system-changesets.md)). `from.id` is a display identity chosen by the
 client and is not verified against the token's `user_id`.
 
@@ -302,7 +312,7 @@ The same activity can also be sent over the socket with the `postActivity` event
 | `403` | `{"errors": {"detail": "Forbidden"}}` | Token bound to another conversation |
 | `404` | `{"errors": {"detail": "Not Found"}}` | Unknown or foreign conversation |
 | `409` | `{"error": "conversation_closed", "detail": "Conversation is closed"}` | Conversation is closed |
-| `422` | `{"errors": {"type": ["is invalid"]}}` | Validation failed (type, sizes) |
+| `422` | `{"errors": {"type": ["is invalid"]}}` | Validation failed: unknown type, sizes, an attachment without `contentType` (`{"errors": {"attachments": ["attachment 0: contentType can't be blank"]}}`), or a bad reference (`{"errors": {"reply_to_id": ["does not exist in this conversation"]}}`). Error keys use the stored field names. |
 | `429` | rate limit body | Tenant's `activity_create` limit exceeded |
 | `503` | `{"error": "Activity could not be accepted, please retry"}` | Delivery jobs could not be enqueued; nothing stored. Retry with the same idempotency key. |
 
@@ -425,7 +435,7 @@ Send `multipart/form-data` with these parts:
 | Part | Required | Notes |
 | --- | --- | --- |
 | `file` | yes | The file. Its declared content type is ignored. |
-| `activity` | no | JSON string (or form map) with optional `type`, `text`, `from.id`, and `channelData` (or `metadata`) for the created activity. Invalid JSON is ignored. |
+| `activity` | no | JSON string (or form map) with optional `type`, `text`, `from.id`, `replyToId` and `channelData` (or `metadata`) for the created activity. Invalid JSON is ignored. |
 
 Validation, in [`Converger.Uploads`](https://github.com/AimTune/converger/blob/main/lib/converger/uploads.ex):
 

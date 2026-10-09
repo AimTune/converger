@@ -256,6 +256,34 @@ defmodule ConvergerWeb.ConvergerChannelTest do
       assert [%{sender: "user-42"}] = stored(conversation)
     end
 
+    test "replyToId references an activity; bad references and attachments are rejected", %{
+      socket: socket,
+      conversation: conversation
+    } do
+      ref = push(socket, "postActivity", %{"text" => "original"})
+      assert_reply ref, :ok, %{id: original_id}, @reply_timeout
+
+      ref =
+        push(socket, "postActivity", %{
+          "type" => "messageReaction",
+          "text" => "👍",
+          "replyToId" => original_id
+        })
+
+      assert_reply ref, :ok, %{id: reaction_id}, @reply_timeout
+      assert_push "activitySet", %{activities: [_]}
+      assert_push "activitySet", %{activities: [frame]}
+      assert wire(frame)["replyToId"] == original_id
+
+      ref = push(socket, "postActivity", %{"type" => "messageDelete"})
+      assert_reply ref, :error, %{errors: %{reply_to_id: [_]}}, @reply_timeout
+
+      ref = push(socket, "postActivity", %{"text" => "x", "attachments" => [%{"name" => "a"}]})
+      assert_reply ref, :error, %{errors: %{attachments: [_]}}, @reply_timeout
+
+      assert Enum.any?(stored(conversation), &(&1.id == reaction_id))
+    end
+
     test "invalid payloads reply with field-level errors", %{socket: socket} do
       ref = push(socket, "postActivity", %{"text" => "x", "type" => "bogus"})
       assert_reply ref, :error, %{reason: "invalid_activity", errors: %{type: [_]}}

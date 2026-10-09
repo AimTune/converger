@@ -288,7 +288,8 @@ defmodule ConvergerWeb.ConvergerChannel do
       "type" => payload["type"] || "message",
       "text" => payload["text"],
       "attachments" => payload["attachments"] || [],
-      "metadata" => payload["channelData"] || %{}
+      "metadata" => payload["channelData"] || %{},
+      "reply_to_id" => payload["replyToId"]
     }
   end
 

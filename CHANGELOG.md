@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+### Rich activity model (#28)
+
+- Activity types are a closed, documented vocabulary: `message`, `event`, `typing`,
+  `messageReaction`, `messageUpdate`, `messageDelete`, `conversationUpdate`, `endOfConversation`
+  and the internal `deliveryReceipt` (server only). Unknown types are rejected with `422`.
+- Attachments are validated on write by `Converger.Activities.ActivityAttachment`
+  (`contentType` required; `contentUrl`, `name`, `size`, `thumbnailUrl`, `content`,
+  `channelData`). Card attachments (`application/vnd.converger.card.*`) need an object `content`.
+  Stored attachments are returned unchanged.
+- New `activities.reply_to_id`, `edited_at`, `deleted_at` (migration
+  `20261010400000`, online-safe; no foreign key on the partitioned table). Replies, reactions, edits and deletes reference the original;
+  edits and deletes are new activities and stamp `edited_at` / `deleted_at` on it. The client API
+  adds `replyToId`, `editedAt`, `deletedAt`; the canonical map adds the snake_case fields.
+- WhatsApp reactions arrive as `messageReaction` referencing the reacted-to activity (inbound or
+  outbound); unresolvable ones stay `event`. WhatsApp replies get `reply_to_id`.
+- **Changed:** WhatsApp (Meta and Infobip) media attachment stubs move provider fields
+  (`provider`, `providerMediaId`, `sha256`, `voice`, `animated`, `providerMediaUrl`) under
+  `channelData`.
+- Adapters declare `capabilities/0` (an `activity_types: [...]` entry in its capabilities list); types an adapter cannot deliver
+  are downgraded to text or skipped, per channel config `unsupported_activities`
+  (`downgrade` | `skip`). **Changed:** `typing` and text-less `event` activities are no longer sent
+  to WhatsApp or echo channels as empty messages.
+- JSON Schema `priv/protocol/v1/activity.schema.json`; ADR-0036.
+
 ### Protocol v1 sends with acks on the Phoenix binding (#24)
 
 - `converger:conversation:*` accepts Converger Protocol v1 `text` frames with the event

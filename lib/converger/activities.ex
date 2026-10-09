@@ -215,11 +215,23 @@ defmodule Converger.Activities do
   lock, so it is consistent with a concurrent close: an activity is either
   committed before the close or rejected.
 
+  ## References (`reply_to_id`)
+
+  An activity with a `reply_to_id` refers to another activity, which must
+  belong to the same conversation. For `messageReaction`, `messageUpdate` and
+  `messageDelete` the reference is required and must be a `message`;
+  `messageUpdate` and `messageDelete` must come from the original's sender
+  and cannot target a deleted message. Accepting one stamps `edited_at` or
+  `deleted_at` on the original in the same transaction; the original's
+  content is not rewritten (clients apply the change).
+
   ## Options
 
     * `:allow_closed` - accept the activity even when the conversation is
       closed. Reserved for server-generated lifecycle events (the
       `conversationUpdate` emitted when a conversation is closed).
+    * `:internal` - also accept server-only types such as `deliveryReceipt`
+      (`Activity.internal_types/0`). Never set for client input.
   """
   def create_activity(attrs \\ %{}, opts \\ []) do
     # 1. Optimistic fetch to avoid transaction poisoning
@@ -282,16 +294,26 @@ defmodule Converger.Activities do
   # either commits first and rejects this insert, or waits for it) and bumps
   # `updated_at`, which the expiration worker treats as "last activity".
   defp insert_with_seq(attrs, opts) do
-    changeset = Activity.changeset(%Activity{}, attrs)
+    changeset = Activity.changeset(%Activity{}, attrs, internal: Keyword.get(opts, :internal))
 
     with {:ok, _} <- Ecto.Changeset.apply_action(changeset, :insert) do
       conversation_id = Ecto.Changeset.get_field(changeset, :conversation_id)
 
       case next_seq(conversation_id, Keyword.get(opts, :allow_closed, false)) do
+        # The reference is checked after next_seq, under the conversation row
+        # lock, so two concurrent deletes of one message are serialised.
         {:ok, seq} ->
           case existing_under_lock(changeset) do
-            nil -> changeset |> Ecto.Changeset.put_change(:seq, seq) |> Repo.insert()
-            %Activity{} = existing -> {:error, {:duplicate, existing}}
+            nil ->
+              with {:ok, target} <- check_reference(changeset),
+                   {:ok, activity} <-
+                     changeset |> Ecto.Changeset.put_change(:seq, seq) |> Repo.insert() do
+                stamp_target(activity, target)
+                {:ok, activity}
+              end
+
+            %Activity{} = existing ->
+              {:error, {:duplicate, existing}}
           end
 
         {:error, :conversation_closed} ->
@@ -326,6 +348,96 @@ defmodule Converger.Activities do
         )
     end
   end
+
+  # Returns {:ok, nil | target_activity} or {:error, changeset}.
+  defp check_reference(changeset) do
+    case Ecto.Changeset.get_field(changeset, :reply_to_id) do
+      nil ->
+        {:ok, nil}
+
+      reply_to_id ->
+        conversation_id = Ecto.Changeset.get_field(changeset, :conversation_id)
+        type = Ecto.Changeset.get_field(changeset, :type)
+        sender = Ecto.Changeset.get_field(changeset, :sender)
+
+        target =
+          Repo.one(
+            from(a in Activity,
+              where: a.id == ^reply_to_id and a.conversation_id == ^conversation_id
+            )
+          )
+
+        case reference_error(type, sender, target) do
+          nil ->
+            {:ok, target}
+
+          message ->
+            changeset
+            |> Ecto.Changeset.add_error(:reply_to_id, message)
+            |> Ecto.Changeset.apply_action(:insert)
+        end
+    end
+  end
+
+  defp reference_error(_type, _sender, nil), do: "does not exist in this conversation"
+
+  defp reference_error(type, sender, %Activity{} = target) do
+    cond do
+      type not in Activity.reference_types() -> nil
+      target.type != "message" -> "must reference a message"
+      type == "messageReaction" -> nil
+      target.sender != sender -> "can only #{verb(type)} the sender's own messages"
+      not is_nil(target.deleted_at) -> "references a deleted message"
+      true -> nil
+    end
+  end
+
+  defp verb("messageUpdate"), do: "edit"
+  defp verb("messageDelete"), do: "delete"
+
+  defp stamp_target(%Activity{type: type} = activity, %Activity{} = target)
+       when type in ["messageUpdate", "messageDelete"] do
+    field = if type == "messageUpdate", do: :edited_at, else: :deleted_at
+
+    # `activities` is partitioned by inserted_at (ADR-0034): naming the
+    # original's inserted_at prunes the update to its partition.
+    Repo.update_all(
+      from(a in Activity, where: a.id == ^target.id and a.inserted_at == ^target.inserted_at),
+      set: [{field, activity.inserted_at}, {:updated_at, activity.inserted_at}]
+    )
+
+    :ok
+  end
+
+  defp stamp_target(_activity, _target), do: :ok
+
+  @doc """
+  The activity a provider message id refers to on `channel_id`, or nil: an
+  inbound message whose idempotency key is that id, else an outbound activity
+  whose delivery to the channel got that provider id. Adapters use it to turn
+  a provider reply / reaction reference (a WhatsApp `context.id` or
+  `reaction.message_id`) into a `reply_to_id`.
+  """
+  def get_activity_by_provider_message_id(_channel_id, nil), do: nil
+
+  def get_activity_by_provider_message_id(channel_id, provider_message_id)
+      when is_binary(provider_message_id) do
+    case get_activity_by_channel_idempotency_key(channel_id, provider_message_id) do
+      %Activity{} = activity ->
+        activity
+
+      nil ->
+        case Converger.Deliveries.get_delivery_by_provider_message_id(
+               channel_id,
+               provider_message_id
+             ) do
+          %{activity_id: activity_id} -> Repo.get(Activity, activity_id)
+          nil -> nil
+        end
+    end
+  end
+
+  def get_activity_by_provider_message_id(_channel_id, _id), do: nil
 
   defp next_seq(conversation_id, allow_closed?) do
     query =

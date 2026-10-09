@@ -115,6 +115,9 @@ receive and that the legacy WebSocket channel pushes.
   "metadata": {},
   "idempotency_key": "reply-7781",
   "seq": 3,
+  "reply_to_id": null,
+  "edited_at": null,
+  "deleted_at": null,
   "conversation_id": "3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10",
   "tenant_id": "c2a4e6f8-1b3d-4f5a-9c7e-2d4f6a8b0c1e",
   "inserted_at": "2026-10-09T12:05:41.004512Z"
@@ -123,9 +126,11 @@ receive and that the legacy WebSocket channel pushes.
 
 | Field | Set by | Notes |
 | --- | --- | --- |
-| `type` | client | `message` (default), `event`, `typing`, `conversationUpdate`, `endOfConversation` |
+| `type` | client | `message` (default), `event`, `typing`, `messageReaction`, `messageUpdate`, `messageDelete`, `conversationUpdate`, `endOfConversation` ([types](../concepts/activities.md#types)) |
 | `text` | client | Up to 65,536 bytes |
-| `attachments` | client | Array of objects (at most 10, each at most 4,096 bytes as JSON). Converger does not interpret them beyond size checks; the client API upload produces `{"contentType", "contentUrl", "name", "size"}` entries. |
+| `attachments` | client | Array of attachment objects (at most 10, each at most 4,096 bytes as JSON). Each needs a `contentType`; `contentUrl`, `name`, `size`, `thumbnailUrl`, `content` and `channelData` are optional and other keys are dropped ([attachment schema](../concepts/activities.md#attachments)). |
+| `reply_to_id` | client | Optional: the activity of this conversation this one replies to, reacts to, edits or deletes ([references](../concepts/activities.md#references-replies-reactions-edits-and-deletes)) |
+| `edited_at`, `deleted_at` | server | Set on a message once a `messageUpdate` / `messageDelete` for it is accepted |
 | `metadata` | client | JSON object, at most 16,384 bytes |
 | `sender` | server | From the request's `sender` field on this API (default `"user"`); `"system"` for lifecycle events |
 | `idempotency_key` | server | From the `x-idempotency-key` header |
@@ -421,8 +426,9 @@ routed to the conversation's channel and to the targets of matching routing rule
 | --- | --- | --- |
 | `type` | string | Default `message` |
 | `text` | string | |
-| `attachments` | array of objects | |
+| `attachments` | array of objects | Each needs a `contentType` |
 | `metadata` | object | |
+| `reply_to_id` | string | An activity of this conversation; required for `messageReaction`, `messageUpdate`, `messageDelete` |
 | `sender` | string | Sender id stored on the activity, for example `"bot"` or an agent id. Default `"user"`. Server-to-server only: the tenant API trusts the caller to name the sender. |
 
 Any other field (`tenant_id`, `conversation_id`, `idempotency_key`, `seq`, `inserted_at`) is ignored
@@ -449,6 +455,9 @@ curl -s -X POST "$CONVERGER/api/v1/conversations/3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7
     "metadata": {},
     "idempotency_key": "reply-7781",
     "seq": 3,
+    "reply_to_id": null,
+    "edited_at": null,
+    "deleted_at": null,
     "conversation_id": "3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10",
     "tenant_id": "c2a4e6f8-1b3d-4f5a-9c7e-2d4f6a8b0c1e",
     "inserted_at": "2026-10-09T12:05:41.004512Z"
@@ -460,7 +469,7 @@ curl -s -X POST "$CONVERGER/api/v1/conversations/3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7
 | --- | --- | --- |
 | `404` | `{"errors": {"detail": "Not Found"}}` | Unknown or foreign conversation |
 | `409` | `{"error": "conversation_closed", "detail": "Conversation is closed"}` | Conversation is closed |
-| `422` | `{"errors": {"type": ["is invalid"]}}` | Validation failed: unknown `type`, `text` over 65,536 bytes, too many or too large attachments, `metadata` too large |
+| `422` | `{"errors": {"type": ["is invalid"]}}` | Validation failed: unknown or internal `type`, `text` over 65,536 bytes, too many or too large attachments, an attachment without `contentType`, `metadata` too large, an invalid `reply_to_id` (unknown, in another conversation, editing someone else's message) |
 | `429` | rate limit body | Tenant's `activity_create` limit exceeded |
 | `503` | `{"error": "Activity could not be accepted, please retry"}` | Deliveries could not be enqueued; nothing was stored. Retry with the same idempotency key. |
 
@@ -505,6 +514,9 @@ curl -s "$CONVERGER/api/v1/conversations/3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10/ac
       "metadata": {},
       "idempotency_key": "wamid.HBgLMTY1MDM4Nzk0MzkVAgASGBQzQTRB",
       "seq": 1,
+      "reply_to_id": null,
+      "edited_at": null,
+      "deleted_at": null,
       "conversation_id": "3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10",
       "tenant_id": "c2a4e6f8-1b3d-4f5a-9c7e-2d4f6a8b0c1e",
       "inserted_at": "2026-10-09T12:04:10.551200Z"
@@ -518,6 +530,9 @@ curl -s "$CONVERGER/api/v1/conversations/3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10/ac
       "metadata": {},
       "idempotency_key": "reply-7781",
       "seq": 2,
+      "reply_to_id": null,
+      "edited_at": null,
+      "deleted_at": null,
       "conversation_id": "3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10",
       "tenant_id": "c2a4e6f8-1b3d-4f5a-9c7e-2d4f6a8b0c1e",
       "inserted_at": "2026-10-09T12:05:41.004512Z"

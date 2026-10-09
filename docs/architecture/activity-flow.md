@@ -15,7 +15,7 @@ The short version:
 
 ## Entry points
 
-All entry points call `Activities.create_client_activity/2`, which keeps only `Activity.client_fields/0` (`type`, `text`, `attachments`, `metadata`) from the untrusted input and merges in server-controlled system attributes (`tenant_id`, `conversation_id`, `sender`, `idempotency_key`). Fields such as `inserted_at` or `seq` in a request body are ignored ([ADR-0005](../adr/0005-separate-client-and-system-changesets.md)).
+All entry points call `Activities.create_client_activity/2`, which keeps only `Activity.client_fields/0` (`type`, `text`, `attachments`, `metadata`, `reply_to_id`) from the untrusted input and merges in server-controlled system attributes (`tenant_id`, `conversation_id`, `sender`, `idempotency_key`). Fields such as `inserted_at` or `seq` in a request body are ignored ([ADR-0005](../adr/0005-separate-client-and-system-changesets.md)).
 
 | Entry point | Module | `sender` | `idempotency_key` |
 | --- | --- | --- | --- |
@@ -77,7 +77,7 @@ If both `conversation_id` and `idempotency_key` are present, the activity with t
 
 ### 2. Validation
 
-`Activity.changeset/2` validates the type (`message`, `event`, `typing`, `conversationUpdate`, `endOfConversation`) and the size limits (`config :converger, :activity_limits`; defaults: 65,536 bytes of text, 10 attachments, 4,096 bytes per attachment, 16,384 bytes of metadata, measured as JSON). `apply_action(:insert)` runs before any SQL, so an invalid activity never takes the conversation lock.
+`Activity.changeset/3` validates the type (`message`, `event`, `typing`, `messageReaction`, `messageUpdate`, `messageDelete`, `conversationUpdate`, `endOfConversation`; the internal `deliveryReceipt` only with `internal: true`), the attachments (`Converger.Activities.ActivityAttachment`: `contentType` required) and the size limits (`config :converger, :activity_limits`; defaults: 65,536 bytes of text, 10 attachments, 4,096 bytes per attachment, 16,384 bytes of metadata, measured as JSON). `apply_action(:insert)` runs before any SQL, so an invalid activity never takes the conversation lock.
 
 ### 3. Lock, lifecycle check and `seq` allocation in one statement
 
@@ -125,7 +125,7 @@ ConvergerWeb.Endpoint.broadcast!(
 )
 ```
 
-The payload is the single canonical map from `Converger.Activities.Serializer` ([ADR-0004](../adr/0004-single-canonical-activity-serializer.md)): `id`, `type`, `sender`, `text`, `attachments`, `metadata`, `idempotency_key`, `seq`, `conversation_id`, `tenant_id`, `inserted_at`. REST responses, WebSocket frames and webhook payloads are all derived from the same map, so they cannot drift.
+The payload is the single canonical map from `Converger.Activities.Serializer` ([ADR-0004](../adr/0004-single-canonical-activity-serializer.md)): `id`, `type`, `sender`, `text`, `attachments`, `metadata`, `idempotency_key`, `seq`, `reply_to_id`, `edited_at`, `deleted_at`, `conversation_id`, `tenant_id`, `inserted_at`. REST responses, WebSocket frames and webhook payloads are all derived from the same map, so they cannot drift.
 
 Broadcasting after commit means a subscriber never sees an activity that later rolls back. The broadcast is not durable: a client that is not connected (or a node that crashes right after commit) misses it and catches up from the database using `seq` watermarks. See [Real-time](realtime.md).
 
