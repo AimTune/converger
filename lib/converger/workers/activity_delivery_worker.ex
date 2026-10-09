@@ -3,31 +3,48 @@ defmodule Converger.Workers.ActivityDeliveryWorker do
   # (Converger.Pipeline.RetryPolicy.for_channel/1) decide when to stop: once
   # the delivery is dead-lettered the job is cancelled. `max_attempts` here is
   # only a safety cap above any sane per-channel `max_attempts`.
+  #
+  # Jobs run in the queue of the tenant's tier (Converger.Pipeline.Oban); the
+  # `queue` below is only the default for jobs inserted without one.
   use Oban.Worker,
     queue: :deliveries,
     max_attempts: 100,
     priority: 1,
-    # One live delivery job per activity/channel pair, forever. Cancelled or
-    # discarded jobs are excluded (default states) so dead deliveries can be
-    # re-enqueued explicitly.
-    unique: [keys: [:activity_id, :channel_id], period: :infinity]
+    # One live delivery job per activity/channel pair, forever, whatever its
+    # queue. Cancelled or discarded jobs are excluded (default states) so dead
+    # deliveries can be re-enqueued explicitly.
+    unique: [fields: [:worker, :args], keys: [:activity_id, :channel_id], period: :infinity]
 
   require Logger
 
   alias Converger.{Activities, Channels, Pipeline}
-  alias Converger.Channels.DeliveryError
+  alias Converger.Channels.{Circuit, DeliveryError}
   alias Converger.Pipeline.RetryPolicy
 
   @impl Oban.Worker
-  def perform(%Oban.Job{args: %{"activity_id" => activity_id, "channel_id" => channel_id}}) do
-    activity = Activities.get_activity!(activity_id)
+  def perform(%Oban.Job{args: %{"activity_id" => activity_id, "channel_id" => channel_id}} = job) do
     channel = Channels.get_channel!(channel_id)
 
+    # Circuit breaker, manual pause and rate limit are checked before the
+    # activity is even loaded: a parked job costs a couple of cheap queries.
+    case Circuit.admit(channel) do
+      :ok ->
+        deliver(Activities.get_activity!(activity_id), channel)
+
+      {:park, reason} ->
+        {:snooze, Circuit.park(job, channel, reason)}
+
+      {:snooze, seconds} ->
+        {:snooze, seconds}
+    end
+  end
+
+  defp deliver(activity, channel) do
     case Pipeline.deliver(activity, channel) do
       :ok ->
         Logger.info("Activity delivered",
-          activity_id: activity_id,
-          channel_id: channel_id,
+          activity_id: activity.id,
+          channel_id: channel.id,
           channel_type: channel.type
         )
 
@@ -35,8 +52,8 @@ defmodule Converger.Workers.ActivityDeliveryWorker do
 
       {:error, reason} = result ->
         Logger.warning("Activity delivery failed",
-          activity_id: activity_id,
-          channel_id: channel_id,
+          activity_id: activity.id,
+          channel_id: channel.id,
           error: inspect(reason)
         )
 

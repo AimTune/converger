@@ -2,8 +2,17 @@ defmodule Converger.Deliveries.Delivery do
   use Ecto.Schema
   import Ecto.Changeset
 
-  @statuses ~w(pending sent delivered read failed)
-  @status_rank %{"pending" => 0, "sent" => 1, "delivered" => 2, "read" => 3, "failed" => -1}
+  # `paused`: parked by an open circuit breaker or a manual pause (see
+  # Converger.Channels.Circuit). It ranks like `pending`.
+  @statuses ~w(pending paused sent delivered read failed)
+  @status_rank %{
+    "pending" => 0,
+    "paused" => 0,
+    "sent" => 1,
+    "delivered" => 2,
+    "read" => 3,
+    "failed" => -1
+  }
 
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id

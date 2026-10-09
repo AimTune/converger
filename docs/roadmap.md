@@ -104,7 +104,7 @@ Run Converger as a cluster that meets the PRD targets (10M messages per day, 1k+
 | --- | --- | --- |
 | [#29](https://github.com/AimTune/converger/issues/29) | Multi-node clustering: libcluster strategies, cross-node verification, health/readiness endpoints, k8s manifests | Open |
 | [#33](https://github.com/AimTune/converger/issues/33) | Delivery and pipeline telemetry, Grafana dashboards and alert rules (SLO instrumentation) | Open |
-| [#31](https://github.com/AimTune/converger/issues/31) | Per-channel circuit breaker, provider rate limiting and tenant-fair queueing | Open |
+| [#31](https://github.com/AimTune/converger/issues/31) | Per-channel circuit breaker, provider rate limiting and tenant-fair queueing | Closed |
 | [#32](https://github.com/AimTune/converger/issues/32) | Dead-letter queue with inspection and replay (API + admin UI) | Open |
 | [#30](https://github.com/AimTune/converger/issues/30) | Table partitioning and retention for `activities` and `deliveries`; archival to object storage | Open |
 | [#35](https://github.com/AimTune/converger/issues/35) | Graceful degradation under database pressure: pool sizing, timeouts, bulkheads, readiness flip | Open |

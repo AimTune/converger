@@ -23,6 +23,7 @@ Table `tenants`:
 | `status` | text | Defaults to `"active"`. Only active tenants authenticate. The admin panel toggles between `active` and `inactive`. |
 | `alert_webhook_url` | string | Optional `http`/`https` URL for channel health alerts. |
 | `limits` | map, default `{}` | Per-tenant rate-limit overrides (see below). |
+| `tier` | text, default `"default"` | Delivery queue tier: `high`, `default` or `bulk` (see [tenant tiers](../delivery.md#tenant-tiers-fair-queueing)). Set by an admin on the Tenants page. |
 | `allowed_upload_types` | text array | Optional MIME allowlist for uploads. `NULL` or empty means the global default ([storage](../storage.md)). |
 | `inserted_at`, `updated_at` | utc_datetime_usec | |
 
@@ -113,6 +114,8 @@ When `alert_webhook_url` is set, the channel health worker (`Converger.Workers.C
   "checked_at": "2026-10-09T10:20:00.000000Z"
 }
 ```
+
+The same URL also receives `channel.circuit_opened` and `channel.circuit_closed` events when a channel's delivery circuit breaker changes state (see [Delivery: circuit breaker](../delivery.md#circuit-breaker)).
 
 The request is fire-and-forget (a `Task`, 10 s receive timeout). It is not retried, and only the outcome is logged. Durable, signed platform event webhooks are Planned ([#49](https://github.com/AimTune/converger/issues/49)).
 

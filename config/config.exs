@@ -101,7 +101,8 @@ config :converger, Oban,
        {"*/5 * * * *", Converger.Workers.ChannelHealthWorker}
      ]}
   ],
-  queues: [default: 10, deliveries: 20]
+  # Delivery queues per tenant tier (tenants.tier), see Converger.Pipeline.Oban.
+  queues: [default: 10, deliveries_high: 10, deliveries: 20, deliveries_bulk: 5]
 
 # Rate limiting (Hammer 7, see Converger.RateLimit).
 #   backend: :local   - per-node ETS counters (single node)

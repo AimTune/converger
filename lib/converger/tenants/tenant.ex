@@ -7,6 +7,7 @@ defmodule Converger.Tenants.Tenant do
   @api_key_prefix "cvg_live_"
   # Number of random characters (after the prefix) kept for display.
   @display_chars 4
+  @tiers ~w(high default bulk)
 
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
@@ -21,6 +22,8 @@ defmodule Converger.Tenants.Tenant do
     field :previous_api_key_expires_at, :utc_datetime_usec
     field :status, :string, default: "active"
     field :alert_webhook_url, :string
+    # Delivery queue tier, see Converger.Pipeline.Oban.queue_for_tier/1.
+    field :tier, :string, default: "default"
     # Rate-limit overrides, see Converger.RateLimit and limits_changeset/2.
     field :limits, :map, default: %{}
     field :allowed_upload_types, {:array, :string}
@@ -31,11 +34,15 @@ defmodule Converger.Tenants.Tenant do
   @doc "Public prefix of every generated API key."
   def api_key_prefix, do: @api_key_prefix
 
+  @doc "Delivery queue tiers, see `Converger.Pipeline.Oban.queue_for_tier/1`."
+  def tiers, do: @tiers
+
   @doc false
   def changeset(tenant, attrs) do
     tenant
-    |> cast(attrs, [:name, :status, :alert_webhook_url, :allowed_upload_types])
+    |> cast(attrs, [:name, :status, :alert_webhook_url, :allowed_upload_types, :tier])
     |> validate_required([:name])
+    |> validate_inclusion(:tier, @tiers)
     |> ensure_api_key()
     |> validate_required([:api_key_hash, :status])
     |> validate_url(:alert_webhook_url)

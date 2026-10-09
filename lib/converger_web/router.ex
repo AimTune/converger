@@ -62,6 +62,11 @@ defmodule ConvergerWeb.Router do
     resources "/routing_rules", RoutingRuleController,
       only: [:index, :show, :create, :update, :delete]
 
+    # Channel delivery state: circuit breaker, manual pause/resume
+    get "/channels/:channel_id/delivery", ChannelDeliveryController, :show
+    post "/channels/:channel_id/pause", ChannelDeliveryController, :pause
+    post "/channels/:channel_id/resume", ChannelDeliveryController, :resume
+
     # Inbound webhook endpoints for external channel integrations
     get "/channels/:channel_id/inbound", InboundController, :verify
     post "/channels/:channel_id/inbound", InboundController, :create
