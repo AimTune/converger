@@ -1,0 +1,24 @@
+{{- if .Values.metrics.podMonitor.enabled }}
+# Scrapes every pod (not the Service): metrics are per node.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: {{ include "converger.fullname" . }}
+  labels:
+    {{- include "converger.labels" . | nindent 4 }}
+    {{- with .Values.metrics.podMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "converger.selectorLabels" . | nindent 6 }}
+  podMetricsEndpoints:
+    - port: http
+      path: /metrics
+      interval: {{ .Values.metrics.podMonitor.interval }}
+      scrapeTimeout: {{ .Values.metrics.podMonitor.scrapeTimeout }}
+      bearerTokenSecret:
+        name: {{ include "converger.secretName" . }}
+        key: METRICS_TOKEN
+{{- end }}

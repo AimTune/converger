@@ -14,21 +14,25 @@ defmodule Converger.Application do
     OpentelemetryEcto.setup([:converger, :repo])
     OpentelemetryOban.setup()
 
+    # Node discovery (libcluster). Nothing is started without a
+    # CLUSTER_STRATEGY; see Converger.Cluster.
     children =
       [
         ConvergerWeb.Telemetry,
         Converger.Vault,
-        Converger.Repo,
-        {DNSCluster, query: Application.get_env(:converger, :dns_cluster_query) || :ignore},
-        {Phoenix.PubSub, name: Converger.PubSub},
-        ConvergerWeb.SocketPresence,
-        ConvergerWeb.ConversationPresence,
-        # Native v1 WebSockets and SSE streams, drained by ConvergerWeb.Drain.
-        ConvergerWeb.ProtocolConnections,
-        {Task.Supervisor, name: Converger.TaskSupervisor},
-        Converger.RateLimit.Supervisor,
-        {Oban, oban_config()}
+        Converger.Repo
       ] ++
+        Converger.Cluster.child_specs() ++
+        [
+          {Phoenix.PubSub, name: Converger.PubSub},
+          ConvergerWeb.SocketPresence,
+          ConvergerWeb.ConversationPresence,
+          # Native v1 WebSockets and SSE streams, drained by ConvergerWeb.Drain.
+          ConvergerWeb.ProtocolConnections,
+          {Task.Supervisor, name: Converger.TaskSupervisor},
+          Converger.RateLimit.Supervisor,
+          {Oban, oban_config()}
+        ] ++
         Converger.Partitions.boot_children() ++
         Converger.Pipeline.child_specs() ++
         [

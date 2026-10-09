@@ -1,0 +1,91 @@
+name: Deploy manifests
+
+# Validates the kustomize manifests (deploy/k8s) and the Helm chart
+# (deploy/helm/converger) on every change, and publishes the chart to
+# oci://ghcr.io/<owner>/charts on v* tags, versioned like the application.
+on:
+  pull_request:
+    paths:
+      - "deploy/**"
+      - ".github/workflows/deploy.yml"
+  push:
+    branches: [main]
+    paths:
+      - "deploy/**"
+      - ".github/workflows/deploy.yml"
+    tags: ["v*"]
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  HELM_VERSION: v3.19.0
+  KUBECONFORM_VERSION: v0.7.0
+  KUBERNETES_VERSION: 1.31.0
+  CHART_DIR: deploy/helm/converger
+
+jobs:
+  validate:
+    name: Lint and validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: Install kubeconform
+        run: |
+          curl -sSL "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" \
+            | tar -xz -C /usr/local/bin kubeconform
+
+      - name: Validate deploy/k8s
+        run: |
+          kubectl kustomize deploy/k8s \
+            | kubeconform -strict -summary -kubernetes-version "$KUBERNETES_VERSION"
+
+      - name: Lint and validate the chart
+        run: |
+          set -euo pipefail
+          for values in "$CHART_DIR"/ci/*-values.yaml; do
+            echo "::group::$values"
+            helm lint --strict "$CHART_DIR" -f "$values"
+            helm template converger "$CHART_DIR" -n converger -f "$values" \
+              | kubeconform -strict -summary -kubernetes-version "$KUBERNETES_VERSION" \
+                  -schema-location default \
+                  -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
+            echo "::endgroup::"
+          done
+
+  publish:
+    name: Publish chart
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: validate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: Package
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          helm package "$CHART_DIR" --version "$version" --app-version "$version" -d dist
+
+      - name: Push to GHCR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          echo "$GH_TOKEN" | helm registry login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          helm push dist/converger-*.tgz "oci://ghcr.io/${owner}/charts"

@@ -128,8 +128,11 @@ Notes for developing on Windows:
 
 - Environment variables in PowerShell: `$env:DB_PASSWORD = "postgres"; mix test`.
 - To run several test suites at once (for example in two worktrees), give each a partition so they use separate
-  databases and upload directories: `$env:MIX_TEST_PARTITION = "2"; mix test`. The Prometheus listener is off in
-  test, so suites do not compete for port 9568.
+  databases and upload directories: `$env:MIX_TEST_PARTITION = "2"; mix test`. No extra port is opened in test
+  (metrics are served on the endpoint, which does not listen in test), so suites do not compete for ports.
+- The two-node cluster suite (`test/cluster`, see [Clustering](operations/clustering.md#the-two-node-test-suite))
+  is excluded by default; run it with `mix test --only cluster`. It boots two extra VMs with `:peer` and uses its
+  own database (`<test database>_cluster`), so it also works on Windows and next to other partitions.
 - The release overlays are POSIX shell scripts; test release behavior with the Docker image rather than natively.
 
 ## Documentation with every change

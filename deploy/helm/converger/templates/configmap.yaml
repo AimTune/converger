@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "converger.fullname" . }}
+  labels:
+    {{- include "converger.labels" . | nindent 4 }}
+data:
+  {{- range $key, $value := .Values.env }}
+  {{ $key }}: {{ $value | toString | quote }}
+  {{- end }}
+  CLUSTER_STRATEGY: {{ .Values.cluster.strategy | quote }}
+  {{- if eq .Values.cluster.strategy "kubernetes_dns" }}
+  CLUSTER_SERVICE: {{ printf "%s-headless.%s.svc.cluster.local" (include "converger.fullname" .) .Release.Namespace | quote }}
+  {{- end }}
+  CLUSTER_NODE_BASENAME: {{ .Values.cluster.nodeBasename | quote }}
+  {{- if and (ne .Values.cluster.strategy "none") .Values.cluster.distributionPort }}
+  CLUSTER_DIST_PORT: {{ .Values.cluster.distributionPort | int | toString | quote }}
+  {{- end }}

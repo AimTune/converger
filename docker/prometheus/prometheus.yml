@@ -3,6 +3,12 @@ global:
   evaluation_interval: 15s
 
 scrape_configs:
+  # The dev server (`mix phx.server` on the host) serves GET /metrics on its
+  # main port; config/dev.exs allows private and loopback IPs without a
+  # token. For a release, set METRICS_TOKEN and add
+  #   authorization: {type: Bearer, credentials_file: /etc/prometheus/converger-token}
+  # (see docs/operations/observability.md).
   - job_name: 'converger'
+    metrics_path: /metrics
     static_configs:
-      - targets: ['host.docker.internal:9568']
+      - targets: ['host.docker.internal:4000']

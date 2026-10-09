@@ -1,0 +1,11 @@
+# One replica, no clustering, no autoscaling, no migration hook.
+cluster:
+  strategy: none
+autoscaling:
+  enabled: false
+replicaCount: 1
+podDisruptionBudget:
+  enabled: false
+migrations:
+  enabled: false
+defaultTopologySpread: false

@@ -49,9 +49,6 @@ config :converger, pipeline: [backend: Converger.Pipeline.Inline]
 # No health probes against real providers in tests (tests enable them per case)
 config :converger, :channel_health, probe_idle_channels: false
 
-# Use a different port for metrics in test to avoid conflicts with dev server
-config :converger, :prometheus_port, false
-
 # Store test uploads in a temp dir (per partition)
 config :converger, Converger.Uploads,
   storage: Converger.Uploads.LocalStorage,

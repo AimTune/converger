@@ -272,11 +272,14 @@ get `429` with `Retry-After`. See [Rate limiting](../operations/rate-limiting.md
 
 | Control | Implementation | Configuration |
 | --- | --- | --- |
-| Client IP behind proxies | `ConvergerWeb.Plugs.TrustedProxies` (first plug in the endpoint); forwarding headers only from trusted peers | `TRUSTED_PROXIES`, see [../security.md](../security.md) and [ADR-0011](../adr/0011-custom-trusted-proxies-plug.md) |
+| Client IP behind proxies | `ConvergerWeb.Plugs.TrustedProxies` (first plug in the endpoint after the health probes); forwarding headers only from trusted peers | `TRUSTED_PROXIES`, see [../security.md](../security.md) and [ADR-0011](../adr/0011-custom-trusted-proxies-plug.md) |
 | Admin network restriction | `ConvergerWeb.Plugs.AdminAuth` | `ADMIN_IP_WHITELIST`, see [../security.md](../security.md) |
 | HTTPS redirect + HSTS | `ConvergerWeb.Plugs.ForceSSL` (runtime `Plug.SSL`; `X-Forwarded-Proto` honoured only from trusted proxies), on by default in production | `FORCE_SSL`, `HSTS`, `HSTS_MAX_AGE`, `HSTS_INCLUDE_SUBDOMAINS`, `HSTS_PRELOAD`, `FORCE_SSL_EXCLUDE_PATHS`, see [TLS, HSTS and WebSocket origins](../deployment.md#tls-hsts-and-websocket-origins) |
 | WebSocket origin check | Phoenix `check_origin` | `CHECK_ORIGIN` |
 | CORS | `CORSPlug`, origins read per request | `CORS_ORIGINS` |
+| Metrics | `ConvergerWeb.Plugs.Metrics` serves `GET /metrics` on the main port; bearer token (constant-time compare) or client-IP allowlist, `404` when neither is configured | `METRICS_TOKEN`, `METRICS_ALLOWED_IPS`; the opt-in `PROMETHEUS_PORT` listener is unauthenticated, see [Observability](../operations/observability.md#prometheus-endpoint) |
+| Health probes | `ConvergerWeb.Plugs.Health`: `GET /health/live` and `/health/ready`, unauthenticated by design; responses carry only `ok`/`error` per check and short reasons, never error details | none |
+| Erlang distribution (clustering) | Nodes connect over EPMD (4369) and a dynamic port, authenticated by the cookie; whoever has the cookie and network access can run code on every node | `RELEASE_COOKIE` (required when `CLUSTER_STRATEGY` is set), keep distribution ports on the private network; see [Clustering](../operations/clustering.md) |
 
 Design notes for the edge and boot checks: [ADR-0022](../adr/0022-deployment-hardening.md).
 
@@ -309,7 +312,10 @@ than run insecurely when:
   repository (see [Rotating leaked secrets](../security.md#rotating-leaked-secrets));
 - a Cloak key does not decode to 32 bytes;
 - `CHECK_ORIGIN` is set but contains no origins;
-- `RATE_LIMIT_BACKEND`, `UPLOAD_STORAGE` or `CDN_TYPE` has an unknown value;
+- `RATE_LIMIT_BACKEND`, `CLUSTER_STRATEGY`, `UPLOAD_STORAGE` or `CDN_TYPE` has an unknown value, or a clustering
+  strategy lacks a required option (`CLUSTER_SERVICE`, `CLUSTER_DNS_QUERY`);
+- clustering is enabled and `RELEASE_COOKIE` is not set (`rel/env.sh.eex`; the cookie baked into the image is
+  known to everyone who has the image);
 - the non-durable Broadway `:memory` producer is configured in production without
   `allow_memory_producer_in_prod: true`.
 
@@ -327,7 +333,7 @@ on every pull request:
   `# sobelow_skip [...]` with a justification.
 - **`mix deps.audit`** (known vulnerabilities) and **`mix hex.audit`** (retired packages). Advisories that do
   not affect Converger are acknowledged in `mix.exs` under `hex: [ignore_advisories: ...]`, each with the reason
-  (currently two `cowlib` CVEs reachable only from the Prometheus listener, and two `cloak` / `cloak_ecto` CVEs in
+  (currently two `cloak` / `cloak_ecto` CVEs in
   ciphers and types Converger does not use, enforced by `test/converger/vault_test.exs`).
 - **Credo** (`--strict`), **Dialyzer**, and compile with warnings as errors.
 
@@ -345,8 +351,7 @@ Tracked in [#52](https://github.com/AimTune/converger/issues/52) (Planned):
 - session `max_age`, idle timeout and "log out everywhere".
 
 Other known limitations: the login form reports "Your account has been deactivated" for an inactive account
-before the password is checked, and unauthenticated health endpoints for load balancers are Planned
-([#29](https://github.com/AimTune/converger/issues/29)).
+before the password is checked.
 
 ## Reporting a vulnerability
 
@@ -363,6 +368,7 @@ with the affected version or commit, reproduction steps and impact. There is no 
 - [ADR-0013: Cluster-wide rate limiting with Hammer and PubSub](../adr/0013-cluster-wide-rate-limiting-with-hammer-and-pubsub.md)
 - [ADR-0014: Webhook SSRF guard and outbound signing](../adr/0014-webhook-ssrf-guard-and-outbound-signing.md)
 - [ADR-0022: Deployment hardening](../adr/0022-deployment-hardening.md)
+- [ADR-0037: libcluster clustering, health endpoints and metrics on the main port](../adr/0037-libcluster-clustering-health-endpoints-and-metrics-on-the-main-port.md)
 
 ## Authorization boundaries
 

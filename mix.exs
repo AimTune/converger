@@ -17,15 +17,6 @@ defmodule Converger.MixProject do
       # when a fixed version ships.
       hex: [
         ignore_advisories: [
-          # cowlib 2.20.0, no fixed release yet. cowlib is only pulled in for
-          # the Prometheus metrics listener (plug_cowboy); the app is served by
-          # Bandit. Neither affected function is reachable with client input:
-          # EEF-CVE-2026-43966: cow_http_struct_hd:escape_string/2 (encoding
-          # structured response headers, not used by the metrics endpoint).
-          "CVE-2026-43966",
-          # EEF-CVE-2026-43969: cow_cookie:cookie/1 builds client Cookie
-          # request headers; we never act as a cowboy/gun HTTP client.
-          "CVE-2026-43969",
           # cloak 1.1.4 / cloak_ecto 1.3.0, no fixed releases yet. Neither
           # affected code path is used (enforced by test/converger/vault_test.exs):
           # EEF-CVE-2026-95105: Cloak.Ciphers.AES.CTR is unauthenticated; the
@@ -87,7 +78,7 @@ defmodule Converger.MixProject do
       {:telemetry_poller, "~> 1.0"},
       {:jason, "~> 1.2"},
       {:msgpax, "~> 2.4"},
-      {:dns_cluster, "~> 0.3.1"},
+      {:libcluster, "~> 3.4"},
       {:bandit, "~> 1.12"},
       {:oban, "~> 2.24"},
       {:oban_web, "~> 2.13"},
@@ -107,7 +98,7 @@ defmodule Converger.MixProject do
       {:opentelemetry_ecto, "~> 1.2"},
       {:opentelemetry_oban, "~> 1.2"},
       {:opentelemetry_req, "~> 1.0"},
-      {:telemetry_metrics_prometheus, "~> 1.1"},
+      {:telemetry_metrics_prometheus_core, "~> 1.2"},
       {:bcrypt_elixir, "~> 3.0"},
       {:cloak, "~> 1.1"},
       {:cloak_ecto, "~> 1.3"},

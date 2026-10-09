@@ -1,0 +1,65 @@
+# Example Fly.io configuration for a clustered Converger (issue #29).
+# Copy it to the repository root (or pass --config), change `app` and
+# PHX_HOST, then:
+#
+#   fly postgres create / attach        # sets DATABASE_URL (use ECTO_IPV6)
+#   fly secrets set SECRET_KEY_BASE="$(openssl rand -base64 64 | tr -d '\n')" \
+#     CLOAK_KEY="$(openssl rand -base64 32)" \
+#     RELEASE_COOKIE="$(openssl rand -base64 48 | tr -d '\n')" \
+#     METRICS_TOKEN="$(openssl rand -hex 32)"
+#   fly deploy
+#   fly scale count 2
+#
+# Machines find each other through Fly's internal DNS (<app>.internal, AAAA
+# records on the 6PN network). rel/env.sh.eex names every node
+# converger@$FLY_PRIVATE_IP and switches the distribution to IPv6.
+# See docs/operations/clustering.md.
+
+app = "converger-example"
+primary_region = "fra"
+kill_signal = "SIGTERM"
+kill_timeout = "30s"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[deploy]
+  # Migrations run once per deploy, before new machines start.
+  release_command = "/app/bin/migrate"
+  strategy = "rolling"
+
+[env]
+  PHX_HOST = "converger-example.fly.dev"
+  PORT = "4000"
+  ECTO_IPV6 = "true"
+  # Fly's proxy terminates TLS and redirects HTTP (force_https below).
+  FORCE_SSL = "false"
+  CLUSTER_STRATEGY = "dns"
+  CLUSTER_DNS_QUERY = "converger-example.internal"
+  CLUSTER_NODE_BASENAME = "converger"
+
+[http_service]
+  internal_port = 4000
+  force_https = true
+  # WebSocket clients stay connected; do not stop idle machines.
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 2
+
+  [http_service.concurrency]
+    type = "connections"
+    soft_limit = 2000
+    hard_limit = 2500
+
+  # Only ready machines get traffic: database, Oban, migrations, not draining.
+  [[http_service.checks]]
+    grace_period = "20s"
+    interval = "10s"
+    timeout = "3s"
+    method = "GET"
+    path = "/health/ready"
+
+[[vm]]
+  memory = "1gb"
+  cpu_kind = "shared"
+  cpus = 1
