@@ -7,14 +7,14 @@ sidebar_position: 8
 This page is the client-facing reference for Converger's **current** WebSocket interface: what to connect to, how to authenticate, which topics to join, which frames you send and receive, and how to resume after a disconnect without losing activities. For the server-side design see [Real-time](architecture/realtime.md).
 
 :::info Protocol v1 is being specified
-Today's WebSocket interface is Phoenix Channels framing with Converger-specific events. Converger Protocol v1 (spec in progress, [#21](https://github.com/AimTune/converger/issues/21), [#63](https://github.com/AimTune/converger/issues/63)) will replace it with a documented, versioned wire protocol. Also planned: a raw WebSocket endpoint without Phoenix framing ([#26](https://github.com/AimTune/converger/issues/26)), client message ids with server acks ([#24](https://github.com/AimTune/converger/issues/24)), delivery/read receipts, typing indicators and presence pushed to clients ([#25](https://github.com/AimTune/converger/issues/25)), and one unified socket stack ([#23](https://github.com/AimTune/converger/issues/23)). Expect the interface below to change; build new integrations on the Converger API socket.
+Today's WebSocket interface is Phoenix Channels framing with Converger-specific events. Converger Protocol v1 (spec in progress, [#21](https://github.com/AimTune/converger/issues/21), [#63](https://github.com/AimTune/converger/issues/63)) will replace it with a documented, versioned wire protocol. Also planned: a raw WebSocket endpoint without Phoenix framing ([#26](https://github.com/AimTune/converger/issues/26)), client message ids with server acks ([#24](https://github.com/AimTune/converger/issues/24)), and one unified socket stack ([#23](https://github.com/AimTune/converger/issues/23)). Expect the interface below to change; build new integrations on the Converger API socket.
 :::
 
 ## Endpoints
 
 | Path | Socket module | Topic | Use |
 | --- | --- | --- | --- |
-| `/socket/converger/websocket` | `ConvergerWeb.ConvergerSocket` | `converger:conversation:<conversation_id>` | **Recommended.** Converger client API (Direct Line-inspired): `activitySet` frames with watermarks. Receive-only; send over REST. |
+| `/socket/converger/websocket` | `ConvergerWeb.ConvergerSocket` | `converger:conversation:<conversation_id>` | **Recommended.** Converger client API (Direct Line-inspired): `activitySet` frames with watermarks, `deliveryStatus`, `typing` and `presence` frames. Sends activities over REST; sends `typing` and `read` over the socket. |
 | `/socket/websocket` | `ConvergerWeb.UserSocket` | `conversation:<conversation_id>` | Legacy. Canonical `new_activity` frames, send over the socket, `delivery_status` frames. Will be deprecated ([#23](https://github.com/AimTune/converger/issues/23)). |
 
 Both are Phoenix sockets (declared in [endpoint.ex](https://github.com/AimTune/converger/blob/main/lib/converger_web/endpoint.ex) as `/socket/converger` and `/socket`; the WebSocket transport is mounted under `/websocket`). Long-polling is disabled. Messages use the Phoenix V2 JSON serializer (`vsn=2.0.0`, the default of the `phoenix` JavaScript client).
@@ -92,7 +92,7 @@ Join `converger:conversation:<conversation_id>`. The join payload may carry the 
 { "watermark": "c2VxOjQy" }
 ```
 
-Authorization: a conversation token must name this conversation; a token without `conversation_id` may join any conversation of its channel.
+Authorization: the token must be a conversation token for this conversation. A channel-level token (from `tokens/generate`) cannot join; create or resume a conversation first to get a conversation token.
 
 | Join reply | Meaning |
 | --- | --- |
@@ -136,9 +136,67 @@ The activity objects are produced by the same function as the REST API (`GET ...
 
 When the conversation is closed or reopened, you receive an activity with `"type": "conversationUpdate"`, `"from": {"id": "system"}` and `channelData` such as `{"event": "conversation_closed", "status": "closed", "reason": "manual"}` (`reason` is `"expired"` for inactivity closes). Sending into a closed conversation returns `409 conversation_closed` until it is reopened.
 
+### 5a. Receipts, typing and presence
+
+Besides `activitySet` the server pushes three **transient** events: they are never stored and never replayed, so a client that was disconnected does not get the ones it missed. Each payload is the complete [Protocol v1](protocol/v1.md) frame (section 8), `type` included, and validates against its JSON Schema in `priv/protocol/v1/frames/server/`.
+
+**Who you are.** Receipts, typing and presence are attributed to the connection's *participant*, derived from its conversation token: `{"id": "<user_id>", "role": "user"}`, or `{"id": "anonymous", "role": "user"}` when the token has no `user_id` (an anonymous widget). A connection never receives its own participant's typing, read receipts or presence, also not from the same user's other tabs. Issue tokens with `user.id` (`POST /api/v1/converger/tokens/generate`) so participants can be told apart; an agent console that joins with its own `user.id` appears as that participant. A separate `agent` role comes with channel-scoped sockets ([#64](https://github.com/AimTune/converger/issues/64), [#67](https://github.com/AimTune/converger/issues/67)).
+
+#### deliveryStatus
+
+Delivery progress of an activity towards one external channel (WhatsApp, webhook, ...), including provider receipts such as WhatsApp's `delivered` and `read`:
+
+```json
+{ "type": "deliveryStatus", "data": { "activityId": "a2f7d9e4-...", "seq": 18, "channelId": "a1b2...", "status": "delivered", "timestamp": 1750000005000 } }
+```
+
+`status` only moves forward: `queued`, `sent`, `delivered`, `read`. `failed` means the delivery was dead-lettered; the frame then carries `attempt` and `error` (`{"code": "delivery_failed", "message": "...", "retryable": false}`). `timestamp` is the provider's time for `delivered` / `read` when it sent one, in milliseconds. Every connection of the conversation receives these frames, except end users with a `user_id`, who receive them only for activities whose sender (`from.id`) is their `user_id`.
+
+A **read receipt** of another participant uses the same event with `upToSeq` instead of `activityId`:
+
+```json
+{ "type": "deliveryStatus", "data": { "upToSeq": 18, "status": "read", "by": { "id": "user-42", "role": "user" }, "timestamp": 1750000006000 } }
+```
+
+#### typing
+
+```json
+{ "type": "typing", "isTyping": true, "from": "user", "sender": { "id": "user-42", "role": "user" } }
+```
+
+`from` is `"user"` for the end user and `"bot"` for every other party (mekik/1). Treat an indicator that is not refreshed within 6 seconds as stopped; a connection that closes while typing sends `isTyping: false` for you.
+
+#### presence
+
+```json
+{ "type": "presence", "data": { "participant": { "id": "agent-7", "role": "agent" }, "status": "online", "connections": 1 } }
+{ "type": "presence", "data": { "participant": { "id": "agent-7", "role": "agent" }, "status": "offline", "connections": 0, "lastSeenAt": 1750000009000 } }
+```
+
+Right after joining you receive one `online` frame per participant already connected, then a frame whenever a participant's connection count changes. Presence is cluster-wide. It is configured per channel with the channel config key `presence`:
+
+| `presence` | Effect |
+| --- | --- |
+| `"identified"` (default) | Every participant except anonymous end users is announced, and receives presence. |
+| `"all"` | Anonymous end users too, as the single participant `anonymous`. |
+| `"off"` | No presence frames on the channel. |
+
+#### Send typing and read
+
+Push these events on the conversation topic:
+
+| Event | Payload | Reply |
+| --- | --- | --- |
+| `typing` | `{"isTyping": true}` | `ok`. Relayed to the conversation's other connections and, when the channel supports it, to the external user (WhatsApp Cloud API typing indicator). Send at most one every 2 seconds while typing; repeats of the same state within 2 seconds are dropped. `isTyping` that is not a boolean: `error` `bad_request`. |
+| `read` | `{"watermark": 18}` | `ok` with `{"watermark": <stored>}`: you have read every activity up to `seq` 18. The stored position never moves backwards and is capped at the conversation's last `seq`. When it moves, the other participants get a `deliveryStatus` read receipt and channels that support it are told (WhatsApp blue ticks on the external user's messages). A `watermark` that is not a positive integer: `error` `invalid_watermark`. |
+
+`watermark` may be the `watermark` of the `activitySet` frame you displayed (as received, for example `"c2VxOjE4"`), the integer `seq` (Protocol v1 frames carry it directly) or its decimal string form.
+
+Typing is no longer something to persist: the `typing` event is transient. Activities with `"type": "typing"` posted over REST are still stored and broadcast for existing clients, but new clients should use the event.
+
 ### 6. Send activities (REST)
 
-The Converger API channel does not handle client events; send over REST with the same token:
+Activities are sent over REST with the same token (the socket only accepts the `typing` and `read` events above):
 
 ```http
 POST /api/v1/converger/conversations/6f1c0e7e-1f0b-4a5e-9a39-2b7c6f0d9a11/activities
@@ -155,9 +213,7 @@ x-idempotency-key: 7d2c1c1e-client-generated
 
 Your own activity also comes back over the socket as an `activitySet`. Use `x-idempotency-key` so that a retry after a timeout returns the same activity instead of creating a second one. Errors: `422` (validation, with field errors), `409` (`conversation_closed`), `503` (could not be accepted, retry), `429` (rate limit, bucket `activity_create` per tenant). See [client API](api/client-api.md).
 
-:::warning
-Do not push events on a `converger:conversation:*` topic. The channel has no `handle_in`, so an incoming event crashes the channel process; the client receives `phx_error` and rejoins.
-:::
+Any other event pushed on a `converger:conversation:*` topic is answered with `error` `bad_request`; the connection stays open.
 
 ### Resume without losing activities
 
@@ -361,11 +417,16 @@ Join `conversation:<conversation_id>`, optionally with the id of the last activi
   "status": "sent",
   "sent_at": "2026-10-09T12:00:01.000000Z",
   "delivered_at": null,
-  "read_at": null
+  "read_at": null,
+  "seq": 42,
+  "sender": "alice",
+  "attempts": 1,
+  "last_error": null,
+  "updated_at": "2026-10-09T12:00:01.000000Z"
 }
 ```
 
-`status` is one of `sent`, `delivered`, `read`, `failed` (see [Delivery and retries](delivery.md)).
+`status` is one of `sent`, `delivered`, `read`, `failed` (see [Delivery and retries](delivery.md)). `seq` and `sender` are the activity's; `attempts` and `last_error` describe the delivery.
 
 ### Client to server
 
@@ -388,11 +449,9 @@ Socket pushes carry no idempotency key, so retrying a push whose reply was lost 
 
 Rejoin with the `id` of the last activity you processed as `last_activity_id`. The server replays up to `ws_replay_limit` activities with a greater `seq` as `new_activity` frames, then `replay_truncated` if more are pending. An unknown id replays from the start of the conversation; no `last_activity_id` means no replay.
 
-## Presence, typing and receipts today
+## Presence, typing and receipts on the legacy socket
 
-- **Presence**: the server tracks joined sockets per channel (`ConvergerWeb.SocketPresence`) for its own use (counting connections, disconnecting a channel's clients). Presence state is not pushed to clients.
-- **Typing**: an activity with `"type": "typing"` is accepted, persisted and broadcast like any other activity. Ephemeral typing indicators are planned ([#25](https://github.com/AimTune/converger/issues/25)).
-- **Receipts**: only the legacy socket pushes `delivery_status`; the Converger API socket does not ([#25](https://github.com/AimTune/converger/issues/25)).
+The legacy socket pushes `delivery_status` (above) but no read receipts, typing events or presence: those are only on the Converger API socket ([section 5a](#5a-receipts-typing-and-presence)). On the legacy socket, typing is an activity with `"type": "typing"` that is persisted and broadcast like any other activity.
 
 ## Disconnects
 

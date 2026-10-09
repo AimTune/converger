@@ -19,6 +19,8 @@ defmodule Converger.Application do
         {DNSCluster, query: Application.get_env(:converger, :dns_cluster_query) || :ignore},
         {Phoenix.PubSub, name: Converger.PubSub},
         ConvergerWeb.SocketPresence,
+        ConvergerWeb.ConversationPresence,
+        {Task.Supervisor, name: Converger.TaskSupervisor},
         Converger.RateLimit.Supervisor,
         {Oban, oban_config()}
       ] ++

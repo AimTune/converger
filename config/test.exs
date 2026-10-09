@@ -71,3 +71,7 @@ config :converger, :webhook,
 
 # Deterministic encryption key for tests only.
 config :converger, Converger.Vault, key: Base.encode64("converger-tst-cloak-key-32bytes!")
+
+# Forward typing indicators and read receipts to external channels inline
+# (Converger.Channels.Signals), so tests see the provider calls synchronously.
+config :converger, :channel_signals_async, false
