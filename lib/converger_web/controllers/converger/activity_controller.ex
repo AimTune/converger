@@ -64,11 +64,13 @@ defmodule ConvergerWeb.ConvergerAPI.ActivityController do
          :ok <- authorize_channel(claims, conversation) do
       # `?limit=` defaults to :activity_default_limit and is capped at
       # :activity_max_limit (config :converger, :pagination). An invalid
-      # watermark starts from the beginning, as before.
+      # watermark starts from the beginning, as before. The integer seq of
+      # Protocol v1 (e.g. from `replayTruncated`) is accepted next to the
+      # opaque form.
       limit = Pagination.clamp_limit(params["limit"], :activity)
 
       position =
-        case Watermark.decode(params["watermark"]) do
+        case ConvergerWeb.Protocol.parse_watermark(params["watermark"]) do
           {:ok, position} -> position
           {:error, _} -> nil
         end

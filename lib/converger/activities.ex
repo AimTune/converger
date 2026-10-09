@@ -153,6 +153,17 @@ defmodule Converger.Activities do
   end
 
   @doc """
+  The activity of `conversation_id` stored with `idempotency_key`, or nil.
+  Lets a sender tell a retransmitted send apart from a new one (the
+  WebSocket `ack` reports `duplicate: true`).
+  """
+  def get_activity_by_idempotency_key(_conversation_id, nil), do: nil
+
+  def get_activity_by_idempotency_key(conversation_id, idempotency_key) do
+    Repo.get_by(Activity, conversation_id: conversation_id, idempotency_key: idempotency_key)
+  end
+
+  @doc """
   The idempotency key (for inbound provider messages: the provider message
   id, e.g. a WhatsApp `wamid`) of the latest activity in the conversation
   sent by `sender`, optionally only among activities with `seq <= max_seq`.

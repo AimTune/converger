@@ -1,6 +1,6 @@
 ---
-title: "ADR-0028: The websocket channel is a delivering adapter with pending receipts"
-sidebar_label: "0028 WebSocket channel adapter"
+title: "ADR-0033: The websocket channel is a delivering adapter with pending receipts"
+sidebar_label: "0033 WebSocket channel adapter"
 description: A websocket channel is delivered to like any other channel, through its adapter, with a delivery row that stays pending until a client is connected, replays or acknowledges, so it can be a routing target and inbound frames take the same path as webhooks.
 ---
 
@@ -72,7 +72,7 @@ Chosen option: **"Adapter delivery with a pending result"**, because it gives `w
 - **Inbound.** The per-message logic of `ConvergerWeb.InboundController` moves into `Converger.Inbound.receive_message/3`, which checks the channel's mode. Webhooks call it, and so does the Converger socket's `postActivity` event ([ADR-0026](0026-one-client-socket-stack-and-shape-checked-legacy-tokens.md)) when the token's channel is a `websocket` channel: the socket is then that channel's own transport. A token of another channel type is a client of the conversation, like the REST API, and keeps writing directly.
 - **Topics and authorization.** `converger:conversation:<id>` accepts a token restricted to the conversation and, with `scope: "channel"` (role `agent`), the conversation's own channel (owned: the after-commit `conversation:<id>` broadcast, as before) and a `websocket` channel that an enabled routing rule targets from the conversation's channel (routed: the channel's deliveries, after its middleware). An unscoped channel-level token still cannot join, as required by the security fix of [#114](https://github.com/AimTune/converger/pull/114). `converger:channel:<id>` follows every delivery to a `websocket` channel and requires a token with `scope: "channel"` ([ADR-0024](0024-converger-protocol-v1-as-superset-of-mekik-1.md) decision 12 asks for an explicit claim rather than "a token without a conversation").
 - **Ordering per conversation topic.** The channel process tracks the last `seq` it pushed, starting from the conversation head read before subscribing. Frames at or below it are dropped; a frame above `last + 1` first pushes the missing range from the database (with the channel's middleware for routed sockets). This covers lost cross-node broadcasts, concurrent delivery jobs and middleware-halted activities.
-- **Existing channels.** Migration `20261010040000_make_websocket_channels_duplex` changes existing `websocket` channels from `outbound`, the only mode they could have, to `duplex`.
+- **Existing channels.** Migration `20261010200000_make_websocket_channels_duplex` changes existing `websocket` channels from `outbound`, the only mode they could have, to `duplex`.
 
 ## Consequences
 
@@ -94,7 +94,7 @@ Chosen option: **"Adapter delivery with a pending result"**, because it gives `w
 ### Follow-ups
 
 - Client-generated ids and server acks for sends: [#24](https://github.com/AimTune/converger/issues/24).
-- Protocol v1 frames, the native endpoint and the handshake on top of these topics: [#21](https://github.com/AimTune/converger/issues/21), [#26](https://github.com/AimTune/converger/issues/26).
+- The native endpoint ([#26](https://github.com/AimTune/converger/issues/26), [ADR-0030](0030-native-websocket-endpoint-and-fallback-transports.md)) is one conversation per connection: it counts as a connected client and its sends go through `Converger.Inbound`, but channel-scoped (agent console) sessions over it are not built yet ([#64](https://github.com/AimTune/converger/issues/64), [#67](https://github.com/AimTune/converger/issues/67)).
 - Adapter behaviour v2 (`config_schema/0`, registry, the remaining type lists in health checks and the dashboard): [#36](https://github.com/AimTune/converger/issues/36).
 - Watermarks per conversation for channel-scoped sockets (`hello.watermarks`): [#64](https://github.com/AimTune/converger/issues/64), [#67](https://github.com/AimTune/converger/issues/67).
 
@@ -107,7 +107,7 @@ Chosen option: **"Adapter delivery with a pending result"**, because it gives `w
 - Inbound context: [`lib/converger/inbound.ex`](https://github.com/AimTune/converger/blob/main/lib/converger/inbound.ex), used by [`ConvergerWeb.InboundController`](https://github.com/AimTune/converger/blob/main/lib/converger_web/controllers/inbound_controller.ex).
 - Socket (topics, authorization, `postActivity` through `Converger.Inbound`, `ack`, `seq` tracking): [`lib/converger_web/channels/converger_channel.ex`](https://github.com/AimTune/converger/blob/main/lib/converger_web/channels/converger_channel.ex); connection counting and channel-scoped socket ids: [`lib/converger_web/sockets.ex`](https://github.com/AimTune/converger/blob/main/lib/converger_web/sockets.ex); `scope` claim: [`lib/converger/auth/converger_token.ex`](https://github.com/AimTune/converger/blob/main/lib/converger/auth/converger_token.ex).
 - Routing authorization: `Converger.RoutingRules.routes_to?/3` in [`lib/converger/routing_rules.ex`](https://github.com/AimTune/converger/blob/main/lib/converger/routing_rules.ex).
-- Migration: [`priv/repo/migrations/20261010040000_make_websocket_channels_duplex.exs`](https://github.com/AimTune/converger/blob/main/priv/repo/migrations/20261010040000_make_websocket_channels_duplex.exs).
+- Migration: [`priv/repo/migrations/20261010200000_make_websocket_channels_duplex.exs`](https://github.com/AimTune/converger/blob/main/priv/repo/migrations/20261010200000_make_websocket_channels_duplex.exs).
 
 Tests: [`test/converger_web/integration/websocket_channel_adapter_test.exs`](https://github.com/AimTune/converger/blob/main/test/converger_web/integration/websocket_channel_adapter_test.exs) drives a signed WhatsApp webhook into a routed agent console and back to a stubbed Graph API, and covers routed topics with middleware, gap fill and de-duplication, pending deliveries marked `sent` by replay, `require_ack` with `ack`, and authorization of both topics.
 

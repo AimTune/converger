@@ -1,12 +1,12 @@
 ---
 title: Delivery and retries
-description: How Converger tracks, retries and dead-letters deliveries to external channels - per-channel retry policies, DeliveryError, Oban attempts, Lifeline, unique jobs and health checks.
+description: How Converger tracks, retries, dead-letters and replays deliveries to external channels - per-channel retry policies, DeliveryError, Oban attempts, Lifeline, unique jobs, dead-letter replay, circuit breakers, rate limits, tenant tiers and health checks.
 sidebar_position: 6
 ---
 
 Every activity that must reach an external channel (a webhook, WhatsApp via Meta or Infobip, the echo bot) gets one **delivery** per target channel. A delivery is attempted by the [delivery pipeline](architecture/delivery-pipeline.md), retried with backoff on transient failures, and **dead-lettered** when it cannot succeed. This page describes the rules, where they live in the code and how to operate them. The design is recorded in [ADR-0019](adr/0019-per-channel-retry-policy-delivery-error-and-lifeline.md) and [ADR-0002](adr/0002-broadway-for-throughput-oban-for-retries.md).
 
-`websocket` channels get deliveries too. Their adapter pushes the activity to the channel's connected sockets. With no connected client (or with `require_ack: true` in the channel config) it returns `{:pending, meta}`, and the delivery stays `pending` without retries until a client acknowledges or replays it (`Deliveries.acknowledge/3`). See [Deliveries](concepts/deliveries.md#websocket-deliveries), [Real-time](architecture/realtime.md) and [ADR-0028](adr/0028-websocket-channel-adapter-delivery.md).
+`websocket` channels get deliveries too. Their adapter pushes the activity to the channel's connected sockets. With no connected client (or with `require_ack: true` in the channel config) it returns `{:pending, meta}`, and the delivery stays `pending` without retries until a client acknowledges or replays it (`Deliveries.acknowledge/3`). See [Deliveries](concepts/deliveries.md#websocket-deliveries), [Real-time](architecture/realtime.md) and [ADR-0033](adr/0033-websocket-channel-adapter-delivery.md).
 
 ## Delivery records
 
@@ -15,6 +15,7 @@ Every activity that must reach an external channel (a webhook, WhatsApp via Meta
 | Status | Meaning | Set by |
 | --- | --- | --- |
 | `pending` | Not delivered yet; eligible for (re)tries. For `websocket`, also handed off with no confirmed receipt (not retried). | first attempt, every failed attempt with retries left, `Deliveries.mark_handed_off/2` |
+| `paused` | Parked: the channel's circuit breaker is open or its deliveries are paused. No attempt is made; it goes back to `pending` when the channel recovers or is resumed. Ranks like `pending`. | [flow control](#flow-control-circuit-breaker-rate-limits-and-tenant-fairness) |
 | `sent` | The provider accepted the request. `sent_at`, `provider_message_id` and response metadata are stored. | `Deliveries.mark_sent/2`, `Deliveries.acknowledge/3` (`websocket`) |
 | `delivered` | The provider reported delivery to the device. | provider receipt (`POST /api/v1/channels/:channel_id/status`) |
 | `read` | The provider reported that the recipient read it. | provider receipt |
@@ -24,6 +25,8 @@ Every activity that must reach an external channel (a webhook, WhatsApp via Meta
 stateDiagram-v2
     [*] --> pending: first attempt
     pending --> pending: transient failure, retries left
+    pending --> paused: breaker open or channel paused
+    paused --> pending: breaker closed or channel resumed
     pending --> sent: adapter ok
     pending --> failed: permanent error, halt, or retries exhausted
     sent --> delivered: receipt
@@ -31,11 +34,11 @@ stateDiagram-v2
     delivered --> read: receipt
     sent --> failed: failed receipt
     delivered --> failed: failed receipt
-    failed --> [*]
+    failed --> pending: replay
     read --> [*]
 ```
 
-Provider receipts only move a delivery forward (`pending` < `sent` < `delivered` < `read`); a late `delivered` after `read` is ignored. A `failed` receipt is applied from any status except `read`, and nothing moves a delivery out of `failed` automatically. Every change is broadcast as `delivery_status` on `conversation:<conversation_id>`.
+Provider receipts only move a delivery forward (`pending` < `sent` < `delivered` < `read`); a late `delivered` after `read` is ignored. A `failed` receipt is applied from any status except `read`, and nothing moves a delivery out of `failed` automatically: only a [replay](#replaying-dead-letters) does. Every change is broadcast as `delivery_status` on `conversation:<conversation_id>`.
 
 `attempts` counts attempts made, successful or not: `mark_sent/2`, `mark_attempt_failed/3` and `mark_dead/2` all increment it.
 
@@ -150,7 +153,7 @@ The **delivery record's `attempts`** decides when to stop, using the channel's p
 
 ### Unique jobs
 
-Delivery jobs are unique on `[:activity_id, :channel_id]` over `period: :infinity`, with Oban's default state set (available, scheduled, executing, retryable, completed). Re-processing an activity (`Converger.Pipeline.process/1`) or a duplicate insert therefore never creates a second job for the same delivery, while a cancelled or discarded job does not block a deliberate re-enqueue.
+Delivery jobs are unique on `[:activity_id, :channel_id]` (fields `[:worker, :args]`, so a job is unique whatever its [tier queue](#tenant-tiers-fair-queueing)) over `period: :infinity`, with Oban's default state set (available, scheduled, executing, retryable, completed). Re-processing an activity (`Converger.Pipeline.process/1`) or a duplicate insert therefore never creates a second job for the same delivery, while a cancelled or discarded job does not block a deliberate re-enqueue.
 
 ### At-least-once to providers
 
@@ -184,38 +187,82 @@ Nothing else happens automatically: the activity stays committed and other chann
 
 | Where | What you see |
 | --- | --- |
+| Deliveries page (`/admin/deliveries`, `/portal/deliveries`) | Failed deliveries by default, filterable by tenant (admin only), channel, status and date range, with the error, attempts, replay history and a payload preview. See [Deliveries page](#deliveries-page). |
+| Tenant API | `GET /api/v1/deliveries?status=failed` with the same filters; see [tenant API](api/tenant-api.md#deliveries). |
 | Admin dashboard (`/admin`) | Count of `failed` deliveries (`Deliveries.count_by_status/0`). |
 | Admin conversation view (`/admin/conversations/:id`) | Per-activity delivery badge; failed deliveries are marked. |
 | Oban Web (`/admin/oban`) | Cancelled `ActivityDeliveryWorker` jobs with their error, until the Pruner removes them after 24 hours. |
-| Elixir API | `Converger.Deliveries.list_dead_letters/2` and `paginate_dead_letters/2` (keyset on `(updated_at, id)`, most recent first; filters `channel_id`, `activity_id`). |
+| Elixir API | `Converger.Deliveries.search_deliveries/2` (filters `status`, `channel_id`, `activity_id`, `tenant_id`, `from`, `to`), and `list_dead_letters/2` / `paginate_dead_letters/2` for `status: "failed"`. All are keyset-paginated on `(updated_at, id)`, most recent first. |
 | SQL | `SELECT id, activity_id, channel_id, attempts, last_error, updated_at FROM deliveries WHERE status = 'failed' ORDER BY updated_at DESC;` |
 | Metrics | Attach a handler to `[:converger, :deliveries, :dead_lettered]`; it is not exported as a Prometheus metric by default. |
 
-### Replaying a dead letter (manual)
+### Replaying dead letters
 
-There is no replay endpoint yet. A dead letter can be re-enqueued from a remote console; the unique job constraint allows it because the previous job was cancelled:
+Fix the cause first (for example the channel's webhook URL), then replay. A replay sends the stored activity again through the channel's middleware and adapter, exactly like the first attempt. The design is recorded in [ADR-0028](adr/0028-dead-letter-replay-in-place-through-oban.md).
 
-```elixir
-alias Converger.{Repo, Deliveries}
-alias Converger.Deliveries.Delivery
+| Where | One delivery | Many deliveries |
+| --- | --- | --- |
+| Deliveries page | **Retry** button on a failed row | **Retry all failed**: every failed delivery that matches the current filters |
+| Tenant API | `POST /api/v1/deliveries/:id/retry` | `POST /api/v1/channels/:channel_id/deliveries/retry`, optionally with `from`, `to`, `activity_id` |
+| Elixir | `Deliveries.retry_delivery(delivery, actor)` | `Deliveries.retry_dead_letters(filters, actor, limit: n)` |
 
-delivery = Deliveries.get_delivery!("<delivery_id>")
+`actor` is `%{type: "admin" | "tenant_api" | "tenant_user" | "system", id: id}`, the same shape as for audit logs.
 
-# Reset the counters, otherwise the first failure dead-letters it again
-# (attempts is already at max_attempts).
-{:ok, delivery} =
-  delivery |> Delivery.changeset(%{status: "pending", attempts: 0}) |> Repo.update()
+A replay, in one transaction:
 
-%{activity_id: delivery.activity_id, channel_id: delivery.channel_id}
-|> Converger.Workers.ActivityDeliveryWorker.new()
-|> Oban.insert()
+1. moves the delivery from `failed` to `pending` with an `UPDATE ... WHERE status = 'failed'`. A delivery that is not (or no longer) failed is not touched, so two operators clicking at once replay it once;
+2. resets `attempts` to `0`, so the channel's [retry policy](#retry-policy) starts over (otherwise the first failure would dead-letter it again), increments `retry_count`, and sets `retried_by` (`"<actor type>:<actor id>"`) and `retried_at`;
+3. inserts one `ActivityDeliveryWorker` job, unless a job for the same activity and channel is still `available`, `scheduled`, `executing`, `retryable` or `suspended`;
+4. writes an audit log entry with action `retry` and resource type `delivery` (`changes` holds the activity and channel ids, the new `retry_count`, and for a single retry the previous `status`, `attempts` and `last_error`; bulk entries carry `"bulk": true`).
+
+After commit it broadcasts `delivery_status` with `status: "pending"` and emits `[:converger, :deliveries, :retried]` (measurement `count`, metadata `delivery_ids`).
+
+Rules:
+
+- Only `failed` deliveries can be replayed. The API answers `409` for any other status.
+- Deliveries on an **inactive** channel are refused (`400 Channel is inactive`) and skipped by bulk replays. Enable the channel first.
+- Replays always go through Oban, whatever the pipeline backend, the same as automatic retries ([ADR-0002](adr/0002-broadway-for-throughput-oban-for-retries.md)). The job is inserted in the same transaction as the reset, so a committed replay always has its job.
+- `last_error` is kept until the next attempt overwrites it, so the cause stays visible while the replay is pending.
+- A delivery that was `sent` and then failed by a provider receipt is sent to the provider again: that is what replay means.
+
+Bulk replays work in chunks of 500 deliveries, oldest failure first. Each chunk selects its rows with `FOR UPDATE SKIP LOCKED` and commits separately, so concurrent bulk replays never pick the same delivery and a large replay does not hold one long transaction. Only deliveries that were already failed when the call started are replayed: one that fails again during the call (a permanent error fails after one attempt) is not picked up a second time. One call replays at most `bulk_retry_limit` deliveries (default 10 000, see [configuration](#configuration)). The result says whether more remain:
+
+```json
+{ "retried": 10000, "has_more": true }
 ```
 
-Retrying the cancelled job from Oban Web also re-runs the delivery, with the same caveat about `attempts`.
+Retrying a cancelled job from Oban Web also re-runs the delivery, but it does not reset `attempts`, so the first failure dead-letters it again, and it is neither audited nor recorded in `retried_by`. Use the Deliveries page or the API instead.
 
 :::info Planned
-A dead-letter queue with inspection and replay through the API and admin UI: Planned ([#32](https://github.com/AimTune/converger/issues/32)). A per-channel circuit breaker, provider rate limiting and tenant-fair queueing: Planned ([#31](https://github.com/AimTune/converger/issues/31)).
+Automatic replay of dead letters when a channel's circuit breaker closes (an optional part of [#32](https://github.com/AimTune/converger/issues/32)) is not implemented. Note that while a breaker is open, deliveries are [parked](#circuit-breaker) rather than dead-lettered, so they need no replay.
 :::
+
+### Deliveries page
+
+`/admin/deliveries` (all tenants) and `/portal/deliveries` (the user's tenant) list deliveries, most recently changed first, with **Load more**. The filters (tenant for admins, channel, status, from and to date) are kept in the URL. The status filter defaults to `failed`. The from and to dates are UTC days and filter on `updated_at`, the time of the last status change.
+
+Each row shows the channel, the activity, the status, `attempts`, `retry_count` with `retried_by` and `retried_at`, `last_error`, and a **Payload** preview: the canonical activity ([ADR-0004](adr/0004-single-canonical-activity-serializer.md)) with sensitive keys such as `api_key`, `password` and `*_token` replaced by `"[REDACTED]"` (`Converger.Secrets.redact/1`). This is the stored activity, before the channel's middleware transformed its copy.
+
+| Role | Browse and export | Retry |
+| --- | --- | --- |
+| Admin `super_admin`, `admin` | yes | yes |
+| Admin `viewer` | yes | no |
+| Tenant user `owner`, `admin`, `member` | yes, own tenant only | yes, own tenant only |
+| Tenant user `viewer` | yes, own tenant only | no |
+
+**Export CSV** downloads the rows that match the current filters (`/admin/deliveries/export`, `/portal/deliveries/export`, streamed, at most `export_limit` rows). The columns are `id`, `tenant_id`, `channel_id`, `channel_name`, `activity_id`, `status`, `attempts`, `last_error`, `retry_count`, `retried_by`, `retried_at`, `inserted_at` and `updated_at`. Payloads are not exported. Text that starts with `=`, `+`, `-` or `@` is prefixed with `'` so that spreadsheets do not evaluate provider error text as a formula. The portal export is always limited to the user's tenant, whatever the query string says.
+
+### Configuration
+
+```elixir
+config :converger, :dead_letters,
+  # Max deliveries replayed by one bulk retry call (API or "Retry all failed")
+  bulk_retry_limit: 10_000,
+  # Max rows in one CSV export
+  export_limit: 10_000
+```
+
+The API's bulk `limit` parameter can lower `bulk_retry_limit` for one call but not raise it.
 
 ## Oban Web dashboard
 
@@ -227,7 +274,7 @@ The Oban Web dashboard is mounted at `/admin/oban` (`oban_dashboard/2` in [route
 | `viewer` | read-only |
 | anyone else | redirected to `/admin/login` |
 
-Queues: `deliveries` (concurrency 20 per node) for delivery jobs, `default` (10) for the cron workers.
+Queues: `deliveries_high` (10 per node), `deliveries` (20) and `deliveries_bulk` (5) for delivery jobs (one per [tenant tier](#tenant-tiers-fair-queueing)), `default` (10) for the cron workers and the circuit probe. Parked deliveries show up as `scheduled` jobs with priority 3.
 
 ## Channel health checks
 
@@ -257,10 +304,99 @@ Each run inserts a row into `channel_health_checks`. When a channel's status dif
 }
 ```
 
-Health checks older than 7 days are pruned at the end of each run. Health is informational today: an unhealthy channel still receives deliveries (see the circuit breaker plan in [#31](https://github.com/AimTune/converger/issues/31)).
+Health checks older than 7 days are pruned at the end of each run. A channel whose status **changes to** `unhealthy` has its [circuit breaker](#circuit-breaker) opened. Only the transition counts, so a breaker closed by a successful probe is not re-opened while the 60-minute window still contains the old failures.
+
+## Flow control: circuit breaker, rate limits and tenant fairness
+
+A dead webhook or a provider returning 429 must not occupy the shared delivery workers and delay every other tenant (the noisy-neighbour problem). Three mechanisms handle this, all applied by `ActivityDeliveryWorker` **before** the activity is loaded or the adapter is called ([`Converger.Channels.Circuit`](https://github.com/AimTune/converger/blob/main/lib/converger/channels/circuit.ex)). The design is recorded in [ADR-0031](adr/0031-per-channel-circuit-breaker-rate-limit-and-tier-queues.md).
+
+### Circuit breaker
+
+Each channel has a breaker stored on its row (`circuit_state`, `circuit_changed_at`, `consecutive_failures`). That way every node sees the same state, and every transition is a single conditional `UPDATE`, so two workers can never both open, probe or close it.
+
+```mermaid
+stateDiagram-v2
+    [*] --> closed
+    closed --> open: failure_threshold consecutive transient failures, or health turns unhealthy
+    open --> half_open: cooldown elapsed, one delivery claims the probe
+    half_open --> closed: probe succeeds
+    half_open --> open: probe fails
+    closed --> paused: manual pause
+    open --> paused: manual pause
+    paused --> closed: manual resume
+    open --> closed: manual resume
+```
+
+| State | Deliveries |
+| --- | --- |
+| `closed` | Attempted normally (subject to the rate limit). |
+| `open` | Parked. The first delivery that runs after `cooldown_ms` becomes the half-open probe. |
+| `half_open` | One probe in flight; every other delivery is parked. A probe stuck for longer than `cooldown_ms` (for example because its node died) can be taken over. |
+| `paused` | Parked until resumed. Never probed. |
+
+**What counts.** A transient failure (transport error, 5xx, 408/425/429, a timeout) increments `consecutive_failures`, and any success resets it to 0. A permanent error (`DeliveryError` with `retryable?: false`, for example an invalid recipient) and a middleware halt are about the message, not the endpoint, so they are ignored. Outcomes are recorded by `Converger.Pipeline` for every backend, but only the Oban worker parks deliveries. Broadway hands its retries to that worker.
+
+**Parking.** A parked job is snoozed for `park_seconds` (plus up to 10% jitter) and its Oban priority drops from 1 to 3. A snooze never uses up an Oban attempt or a delivery attempt. The delivery row becomes `paused`. Because Oban fetches jobs by priority, a fresh delivery of a healthy channel in the same queue is always picked before a parked one. With 10,000 jobs parked for a dead channel, the queue still serves everyone else first.
+
+**Probing.** When the breaker opens, `Converger.Workers.ChannelCircuitProbeWorker` (queue `default`, unique per channel) is scheduled `cooldown_ms` later. While the breaker stays open, it wakes one parked job every cooldown. That job claims `half_open` and is the probe. The loop stops once the breaker is closed or paused, or when nothing is parked; in that case the next delivery to the channel probes itself.
+
+**Closing.** When a probe succeeds, the breaker closes, `consecutive_failures` is reset, and **every** parked job of the channel is released at once: it becomes `available` now with priority 1, and its `paused` delivery goes back to `pending`. Recovery therefore does not wait for `park_seconds`.
+
+Configuration (defaults shown):
+
+```elixir
+config :converger, :circuit_breaker,
+  failure_threshold: 5,   # consecutive transient failures before opening
+  cooldown_ms: 30_000,    # time open before a probe
+  park_seconds: 600       # sleep of a parked job before it re-checks on its own
+```
+
+When the breaker opens or closes, the tenant's `alert_webhook_url` (if set) receives a POST. The request is fire-and-forget with a 10 s timeout, and a failed probe re-opening the breaker sends nothing:
+
+```json
+{
+  "event": "channel.circuit_opened",
+  "channel_id": "<uuid>",
+  "channel_name": "support-webhook",
+  "tenant_id": "<uuid>",
+  "reason": "failures",
+  "changed_at": "2026-10-09T12:05:00.000000Z"
+}
+```
+
+`event` is `channel.circuit_opened` (`reason`: `failures` or `unhealthy`) or `channel.circuit_closed` (`reason`: `probe_succeeded`). Every transition, manual ones included, is also broadcast as `circuit_changed` on the `channel_health` PubSub topic, and the admin channel list updates live. For metrics, see [Observability](operations/observability.md).
+
+### Manual pause and resume
+
+An operator can stop deliveries to a channel without disabling it. While it is paused, inbound traffic and the WebSocket keep working, and outbound deliveries are parked:
+
+- **Admin UI**: the channel list has a *Delivery* column (Flowing / Breaker open / Probing / Paused) and *Pause deliveries* / *Resume deliveries* buttons.
+- **Tenant API**: `POST /api/v1/channels/:channel_id/pause`, `POST /api/v1/channels/:channel_id/resume` and `GET /api/v1/channels/:channel_id/delivery` (see [Tenant API](api/tenant-api.md#channel-delivery-state)).
+
+Resume also force-closes an open breaker. Both actions are written to the audit log (`pause_deliveries` / `resume_deliveries`).
+
+### Rate limits
+
+A channel can cap its outbound throughput with `rate_limit`: `"<count>/s"`, `"<count>/m"` or `"<count>/h"`, for example `"80/s"`. Without one, the adapter default applies. Today only `whatsapp_meta` has a default: `80/s`, the Cloud API's default throughput per business phone number. Raise it per channel for numbers with higher throughput. The check uses the same Hammer counters as the API rate limits (bucket `channel_outbound`, keyed by channel; see [Rate limiting](operations/rate-limiting.md)), so with `RATE_LIMIT_BACKEND=cluster` it applies across nodes.
+
+A delivery over the limit is **snoozed** until the window resets. It is not counted as a failure, keeps its priority, and does not use up an attempt.
+
+### Tenant tiers (fair queueing)
+
+`tenants.tier` (`high`, `default`, `bulk`; set by an admin on the Tenants page) selects the Oban queue for the tenant's delivery jobs:
+
+| Tier | Queue | Concurrency per node |
+| --- | --- | --- |
+| `high` | `deliveries_high` | 10 |
+| `default` | `deliveries` | 20 |
+| `bulk` | `deliveries_bulk` | 5 |
+
+Each queue has its own workers, so a bulk tenant sending a million messages cannot hold up a `high` tenant's deliveries. The `default` tier keeps the historical queue name `deliveries`, so jobs enqueued before tiers existed still run. Retries handed off by Broadway use the same tier queue.
+
+Trade-off: tiers isolate classes of tenants, not individual tenants. Two tenants in the same tier still share that queue's workers. Within a queue, the circuit breaker and parking priority keep a dead channel from blocking the queue, and rate limits keep one provider from taking all of it. True per-tenant partitioning, with one queue partition and a global limit per tenant, would need Oban Pro's partitioned queues (`Smart` engine). We chose not to require that.
 
 ## Related
 
 - [Delivery pipeline](architecture/delivery-pipeline.md) and [Activity flow](architecture/activity-flow.md)
 - [Webhooks](webhooks.md)
-- [ADR-0019](adr/0019-per-channel-retry-policy-delivery-error-and-lifeline.md), [ADR-0002](adr/0002-broadway-for-throughput-oban-for-retries.md), [ADR-0001](adr/0001-transactional-outbox-with-oban.md)
+- [ADR-0019](adr/0019-per-channel-retry-policy-delivery-error-and-lifeline.md), [ADR-0002](adr/0002-broadway-for-throughput-oban-for-retries.md), [ADR-0001](adr/0001-transactional-outbox-with-oban.md), [ADR-0028](adr/0028-dead-letter-replay-in-place-through-oban.md)

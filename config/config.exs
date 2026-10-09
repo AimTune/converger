@@ -33,6 +33,32 @@ config :converger, :pagination,
   # (tenants, channels, routing rules, admin users)
   lookup_limit: 1000
 
+# Converger Protocol v1 transports: the native WebSocket (/socket/converger/v1)
+# and the Server-Sent Events stream (see ConvergerWeb.Protocol). The replay
+# batch is :ws_replay_limit above.
+config :converger, ConvergerWeb.Protocol,
+  # outbound silence before the server sends a `heartbeat`
+  heartbeat_interval_ms: 30_000,
+  # inbound silence before the socket is closed with 4408
+  idle_timeout_ms: 60_000,
+  # larger frames get `payload_too_large`; above the hard cap the socket closes (1009)
+  max_frame_bytes: 131_072,
+  max_frame_hard_bytes: 1_048_576,
+  # frames replayed per handshake or `sync`; beyond it `replayTruncated`
+  replay_max: 10_000
+
+# Tokens travel in query strings (`?token=` on sockets and the SSE stream):
+# keep them out of request logs.
+config :phoenix, :filter_parameters, ["password", "token", "secret"]
+
+# Dead-letter replay and export (see Converger.Deliveries.retry_dead_letters/3
+# and ConvergerWeb.DeliveryExportController).
+config :converger, :dead_letters,
+  # Max deliveries replayed by one bulk retry call
+  bulk_retry_limit: 10_000,
+  # Max rows in one CSV export
+  export_limit: 10_000
+
 # Serialize migration runs with a session-level Postgres advisory lock instead
 # of the default table lock. Concurrent `Converger.Release.migrate/0` calls
 # (e.g. several replicas or init containers starting at once) wait for the
@@ -137,7 +163,8 @@ config :converger, Oban,
        {"*/5 * * * *", Converger.Workers.ChannelHealthWorker}
      ]}
   ],
-  queues: [default: 10, deliveries: 20]
+  # Delivery queues per tenant tier (tenants.tier), see Converger.Pipeline.Oban.
+  queues: [default: 10, deliveries_high: 10, deliveries: 20, deliveries_bulk: 5]
 
 # Rate limiting (Hammer 7, see Converger.RateLimit).
 #   backend: :local   - per-node ETS counters (single node)

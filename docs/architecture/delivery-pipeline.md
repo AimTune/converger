@@ -56,10 +56,10 @@ The worker ([source](https://github.com/AimTune/converger/blob/main/lib/converge
 
 | Option | Value | Why |
 | --- | --- | --- |
-| `queue` | `:deliveries` | Concurrency 20 per node (`queues: [default: 10, deliveries: 20]`). |
+| `queue` | per tenant tier | `deliveries_high` (10 per node), `deliveries` (20, also the default) or `deliveries_bulk` (5), chosen from `tenants.tier` at enqueue (`Converger.Pipeline.Oban.queue_for_tier/1`). |
 | `priority` | `1` | |
 | `max_attempts` | `100` | Only a safety cap. The channel's retry policy decides when to stop, by cancelling the job. |
-| `unique` | `[keys: [:activity_id, :channel_id], period: :infinity]` | One live job per activity and channel, ever. Cancelled and discarded jobs are not counted, so a dead delivery can be re-enqueued explicitly. |
+| `unique` | `[fields: [:worker, :args], keys: [:activity_id, :channel_id], period: :infinity]` | One live job per activity and channel, ever. Cancelled and discarded jobs are not counted, so a dead delivery can be re-enqueued explicitly. |
 | `backoff/1` | channel policy or `Retry-After` | See [Delivery and retries](../delivery.md). |
 
 `perform/1` returns `:ok` on success, `{:error, reason}` for a retryable failure (Oban schedules the next attempt) and `{:cancel, reason}` when the delivery was dead-lettered or halted by middleware.
@@ -196,7 +196,7 @@ After middleware, `Converger.Channels.Adapter.deliver_activity/2` dispatches by 
 | `whatsapp_infobip` | `Converger.Channels.Adapters.WhatsAppInfobip` | yes |
 | `websocket` | `Converger.Channels.Adapters.WebSocket` | yes |
 
-The `websocket` adapter broadcasts the activity (after the channel's middleware) on the PubSub topics `channel:<channel_id>` and `channel:<channel_id>:conversation:<conversation_id>`, which the channel's agent-console and routed sockets follow, and counts the connected clients (`ConvergerWeb.Sockets.count_connections/2`). It returns `{:ok, %{connected_clients: n}}` when at least one client is connected, and `{:pending, %{connected_clients: n}}` when none is, or when the channel's config has `require_ack: true` ([ADR-0028](../adr/0028-websocket-channel-adapter-delivery.md), [WebSocket channel](../channels/websocket.md)).
+The `websocket` adapter broadcasts the activity (after the channel's middleware) on the PubSub topics `channel:<channel_id>` and `channel:<channel_id>:conversation:<conversation_id>`, which the channel's agent-console and routed sockets follow, and counts the connected clients (`ConvergerWeb.Sockets.count_connections/2`). It returns `{:ok, %{connected_clients: n}}` when at least one client is connected, and `{:pending, %{connected_clients: n}}` when none is, or when the channel's config has `require_ack: true` ([ADR-0033](../adr/0033-websocket-channel-adapter-delivery.md), [WebSocket channel](../channels/websocket.md)).
 
 An adapter returns `:ok`, `{:ok, response_meta}`, `{:pending, response_meta}` or `{:error, reason}`. `{:pending, _}` means handed off without a confirmed receipt: the delivery stays `pending` with `attempts` incremented (`Deliveries.mark_handed_off/2`), is not retried, and is marked `sent` by `Deliveries.acknowledge/3` when a client acknowledges it or it is replayed to a client. For `{:error, reason}`, `reason` may be a `%Converger.Channels.DeliveryError{}` that says whether the failure is retryable and carries a provider `Retry-After`. Adapters can also supply retry policy defaults through the optional `retry_policy/0` callback (the webhook adapter sets `timeout_ms: 10_000`) and declare what they can do through the optional `capabilities/0` callback (default `[:inbound, :outbound]`). See [Delivery and retries](../delivery.md) and [writing an adapter](../channels/writing-an-adapter.md).
 
@@ -204,4 +204,4 @@ An adapter returns `:ok`, `{:ok, response_meta}`, `{:pending, response_meta}` or
 
 - [Activity flow](activity-flow.md)
 - [Delivery and retries](../delivery.md)
-- [ADR-0001](../adr/0001-transactional-outbox-with-oban.md), [ADR-0002](../adr/0002-broadway-for-throughput-oban-for-retries.md), [ADR-0003](../adr/0003-pipeline-is-the-only-delivery-path.md), [ADR-0008](../adr/0008-middleware-receives-channel-and-crashes-are-contained.md), [ADR-0019](../adr/0019-per-channel-retry-policy-delivery-error-and-lifeline.md), [ADR-0028](../adr/0028-websocket-channel-adapter-delivery.md)
+- [ADR-0001](../adr/0001-transactional-outbox-with-oban.md), [ADR-0002](../adr/0002-broadway-for-throughput-oban-for-retries.md), [ADR-0003](../adr/0003-pipeline-is-the-only-delivery-path.md), [ADR-0008](../adr/0008-middleware-receives-channel-and-crashes-are-contained.md), [ADR-0019](../adr/0019-per-channel-retry-policy-delivery-error-and-lifeline.md), [ADR-0033](../adr/0033-websocket-channel-adapter-delivery.md)

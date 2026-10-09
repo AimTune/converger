@@ -64,6 +64,16 @@ defmodule ConvergerWeb.Router do
     resources "/routing_rules", RoutingRuleController,
       only: [:index, :show, :create, :update, :delete]
 
+    # Channel delivery state: circuit breaker, manual pause/resume
+    get "/channels/:channel_id/delivery", ChannelDeliveryController, :show
+    post "/channels/:channel_id/pause", ChannelDeliveryController, :pause
+    post "/channels/:channel_id/resume", ChannelDeliveryController, :resume
+
+    # Dead-letter inspection and replay
+    get "/deliveries", DeliveryController, :index
+    post "/deliveries/:id/retry", DeliveryController, :retry
+    post "/channels/:channel_id/deliveries/retry", DeliveryController, :bulk_retry
+
     # Inbound webhook endpoints for external channel integrations
     get "/channels/:channel_id/inbound", InboundController, :verify
     post "/channels/:channel_id/inbound", InboundController, :create
@@ -107,6 +117,26 @@ defmodule ConvergerWeb.Router do
     get "/attachments/:id", AttachmentController, :show
   end
 
+  # Server-Sent Events fallback (Protocol v1 frames). EventSource cannot set
+  # headers, so the token may also come from `?token=`; no `accepts ["json"]`
+  # because EventSource asks for text/event-stream.
+  pipeline :converger_stream_auth do
+    plug ConvergerWeb.Plugs.ConvergerAuth, mode: :token, query_token: true
+  end
+
+  scope "/api/v1/converger", ConvergerWeb.ConvergerAPI do
+    pipe_through [:converger_stream_auth]
+
+    get "/conversations/:conversation_id/events", EventStreamController, :stream
+  end
+
+  # Native Converger Protocol v1 WebSocket (raw frames, no Phoenix framing).
+  # The Phoenix sockets at /socket/converger/{websocket,longpoll} are
+  # dispatched by the endpoint before the router.
+  scope "/socket/converger", ConvergerWeb do
+    get "/v1", ProtocolSocketController, :upgrade
+  end
+
   # Admin login (IP whitelist protected)
   scope "/admin", ConvergerWeb do
     pipe_through [:browser, :admin_auth, :admin_session]
@@ -137,10 +167,18 @@ defmodule ConvergerWeb.Router do
       live "/conversations", ConversationLive, :index
       live "/conversations/:id", ConversationLive, :show
       live "/routing_rules", RoutingRuleLive
+      live "/deliveries", DeliveryLive
       live "/audit_logs", AuditLogLive
       live "/users", AdminUserLive
       live "/tenant_users", TenantUserLive
     end
+  end
+
+  # Admin CSV export of deliveries (IP whitelist + session auth)
+  scope "/admin", ConvergerWeb do
+    pipe_through [:browser, :admin_auth, :admin_session, :require_admin]
+
+    get "/deliveries/export", DeliveryExportController, :admin
   end
 
   # Oban Web dashboard (IP whitelist + admin session; role checks in
@@ -175,9 +213,17 @@ defmodule ConvergerWeb.Router do
       live "/channels", ChannelLive
       live "/conversations", ConversationLive, :index
       live "/conversations/:id", ConversationLive, :show
+      live "/deliveries", DeliveryLive
       live "/routing_rules", RoutingRuleLive
       live "/users", UserLive
     end
+  end
+
+  # Tenant portal CSV export of deliveries (session auth)
+  scope "/portal", ConvergerWeb do
+    pipe_through [:browser, :tenant_session, :require_tenant]
+
+    get "/deliveries/export", DeliveryExportController, :portal
   end
 
   # Enable Swoosh mailbox preview in development

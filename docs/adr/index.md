@@ -42,6 +42,8 @@ supersedes the old one and both are linked. Read
 | [0017](0017-conversation-lifecycle-enforced-under-the-seq-lock.md) | Conversation lifecycle enforced under the seq lock | Accepted | [#17](https://github.com/AimTune/converger/issues/17) / [#84](https://github.com/AimTune/converger/pull/84) |
 | [0018](0018-keyset-pagination.md) | Keyset pagination for every list query | Accepted | [#18](https://github.com/AimTune/converger/issues/18) / [#89](https://github.com/AimTune/converger/pull/89) |
 | [0019](0019-per-channel-retry-policy-delivery-error-and-lifeline.md) | Per-channel retry policy, `DeliveryError` and Oban Lifeline | Accepted | [#19](https://github.com/AimTune/converger/issues/19) / [#85](https://github.com/AimTune/converger/pull/85) |
+| [0028](0028-dead-letter-replay-in-place-through-oban.md) | Dead-letter replay resets the delivery in place and always goes through Oban | Accepted | [#32](https://github.com/AimTune/converger/issues/32) / [#121](https://github.com/AimTune/converger/pull/121) |
+| [0031](0031-per-channel-circuit-breaker-rate-limit-and-tier-queues.md) | Per-channel circuit breaker on the channel row, priority-based parking, Hammer rate limits and tier queues | Accepted | [#31](https://github.com/AimTune/converger/issues/31) / [#120](https://github.com/AimTune/converger/pull/120) |
 
 ### Channels, middleware and real time
 
@@ -53,8 +55,9 @@ supersedes the old one and both are linked. Read
 | [0024](0024-converger-protocol-v1-as-superset-of-mekik-1.md) | Converger Protocol v1 is a superset profile of mekik/1 | Accepted | [#63](https://github.com/AimTune/converger/issues/63) |
 | [0026](0026-one-client-socket-stack-and-shape-checked-legacy-tokens.md) | One client socket stack; the legacy socket and token family are deprecated | Accepted | [#23](https://github.com/AimTune/converger/issues/23) / [#115](https://github.com/AimTune/converger/pull/115) |
 | [0027](0027-websocket-limits-backpressure-and-draining.md) | WebSocket limits in the socket transport, mailbox backpressure and readiness-gated draining | Accepted | [#27](https://github.com/AimTune/converger/issues/27) / [#117](https://github.com/AimTune/converger/pull/117) |
-| [0028](0028-websocket-channel-adapter-delivery.md) | The `websocket` channel is a delivering adapter with pending receipts | Accepted | [#22](https://github.com/AimTune/converger/issues/22) / [#119](https://github.com/AimTune/converger/pull/119) |
+| [0030](0030-native-websocket-endpoint-and-fallback-transports.md) | Native v1 WebSocket on WebSock, MessagePack by subprotocol, SSE and long-poll fallbacks | Accepted | [#26](https://github.com/AimTune/converger/issues/26) / [#122](https://github.com/AimTune/converger/pull/122) |
 | [0032](0032-transient-conversation-signals.md) | Transient conversation signals: receipts, typing and presence over dedicated topics, stored read watermarks, optional adapter callbacks | Accepted | [#25](https://github.com/AimTune/converger/issues/25) |
+| [0033](0033-websocket-channel-adapter-delivery.md) | The `websocket` channel is a delivering adapter with pending receipts | Accepted | [#22](https://github.com/AimTune/converger/issues/22) / [#119](https://github.com/AimTune/converger/pull/119) |
 
 ### Security
 

@@ -82,7 +82,7 @@ WebSocket becomes the primary channel, with a documented wire protocol that any 
 | --- | --- | --- |
 | [#63](https://github.com/AimTune/converger/issues/63) | Converger Protocol v1 must be wire-compatible with mekik/1 (hello/welcome, seq envelope, chativa frame vocabulary) | Open ([ADR-0024](adr/0024-converger-protocol-v1-as-superset-of-mekik-1.md)) |
 | [#21](https://github.com/AimTune/converger/issues/21) | Specify the Converger Protocol v1 (WebSocket wire protocol) | Open |
-| [#22](https://github.com/AimTune/converger/issues/22) | Make `websocket` a first-class duplex channel adapter (deliver to sockets, offline buffering, fan-out target) | Open (implemented, pending merge; [ADR-0028](adr/0028-websocket-channel-adapter-delivery.md)) |
+| [#22](https://github.com/AimTune/converger/issues/22) | Make `websocket` a first-class duplex channel adapter (deliver to sockets, offline buffering, fan-out target) | Open (implemented, pending merge; [ADR-0033](adr/0033-websocket-channel-adapter-delivery.md)) |
 | [#23](https://github.com/AimTune/converger/issues/23) | Unify `UserSocket`/`ConversationChannel` and `ConvergerSocket`/`ConvergerChannel` into one protocol implementation | In review ([ADR-0026](adr/0026-one-client-socket-stack-and-shape-checked-legacy-tokens.md)) |
 | [#24](https://github.com/AimTune/converger/issues/24) | Client-side message ids with server acks over WebSocket (at-least-once send, exactly-once persistence) | Open |
 | [#25](https://github.com/AimTune/converger/issues/25) | Push delivery/read receipts, typing indicators and presence to WebSocket clients | Done (Phoenix channel binding; v1 framing with #22) |
@@ -104,8 +104,8 @@ Run Converger as a cluster that meets the PRD targets (10M messages per day, 1k+
 | --- | --- | --- |
 | [#29](https://github.com/AimTune/converger/issues/29) | Multi-node clustering: libcluster strategies, cross-node verification, health/readiness endpoints, k8s manifests | Open |
 | [#33](https://github.com/AimTune/converger/issues/33) | Delivery and pipeline telemetry, Grafana dashboards and alert rules (SLO instrumentation) | Open |
-| [#31](https://github.com/AimTune/converger/issues/31) | Per-channel circuit breaker, provider rate limiting and tenant-fair queueing | Open |
-| [#32](https://github.com/AimTune/converger/issues/32) | Dead-letter queue with inspection and replay (API + admin UI) | Open |
+| [#31](https://github.com/AimTune/converger/issues/31) | Per-channel circuit breaker, provider rate limiting and tenant-fair queueing | Done |
+| [#32](https://github.com/AimTune/converger/issues/32) | Dead-letter queue with inspection and replay (API + admin UI) | Done (optional automatic replay on breaker close not implemented) |
 | [#30](https://github.com/AimTune/converger/issues/30) | Table partitioning and retention for `activities` and `deliveries`; archival to object storage | Open |
 | [#35](https://github.com/AimTune/converger/issues/35) | Graceful degradation under database pressure: pool sizing, timeouts, bulkheads, readiness flip | Open |
 | [#66](https://github.com/AimTune/converger/issues/66) | Pluggable event backbone: Elixir-native (PubSub + Oban) by default, Kafka/NATS/RabbitMQ selectable, with a published benchmark matrix | Open |

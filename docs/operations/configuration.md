@@ -249,13 +249,13 @@ config :converger, Oban,
        {"*/5 * * * *", Converger.Workers.ChannelHealthWorker}
      ]}
   ],
-  queues: [default: 10, deliveries: 20]
+  queues: [default: 10, deliveries_high: 10, deliveries: 20, deliveries_bulk: 5]
 ```
 
 | Setting | Value | Notes |
 | --- | --- | --- |
 | Queue `default` | 10 concurrent jobs per node | Conversation expiration (hourly) and channel health checks (every 5 minutes). |
-| Queue `deliveries` | 20 concurrent jobs per node | `Converger.Workers.ActivityDeliveryWorker` (unique per activity and channel). |
+| Queues `deliveries_high`, `deliveries`, `deliveries_bulk` | 10 / 20 / 5 concurrent jobs per node | `Converger.Workers.ActivityDeliveryWorker` (unique per activity and channel), one queue per tenant tier (`tenants.tier`: `high`, `default`, `bulk`); see [flow control](../delivery.md#tenant-tiers-fair-queueing). |
 | `Pruner` | completed/discarded jobs older than 24 h | Keeps `oban_jobs` small. |
 | `Lifeline` | rescues jobs stuck in `executing` after 30 min | Recovers deliveries from a crashed node. |
 | Test | `testing: :inline` | Jobs run synchronously in tests. |
@@ -308,6 +308,28 @@ config :converger, Converger.RateLimit,
 (`{limit, window_ms}`). `clean_period_ms` (default 60000) controls how often expired ETS counters are removed.
 See [Rate limiting](rate-limiting.md).
 
+### Protocol v1 transports
+
+```elixir
+config :converger, ConvergerWeb.Protocol,
+  heartbeat_interval_ms: 30_000,
+  idle_timeout_ms: 60_000,
+  max_frame_bytes: 131_072,
+  max_frame_hard_bytes: 1_048_576,
+  replay_max: 10_000
+```
+
+Settings of the native WebSocket (`/socket/converger/v1`) and the Server-Sent Events stream, announced to
+clients in `welcome.data.limits` ([Protocol v1](../protocol/v1.md), section 11). `heartbeat_interval_ms`: outbound
+silence before a `heartbeat` frame (also the SSE heartbeat period). `idle_timeout_ms`: inbound silence before the
+socket is closed with 4408. `max_frame_bytes`: larger frames are answered with `payload_too_large`;
+`max_frame_hard_bytes`: larger frames close the socket (1009). `replay_max`: frames replayed per handshake, `sync`
+or SSE connection before `replayTruncated`. The replay batch size is `ws_replay_limit` under
+[Pagination](#pagination). Keep the heartbeat below any proxy idle timeout in front of Converger.
+
+Tokens passed as `?token=` (sockets, SSE) are filtered from request logs by
+`config :phoenix, :filter_parameters, ["password", "token", "secret"]`.
+
 ### Repo and migrations
 
 ```elixir
@@ -328,6 +350,7 @@ PgBouncer transaction pooling). See [Migrations and maintenance windows](migrati
 | `:trusted_proxies` | `[]` | See `TRUSTED_PROXIES`. |
 | `:inbound_signature_tolerance_seconds` | `300` | Allowed clock skew for `x-converger-signature` timestamps. |
 | `:pagination` | see [Pagination](#pagination) | Page size defaults and caps. |
+| `:dead_letters` | `bulk_retry_limit: 10_000`, `export_limit: 10_000` | Max deliveries replayed by one bulk retry call, and max rows in one Deliveries CSV export. See [Replaying dead letters](../delivery.md#replaying-dead-letters). |
 | `:prometheus_port` | `9568`; `false` in test | `false` disables the metrics listener. |
 | `:force_ssl` | unset outside prod | Keyword list of `Plug.SSL` options, built from the TLS variables in prod; `false` disables. |
 | `:webhook` | `[]` | `allowed_targets`, `allow_private_targets`, `resolver` (SSRF guard), and installation defaults for `connect_timeout` (5000 ms), `receive_timeout` (10000 ms), `max_response_bytes` (1 MiB). |

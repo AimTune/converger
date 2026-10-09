@@ -185,6 +185,7 @@ and [`ConvergerWeb.ErrorJSON`](https://github.com/AimTune/converger/blob/main/li
 | `403` | `{"errors": {"detail": "Forbidden"}}` | Authenticated but not allowed (wrong conversation for the token, channel token where an API key is required) |
 | `404` | `{"errors": {"detail": "Not Found"}}` | Unknown resource, or a resource of another tenant (tenant isolation never reveals existence), unknown route |
 | `409` | `{"error": "conversation_closed", "detail": "Conversation is closed"}` | Activity posted to a closed conversation ([ADR-0017](../adr/0017-conversation-lifecycle-enforced-under-the-seq-lock.md)) |
+| `409` | `{"error": "not_failed", "detail": "Only failed deliveries can be retried"}` | Replay of a delivery that is not `failed` ([tenant API](tenant-api.md#retry-a-delivery)) |
 | `413` | `{"error": "File too large (max 10.0MB)"}` or `{"errors": {"detail": "Request Entity Too Large"}}` | Upload over the size limit (the second form when the whole multipart body exceeds the limit plus 1 MB) |
 | `415` | `{"error": "File type application/octet-stream is not allowed"}` | Upload whose sniffed type is not allow-listed |
 | `422` | `{"errors": {"<field>": ["<message>"]}}` | Changeset validation failed |

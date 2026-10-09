@@ -172,7 +172,7 @@ config :converger, Oban,
        {"*/5 * * * *", Converger.Workers.ChannelHealthWorker}
      ]}
   ],
-  queues: [default: 10, deliveries: 20]
+  queues: [default: 10, deliveries_high: 10, deliveries: 20, deliveries_bulk: 5]
 ```
 
 | Worker | Queue | Schedule | Purpose |
@@ -211,7 +211,7 @@ PubSub is fire-and-forget. Nothing that must not be lost is sent only over PubSu
 ### Telemetry and tracing
 
 - **Metrics**: `ConvergerWeb.Telemetry` defines Phoenix, Ecto, VM and Oban metrics plus `converger.activities.create.count` and `converger.rate_limit.exceeded.count`, exported in Prometheus format.
-- **Telemetry events** emitted by Converger itself: `[:converger, :activities, :create]`, `[:converger, :deliveries, :dead_lettered]`, `[:converger, :middleware, :exception]`, `[:converger, :rate_limit, :exceeded]`, `[:converger, :deprecated, :use]`.
+- **Telemetry events** emitted by Converger itself: `[:converger, :activities, :create]`, `[:converger, :deliveries, :dead_lettered]`, `[:converger, :deliveries, :retried]`, `[:converger, :middleware, :exception]`, `[:converger, :rate_limit, :exceeded]`, `[:converger, :deprecated, :use]`.
 - **Tracing**: OpenTelemetry spans for Phoenix, Ecto and Oban. Export is disabled (`traces_exporter: :none`) unless `OTEL_EXPORTER_OTLP_ENDPOINT` or `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` is set ([ADR-0010](../adr/0010-runtime-cors-and-opentelemetry-configuration.md)).
 - **Logs**: in production, `LoggerJSON` on the default handler, with redaction of keys such as `api_key`, `secret`, `token` and `authorization`.
 

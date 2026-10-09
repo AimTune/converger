@@ -14,6 +14,11 @@ defmodule Converger.Channels.Adapters.WhatsAppMeta do
   @impl true
   def supported_modes, do: ~w(inbound outbound duplex)
 
+  # Cloud API default throughput per business phone number (80 messages/s);
+  # higher-throughput numbers override it with the channel's `rate_limit`.
+  @impl true
+  def rate_limit, do: "80/s"
+
   @impl true
   def validate_config(config) do
     required = ["phone_number_id", "access_token", "verify_token"]

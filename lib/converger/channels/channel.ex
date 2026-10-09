@@ -26,6 +26,12 @@ defmodule Converger.Channels.Channel do
     field :transformations, {:array, :map}, default: []
     # Per-channel delivery retry overrides, see Converger.Pipeline.RetryPolicy.
     field :retry_policy, :map, default: %{}
+    # Outbound rate limit ("80/s", "1000/m", "5000/h"), see Converger.Channels.Circuit.
+    field :rate_limit, :string
+    # Delivery circuit breaker, managed by Converger.Channels.Circuit (never cast).
+    field :circuit_state, :string, default: "closed"
+    field :circuit_changed_at, :utc_datetime_usec
+    field :consecutive_failures, :integer, default: 0
     belongs_to :tenant, Converger.Tenants.Tenant
 
     timestamps(type: :utc_datetime_usec)
@@ -47,7 +53,8 @@ defmodule Converger.Channels.Channel do
       :require_signature,
       :config,
       :transformations,
-      :retry_policy
+      :retry_policy,
+      :rate_limit
     ])
     |> validate_required([:name, :status, :tenant_id])
     |> validate_inclusion(:type, @channel_types)
@@ -57,6 +64,7 @@ defmodule Converger.Channels.Channel do
     |> validate_mode_compatibility()
     |> validate_transformations()
     |> validate_retry_policy()
+    |> validate_rate_limit()
     |> unique_constraint([:tenant_id, :name])
     |> ensure_secret()
     |> put_secret_hash()
@@ -114,6 +122,15 @@ defmodule Converger.Channels.Channel do
       case Converger.Pipeline.RetryPolicy.validate(policy) do
         :ok -> []
         {:error, message} -> [retry_policy: message]
+      end
+    end)
+  end
+
+  defp validate_rate_limit(changeset) do
+    validate_change(changeset, :rate_limit, fn :rate_limit, value ->
+      case Converger.Channels.Circuit.parse_rate_limit(value) do
+        {:ok, _} -> []
+        :error -> [rate_limit: "must look like 80/s, 1000/m or 5000/h"]
       end
     end)
   end

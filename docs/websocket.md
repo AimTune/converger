@@ -6,18 +6,74 @@ sidebar_position: 8
 
 This page is the client-facing reference for Converger's **current** WebSocket interface: what to connect to, how to authenticate, which topics to join, which frames you send and receive, and how to resume after a disconnect without losing activities. For the server-side design see [Real-time](architecture/realtime.md).
 
-:::info Protocol v1 is being specified
-Today's WebSocket interface is Phoenix Channels framing with Converger-specific events. Converger Protocol v1 (spec in progress, [#21](https://github.com/AimTune/converger/issues/21), [#63](https://github.com/AimTune/converger/issues/63)) will replace it with a documented, versioned wire protocol. Also planned: a raw WebSocket endpoint without Phoenix framing ([#26](https://github.com/AimTune/converger/issues/26)), and client message ids with server acks ([#24](https://github.com/AimTune/converger/issues/24)). Expect the interface below to change. The Converger API socket is the single client stack ([#23](https://github.com/AimTune/converger/issues/23)); the legacy socket is deprecated.
+:::info Protocol v1
+[Converger Protocol v1](protocol/v1.md) is the documented, versioned wire protocol. Its **native endpoint** (`/socket/converger/v1`, raw frames, no Phoenix framing, [#26](https://github.com/AimTune/converger/issues/26)) is the recommended way to connect from any language; see [Native Protocol v1 endpoint](#native-protocol-v1-endpoint) below. The Converger API socket is the single Phoenix client stack ([#23](https://github.com/AimTune/converger/issues/23)); the legacy socket is deprecated. Still planned: v1 framing on the Phoenix binding ([#22](https://github.com/AimTune/converger/issues/22)) and receipts, typing and presence on the native endpoint (today they are pushed on the Phoenix binding only, [#25](https://github.com/AimTune/converger/issues/25)).
 :::
 
 ## Endpoints
 
-| Path | Socket module | Topic | Use |
-| --- | --- | --- | --- |
-| `/socket/converger/websocket` | `ConvergerWeb.ConvergerSocket` | `converger:conversation:<conversation_id>`, `converger:channel:<channel_id>` | **The client socket.** Converger client API (Direct Line-inspired): `activitySet` frames with watermarks, `deliveryStatus`, `typing` and `presence` frames; send with `postActivity` or over REST, and `typing` and `read` over the socket. |
-| `/socket/websocket` | `ConvergerWeb.UserSocket` | `conversation:<conversation_id>` | **Deprecated** ([#23](https://github.com/AimTune/converger/issues/23)). Canonical `new_activity` frames, send over the socket, `delivery_status` frames. Every connection logs a deprecation warning; see [migrating from the legacy API](api/migrating-from-legacy.md). |
+| Path | Module | Use |
+| --- | --- | --- |
+| `/socket/converger/v1` | `ConvergerWeb.ProtocolSocket` | **Recommended.** Native [Protocol v1](protocol/v1.md): raw JSON (or MessagePack) frames, send and receive with acks, resume by `seq` watermark. No receipts, typing or presence yet, and no channel-scoped (agent console) sessions: those use the Phoenix socket. |
+| `/api/v1/converger/conversations/:id/events` | `ConvergerWeb.ConvergerAPI.EventStreamController` | Server-Sent Events fallback when WebSockets are blocked: the same v1 frames, receive-only; send over REST. |
+| `/socket/converger/websocket` (topics `converger:conversation:<conversation_id>` and, for agent consoles, `converger:channel:<channel_id>`) | `ConvergerWeb.ConvergerSocket` | The Phoenix client socket. Converger client API (Direct Line-inspired): `activitySet` frames with watermarks, `deliveryStatus`, `typing` and `presence` frames; send with `postActivity` or over REST, and `typing`, `read` and `ack` (delivery receipts of a `websocket` channel) over the socket. Long-polling fallback at `/socket/converger/longpoll`. |
+| `/socket/websocket` (topic `conversation:<conversation_id>`) | `ConvergerWeb.UserSocket` | **Deprecated** ([#23](https://github.com/AimTune/converger/issues/23)). Canonical `new_activity` frames, send over the socket, `delivery_status` frames. Every connection logs a deprecation warning; see [migrating from the legacy API](api/migrating-from-legacy.md). |
 
-Both are Phoenix sockets (declared in [endpoint.ex](https://github.com/AimTune/converger/blob/main/lib/converger_web/endpoint.ex) as `/socket/converger` and `/socket`; the WebSocket transport is mounted under `/websocket`). Long-polling is disabled. Messages use the Phoenix V2 JSON serializer (`vsn=2.0.0`, the default of the `phoenix` JavaScript client).
+The two Phoenix sockets are declared in [endpoint.ex](https://github.com/AimTune/converger/blob/main/lib/converger_web/endpoint.ex) as `/socket/converger` and `/socket`; the WebSocket transport is mounted under `/websocket`. They use the Phoenix V2 JSON serializer (`vsn=2.0.0`, the default of the `phoenix` JavaScript client). Long-polling is enabled on `/socket/converger` only (the `phoenix` client falls back to it automatically when the WebSocket cannot connect); the legacy socket has none.
+
+## Native Protocol v1 endpoint
+
+```text
+wss://<host>/socket/converger/v1
+Sec-WebSocket-Protocol: converger.v1        (or converger.v1+msgpack; none = JSON, mekik/1 clients)
+Authorization: Bearer <converger token>     (or ?token=<token>, or "token" in hello)
+```
+
+One frame per WebSocket message. The full contract (every frame, field and error code) is the [Protocol v1 specification](protocol/v1.md); the short version:
+
+```json
+→ {"type": "hello", "protocol": "converger/1", "watermark": 15}
+← {"type": "welcome", "data": {"conversationId": "…", "userId": "alice", "watermark": 17, "limits": {…}, …}}
+← {"type": "text", "id": "…", "seq": 16, "from": "bot", "data": {"text": "Your order has shipped."}, "timestamp": 1750000000000}
+← {"type": "text", "id": "…", "seq": 17, …}
+→ {"type": "text", "clientId": "c-18", "data": {"text": "When will it arrive?"}}
+← {"type": "ack", "clientId": "c-18", "id": "…", "seq": 18, "timestamp": 1750000004000}
+→ {"type": "ping", "nonce": "p-1"}
+← {"type": "heartbeat", "nonce": "p-1", "headSeq": 18, "timestamp": 1750000005000}
+```
+
+- **Handshake.** Send `hello` first; anything else draws `error` `no_session`. The server answers `welcome` (whose `watermark` is the conversation head) and replays every frame with `seq` greater than your `hello.watermark` (absent means 0: the whole transcript, at most 10 000 frames, then `replayTruncated`). A conversation token fixes the conversation; with a channel-level token, `hello.conversationId` is adopted if it belongs to the channel, otherwise a new conversation is started.
+- **Watermark.** Keep the highest `seq` you have processed. Reconnect with it in `hello.watermark`, or send `sync {"watermark": n}` on a live connection to replay after `n`. The old opaque watermarks are still accepted.
+- **Sending.** A `text` frame with a `clientId` is persisted exactly once and acknowledged with `ack {clientId, id, seq}`; resending the same `clientId` (after a reconnect, for example) returns the same ack with `duplicate: true`. Your own turn is not echoed back to the connection that sent it; your other tabs receive it with `from: "user"` and your `clientId`. Rejections are `error` frames carrying your `clientId` (`invalid_message`, `conversation_closed`, `rate_limited` with `retryAfterMs`, ...).
+- **Liveness.** The server sends `heartbeat` after 30 s of silence and answers `ping`; it closes a connection that sent nothing (not even a ping or a WebSocket ping) for 60 s with code 4408.
+- **Close codes.** 4401: invalid or expired token (`error` `unauthorized` / `token_expired` first; refresh in-band with `auth {"token": ...}` before `welcome.data.expiresAt` to avoid it). 4403: channel deactivated or forced disconnect. 4400: unsupported `hello.protocol`. 1008: the token's conversation does not exist. Reconnect with backoff and the same watermark: nothing is lost.
+- **MessagePack.** Offer `converger.v1+msgpack` to send and receive binary MessagePack frames; the maps are identical to the JSON frames.
+
+A complete client in Python using only the [`websockets`](https://pypi.org/project/websockets/) library (version 14 or later) is in [`examples/python/converger_ws.py`](https://github.com/AimTune/converger/blob/main/examples/python/converger_ws.py):
+
+```bash
+pip install websockets
+python examples/python/converger_ws.py --url wss://converger.example.com/socket/converger/v1 \
+  --token "$CONVERGER_TOKEN" --text "Where is my order?"
+```
+
+## Server-Sent Events fallback
+
+When WebSockets are blocked, receive with Server-Sent Events and send over REST:
+
+```js
+const events = new EventSource(
+  `https://converger.example.com/api/v1/converger/conversations/${conversationId}/events` +
+    `?token=${encodeURIComponent(token)}&watermark=${lastSeq}`
+);
+events.addEventListener("text", (e) => {
+  const frame = JSON.parse(e.data); // a Protocol v1 frame; e.lastEventId === String(frame.seq)
+  render(frame);
+});
+events.addEventListener("error", (e) => { if (e.data) console.warn(JSON.parse(e.data)); });
+```
+
+Every event is a v1 frame, named by its `type` (`text`, `event`, `conversationUpdate`, `heartbeat`, `replayTruncated`, `error`). Persistent frames have their `seq` as the SSE `id`, so the browser's automatic reconnect resumes after the last one it saw (`Last-Event-ID` wins over `?watermark=`). The stream ends with `error` `token_expired` when the token expires: fetch a fresh token and open a new `EventSource` with your last `seq`. Send with `POST /api/v1/converger/conversations/:id/activities` and an `X-Idempotency-Key` ([client API](api/client-api.md)).
 
 **Origins.** In production, browser connections are accepted only from the endpoint host (`PHX_HOST`) unless `CHECK_ORIGIN` lists more origins (comma-separated). Clients that send no `Origin` header (mobile apps, servers) are not affected. In development `check_origin` is off. See [deployment](deployment.md).
 

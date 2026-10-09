@@ -2,8 +2,17 @@ defmodule Converger.Deliveries.Delivery do
   use Ecto.Schema
   import Ecto.Changeset
 
-  @statuses ~w(pending sent delivered read failed)
-  @status_rank %{"pending" => 0, "sent" => 1, "delivered" => 2, "read" => 3, "failed" => -1}
+  # `paused`: parked by an open circuit breaker or a manual pause (see
+  # Converger.Channels.Circuit). It ranks like `pending`.
+  @statuses ~w(pending paused sent delivered read failed)
+  @status_rank %{
+    "pending" => 0,
+    "paused" => 0,
+    "sent" => 1,
+    "delivered" => 2,
+    "read" => 3,
+    "failed" => -1
+  }
 
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
@@ -16,6 +25,11 @@ defmodule Converger.Deliveries.Delivery do
     field :read_at, :utc_datetime_usec
     field :provider_message_id, :string
     field :metadata, :map, default: %{}
+    # Manual replays of a dead letter (`Converger.Deliveries.retry_delivery/2`).
+    # Set by the server only, never cast from input.
+    field :retry_count, :integer, default: 0
+    field :retried_by, :string
+    field :retried_at, :utc_datetime_usec
 
     belongs_to :activity, Converger.Activities.Activity
     belongs_to :channel, Converger.Channels.Channel

@@ -15,6 +15,8 @@ defmodule ConvergerWeb.ConvergerFrames do
   # Delivery statuses as stored (Converger.Deliveries.Delivery) -> v1 statuses.
   @statuses %{
     "pending" => "queued",
+    # Parked by a circuit breaker or manual pause: still queued for the client.
+    "paused" => "queued",
     "sent" => "sent",
     "delivered" => "delivered",
     "read" => "read",

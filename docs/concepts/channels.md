@@ -25,6 +25,9 @@ Table `channels`:
 | `transformations` | jsonb array | `[]` | [Middleware](middleware.md) chain applied before delivery to this channel. |
 | `require_signature` | boolean | `true` | Reject unsigned inbound webhooks. |
 | `retry_policy` | map | `{}` | Per-channel delivery retry overrides. |
+| `rate_limit` | string | `nil` | Outbound rate limit (`"80/s"`, `"1000/m"`, `"5000/h"`); `nil` uses the adapter default (WhatsApp Meta: `80/s`). See [flow control](../delivery.md#rate-limits). |
+| `circuit_state` | string | `"closed"` | Delivery circuit breaker: `closed`, `open`, `half_open` or `paused`. Managed by `Converger.Channels.Circuit`, never set through the changeset. |
+| `circuit_changed_at`, `consecutive_failures` | datetime, integer | `nil`, `0` | Breaker bookkeeping. |
 | `status` | text | `"active"` | The admin panel and portal toggle between `active` and `inactive`. |
 | `inserted_at`, `updated_at` | utc_datetime_usec | | |
 
@@ -37,7 +40,7 @@ Each type maps to a module implementing the `Converger.Channels.Adapter` behavio
 | Type | Modes | Required config | Delivery | Page |
 | --- | --- | --- | --- | --- |
 | `webhook` | `inbound`, `outbound`, `duplex` | `url`. Optional: `method` (`POST`, `PUT`, `PATCH`), `headers`, `connect_timeout`, `receive_timeout`, `max_response_bytes` | HTTP request with the canonical activity, signed with `x-converger-signature` | [Webhooks](../webhooks.md) |
-| `websocket` | `inbound`, `outbound`, `duplex` | none. Optional: `require_ack` (`true`/`false`, default `false`) | Broadcast to the channel's connected sockets; the delivery stays `pending` while no client is connected (or until a client acks, with `require_ack`). Clients send messages over the socket ([ADR-0028](../adr/0028-websocket-channel-adapter-delivery.md)). | [WebSocket channel](../channels/websocket.md) |
+| `websocket` | `inbound`, `outbound`, `duplex` | none. Optional: `require_ack` (`true`/`false`, default `false`) | Broadcast to the channel's connected sockets; the delivery stays `pending` while no client is connected (or until a client acks, with `require_ack`). Clients send messages over the socket ([ADR-0033](../adr/0033-websocket-channel-adapter-delivery.md)). | [WebSocket channel](../channels/websocket.md) |
 | `whatsapp_meta` | `inbound`, `outbound`, `duplex` | `phone_number_id`, `access_token`, `verify_token`, plus `app_secret` when `require_signature` is true | WhatsApp Cloud API (Graph) | [WhatsApp](../channels/whatsapp.md) |
 | `whatsapp_infobip` | `inbound`, `outbound`, `duplex` | `base_url`, `api_key`, `sender` | Infobip WhatsApp API | [WhatsApp](../channels/whatsapp.md) |
 | `echo` | `outbound` | none | Writes a reply activity from `"bot"` into the same conversation (testing) | [Echo](../channels/echo.md) |
@@ -48,7 +51,7 @@ One config key is read for every inbound-capable type: `conversation_idle_timeou
 
 ## Modes
 
-The mode is the channel's direction. It was introduced by migration [`20260227160000_add_mode_to_channels`](https://github.com/AimTune/converger/blob/main/priv/repo/migrations/20260227160000_add_mode_to_channels.exs), which defaulted existing channels to `duplex` and set `echo` and `websocket` channels to `outbound`. Migration [`20261010040000_make_websocket_channels_duplex`](https://github.com/AimTune/converger/blob/main/priv/repo/migrations/20261010040000_make_websocket_channels_duplex.exs) later moved existing `websocket` channels from `outbound` to `duplex`, when the type gained inbound support ([#22](https://github.com/AimTune/converger/issues/22)).
+The mode is the channel's direction. It was introduced by migration [`20260227160000_add_mode_to_channels`](https://github.com/AimTune/converger/blob/main/priv/repo/migrations/20260227160000_add_mode_to_channels.exs), which defaulted existing channels to `duplex` and set `echo` and `websocket` channels to `outbound`. Migration [`20261010200000_make_websocket_channels_duplex`](https://github.com/AimTune/converger/blob/main/priv/repo/migrations/20261010200000_make_websocket_channels_duplex.exs) later moved existing `websocket` channels from `outbound` to `duplex`, when the type gained inbound support ([#22](https://github.com/AimTune/converger/issues/22)).
 
 | Mode | Accepts inbound webhooks | Receives deliveries | Can be a routing rule source | Can be a routing rule target |
 | --- | --- | --- | --- | --- |
@@ -144,4 +147,4 @@ Deleting a channel also disconnects its sockets, and cascades to its conversatio
 | `unhealthy` | 50% or more |
 | `unknown` | no deliveries in the window |
 
-When the status differs from the previous check, the worker logs the change, broadcasts `health_changed` on the `channel_health` PubSub topic (the admin channel list shows a health dot), and POSTs to the tenant's [alert webhook](tenants.md#alert-webhook). Checks older than 7 days are pruned on every run. Per-channel circuit breakers are Planned ([#31](https://github.com/AimTune/converger/issues/31)).
+When the status differs from the previous check, the worker logs the change, broadcasts `health_changed` on the `channel_health` PubSub topic (the admin channel list shows a health dot), and POSTs to the tenant's [alert webhook](tenants.md#alert-webhook). Checks older than 7 days are pruned on every run. A channel turning `unhealthy` opens its delivery circuit breaker (see [Delivery: circuit breaker](../delivery.md#circuit-breaker)).

@@ -4,7 +4,7 @@ description: How the websocket channel adapter delivers activities to connected 
 sidebar_position: 4
 ---
 
-The `websocket` channel type is the home of clients connected over WebSockets: a web chat widget, an agent console, a test client. It is a regular channel adapter ([`lib/converger/channels/adapters/websocket.ex`](https://github.com/AimTune/converger/blob/main/lib/converger/channels/adapters/websocket.ex)): the pipeline delivers to it through the channel's middleware and records a delivery for every activity, it can be the target of a routing rule, and messages its clients send go through the same inbound path as webhooks. The design is recorded in [ADR-0028](../adr/0028-websocket-channel-adapter-delivery.md).
+The `websocket` channel type is the home of clients connected over WebSockets: a web chat widget, an agent console, a test client. It is a regular channel adapter ([`lib/converger/channels/adapters/websocket.ex`](https://github.com/AimTune/converger/blob/main/lib/converger/channels/adapters/websocket.ex)): the pipeline delivers to it through the channel's middleware and records a delivery for every activity, it can be the target of a routing rule, and messages its clients send go through the same inbound path as webhooks. The design is recorded in [ADR-0033](../adr/0033-websocket-channel-adapter-delivery.md).
 
 For the client side (sockets, topics, frames, tokens, replay), see the [WebSocket API](../websocket.md).
 
@@ -17,7 +17,7 @@ For the client side (sockets, topics, frames, tokens, replay), see the [WebSocke
 | `config.require_ack` | `true` or `false` (default). With `true`, a delivery stays `pending` until a client acknowledges it, even when clients are connected. |
 | `config.presence` | `identified` (default), `all` or `off`: presence frames for the client API sockets of this channel ([WebSocket API](../websocket.md#presence), [ADR-0032](../adr/0032-transient-conversation-signals.md)). Read from the token's channel, so it works on every channel type. |
 
-Existing `websocket` channels, which could only be `outbound` before, were changed to `duplex` by migration `20261010040000_make_websocket_channels_duplex`.
+Existing `websocket` channels, which could only be `outbound` before, were changed to `duplex` by migration `20261010200000_make_websocket_channels_duplex`.
 
 ## Adapter callbacks
 
@@ -108,5 +108,5 @@ The same channel-scoped token can also join `converger:conversation:<id>` for on
 - [Channels and adapters](overview.md)
 - [Routing rules](../concepts/routing-rules.md)
 - [Deliveries](../concepts/deliveries.md)
-- [ADR-0028](../adr/0028-websocket-channel-adapter-delivery.md): the websocket channel adapter and pending receipts.
+- [ADR-0033](../adr/0033-websocket-channel-adapter-delivery.md): the websocket channel adapter and pending receipts.
 - [ADR-0020](../adr/0020-per-subject-socket-ids-and-presence.md): per-subject socket ids and presence.

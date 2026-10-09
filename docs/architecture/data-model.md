@@ -38,6 +38,7 @@ erDiagram
         text api_key_prefix
         binary previous_api_key_hash
         jsonb limits
+        text tier
         text_array allowed_upload_types
     }
     channels {
@@ -53,6 +54,10 @@ erDiagram
         boolean require_signature
         jsonb transformations
         jsonb retry_policy
+        text rate_limit
+        text circuit_state
+        timestamptz circuit_changed_at
+        integer consecutive_failures
     }
     conversations {
         uuid id PK
@@ -99,6 +104,7 @@ erDiagram
         integer attempts
         text last_error
         text provider_message_id
+        integer retry_count
     }
     routing_rules {
         uuid id PK
@@ -166,6 +172,7 @@ The top-level isolation unit. Every domain row carries a `tenant_id` and every A
 | `previous_api_key_hash`, `previous_api_key_expires_at` | binary, timestamp | Grace period for the previous key after a rotation (indexed). |
 | `alert_webhook_url` | string | Receives `channel_health_changed` alerts. |
 | `limits` | jsonb, not null, default `{}` | Per-tenant rate-limit overrides, e.g. `{"activity_create": {"limit": 200, "scale_ms": 1000}}`. |
+| `tier` | text, not null, default `"default"` | Delivery queue tier (`high`, `default`, `bulk`), see [tenant tiers](../delivery.md#tenant-tiers-fair-queueing). |
 | `allowed_upload_types` | text[] | Per-tenant MIME allowlist; `NULL` uses the global default. |
 
 ### channels
@@ -183,6 +190,10 @@ A connection to one messaging surface (a webhook, a WhatsApp number, a WebSocket
 | `require_signature` | boolean, not null | Whether unsigned inbound webhooks are rejected. Default `true` for new channels; channels that existed before the column was added were backfilled with `false`. |
 | `transformations` | jsonb, not null, default `[]` | Ordered middleware chain. |
 | `retry_policy` | jsonb, not null, default `{}` | Per-channel retry overrides, see [Delivery and retries](../delivery.md). |
+| `rate_limit` | text | Outbound rate limit, e.g. `"80/s"`. `NULL` uses the adapter default. |
+| `circuit_state` | text, not null, default `"closed"` | Delivery circuit breaker: `closed`, `open`, `half_open`, `paused`. See [circuit breaker](../delivery.md#circuit-breaker). |
+| `circuit_changed_at` | utc_datetime_usec | Time of the last breaker transition. |
+| `consecutive_failures` | integer, not null, default `0` | Transient delivery failures since the last success. |
 
 Indexes: unique `(tenant_id, name)`, `(mode)`, `(tenant_id, mode, status)`, unique `(secret_hash)`.
 
@@ -241,14 +252,16 @@ One row per activity and target channel; the source of truth for delivery state 
 | Column | Type | Notes |
 | --- | --- | --- |
 | `activity_id`, `channel_id` | uuid, not null | Cascade on delete. |
-| `status` | text, not null, default `"pending"` | `pending`, `sent`, `delivered`, `read`, `failed` (dead letter). |
+| `status` | text, not null, default `"pending"` | `pending`, `paused` (parked by the circuit breaker or a manual pause), `sent`, `delivered`, `read`, `failed` (dead letter). |
 | `attempts` | integer, default `0` | Attempts made; drives the retry policy. |
 | `last_error` | text | Last failure message. |
 | `sent_at`, `delivered_at`, `read_at` | timestamps | Set on send and on provider receipts. |
 | `provider_message_id` | text | Provider id (e.g. a WhatsApp message id) used to correlate receipts. |
 | `metadata` | jsonb, default `{}` | Adapter response metadata. |
+| `retry_count` | integer, not null, default `0` | Manual replays of the dead letter. |
+| `retried_by`, `retried_at` | text, timestamp | Who replayed it last (`"<actor type>:<actor id>"`) and when. |
 
-Indexes: unique `(activity_id, channel_id)`, `(activity_id)`, `(channel_id)`, `(status)`, partial `(provider_message_id)` and `(channel_id, provider_message_id)` `WHERE provider_message_id IS NOT NULL`, and the keyset index `(inserted_at, id)`.
+Indexes: unique `(activity_id, channel_id)`, `(activity_id)`, `(channel_id)`, `(status)`, partial `(provider_message_id)` and `(channel_id, provider_message_id)` `WHERE provider_message_id IS NOT NULL`, and the keyset indexes `(inserted_at, id)`, `(status, updated_at, id)` and `(channel_id, status, updated_at, id)` (the last two for the dead-letter lists).
 
 ### routing_rules
 
@@ -260,7 +273,7 @@ Uploaded files ([storage](../storage.md)). Columns: `tenant_id` (not null), `con
 
 ### audit_logs
 
-Append-only (`updated_at` disabled) trail of administrative changes. Columns: `tenant_id` (nullable, `ON DELETE SET NULL` so the trail outlives the tenant), `actor_type`, `actor_id`, `action`, `resource_type`, `resource_id`, `changes` (jsonb, with secrets redacted, [ADR-0012](../adr/0012-secrets-at-rest-and-audit-redaction.md)). Indexes: `(tenant_id)`, `(resource_type, resource_id)`, `(actor_type, actor_id)`, `(action)`, `(inserted_at)`, `(inserted_at, id)`.
+Append-only (`updated_at` disabled) trail of administrative changes. Columns: `tenant_id` (nullable, `ON DELETE SET NULL` so the trail outlives the tenant), `actor_type`, `actor_id`, `action`, `resource_type`, `resource_id`, `changes` (jsonb, with secrets redacted, [ADR-0012](../adr/0012-secrets-at-rest-and-audit-redaction.md)). Actions: `create`, `update`, `delete`, `toggle_status`, `toggle_enabled`, `rotate_api_key`, `retry` (dead-letter replay). Resource types: `tenant`, `channel`, `routing_rule`, `admin_user`, `tenant_user`, `delivery`. Indexes: `(tenant_id)`, `(resource_type, resource_id)`, `(actor_type, actor_id)`, `(action)`, `(inserted_at)`, `(inserted_at, id)`.
 
 ### channel_health_checks
 
