@@ -17,13 +17,14 @@ Two socket stacks exist today, for historical reasons. The Converger client API 
 | Token | `Converger.Auth.Token` (from `POST /api/v1/tokens`) | `Converger.Auth.ConvergerToken` (from `POST /api/v1/converger/tokens/generate` or `/conversations`) |
 | Activity frame | `new_activity` (canonical map) | `activitySet` (`{activities, watermark, has_more}`) |
 | Resume | `last_activity_id` in the join payload | opaque `watermark` in the join payload |
-| Client sends | `new_activity` push | `postActivity` push, or REST |
-| Delivery status | `delivery_status` pushed | not pushed |
+| Client sends | `new_activity` push | `postActivity` push, or REST; `typing` and `read` events |
+| Delivery status | `delivery_status` pushed | `deliveryStatus` frames, plus read receipts |
+| Typing, presence | no (typing is a persisted activity) | `typing` and `presence` frames |
 
 Both are Phoenix sockets with `websocket: true` and `longpoll: false`, using the standard Phoenix V2 JSON serializer. A third socket, `/live`, serves LiveView for the admin and tenant UIs.
 
 :::info Planned
-Converger Protocol v1 ([spec](../protocol/v1.md)) is implemented on the Converger client API socket ([#22](https://github.com/AimTune/converger/issues/22)); the legacy stack is removed after its deprecation window (protocol v1, section 13.3). Also planned: a raw WebSocket endpoint without Phoenix framing ([#26](https://github.com/AimTune/converger/issues/26)), client message ids with server acks ([#24](https://github.com/AimTune/converger/issues/24)), and receipts, typing and presence pushed to clients ([#25](https://github.com/AimTune/converger/issues/25)).
+Converger Protocol v1 ([spec](../protocol/v1.md)) is implemented on the Converger client API socket ([#22](https://github.com/AimTune/converger/issues/22)); the legacy stack is removed after its deprecation window (protocol v1, section 13.3). Also planned: a raw WebSocket endpoint without Phoenix framing ([#26](https://github.com/AimTune/converger/issues/26)), and client message ids with server acks ([#24](https://github.com/AimTune/converger/issues/24)).
 :::
 
 ## How an activity reaches a socket
@@ -48,7 +49,7 @@ sequenceDiagram
 
 - `Converger.Pipeline.broadcast/1` publishes `"new_activity"` on `conversation:<conversation_id>` with the canonical activity map ([ADR-0004](../adr/0004-single-canonical-activity-serializer.md)) **after** the activity's transaction committed ([Activity flow](activity-flow.md)).
 - A `ConversationChannel` process is joined to exactly that topic, so Phoenix forwards the broadcast to the client as-is (no `intercept`).
-- A `ConvergerChannel` process is joined to `converger:conversation:<id>` and additionally calls `ConvergerWeb.Endpoint.subscribe("conversation:<id>")` in `join/3`. Its `handle_info/2` turns each `new_activity` broadcast into an `activitySet` frame with one activity (formatted by `ConvergerWeb.ConvergerAPI.ActivityJSON.activity_data/1`, the same function the REST API uses) and the watermark of that activity's `seq`. `delivery_status` broadcasts are received and dropped.
+- A `ConvergerChannel` process is joined to `converger:conversation:<id>` and additionally calls `ConvergerWeb.Endpoint.subscribe("conversation:<id>")` in `join/3`. Its `handle_info/2` turns each `new_activity` broadcast into an `activitySet` frame with one activity (formatted by `ConvergerWeb.ConvergerAPI.ActivityJSON.activity_data/1`, the same function the REST API uses) and the watermark of that activity's `seq`. `delivery_status` broadcasts become `deliveryStatus` frames (see [Receipts, typing and presence](#receipts-typing-and-presence)).
 
 PubSub is cluster-wide, so a client connected to node B receives activities created on node A.
 
@@ -57,7 +58,10 @@ PubSub is cluster-wide, so a client connected to node B receives activities crea
 | Topic | Event | Payload | Publisher |
 | --- | --- | --- | --- |
 | `conversation:<conversation_id>` | `new_activity` | canonical activity: `id`, `type`, `sender`, `text`, `attachments`, `metadata`, `idempotency_key`, `seq`, `conversation_id`, `tenant_id`, `inserted_at` | `Converger.Pipeline.broadcast/1` |
-| `conversation:<conversation_id>` | `delivery_status` | `delivery_id`, `activity_id`, `channel_id`, `status`, `sent_at`, `delivered_at`, `read_at` | `Converger.Deliveries` on `sent`, dead letter (`failed`) and provider receipts |
+| `conversation:<conversation_id>` | `delivery_status` | `delivery_id`, `activity_id`, `channel_id`, `status`, `sent_at`, `delivered_at`, `read_at`, `seq`, `sender`, `attempts`, `last_error`, `updated_at` | `Converger.Deliveries` on `sent`, dead letter (`failed`) and provider receipts |
+| `conversation:<conversation_id>:signals` | `typing` | `participant` (`id`, `role`), `is_typing` | `ConvergerChannel` (`broadcast_from`, so not to the sender's own process) |
+| `conversation:<conversation_id>:signals` | `read` | `up_to_seq`, `by` (participant), `at` | `ConvergerChannel`, when a `read` frame moved the stored watermark |
+| `conversation:<conversation_id>:presence` | presence diffs | participant id with meta `role`, `online_at` | `ConvergerWeb.ConversationPresence` |
 | `channel_health` | `health_changed` | `channel_id`, `channel_name`, `tenant_id`, `previous_status`, `status`, `failure_rate`, `total_deliveries`, `failed_deliveries`, `checked_at` | `Converger.Channels.Health` (from `ChannelHealthWorker`) |
 | `sockets:channel:<channel_id>` | presence diffs | socket id with meta `tenant_id`, `conversation_id` | `ConvergerWeb.SocketPresence` |
 | `converger_socket:<tenant_id>:user:<user_id>`, `converger_socket:<tenant_id>:conversation:<conversation_id>`, `user_socket:<tenant_id>:<sub>` | `disconnect` | `{}` | `ConvergerWeb.Sockets` |
@@ -82,7 +86,7 @@ Both sockets authenticate once, in `connect/3`, from the `token` connect paramet
 
 `ConvergerSocket.connect/3` verifies the token with `Converger.Auth.ConvergerToken.verify_token/1` (which also requires `"type": "converger"`) **and** checks that the token's channel is active (`Channels.get_active_channel/2`). A token for a deactivated channel cannot connect even before it expires.
 
-Converger tokens carry `type`, `channel_id`, `tenant_id`, `sub` (`converger_<channel_id>`), an expiry (1800 s by default), and optionally `conversation_id` and `user_id`. `ConvergerChannel.join/3` for `converger:conversation:<id>` authorizes only when the token has a `conversation_id` claim equal to `<id>`. A channel-level token (no `conversation_id`) cannot join: the client first creates or resumes a conversation (`POST` or `GET /api/v1/converger/conversations`), which returns a conversation token.
+Converger tokens carry `type`, `channel_id`, `tenant_id`, `sub` (`converger_<channel_id>`), an expiry (1800 s by default), and optionally `conversation_id` and `user_id`. `ConvergerChannel.join/3` for `converger:conversation:<id>` authorizes only when the token has a `conversation_id` claim equal to `<id>`. A channel-level token (no `conversation_id`) cannot join: it must create or resume a conversation first (`POST`/`GET /api/v1/converger/conversations`), which returns a conversation token ([#114](https://github.com/AimTune/converger/pull/114)). Channel-wide agent sockets come with an explicit `scope` claim ([#64](https://github.com/AimTune/converger/issues/64)).
 
 Any other topic is rejected with `{"reason": "invalid_topic"}`; a failed authorization with `{"reason": "unauthorized"}`.
 
@@ -117,8 +121,34 @@ Because socket ids are per subject, "every socket of a channel" cannot be addres
 `disconnect_channel/1` lists the socket ids on that topic and broadcasts `"disconnect"` to each. `Converger.Channels.update_channel/3` calls it whenever a channel ends up in a non-`active` status, and `delete_channel/2` calls it after deleting. Combined with the active-channel checks in `ConvergerSocket.connect/3` and `ConversationChannel.join/3`, a deactivated channel's clients are dropped and cannot reconnect while it stays inactive.
 
 :::note
-Sockets without an id (a `ConvergerSocket` connected with a channel-level token that has neither `user_id` nor `conversation_id`) are not tracked, so `disconnect_channel/1` cannot reach them. Issue tokens with `user.id` (or per conversation) for clients that must be force-disconnectable. Presence is used for server-side bookkeeping only; presence state is not pushed to clients today (planned, [#25](https://github.com/AimTune/converger/issues/25)).
+Sockets without an id (a `ConvergerSocket` connected with a channel-level token that has neither `user_id` nor `conversation_id`) are not tracked, so `disconnect_channel/1` cannot reach them. Issue tokens with `user.id` (or per conversation) for clients that must be force-disconnectable. `SocketPresence` is server-side bookkeeping only; the presence pushed to clients is the separate per-conversation `ConversationPresence` below.
 :::
+
+## Receipts, typing and presence
+
+`ConvergerChannel` pushes three transient frames besides `activitySet` (client contract: [WebSocket](../websocket.md#5a-receipts-typing-and-presence); spec: [Protocol v1](../protocol/v1.md), section 8; decision: [ADR-0032](../adr/0032-transient-conversation-signals.md)). The legacy channel pushes none of them. Each connection has a **participant** derived from its conversation token (`ConvergerChannel.participant/1`): `role: "user"` with the token's `user_id` as id, or `"anonymous"` without one.
+
+```mermaid
+sequenceDiagram
+    participant A as Client A (ConvergerChannel)
+    participant S as PubSub conversation:ID:signals
+    participant B as Client B (ConvergerChannel)
+    participant SG as Channels.Signals (task)
+    participant WA as WhatsApp Cloud API
+
+    A->>S: broadcast_from "typing" {participant, is_typing}
+    S->>B: Broadcast
+    B->>B: push "typing" (skipped if same participant)
+    A->>SG: forward_typing (at most every 20 s)
+    SG->>WA: typing_indicator on the latest inbound wamid
+```
+
+- **deliveryStatus.** `Converger.Deliveries` already broadcast `delivery_status` on `conversation:<id>` for every status change (`mark_sent`, dead letter, provider receipts through `apply_status_update/2`). Each `ConvergerChannel` turns it into a `deliveryStatus` frame (`ConvergerWeb.ConvergerFrames`), skipping it for identified end users who did not send the activity. Stored `pending` maps to v1 `queued`.
+- **read.** A `read {watermark}` push calls `Converger.Receipts.mark_read/3`, which upserts `conversation_reads (conversation_id, reader_id) -> read_seq` with `ON CONFLICT ... DO UPDATE ... WHERE read_seq < new`, so the position is monotonic without a lock and capped at `conversations.last_seq`. Only when it moved does the channel broadcast `read` on the signals topic (every other participant's connections push a `deliveryStatus` read receipt) and call `Converger.Channels.Signals.forward_read/3`.
+- **typing.** A `typing` push is rate-limited in the channel process (same state within 2 s is dropped), broadcast with `broadcast_from` on the signals topic, and `isTyping: true` is forwarded to external channels at most every 20 s per connection. `terminate/2` broadcasts `isTyping: false` when a typing connection closes.
+- **presence.** When the channel's config `presence` allows it (`"identified"` by default, `"all"`, `"off"`), the channel process is tracked in `ConvergerWeb.ConversationPresence` under `conversation:<id>:presence`, keyed by participant id, and subscribes to that topic. After join it pushes the current participants; on each `presence_diff` it pushes the new connection count of every participant in the diff (`offline` at 0). Phoenix Presence is CRDT-replicated, so this works across nodes.
+- **Backpressure.** `typing` and `presence` frames go through `ConvergerWeb.SocketGuard.push_ephemeral/3`, which drops them when the client's socket mailbox is backed up; `deliveryStatus` frames are always pushed.
+- **External channels.** `Converger.Channels.Signals` resolves the same target channels as a delivery (`Pipeline.resolve_delivery_channels/1`), keeps the ones whose adapter implements `send_typing/2` / `send_read_receipt/2` and that have a participant in the conversation, and passes the participant's latest inbound provider message id (an activity's `idempotency_key`). It runs in a task under `Converger.TaskSupervisor` (`config :converger, :channel_signals_async`, `true` by default), so a slow provider never blocks a channel process. Failures are logged and not retried. See [Writing an adapter](../channels/writing-an-adapter.md).
 
 ## Replay and resume
 

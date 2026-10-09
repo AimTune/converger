@@ -53,6 +53,7 @@ supersedes the old one and both are linked. Read
 | [0024](0024-converger-protocol-v1-as-superset-of-mekik-1.md) | Converger Protocol v1 is a superset profile of mekik/1 | Accepted | [#63](https://github.com/AimTune/converger/issues/63) |
 | [0026](0026-one-client-socket-stack-and-shape-checked-legacy-tokens.md) | One client socket stack; the legacy socket and token family are deprecated | Accepted | [#23](https://github.com/AimTune/converger/issues/23) / [#115](https://github.com/AimTune/converger/pull/115) |
 | [0027](0027-websocket-limits-backpressure-and-draining.md) | WebSocket limits in the socket transport, mailbox backpressure and readiness-gated draining | Accepted | [#27](https://github.com/AimTune/converger/issues/27) / [#117](https://github.com/AimTune/converger/pull/117) |
+| [0032](0032-transient-conversation-signals.md) | Transient conversation signals: receipts, typing and presence over dedicated topics, stored read watermarks, optional adapter callbacks | Accepted | [#25](https://github.com/AimTune/converger/issues/25) |
 
 ### Security
 

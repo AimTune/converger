@@ -13,7 +13,7 @@ For the client side (sockets, topics, frames, tokens, replay), see the [WebSocke
 | Callback | Behaviour |
 | --- | --- |
 | `supported_modes/0` | `["outbound"]`. Creating a `websocket` channel in another mode fails with `websocket channels only support modes: outbound`. |
-| `validate_config/1` | Accepts any config; there is nothing to configure. |
+| `validate_config/1` | Accepts any config. The only key read today is `presence` (`"identified"` default, `"all"`, `"off"`), which controls presence frames for client API sockets; it is read from the token's channel, so it works on every channel type ([WebSocket API](../websocket.md#presence)). |
 | `deliver_activity/2` | Returns `:ok` without doing anything. |
 | `parse_inbound/2` | `{:error, "websocket channel does not receive inbound webhooks"}`. |
 
@@ -41,7 +41,7 @@ The payload is the canonical activity JSON ([ADR-0004](../adr/0004-single-canoni
 | Socket | Topic joined by the client | What the client gets |
 | --- | --- | --- |
 | `/socket` (`ConvergerWeb.UserSocket`, deprecated, see [migrating from the legacy surfaces](../api/migrating-from-legacy.md)) | `conversation:<conversation id>` | `new_activity` events with the canonical activity. The client can also push `new_activity` to create activities; replay with `last_activity_id` on join. |
-| `/socket/converger` (`ConvergerWeb.ConvergerSocket`, client API) | `converger:conversation:<conversation id>` | `activitySet` frames `{activities, watermark, has_more}`; replay after an opaque `watermark` on join ([ADR-0006](../adr/0006-per-conversation-seq-and-opaque-watermarks.md)). Clients send activities over REST or with the `postActivity` push ([WebSocket](../websocket.md#6-send-activities-over-the-socket)). |
+| `/socket/converger` (`ConvergerWeb.ConvergerSocket`, client API) | `converger:conversation:<conversation id>` | `activitySet` frames `{activities, watermark, has_more}`; replay after an opaque `watermark` on join ([ADR-0006](../adr/0006-per-conversation-seq-and-opaque-watermarks.md)); transient `deliveryStatus`, `typing` and `presence` frames ([ADR-0032](../adr/0032-transient-conversation-signals.md)). Clients send activities over REST or with the `postActivity` push ([WebSocket](../websocket.md#6-send-activities-over-the-socket)), and `typing` and `read` over the socket. |
 
 Because the broadcast is independent of the channel type, a WebSocket client can follow a conversation on **any** channel (for example watch a WhatsApp conversation live), as long as its token authorizes that conversation. What the `websocket` type adds is a channel to own conversations that have no external provider: tokens for the client API are generated with the channel `secret` (`POST /api/v1/converger/tokens/generate`), and conversations created with those tokens belong to that channel.
 

@@ -292,7 +292,13 @@ defmodule Converger.Deliveries do
           status: delivery.status,
           sent_at: delivery.sent_at,
           delivered_at: delivery.delivered_at,
-          read_at: delivery.read_at
+          read_at: delivery.read_at,
+          # For the WebSocket deliveryStatus frame (ConvergerWeb.ConvergerFrames).
+          seq: delivery.activity.seq,
+          sender: delivery.activity.sender,
+          attempts: delivery.attempts,
+          last_error: delivery.last_error,
+          updated_at: delivery.updated_at
         }
       )
     end

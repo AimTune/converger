@@ -22,6 +22,24 @@
   `docs/api/migrating-from-legacy.md`; decision: ADR-0026.
 - `converger_js` and the chaos harness use the Converger API socket.
 
+### Receipts, typing indicators and presence on the WebSocket (#25)
+
+- The Converger API socket (`converger:conversation:<id>`) pushes `deliveryStatus` frames for
+  every delivery status change, including WhatsApp `delivered` / `read` receipts, which it used
+  to drop. End users with a `user_id` receive them only for their own activities.
+- Clients can push `typing {isTyping}` (relayed to the other connections, never stored,
+  rate-limited to one state change per 2 s) and `read {watermark}` (stored per reader in the new
+  `conversation_reads` table, never moving backwards; the other participants get a
+  `deliveryStatus` read receipt).
+- `presence` frames per conversation (Phoenix Presence), configurable per channel with the config
+  key `presence` (`identified` by default, `all`, `off`); anonymous end users are not announced by
+  default.
+- New optional adapter callbacks `send_typing/2` and `send_read_receipt/2`; `whatsapp_meta`
+  implements both (Cloud API typing indicator and mark as read).
+- The `delivery_status` PubSub payload (also pushed to the legacy socket) gains `seq`, `sender`,
+  `attempts`, `last_error` and `updated_at`.
+- Migration: `20261010100000_create_conversation_reads`. ADR-0032.
+
 ### Security fixes
 
 - Tenant API (`x-channel-token`) accepts only channel tokens (`typ: "channel"`, or the legacy

@@ -85,7 +85,7 @@ WebSocket becomes the primary channel, with a documented wire protocol that any 
 | [#22](https://github.com/AimTune/converger/issues/22) | Make `websocket` a first-class duplex channel adapter (deliver to sockets, offline buffering, fan-out target) | Open |
 | [#23](https://github.com/AimTune/converger/issues/23) | Unify `UserSocket`/`ConversationChannel` and `ConvergerSocket`/`ConvergerChannel` into one protocol implementation | In review ([ADR-0026](adr/0026-one-client-socket-stack-and-shape-checked-legacy-tokens.md)) |
 | [#24](https://github.com/AimTune/converger/issues/24) | Client-side message ids with server acks over WebSocket (at-least-once send, exactly-once persistence) | Open |
-| [#25](https://github.com/AimTune/converger/issues/25) | Push delivery/read receipts, typing indicators and presence to WebSocket clients | Open |
+| [#25](https://github.com/AimTune/converger/issues/25) | Push delivery/read receipts, typing indicators and presence to WebSocket clients | Done (Phoenix channel binding; v1 framing with #22) |
 | [#26](https://github.com/AimTune/converger/issues/26) | Raw WebSocket endpoint (non-Phoenix framing), optional MessagePack encoding, and SSE/long-poll fallback | Open |
 | [#27](https://github.com/AimTune/converger/issues/27) | WebSocket connection limits, backpressure, socket draining and graceful shutdown | Open |
 | [#28](https://github.com/AimTune/converger/issues/28) | Rich activity model: activity types, attachment schema, reactions, edits/deletes, reply threading | Open |

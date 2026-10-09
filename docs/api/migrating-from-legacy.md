@@ -78,7 +78,7 @@ and its socket identity ([ADR-0020](../adr/0020-per-subject-socket-ids-and-prese
 | Send | push `new_activity` | push `postActivity` |
 | Send idempotency | `idempotency_key` (any string up to 255 bytes) | `clientId` (1 to 128 of `A-Z a-z 0-9 . _ : ~ -`) |
 | Send reply | `{"id", "seq"}` | `{"id", "seq", "watermark"}` |
-| Delivery receipts | `delivery_status` | not yet ([#25](https://github.com/AimTune/converger/issues/25)) |
+| Delivery receipts | `delivery_status` | `deliveryStatus` frames, plus read receipts, `typing` and `presence` ([WebSocket](../websocket.md#5a-receipts-typing-and-presence)) |
 
 ### Activity fields
 
