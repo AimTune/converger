@@ -27,9 +27,14 @@ Table `deliveries`:
 | `read_at` | utc_datetime_usec | | Provider read receipt. |
 | `provider_message_id` | text | | For example the WhatsApp `wamid` or the Infobip message id. Used to correlate receipts. |
 | `metadata` | map | `{}` | Adapter response metadata, merged on success. |
+| `retry_count` | integer | `0` | How many times the delivery was replayed from the dead-letter queue. |
+| `retried_by` | text | | Who replayed it last, as `"<actor type>:<actor id>"` (for example `"tenant_api:<tenant id>"` or `"admin:ops@example.com"`). |
+| `retried_at` | utc_datetime_usec | | When it was last replayed. |
 | `inserted_at`, `updated_at` | utc_datetime_usec | | |
 
-Indexes: `(activity_id)`, `(channel_id)`, `(status)`, unique `(activity_id, channel_id)`, and partial indexes on `(provider_message_id)` and `(channel_id, provider_message_id)` where `provider_message_id IS NOT NULL`.
+Indexes: `(activity_id)`, `(channel_id)`, `(status)`, unique `(activity_id, channel_id)`, and partial indexes on `(provider_message_id)` and `(channel_id, provider_message_id)` where `provider_message_id IS NOT NULL`, plus `(inserted_at, id)`, `(status, updated_at, id)` and `(channel_id, status, updated_at, id)` for the keyset-paginated lists.
+
+Replay tracking (`retry_count`, `retried_by`, `retried_at`) was added by migration [`20261010032000_add_replay_tracking_to_deliveries`](https://github.com/AimTune/converger/blob/main/priv/repo/migrations/20261010032000_add_replay_tracking_to_deliveries.exs), and the dead-letter indexes by [`20261010032100_add_dead_letter_indexes_to_deliveries`](https://github.com/AimTune/converger/blob/main/priv/repo/migrations/20261010032100_add_dead_letter_indexes_to_deliveries.exs) (built `CONCURRENTLY`).
 
 Receipt tracking was added by migration [`20260227200000_add_receipt_tracking_to_deliveries`](https://github.com/AimTune/converger/blob/main/priv/repo/migrations/20260227200000_add_receipt_tracking_to_deliveries.exs). It added `sent_at`, `read_at` and `provider_message_id`, renamed the old success status `delivered` to `sent` (adapter success only means the message left Converger, while `delivered` is now reserved for the provider's receipt), copied `delivered_at` to `sent_at`, and backfilled `provider_message_id` from `metadata.whatsapp_message_id` or `metadata.infobip_message_id`.
 
@@ -56,6 +61,7 @@ stateDiagram-v2
   sent --> read : provider receipt
   delivered --> read : provider receipt
   sent --> failed : provider "failed" receipt
+  failed --> pending : replay (API or Deliveries page)
   delivered --> failed : provider "failed" receipt
   pending --> delivered : early receipt
   pending --> read : early receipt
@@ -137,4 +143,6 @@ A delivery is dead-lettered (`status: "failed"`) when its retries run out, when 
 - broadcasts `delivery_status`;
 - cancels the Oban job.
 
-`Deliveries.list_dead_letters/2` and `paginate_dead_letters/2` list failed deliveries, most recently failed first (keyset on `(updated_at, id)`). Failures also lower the channel's [health](channels.md#health-checks) status and can trigger the tenant's alert webhook. A dead-letter queue with inspection and replay through the API and admin UI is Planned ([#32](https://github.com/AimTune/converger/issues/32)).
+`Deliveries.list_dead_letters/2` and `paginate_dead_letters/2` list failed deliveries, most recently failed first (keyset on `(updated_at, id)`). Failures also lower the channel's [health](channels.md#health-checks) status and can trigger the tenant's alert webhook.
+
+Dead letters can be inspected and replayed on the **Deliveries** page of the admin panel and the tenant portal, and through the [tenant API](../api/tenant-api.md#deliveries). A replay moves the delivery back to `pending`, resets `attempts`, records `retry_count`, `retried_by` and `retried_at`, writes an audit log entry and enqueues a new job. See [Replaying dead letters](../delivery.md#replaying-dead-letters) for the rules.

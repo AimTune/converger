@@ -90,6 +90,7 @@ erDiagram
         integer attempts
         text last_error
         text provider_message_id
+        integer retry_count
     }
     routing_rules {
         uuid id PK
@@ -232,8 +233,10 @@ One row per activity and target channel; the source of truth for delivery state 
 | `sent_at`, `delivered_at`, `read_at` | timestamps | Set on send and on provider receipts. |
 | `provider_message_id` | text | Provider id (e.g. a WhatsApp message id) used to correlate receipts. |
 | `metadata` | jsonb, default `{}` | Adapter response metadata. |
+| `retry_count` | integer, not null, default `0` | Manual replays of the dead letter. |
+| `retried_by`, `retried_at` | text, timestamp | Who replayed it last (`"<actor type>:<actor id>"`) and when. |
 
-Indexes: unique `(activity_id, channel_id)`, `(activity_id)`, `(channel_id)`, `(status)`, partial `(provider_message_id)` and `(channel_id, provider_message_id)` `WHERE provider_message_id IS NOT NULL`, and the keyset index `(inserted_at, id)`.
+Indexes: unique `(activity_id, channel_id)`, `(activity_id)`, `(channel_id)`, `(status)`, partial `(provider_message_id)` and `(channel_id, provider_message_id)` `WHERE provider_message_id IS NOT NULL`, and the keyset indexes `(inserted_at, id)`, `(status, updated_at, id)` and `(channel_id, status, updated_at, id)` (the last two for the dead-letter lists).
 
 ### routing_rules
 
@@ -245,7 +248,7 @@ Uploaded files ([storage](../storage.md)). Columns: `tenant_id` (not null), `con
 
 ### audit_logs
 
-Append-only (`updated_at` disabled) trail of administrative changes. Columns: `tenant_id` (nullable, `ON DELETE SET NULL` so the trail outlives the tenant), `actor_type`, `actor_id`, `action`, `resource_type`, `resource_id`, `changes` (jsonb, with secrets redacted, [ADR-0012](../adr/0012-secrets-at-rest-and-audit-redaction.md)). Indexes: `(tenant_id)`, `(resource_type, resource_id)`, `(actor_type, actor_id)`, `(action)`, `(inserted_at)`, `(inserted_at, id)`.
+Append-only (`updated_at` disabled) trail of administrative changes. Columns: `tenant_id` (nullable, `ON DELETE SET NULL` so the trail outlives the tenant), `actor_type`, `actor_id`, `action`, `resource_type`, `resource_id`, `changes` (jsonb, with secrets redacted, [ADR-0012](../adr/0012-secrets-at-rest-and-audit-redaction.md)). Actions: `create`, `update`, `delete`, `toggle_status`, `toggle_enabled`, `rotate_api_key`, `retry` (dead-letter replay). Resource types: `tenant`, `channel`, `routing_rule`, `admin_user`, `tenant_user`, `delivery`. Indexes: `(tenant_id)`, `(resource_type, resource_id)`, `(actor_type, actor_id)`, `(action)`, `(inserted_at)`, `(inserted_at, id)`.
 
 ### channel_health_checks
 
