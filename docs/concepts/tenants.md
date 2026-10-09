@@ -40,7 +40,7 @@ The migration [`20261008100001_hash_tenant_api_keys`](https://github.com/AimTune
 
 Server-to-server routes under `/api/v1` (conversations, activities, routing rules) authenticate with the `x-api-key` header through `ConvergerWeb.Plugs.TenantAuth`. The presented key is hashed and looked up by `api_key_hash`, or by `previous_api_key_hash` while `previous_api_key_expires_at` is in the future. The tenant must have `status: "active"`. Otherwise the response is `401` with `{"error": "Unauthorized: Invalid or inactive API Key"}`.
 
-The same plug also accepts a channel token in `x-channel-token`, and then resolves the tenant from the token's `tenant_id` claim. Listing conversations (`GET /api/v1/conversations`) requires the API key specifically, because it exposes other end users' conversations. See the [tenant API](../api/tenant-api.md).
+The same plug also accepts a channel token in `x-channel-token`, and then resolves the tenant from the token's `tenant_id` claim. Only channel tokens are accepted there: end-user tokens (legacy conversation tokens and Converger API tokens) are refused with `401` `Unauthorized: Invalid token`. `x-channel-token` is deprecated; `x-api-key` is not (see [migrating from the legacy surfaces](../api/migrating-from-legacy.md)). Listing conversations (`GET /api/v1/conversations`) requires the API key specifically, because it exposes other end users' conversations. See the [tenant API](../api/tenant-api.md).
 
 ### Rotation
 
@@ -62,7 +62,7 @@ Tenants are created `active`. An inactive tenant:
 
 - fails `x-api-key` authentication on `/api/v1`;
 - fails `x-channel-token` authentication (`"Unauthorized: Tenant is not active"`);
-- cannot obtain conversation tokens from the legacy `POST /api/v1/tokens` (`403`).
+- cannot obtain conversation tokens from the legacy, deprecated `POST /api/v1/tokens` (`403`).
 
 The client API (`/api/v1/converger`) and its sockets check the **channel**'s status. Deactivating a channel disconnects its sockets ([channels](channels.md#status)). Deleting a tenant cascades to all its data.
 

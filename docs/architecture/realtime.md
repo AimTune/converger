@@ -6,9 +6,9 @@ sidebar_position: 4
 
 Converger is WebSocket-first: a client that holds a socket open sees every activity of its conversation as soon as it commits. Real-time fan-out is built on Phoenix Channels and Phoenix PubSub. This page explains the server side; the client-facing contract (frames, payloads, examples) is on the [WebSocket](../websocket.md) page.
 
-Two socket stacks exist today, for historical reasons:
+Two socket stacks exist today, for historical reasons. The Converger client API stack is the single implementation of the client protocol; the legacy stack is **deprecated** ([#23](https://github.com/AimTune/converger/issues/23), [ADR-0026](../adr/0026-one-client-socket-stack-and-shape-checked-legacy-tokens.md)) and kept unchanged until it is removed:
 
-| | Legacy stack | Converger client API stack |
+| | Legacy stack (deprecated) | Converger client API stack |
 | --- | --- | --- |
 | Socket path | `/socket` | `/socket/converger` |
 | Socket module | [`ConvergerWeb.UserSocket`](https://github.com/AimTune/converger/blob/main/lib/converger_web/channels/user_socket.ex) | [`ConvergerWeb.ConvergerSocket`](https://github.com/AimTune/converger/blob/main/lib/converger_web/channels/converger_socket.ex) |
@@ -17,13 +17,13 @@ Two socket stacks exist today, for historical reasons:
 | Token | `Converger.Auth.Token` (from `POST /api/v1/tokens`) | `Converger.Auth.ConvergerToken` (from `POST /api/v1/converger/tokens/generate` or `/conversations`) |
 | Activity frame | `new_activity` (canonical map) | `activitySet` (`{activities, watermark, has_more}`) |
 | Resume | `last_activity_id` in the join payload | opaque `watermark` in the join payload |
-| Client sends | `new_activity` push | REST only (the channel handles no client events) |
+| Client sends | `new_activity` push | `postActivity` push, or REST |
 | Delivery status | `delivery_status` pushed | not pushed |
 
 Both are Phoenix sockets with `websocket: true` and `longpoll: false`, using the standard Phoenix V2 JSON serializer. A third socket, `/live`, serves LiveView for the admin and tenant UIs.
 
 :::info Planned
-The two stacks will be unified into one implementation of Converger Protocol v1 (spec in progress, [#21](https://github.com/AimTune/converger/issues/21), [#63](https://github.com/AimTune/converger/issues/63)); the legacy stack and its token family will be deprecated ([#23](https://github.com/AimTune/converger/issues/23)). Also planned: a raw WebSocket endpoint without Phoenix framing ([#26](https://github.com/AimTune/converger/issues/26)), client message ids with server acks ([#24](https://github.com/AimTune/converger/issues/24)), and receipts, typing and presence pushed to clients ([#25](https://github.com/AimTune/converger/issues/25)).
+Converger Protocol v1 ([spec](../protocol/v1.md)) is implemented on the Converger client API socket ([#22](https://github.com/AimTune/converger/issues/22)); the legacy stack is removed after its deprecation window (protocol v1, section 13.3). Also planned: a raw WebSocket endpoint without Phoenix framing ([#26](https://github.com/AimTune/converger/issues/26)), client message ids with server acks ([#24](https://github.com/AimTune/converger/issues/24)), and receipts, typing and presence pushed to clients ([#25](https://github.com/AimTune/converger/issues/25)).
 :::
 
 ## How an activity reaches a socket
@@ -70,7 +70,7 @@ Both sockets authenticate once, in `connect/3`, from the `token` connect paramet
 
 ### Legacy socket (`/socket`)
 
-`UserSocket.connect/3` verifies the token with `Converger.Auth.Token.verify_token/1` and stores the claims. Tokens come from `POST /api/v1/tokens` (body `conversation_id`, `user_id`; header `x-channel-token`) and carry `conversation_id`, `tenant_id`, `sub` (the user id) and a 1 hour expiry.
+`UserSocket.connect/3` verifies the token with `Converger.Auth.Token.verify_conversation_token/1` (a channel token or a Converger API token is refused), logs a deprecation warning (`ConvergerWeb.Deprecation`) and stores the claims. Tokens come from `POST /api/v1/tokens` (body `conversation_id`, `user_id`; header `x-channel-token`) and carry `conversation_id`, `tenant_id`, `sub` (the user id) and a 1 hour expiry.
 
 `ConversationChannel.join/3` for `conversation:<id>`:
 
@@ -82,12 +82,11 @@ Both sockets authenticate once, in `connect/3`, from the `token` connect paramet
 
 `ConvergerSocket.connect/3` verifies the token with `Converger.Auth.ConvergerToken.verify_token/1` (which also requires `"type": "converger"`) **and** checks that the token's channel is active (`Channels.get_active_channel/2`). A token for a deactivated channel cannot connect even before it expires.
 
-Converger tokens carry `type`, `channel_id`, `tenant_id`, `sub` (`converger_<channel_id>`), an expiry (1800 s by default), and optionally `conversation_id` and `user_id`. `ConvergerChannel.join/3` for `converger:conversation:<id>` authorizes when either:
-
-- the token has a `conversation_id` claim equal to `<id>`, or
-- the token has no `conversation_id` claim and the conversation belongs to the token's `channel_id` within its `tenant_id`.
+Converger tokens carry `type`, `channel_id`, `tenant_id`, `sub` (`converger_<channel_id>`), an expiry (1800 s by default), and optionally `conversation_id` and `user_id`. `ConvergerChannel.join/3` for `converger:conversation:<id>` authorizes only when the token has a `conversation_id` claim equal to `<id>`. A channel-level token (no `conversation_id`) cannot join: the client first creates or resumes a conversation (`POST` or `GET /api/v1/converger/conversations`), which returns a conversation token.
 
 Any other topic is rejected with `{"reason": "invalid_topic"}`; a failed authorization with `{"reason": "unauthorized"}`.
+
+`ConvergerChannel.handle_in("postActivity", ...)` sends over the socket: it rate-limits with the tenant's `activity_create` bucket, maps the Direct Line-style payload to client fields (`channelData` becomes `metadata`) and calls `Activities.create_client_activity/2`, so the activity takes the same pipeline path as a REST send ([ADR-0003](../adr/0003-pipeline-is-the-only-delivery-path.md)). The sender is the token's `user_id`, else the payload's `from.id`, else `"user"`; an optional `clientId` becomes the idempotency key `ws:<sender>:<clientId>`. The reply is `{id, seq, watermark}`; the activity then arrives as an `activitySet` like any other. See [WebSocket](../websocket.md#6-send-activities-over-the-socket).
 
 ## Socket identity
 

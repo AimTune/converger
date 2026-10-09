@@ -1,6 +1,6 @@
 ---
-title: "ADR-0026: Dead-letter replay resets the delivery in place and always goes through Oban"
-sidebar_label: "0026 Dead-letter replay"
+title: "ADR-0028: Dead-letter replay resets the delivery in place and always goes through Oban"
+sidebar_label: "0028 Dead-letter replay"
 description: A replayed dead letter keeps its delivery row, is flipped from failed to pending under a status guard, gets a fresh attempt budget and one Oban job inserted in the same transaction, whatever the pipeline backend, and is audited per delivery.
 ---
 

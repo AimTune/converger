@@ -57,31 +57,33 @@
         }
     </style>
 </head>
-
 <body>
     <div class="container">
-        <h1>Converger JS Demo <small style="font-size: 0.5em; color: #666;">v2 (Token Auth)</small></h1>
+        <h1>Converger JS Demo <small style="font-size: 0.5em; color: #666;">Converger API socket</small></h1>
+
+        <p>
+            Get a user token from your backend:
+            <code>POST /api/v1/converger/tokens/generate</code> with
+            <code>Authorization: Bearer &lt;channel secret&gt;</code>.
+            Never put the channel secret in a browser.
+        </p>
 
         <div class="input-group">
-            <label>Channel Token (from Admin Panel)</label>
-            <input type="text" id="channelToken" placeholder="JWT Token">
-        </div>
-        <div class="input-group">
-            <label>User ID (Optional)</label>
-            <input type="text" id="userId" placeholder="random if empty">
+            <label>User Token</label>
+            <input type="text" id="userToken" placeholder="JWT Token">
         </div>
 
         <div style="margin-top: 10px; margin-bottom: 20px;">
             <button id="startBtn" style="background-color: #28a745;">Start New Conversation & Connect</button>
             <span style="margin: 0 10px;">OR</span>
-            <button id="connectManualBtn" style="background-color: #6c757d;">Connect Manually (User Token
+            <button id="connectManualBtn" style="background-color: #6c757d;">Connect Manually (Conversation Token
                 required)</button>
         </div>
 
         <div id="manualInput" style="display:none; border: 1px solid #ddd; padding: 10px; margin-bottom: 20px;">
             <h3>Manual Connection</h3>
             <div class="input-group">
-                <label>User Token</label>
+                <label>Conversation Token</label>
                 <input type="text" id="token" placeholder="JWT Token">
             </div>
             <div class="input-group">
@@ -104,15 +106,10 @@
         </div>
     </div>
 
-    <!-- Import using ES modules -->
-    <script type="module">
-        import { ConvergerClient } from './src/converger-client.js';
-    </script>
-
     <script type="importmap">
     {
         "imports": {
-            "phoenix": "https://cdn.jsdelivr.net/npm/phoenix@1.7.0/+esm"
+            "phoenix": "https://cdn.jsdelivr.net/npm/phoenix@1.8.1/+esm"
         }
     }
     </script>
@@ -120,8 +117,8 @@
     <script type="module">
         import { ConvergerClient } from './src/converger-client.js';
 
-        const client = new ConvergerClient("ws://localhost:4000/socket");
-        let conversationId = null;
+        const API = 'http://localhost:4000/api/v1/converger';
+        const client = new ConvergerClient("ws://localhost:4000/socket/converger");
 
         function updateStatus(msg, color = 'black') {
             const statusEl = document.getElementById('status');
@@ -129,49 +126,20 @@
             statusEl.style.color = color;
         }
 
-        async function createConversation(channelToken, userId) {
+        // Returns {conversationId, token}: the token is scoped to the new conversation.
+        async function createConversation(userToken) {
             updateStatus("Creating conversation...", "#007bff");
-            // NOTE: We do NOT send channel_id in body. It is extracted from x-channel-token by the backend.
-            const url = 'http://localhost:4000/api/v1/conversations';
-            console.log("Fetching: " + url);
-            const response = await fetch(url, {
+            const response = await fetch(`${API}/conversations`, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'x-channel-token': channelToken
-                },
-                body: JSON.stringify({})
+                headers: { 'Authorization': `Bearer ${userToken}` }
             });
 
             if (!response.ok) {
                 const err = await response.json();
-                throw new Error("Create Conversation failed: " + (err.error || response.statusText));
+                throw new Error("Create Conversation failed: " + (err.error?.message || response.statusText));
             }
 
-            const data = await response.json();
-            console.log("Conversation Created:", data);
-            return data.data.id;
-        }
-
-        async function generateToken(channelToken, conversationId, userId) {
-            updateStatus("Generating user token...", "#007bff");
-            const response = await fetch('http://localhost:4000/api/v1/tokens', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'x-channel-token': channelToken
-                },
-                body: JSON.stringify({ conversation_id: conversationId, user_id: userId })
-            });
-
-            if (!response.ok) {
-                const err = await response.json();
-                throw new Error("Generate Token failed: " + (err.error || response.statusText));
-            }
-
-            const data = await response.json();
-            console.log("Token Generated:", data);
-            return data.token;
+            return response.json();
         }
 
         document.getElementById('connectManualBtn').addEventListener('click', () => {
@@ -179,26 +147,18 @@
         });
 
         document.getElementById('startBtn').addEventListener('click', async () => {
-            const channelToken = document.getElementById('channelToken').value;
-            const userId = document.getElementById('userId').value || 'user_' + Math.floor(Math.random() * 10000);
+            const userToken = document.getElementById('userToken').value;
 
-            if (!channelToken) {
-                alert("Please provide valid Channel Token");
+            if (!userToken) {
+                alert("Please provide a valid User Token");
                 return;
             }
 
             try {
-                const cid = await createConversation(channelToken, userId);
-                conversationId = cid;
-
-                // Update UI to show what happened
-                document.getElementById('conversationId').value = cid;
-
-                const token = await generateToken(channelToken, cid, userId);
+                const { conversationId, token } = await createConversation(userToken);
+                document.getElementById('conversationId').value = conversationId;
                 document.getElementById('token').value = token;
-
-                connectAndJoin(token, cid);
-
+                connectAndJoin(token, conversationId);
             } catch (e) {
                 console.error(e);
                 alert(e.message);
@@ -208,7 +168,7 @@
 
         document.getElementById('connectBtn').addEventListener('click', () => {
             const token = document.getElementById('token').value;
-            conversationId = document.getElementById('conversationId').value;
+            const conversationId = document.getElementById('conversationId').value;
 
             if (!token || !conversationId) {
                 alert("Please provide Token and Conversation ID");
@@ -223,14 +183,16 @@
                 client.connect(token);
                 client.joinConversation(cid);
 
-                client.onActivity((payload) => {
+                client.onActivity((activity) => {
                     const log = document.getElementById('log');
                     const el = document.createElement('div');
                     el.className = 'message';
-                    el.innerHTML = `
-                        <div class="meta">${payload.sender || 'Unknown'} - ${payload.inserted_at || new Date().toISOString()}</div>
-                        <div>${payload.text}</div>
-                    `;
+                    const meta = document.createElement('div');
+                    meta.className = 'meta';
+                    meta.textContent = `${activity.from?.id || 'Unknown'} - ${activity.timestamp || new Date().toISOString()}`;
+                    const body = document.createElement('div');
+                    body.textContent = activity.text ?? '';
+                    el.append(meta, body);
                     log.appendChild(el);
                     log.scrollTop = log.scrollHeight;
                 });
@@ -257,7 +219,7 @@
             const text = input.value;
             if (!text) return;
 
-            client.sendMessage(text);
+            client.sendMessage(text).catch((err) => updateStatus("Send failed: " + (err.reason || err), "red"));
             input.value = '';
         }
     </script>

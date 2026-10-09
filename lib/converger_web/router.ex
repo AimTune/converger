@@ -51,6 +51,8 @@ defmodule ConvergerWeb.Router do
   scope "/api/v1", ConvergerWeb do
     pipe_through :api
 
+    # Deprecated (#23), like every `x-channel-token` use: legacy conversation
+    # tokens. Converger tokens come from /api/v1/converger/tokens/generate.
     post "/tokens", TokenController, :create
 
     resources "/conversations", ConversationController, only: [:index, :create, :show] do

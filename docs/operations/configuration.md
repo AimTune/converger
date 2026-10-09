@@ -120,6 +120,28 @@ All environments. Values are integers; unset or empty variables keep the `config
 
 Limits themselves are not environment variables; see [Rate limiting](rate-limiting.md#tuning).
 
+## WebSocket limits and draining
+
+All environments. Integers; unset or empty variables keep the `config :converger, :websocket` default. See
+[WebSocket limits and draining](websocket-limits.md#configuration) for what each one does.
+
+| Variable | Config key | Default |
+| --- | --- | --- |
+| `WS_MAX_FRAME_BYTES` | `max_frame_bytes` | `131072` |
+| `WS_MAX_MESSAGES_PER_WINDOW` | `max_messages` | `20` |
+| `WS_RATE_WINDOW_MS` | `rate_window_ms` | `1000` |
+| `WS_MAX_JOINS` | `max_joins` | `50` |
+| `WS_EPHEMERAL_DROP_QUEUE_LEN` | `ephemeral_drop_queue_len` | `100` |
+| `WS_SLOW_CONSUMER_QUEUE_LEN` | `slow_consumer_queue_len` | `1000` |
+| `WS_RECONNECT_BASE_MS` | `reconnect_base_ms` | `1000` |
+| `WS_RECONNECT_JITTER_MS` | `reconnect_jitter_ms` | `5000` |
+| `WS_DRAIN_DELAY_MS` | `drain_delay_ms` | `5000` (`0` in test) |
+| `WS_DRAIN_BATCH_SIZE` | `drain_batch_size` | `500` |
+| `WS_DRAIN_BATCH_INTERVAL_MS` | `drain_batch_interval_ms` | `1000` |
+| `WS_DRAIN_SHUTDOWN_MS` | `drain_shutdown_ms` | `30000` |
+
+The hard frame cap, `config :converger, :websocket_max_frame_size` (`1_048_576`), is compile time.
+
 ## Clustering and metrics
 
 | Variable | Default | Environment | Meaning |

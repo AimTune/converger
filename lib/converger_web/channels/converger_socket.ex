@@ -1,5 +1,14 @@
 defmodule ConvergerWeb.ConvergerSocket do
+  @moduledoc """
+  The client WebSocket (`/socket/converger`), the single implementation of
+  the client protocol: receive `activitySet`, send with `postActivity`
+  (`ConvergerWeb.ConvergerChannel`). Authenticates with a Converger token
+  (`Converger.Auth.ConvergerToken`).
+  """
+
   use Phoenix.Socket
+  # Rate, size and join limits, slow-consumer and drain handling.
+  use ConvergerWeb.SocketGuard
 
   alias Converger.Auth.ConvergerToken
 

@@ -194,7 +194,7 @@ Nothing else happens automatically: the activity stays committed and other chann
 
 ### Replaying dead letters
 
-Fix the cause first (for example the channel's webhook URL), then replay. A replay sends the stored activity again through the channel's middleware and adapter, exactly like the first attempt. The design is recorded in [ADR-0026](adr/0026-dead-letter-replay-in-place-through-oban.md).
+Fix the cause first (for example the channel's webhook URL), then replay. A replay sends the stored activity again through the channel's middleware and adapter, exactly like the first attempt. The design is recorded in [ADR-0028](adr/0028-dead-letter-replay-in-place-through-oban.md).
 
 | Where | One delivery | Many deliveries |
 | --- | --- | --- |
@@ -306,4 +306,4 @@ Health checks older than 7 days are pruned at the end of each run. Health is inf
 
 - [Delivery pipeline](architecture/delivery-pipeline.md) and [Activity flow](architecture/activity-flow.md)
 - [Webhooks](webhooks.md)
-- [ADR-0019](adr/0019-per-channel-retry-policy-delivery-error-and-lifeline.md), [ADR-0002](adr/0002-broadway-for-throughput-oban-for-retries.md), [ADR-0001](adr/0001-transactional-outbox-with-oban.md), [ADR-0026](adr/0026-dead-letter-replay-in-place-through-oban.md)
+- [ADR-0019](adr/0019-per-channel-retry-policy-delivery-error-and-lifeline.md), [ADR-0002](adr/0002-broadway-for-throughput-oban-for-retries.md), [ADR-0001](adr/0001-transactional-outbox-with-oban.md), [ADR-0028](adr/0028-dead-letter-replay-in-place-through-oban.md)

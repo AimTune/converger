@@ -31,7 +31,8 @@ The application callback is [`Converger.Application`](https://github.com/AimTune
 | 7 | `Converger.RateLimit.Supervisor` | Hammer ETS counters, the per-tenant override cache and, with the `:cluster` backend, the PubSub counter replication. |
 | 8 | `Oban` | Job processing, configured from `config :converger, Oban`. |
 | 9 | `Converger.Pipeline.child_specs()` | Children of the configured pipeline backend. Empty for Oban and Inline; the Broadway pipeline for the Broadway backend. |
-| 10 | `ConvergerWeb.Endpoint` | Bandit HTTP server, sockets and the router. Started last so it only accepts traffic once everything it depends on is running. |
+| 10 | `ConvergerWeb.Endpoint` | Bandit HTTP server, sockets and the router. Started after everything it depends on, so it only accepts traffic once they are running. Client sockets are limited by `ConvergerWeb.SocketGuard`. |
+| 11 | `ConvergerWeb.Drain` | Shutdown gate. Stopped first, it turns `/health/ready` to 503 and refuses new sockets for `drain_delay_ms` before the endpoint drains its sockets in batches. See [WebSocket limits and draining](../operations/websocket-limits.md). |
 
 ```mermaid
 flowchart TD
@@ -54,6 +55,7 @@ flowchart TD
     OBAN --> PLG["plugins: Pruner, Lifeline, Cron"]
     SUP --> BW["Broadway pipeline (Broadway backend only)"]
     SUP --> EP["ConvergerWeb.Endpoint (Bandit)"]
+    SUP --> DRAIN["ConvergerWeb.Drain"]
 ```
 
 ## Components
@@ -71,7 +73,7 @@ flowchart LR
         REST["REST controllers /api/v1"]
         CAPI["Converger client API /api/v1/converger"]
         INB["InboundController /api/v1/channels/:id/inbound"]
-        SOCK["UserSocket /socket and ConvergerSocket /socket/converger"]
+        SOCK["ConvergerSocket /socket/converger and UserSocket /socket (deprecated)"]
         LV["LiveView /admin and /portal"]
         OW["Oban Web /admin/oban"]
     end
@@ -119,10 +121,10 @@ flowchart LR
 | Component | Module(s) | Notes |
 | --- | --- | --- |
 | HTTP endpoint | [`ConvergerWeb.Endpoint`](https://github.com/AimTune/converger/blob/main/lib/converger_web/endpoint.ex) | Bandit adapter. Plug order: `TrustedProxies` (resolves `conn.remote_ip` from `TRUSTED_PROXIES`), `ForceSSL` (HTTPS redirect and HSTS, runtime-configured), `Plug.Static`, request id, telemetry, `CORSPlug` (origins read per request from `CORS_ORIGINS`), parsers (with a body reader that caches the raw body for signature checks), session, router. |
-| Tenant REST API | `ConvergerWeb.ConversationController`, `ActivityController`, `RoutingRuleController`, `TokenController` | `/api/v1`, authenticated with `x-api-key` (tenant API key) or `x-channel-token`. |
+| Tenant REST API | `ConvergerWeb.ConversationController`, `ActivityController`, `RoutingRuleController`, `TokenController` | `/api/v1`, authenticated with `x-api-key` (tenant API key) or `x-channel-token` (deprecated, see [migrating from the legacy surfaces](../api/migrating-from-legacy.md)). |
 | Converger client API | `ConvergerWeb.ConvergerAPI.*` | `/api/v1/converger`, Direct Line-inspired, authenticated with `Authorization: Bearer` (channel secret for `tokens/generate`, otherwise a Converger token). |
 | Inbound webhooks | `ConvergerWeb.InboundController` | `GET/POST /api/v1/channels/:channel_id/inbound` (provider verification and messages) and `POST /api/v1/channels/:channel_id/status` (delivery and read receipts). |
-| Sockets | `ConvergerWeb.UserSocket`, `ConvergerWeb.ConvergerSocket` | Phoenix channel sockets at `/socket` and `/socket/converger`; see [Real-time](realtime.md) and [WebSocket](../websocket.md). |
+| Sockets | `ConvergerWeb.UserSocket`, `ConvergerWeb.ConvergerSocket` | Phoenix channel sockets at `/socket/converger` (the client socket stack; clients also send activities on it with `postActivity`) and `/socket` (legacy, deprecated); see [Real-time](realtime.md) and [WebSocket](../websocket.md). |
 | Admin UI | `ConvergerWeb.Admin.*Live` | `/admin`, behind the admin IP allowlist (`ADMIN_IP_WHITELIST`) and an admin session. |
 | Tenant portal | `ConvergerWeb.Portal.*Live` | `/portal`, tenant user session, no IP allowlist. |
 | Oban Web | `oban_dashboard("/oban")` | `/admin/oban`, same guards as the admin UI plus role mapping in `ConvergerWeb.ObanResolver`. |
@@ -209,7 +211,7 @@ PubSub is fire-and-forget. Nothing that must not be lost is sent only over PubSu
 ### Telemetry and tracing
 
 - **Metrics**: `ConvergerWeb.Telemetry` defines Phoenix, Ecto, VM and Oban metrics plus `converger.activities.create.count` and `converger.rate_limit.exceeded.count`, exported in Prometheus format.
-- **Telemetry events** emitted by Converger itself: `[:converger, :activities, :create]`, `[:converger, :deliveries, :dead_lettered]`, `[:converger, :deliveries, :retried]`, `[:converger, :middleware, :exception]`, `[:converger, :rate_limit, :exceeded]`.
+- **Telemetry events** emitted by Converger itself: `[:converger, :activities, :create]`, `[:converger, :deliveries, :dead_lettered]`, `[:converger, :deliveries, :retried]`, `[:converger, :middleware, :exception]`, `[:converger, :rate_limit, :exceeded]`, `[:converger, :deprecated, :use]`.
 - **Tracing**: OpenTelemetry spans for Phoenix, Ecto and Oban. Export is disabled (`traces_exporter: :none`) unless `OTEL_EXPORTER_OTLP_ENDPOINT` or `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` is set ([ADR-0010](../adr/0010-runtime-cors-and-opentelemetry-configuration.md)).
 - **Logs**: in production, `LoggerJSON` on the default handler, with redaction of keys such as `api_key`, `secret`, `token` and `authorization`.
 
