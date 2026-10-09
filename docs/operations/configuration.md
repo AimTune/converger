@@ -164,6 +164,7 @@ cookie) is configured by `rel/env.sh.eex` when the release starts.
 | `RELEASE_DISTRIBUTION` | `name` when clustering, else `sname` | releases | Standard Mix release variable; long names are needed for `name@ip`. |
 | `RELEASE_NODE` | `<CLUSTER_NODE_BASENAME>@<IP>` when clustering | releases | Standard Mix release variable. The IP is `POD_IP`, then `FLY_PRIVATE_IP`, then `hostname -i`. An IPv6 address switches the distribution to `inet6_tcp`. |
 | `POD_IP`, `FLY_PRIVATE_IP` | unset | releases | Node address used for `RELEASE_NODE` (Kubernetes downward API, Fly.io). |
+| `CLUSTER_DIST_PORT` | unset (random port) | releases | Fixed Erlang distribution port of the server, for firewalls and NetworkPolicies. Applied by `rel/env.sh.eex` to `start`/`daemon` only, so `bin/converger rpc` and `remote` can still run in the same pod. The Helm chart sets `9100`. |
 
 ## Metrics and health
 

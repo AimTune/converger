@@ -1,30 +1,61 @@
-# Default values for the Converger chart (a skeleton: it mirrors deploy/k8s).
-# See docs/operations/kubernetes.md.
+# Default values for the Converger chart. Every key is documented in
+# README.md next to this file and in docs/operations/kubernetes.md; the
+# environment variables are documented in docs/operations/configuration.md.
+
+nameOverride: ""
+fullnameOverride: ""
 
 image:
   repository: ghcr.io/aimtune/converger
-  # Defaults to the chart's appVersion. Pin a version or a digest.
+  # Defaults to the chart's appVersion. Pin a version, or set `digest`.
   tag: ""
+  # sha256:... ; wins over `tag` when set.
+  digest: ""
   pullPolicy: IfNotPresent
 
 imagePullSecrets: []
 
-# Name of an existing Secret with DATABASE_URL, SECRET_KEY_BASE, CLOAK_KEY,
-# RELEASE_COOKIE and (optionally) METRICS_TOKEN. The chart never creates it.
+# Secrets: DATABASE_URL, SECRET_KEY_BASE, CLOAK_KEY, RELEASE_COOKIE and
+# (optionally) METRICS_TOKEN.
+#
+# By default the chart reads them from an existing Secret that you create
+# (kubectl, External Secrets, Sealed Secrets, ...). Set `secret.create: true`
+# to let the chart render the Secret from the values below instead; the
+# values then live in the Helm release, so prefer `existingSecret` in
+# production.
 existingSecret: converger-env
 
-# Non-secret environment (docs/operations/configuration.md).
+secret:
+  create: false
+  databaseUrl: ""
+  secretKeyBase: ""
+  cloakKey: ""
+  releaseCookie: ""
+  metricsToken: ""
+
+# Non-secret environment, rendered into the ConfigMap.
 env:
   PHX_HOST: converger.example.com
+  # Addresses of the ingress controller / load balancer, so that
+  # X-Forwarded-For and X-Forwarded-Proto are honoured.
   TRUSTED_PROXIES: 10.0.0.0/8
   FORCE_SSL: "true"
   POOL_SIZE: "10"
   METRICS_ALLOWED_IPS: ""
 
+# Extra container env entries (name/value or valueFrom), and extra
+# envFrom sources (configMapRef / secretRef).
+extraEnv: []
+extraEnvFrom: []
+
 cluster:
-  # libcluster strategy: kubernetes_dns (headless Service) or none.
+  # libcluster strategy: kubernetes_dns (through the headless Service) or
+  # none (independent nodes; only for a single replica).
   strategy: kubernetes_dns
   nodeBasename: converger
+  # Fixed Erlang distribution port, so that NetworkPolicies can allow it.
+  # null leaves it to the runtime (a random port).
+  distributionPort: 9100
 
 replicaCount: 2
 
@@ -33,18 +64,89 @@ autoscaling:
   minReplicas: 2
   maxReplicas: 10
   targetCPUUtilizationPercentage: 70
+  # Optional; unset means CPU only.
+  targetMemoryUtilizationPercentage: null
 
 podDisruptionBudget:
   enabled: true
   minAvailable: 1
 
-# Runs /app/bin/migrate as a pre-install/pre-upgrade hook.
+# Runs /app/bin/migrate as a pre-install/pre-upgrade hook, with the new
+# image, before the Deployment rolls.
 migrations:
   enabled: true
+  backoffLimit: 3
+  activeDeadlineSeconds: 600
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
+
+serviceAccount:
+  create: true
+  # Defaults to the full name when create is true, "default" otherwise.
+  name: ""
+  annotations: {}
 
 service:
   type: ClusterIP
   port: 80
+  annotations: {}
+
+ingress:
+  enabled: false
+  className: ""
+  # WebSockets are long-lived: raise the proxy timeouts of your controller,
+  # for example for ingress-nginx:
+  #   nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+  #   nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+  annotations: {}
+  hosts:
+    - host: converger.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+  #  - secretName: converger-tls
+  #    hosts:
+  #      - converger.example.com
+
+metrics:
+  # Prometheus Operator PodMonitor scraping every pod at :4000/metrics with
+  # the METRICS_TOKEN from the Secret. Needs the monitoring.coreos.com CRDs.
+  podMonitor:
+    enabled: false
+    interval: 30s
+    scrapeTimeout: 10s
+    labels: {}
+
+networkPolicy:
+  enabled: false
+  # Who may reach the HTTP port (4000). Empty allows every source; list
+  # NetworkPolicy peers (for example the ingress controller's namespace and
+  # Prometheus) to narrow it. Pod-to-pod clustering (EPMD 4369 and
+  # cluster.distributionPort) is always allowed between Converger pods.
+  httpFrom: []
+  #  - namespaceSelector:
+  #      matchLabels:
+  #        kubernetes.io/metadata.name: ingress-nginx
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65534
+  runAsGroup: 65534
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: ["ALL"]
 
 resources:
   requests:
@@ -53,9 +155,21 @@ resources:
   limits:
     memory: 1Gi
 
+# preStop sleep + the drain budget of docs/operations/websocket-limits.md
+# (60 s with the defaults, up to 90 s with many native and Phoenix sockets).
 terminationGracePeriodSeconds: 95
 preStopSleepSeconds: 5
 
+# Spread pods over nodes and zones when possible (ScheduleAnyway). Set
+# topologySpreadConstraints to replace these defaults.
+defaultTopologySpread: true
+topologySpreadConstraints: []
+
+priorityClassName: ""
 nodeSelector: {}
 tolerations: []
 affinity: {}
+
+# `helm test` pod: GETs /health/ready through the Service.
+tests:
+  image: busybox:1.37

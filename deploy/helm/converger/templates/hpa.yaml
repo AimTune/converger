@@ -19,7 +19,16 @@ spec:
         target:
           type: Utilization
           averageUtilization: {{ .Values.autoscaling.targetCPUUtilizationPercentage }}
+    {{- with .Values.autoscaling.targetMemoryUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: {{ . }}
+    {{- end }}
   behavior:
+    # Scale down one pod a minute: every pod drains its WebSockets first.
     scaleDown:
       stabilizationWindowSeconds: 300
       policies:

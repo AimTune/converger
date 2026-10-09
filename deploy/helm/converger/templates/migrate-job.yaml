@@ -1,7 +1,7 @@
 {{- if .Values.migrations.enabled }}
-# Runs before the Deployment is installed or upgraded. The ConfigMap is not
-# installed yet at pre-install time, so the hook only uses the Secret
-# (DATABASE_URL, SECRET_KEY_BASE, CLOAK_KEY).
+# Runs before the Deployment is installed or upgraded, with the new image.
+# The ConfigMap is not installed yet at pre-install time, so the hook only
+# uses the Secret (DATABASE_URL, SECRET_KEY_BASE, CLOAK_KEY) and extraEnv.
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -14,36 +14,49 @@ metadata:
     helm.sh/hook-weight: "0"
     helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
 spec:
-  backoffLimit: 3
+  backoffLimit: {{ .Values.migrations.backoffLimit }}
+  activeDeadlineSeconds: {{ .Values.migrations.activeDeadlineSeconds }}
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: {{ .Chart.Name }}
-        app.kubernetes.io/instance: {{ .Release.Name }}
+        {{- include "converger.baseLabels" . | nindent 8 }}
         app.kubernetes.io/component: migrate
     spec:
       restartPolicy: Never
+      {{- if not .Values.serviceAccount.create }}
+      # The chart's own ServiceAccount is created after pre-install hooks,
+      # so only an existing one can be used here.
+      serviceAccountName: {{ include "converger.serviceAccountName" . }}
+      {{- end }}
       automountServiceAccountToken: false
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       securityContext:
-        {{- include "converger.podSecurityContext" . | nindent 8 }}
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
         - name: migrate
           image: {{ include "converger.image" . }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command: ["/app/bin/migrate"]
+          {{- with .Values.extraEnv }}
+          env:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           envFrom:
             - secretRef:
-                name: {{ required "existingSecret is required" .Values.existingSecret }}
+                name: {{ include "converger.secretName" . }}
           resources:
-            requests:
-              cpu: 100m
-              memory: 256Mi
-            limits:
-              memory: 512Mi
+            {{- toYaml .Values.migrations.resources | nindent 12 }}
           securityContext:
-            {{- include "converger.containerSecurityContext" . | nindent 12 }}
+            {{- toYaml .Values.securityContext | nindent 12 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
 {{- end }}

@@ -150,8 +150,15 @@ every Oban job completed on its first attempt.
 
 **Deployment artefacts.** `deploy/k8s` (kustomize: Deployment with startup/liveness/readiness probes and a
 `preStop` sleep, Service, headless Service with `publishNotReadyAddresses`, HPA, PodDisruptionBudget, migration Job,
-ServiceAccount without API token), a Helm chart skeleton in `deploy/helm/converger` with the migration as a
-pre-install/pre-upgrade hook, `deploy/fly/fly.toml`, and `docker-compose.cluster.yml` (gossip).
+ServiceAccount without API token), a Helm chart in `deploy/helm/converger` with the same resources, the migration
+as a pre-install/pre-upgrade hook, a values schema, a `helm test` readiness check and optional Ingress, `PodMonitor`,
+`NetworkPolicy` and chart-managed Secret, `deploy/fly/fly.toml`, and `docker-compose.cluster.yml` (gossip). The chart
+is released with the application: each `v*` tag packages it with `version` and `appVersion` set to the tag and
+pushes it to `oci://ghcr.io/aimtune/charts` (GHCR, next to the image), rather than to a separate chart repository
+with its own version line; a classic `index.yaml` repository on GitHub Pages was rejected because the docs site
+already owns Pages and OCI needs no index. The server's Erlang distribution port can be pinned with
+`CLUSTER_DIST_PORT` (the chart uses 9100) so NetworkPolicies can allow it; `rel/env.sh.eex` applies it to `start`
+only, because `ERL_AFLAGS` would also bind it in `bin/converger rpc`'s second node.
 
 ## Consequences
 
@@ -177,7 +184,10 @@ pre-install/pre-upgrade hook, `deploy/fly/fly.toml`, and `docker-compose.cluster
 - The plain kustomize migration Job must be deleted before applying a new image (immutable pod template); the Helm
   chart avoids this with a hook.
 - The cluster suite uses a separate database that it truncates; it must not point at a database with data.
-- The manifests are validated statically (kustomize, kubeconform, `helm lint`), not against a live cluster in CI.
+- The manifests are validated statically in CI (`Deploy manifests` workflow: kustomize, kubeconform, `helm lint`
+  for three value sets), not against a live cluster.
+- One chart version per application version: a chart-only fix needs an application release (or a manual
+  `helm package --version` push).
 
 ### Follow-ups
 

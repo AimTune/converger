@@ -195,8 +195,14 @@
   two acknowledged `cowlib` advisories with them).
 - Two-node test suite (`test/cluster`, `mix test --only cluster`, own CI job):
   cross-node WebSocket broadcast, shared rate limits, exactly-once deliveries.
-- `deploy/k8s` (kustomize), a Helm chart skeleton, `deploy/fly/fly.toml` and
-  `docker-compose.cluster.yml`. ADR-0037.
+- `deploy/k8s` (kustomize), `deploy/fly/fly.toml` and `docker-compose.cluster.yml`.
+- Helm chart `deploy/helm/converger`: migration hook, values schema,
+  `helm test`, optional Ingress, `PodMonitor`, `NetworkPolicy` and
+  chart-managed Secret. Published to `oci://ghcr.io/aimtune/charts/converger`
+  on every `v*` tag; the new `Deploy manifests` workflow lints and
+  kubeconform-validates the chart and `deploy/k8s`.
+- `CLUSTER_DIST_PORT` pins the server's Erlang distribution port (start only,
+  so `bin/converger rpc` still works). ADR-0037.
 
 ### Converger Protocol v1 specification (#21, refs #63 #68)
 

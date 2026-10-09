@@ -2,9 +2,22 @@ apiVersion: v2
 name: converger
 description: Converger channel hub, clustered with libcluster (Kubernetes DNS), with readiness-gated rollouts and a migration hook.
 type: application
-# Chart skeleton (issue #29). Versioned independently of the app.
+# Released together with the application: the release workflow
+# (.github/workflows/deploy.yml) packages the chart with version and
+# appVersion set from the v* tag and pushes it to oci://ghcr.io/aimtune/charts.
 version: 0.1.0
 appVersion: "0.1.0"
+kubeVersion: ">=1.27.0-0"
 home: https://converger.aimtune.dev
+icon: https://converger.aimtune.dev/img/logo.svg
 sources:
   - https://github.com/AimTune/converger
+keywords:
+  - converger
+  - chat
+  - websocket
+  - elixir
+  - phoenix
+maintainers:
+  - name: AimTune
+    url: https://github.com/AimTune

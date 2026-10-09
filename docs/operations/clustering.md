@@ -57,8 +57,9 @@ environment wins):
 | `RELEASE_COOKIE` | **you must set it** | The same random secret on every node, from your secret store (`openssl rand -base64 48`). `bin/converger start` refuses to boot while clustering is enabled and it is unset: the cookie generated at build time is baked into the image and identical for everyone who has the image. |
 | `RELEASE_DISTRIBUTION` | `name` | Long names, required for `name@ip`. |
 | `RELEASE_NODE` | `${CLUSTER_NODE_BASENAME:-converger}@<ip>` | `<ip>` is `POD_IP` (Kubernetes downward API), else `FLY_PRIVATE_IP`, else the first address of `hostname -i`. For an IPv6 address, `-proto_dist inet6_tcp` is added to `ERL_AFLAGS`. |
+| `CLUSTER_DIST_PORT` | optional | A fixed distribution port for the server (`start`/`daemon` only; `rpc` and `remote` keep a random one). The Helm chart sets `9100`. |
 
-The distribution listens on EPMD (port 4369) and a dynamic port. Nodes must reach each other on both; on
+The distribution listens on EPMD (port 4369) and a dynamic port (or `CLUSTER_DIST_PORT`). Nodes must reach each other on both; on
 Kubernetes and docker compose pod-to-pod / container-to-container traffic is open by default. Anyone who can reach
 those ports **and** knows the cookie can run code on the node: keep them on the private network and treat the
 cookie like `SECRET_KEY_BASE`. `bin/migrate` (`eval`) does not start the distribution and needs no cookie.

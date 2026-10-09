@@ -1,13 +1,14 @@
 ---
 title: Kubernetes
-description: Deploying a clustered Converger on Kubernetes with the kustomize manifests in deploy/k8s or the Helm chart skeleton, with probes, migrations, clustering, autoscaling, disruption budget and metrics scraping.
+description: Deploying a clustered Converger on Kubernetes with the kustomize manifests in deploy/k8s or the published Helm chart, with probes, migrations, clustering, autoscaling, disruption budget and metrics scraping.
 sidebar_position: 7
 ---
 
 The repository ships two ways to run Converger on Kubernetes:
 
 - `deploy/k8s/`: plain manifests for `kubectl apply -k deploy/k8s`;
-- `deploy/helm/converger/`: a Helm chart skeleton with the same resources and the migration as a hook.
+- `deploy/helm/converger/`: a Helm chart with the same resources, the migration as a hook and optional Ingress,
+  PodMonitor and NetworkPolicy, published to `oci://ghcr.io/aimtune/charts/converger` with every release.
 
 Both run a [clustered](clustering.md) Deployment whose pods only receive traffic once
 [`GET /health/ready`](observability.md#health-endpoints) passes. The design is recorded in
@@ -97,8 +98,10 @@ Service every 5 s and connects to `converger@<pod IP>`. `rel/env.sh.eex` names e
 starting pod joins the cluster (PubSub, rate-limit sync) before it receives traffic. The Helm chart sets the fully
 qualified Service name (`<release>-converger-headless.<namespace>.svc.cluster.local`).
 
-If a NetworkPolicy restricts pod traffic, allow pod-to-pod TCP on 4369 (EPMD) and the distribution port. To pin
-the distribution port, add `-kernel inet_dist_listen_min 9100 inet_dist_listen_max 9100` to `ERL_AFLAGS`.
+If a NetworkPolicy restricts pod traffic, allow pod-to-pod TCP on 4369 (EPMD) and the distribution port. Pin
+the distribution port with `CLUSTER_DIST_PORT` (the Helm chart sets `9100` and, with `networkPolicy.enabled`, renders
+that policy). Do not pin it through `ERL_AFLAGS`: that also applies to `bin/converger rpc`, whose second node would
+then fail to bind the same port.
 
 ## Metrics
 
@@ -124,34 +127,60 @@ spec:
 ```
 
 Or set `METRICS_ALLOWED_IPS` in the ConfigMap to the Prometheus pods' range and drop the token. See
-[Observability](observability.md#prometheus-endpoint).
+[Observability](observability.md#prometheus-endpoint). The Helm chart renders this `PodMonitor` with
+`metrics.podMonitor.enabled=true`.
 
 ## Helm chart
 
-`deploy/helm/converger` is a skeleton with the same resources:
+`deploy/helm/converger` renders the same resources as `deploy/k8s`, runs the migration as a
+`pre-install,pre-upgrade` hook (so upgrades need no manual Job cleanup), and adds optional Ingress, Prometheus
+Operator `PodMonitor`, `NetworkPolicy` and a chart-managed Secret. Every `v*` release publishes it to GHCR as an
+OCI artifact, with the chart `version` and `appVersion` both set to the release version.
 
 ```sh
-helm install converger deploy/helm/converger \
-  --set existingSecret=converger-env \
-  --set env.PHX_HOST=converger.example.com \
-  --set image.tag=<version>
+helm install converger oci://ghcr.io/aimtune/charts/converger --version <version> \
+  -n converger \
+  --set env.PHX_HOST=converger.example.com
+
+helm test converger -n converger    # GET /health/ready through the Service
 ```
+
+From a checkout, use `deploy/helm/converger` instead of the OCI reference. The Secret (`converger-env` by default)
+is the same one as in [Install](#install).
 
 | Value | Default | Meaning |
 | --- | --- | --- |
-| `image.repository`, `image.tag` | `ghcr.io/aimtune/converger`, chart `appVersion` | Image to run |
-| `existingSecret` | `converger-env` | Secret with `DATABASE_URL`, `SECRET_KEY_BASE`, `CLOAK_KEY`, `RELEASE_COOKIE`, `METRICS_TOKEN`; the chart never creates secrets |
-| `env` | `PHX_HOST`, `TRUSTED_PROXIES`, `FORCE_SSL`, `POOL_SIZE`, `METRICS_ALLOWED_IPS` | Rendered into the ConfigMap |
-| `cluster.strategy`, `cluster.nodeBasename` | `kubernetes_dns`, `converger` | Clustering |
-| `autoscaling.*`, `podDisruptionBudget.*` | enabled, 2 to 10 replicas, `minAvailable: 1` | HPA and PDB |
-| `migrations.enabled` | `true` | `/app/bin/migrate` as a `pre-install,pre-upgrade` hook |
+| `image.repository`, `image.tag`, `image.digest` | `ghcr.io/aimtune/converger`, chart `appVersion`, empty | Image to run; a digest wins over the tag |
+| `existingSecret` | `converger-env` | Secret with `DATABASE_URL`, `SECRET_KEY_BASE`, `CLOAK_KEY`, `RELEASE_COOKIE`, optional `METRICS_TOKEN` |
+| `secret.create`, `secret.*` | `false` | Render that Secret from values instead. The values then live in the Helm release; with migrations on, the Secret is a hook (created before the migration Job, kept on uninstall). Prefer `existingSecret` in production. |
+| `env` | `PHX_HOST`, `TRUSTED_PROXIES`, `FORCE_SSL`, `POOL_SIZE`, `METRICS_ALLOWED_IPS` | Non-secret settings, rendered into the ConfigMap ([Configuration](configuration.md)) |
+| `extraEnv`, `extraEnvFrom` | `[]` | More env entries or sources, for example `MAILGUN_API_KEY` from another Secret |
+| `cluster.strategy` | `kubernetes_dns` | `none` for a single, unclustered replica (no headless Service) |
+| `cluster.nodeBasename` | `converger` | Nodes are `<basename>@<pod IP>` |
+| `cluster.distributionPort` | `9100` | `CLUSTER_DIST_PORT`; `null` leaves the port random |
+| `replicaCount` | `2` | Used when autoscaling is off |
+| `autoscaling.*` | on, 2 to 10 replicas, 70 % CPU, optional memory target | HPA, scaling in one pod a minute |
+| `podDisruptionBudget.*` | on, `minAvailable: 1` | PDB |
+| `migrations.*` | on, `backoffLimit: 3`, `activeDeadlineSeconds: 600` | `/app/bin/migrate` hook with the new image |
+| `serviceAccount.*` | created, no API token | Annotate it for cloud IAM (IRSA, Workload Identity). The migration hook only uses it when `create: false` (the chart's own account does not exist yet during `pre-install`). |
+| `service.*` | `ClusterIP`, port 80 | Service to the `http` port (4000) |
+| `ingress.*` | off | Ingress to the Service; raise the controller's proxy timeouts for WebSockets |
+| `metrics.podMonitor.*` | off, 30 s | Scrapes every pod's `/metrics` with `METRICS_TOKEN` from the Secret (needs the Prometheus Operator CRDs) |
+| `networkPolicy.enabled`, `networkPolicy.httpFrom` | off, `[]` | Allows HTTP from `httpFrom` (everyone when empty) and EPMD plus the distribution port between Converger pods |
+| `defaultTopologySpread`, `topologySpreadConstraints` | `true`, `[]` | Soft spread over nodes and zones unless constraints are given |
+| `terminationGracePeriodSeconds`, `preStopSleepSeconds` | `95`, `5` | See [Probes and shutdown](#probes-and-shutdown) |
+| `podSecurityContext`, `securityContext`, `resources`, `podAnnotations`, `podLabels`, `priorityClassName`, `nodeSelector`, `tolerations`, `affinity` | non-root, 250m/512Mi | The usual pod settings |
 
-The chart is not published to a chart repository yet; Ingress, NetworkPolicy and ServiceMonitor templates are
-left to the deployer.
+`values.schema.json` rejects unknown strategies, bad digests and wrongly typed values on `install`, `upgrade`,
+`lint` and `template`. The chart's own [README](https://github.com/AimTune/converger/tree/main/deploy/helm/converger)
+lists the same values.
 
 ## Validation
 
-The manifests are checked with `kubectl kustomize deploy/k8s` and
-[kubeconform](https://github.com/yannh/kubeconform) (`-strict`, Kubernetes 1.31), and the chart with `helm lint`
-and `helm template` piped through kubeconform. They have not been exercised against a live cluster in CI; the
-cluster behaviour itself is covered by the [two-node test suite](clustering.md#the-two-node-test-suite).
+The `Deploy manifests` workflow (`.github/workflows/deploy.yml`) runs on every change under `deploy/`: it renders
+`kubectl kustomize deploy/k8s` and checks it with [kubeconform](https://github.com/yannh/kubeconform) (`-strict`,
+Kubernetes 1.31), then runs `helm lint --strict` and `helm template | kubeconform` (with the CRD catalog for the
+`PodMonitor`) for every values file in `deploy/helm/converger/ci/` (defaults, every option on, single node). On a
+`v*` tag it then packages the chart and pushes it to `oci://ghcr.io/aimtune/charts`. Nothing is exercised against a
+live cluster in CI; the cluster behaviour itself is covered by the
+[two-node test suite](clustering.md#the-two-node-test-suite).

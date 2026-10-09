@@ -1,10 +1,25 @@
-Converger {{ .Chart.AppVersion }} is deployed as {{ include "converger.fullname" . }}.
+Converger {{ .Chart.AppVersion }} is deployed as {{ include "converger.fullname" . }} (image {{ include "converger.image" . }}).
 
 - Pods only receive traffic once GET /health/ready answers 200 (database,
-  Oban, migrations, not draining).
+  Oban, migrations, not draining). Check the release with:
+    helm test {{ .Release.Name }} -n {{ .Release.Namespace }}
+{{- if ne .Values.cluster.strategy "none" }}
 - Clustering: {{ .Values.cluster.strategy }} via {{ include "converger.fullname" . }}-headless.
-  Check with: kubectl exec deploy/{{ include "converger.fullname" . }} -- /app/bin/converger rpc 'IO.inspect(Node.list())'
+  Check with:
+    kubectl -n {{ .Release.Namespace }} exec deploy/{{ include "converger.fullname" . }} -- /app/bin/converger rpc 'IO.inspect(Node.list())'
+{{- end }}
+{{- if .Values.ingress.enabled }}
+- Ingress:{{ range .Values.ingress.hosts }} http{{ if $.Values.ingress.tls }}s{{ end }}://{{ .host }}{{ end }}
+{{- else }}
+- No Ingress; try it locally:
+    kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "converger.fullname" . }} 4000:{{ .Values.service.port }}
+{{- end }}
 - Metrics: GET /metrics with "Authorization: Bearer $METRICS_TOKEN" (from the
-  {{ .Values.existingSecret }} Secret) or from METRICS_ALLOWED_IPS.
+  {{ include "converger.secretName" . }} Secret) or from METRICS_ALLOWED_IPS.
+{{- if .Values.secret.create }}
+
+WARNING: secret.create=true keeps DATABASE_URL, SECRET_KEY_BASE, CLOAK_KEY and
+RELEASE_COOKIE in the Helm release. Prefer existingSecret in production.
+{{- end }}
 
 Docs: https://converger.aimtune.dev/operations/kubernetes
