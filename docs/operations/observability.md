@@ -1,11 +1,11 @@
 ---
 title: Observability
-description: Structured JSON logs, Prometheus metrics, OpenTelemetry traces, the Oban dashboard and channel health checks, and what is still missing.
+description: Structured JSON logs, Prometheus metrics on /metrics, health and readiness endpoints, OpenTelemetry traces, the Oban dashboard and channel health checks, and what is still missing.
 sidebar_position: 2
 ---
 
-Converger exposes three signals: JSON logs on stdout, Prometheus metrics on a separate port, and OpenTelemetry
-traces exported over OTLP. On top of that, a periodic job scores the health of every external channel and can
+Converger exposes three signals: JSON logs on stdout, Prometheus metrics at `/metrics` on the main port, and OpenTelemetry
+traces exported over OTLP. Load balancers and Kubernetes probe `/health/live` and `/health/ready`. On top of that, a periodic job scores the health of every external channel and can
 alert tenants. This page describes what is emitted today, how to collect it, and what is planned. The variables
 mentioned here are listed in the [Configuration reference](configuration.md).
 
@@ -52,29 +52,45 @@ All metadata is included, and the values of the listed keys are replaced with `"
 
 ### Prometheus endpoint
 
-`ConvergerWeb.Telemetry` starts `TelemetryMetricsPrometheus` on its own listener:
+`ConvergerWeb.Telemetry` aggregates the metrics in a `TelemetryMetricsPrometheus.Core` registry, and
+`ConvergerWeb.Plugs.Metrics` serves them **on the main HTTP port**:
 
 | Setting | Value |
 | --- | --- |
-| Port | `PROMETHEUS_PORT`, default `9568` (disabled in test unless the variable is set) |
-| Path | `/metrics` |
-| Authentication | none |
+| Port | `PORT` (the app's own port, default `4000`) |
+| Path | `GET /metrics` (Prometheus text format 0.0.4) |
+| Authentication | `Authorization: Bearer <METRICS_TOKEN>`, or a client IP in `METRICS_ALLOWED_IPS` (IPs/CIDRs) |
+| Neither configured | `404`: metrics are off (secure by default) |
+| Wrong or missing credentials | `401` with `www-authenticate: Bearer realm="metrics"` |
 
-:::warning
-The metrics listener is unauthenticated and separate from the main endpoint, so `TRUSTED_PROXIES`,
-`ADMIN_IP_WHITELIST` and `FORCE_SSL` do not apply to it. Expose it only on an internal network (do not publish
-the port on a public load balancer). Serving metrics on the main port behind authentication is Planned
-([#29](https://github.com/AimTune/converger/issues/29)).
-:::
+The plug runs in the endpoint after `TrustedProxies` (so the allowlist sees the real client IP behind trusted
+proxies) and before `ForceSSL` (so an in-cluster scrape over plain HTTP to the pod IP is not redirected). The
+token is compared in constant time. In development `config/dev.exs` allows loopback and private ranges, so the
+compose Prometheus can scrape `mix phx.server` without a token.
 
-Prometheus scrape configuration (the compose stack scrapes the app on the Docker host):
+Prometheus scrape configuration with a token:
 
 ```yaml
 scrape_configs:
   - job_name: converger
+    metrics_path: /metrics
+    authorization:
+      type: Bearer
+      credentials_file: /etc/prometheus/converger-token
     static_configs:
-      - targets: ["converger.internal:9568"]
+      - targets: ["converger.internal:4000"]
 ```
+
+On Kubernetes, scrape the pods directly (for example with a `PodMonitor` whose `bearerTokenSecret` points at
+`METRICS_TOKEN` in the `converger-env` Secret) so that every replica is scraped, not one behind the Service.
+See [Kubernetes](kubernetes.md).
+
+:::note
+Until [#29](https://github.com/AimTune/converger/issues/29) the metrics were served by a separate,
+unauthenticated listener on port `9568`. That listener is now off unless `PROMETHEUS_PORT` is set explicitly
+(it then serves `/metrics` without authentication, as before, on that port only). Prefer the main port with
+`METRICS_TOKEN`; see [Upgrades](upgrades.md#metrics-moved-to-the-main-port).
+:::
 
 ### Exported metrics
 
@@ -159,7 +175,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 mix phx.server
 
 | Service | URL | Role |
 | --- | --- | --- |
-| Prometheus | `http://localhost:9090` | Scrapes `host.docker.internal:9568` every 15 s (`docker/prometheus/prometheus.yml`) |
+| Prometheus | `http://localhost:9090` | Scrapes `host.docker.internal:4000/metrics` (the dev server) every 15 s (`docker/prometheus/prometheus.yml`) |
 | Grafana | `http://localhost:3000` (password from `GF_SECURITY_ADMIN_PASSWORD`) | Data sources Prometheus, Jaeger and Loki; dashboard "Converger Overview" |
 | OpenTelemetry Collector | OTLP HTTP on `localhost:4318` | Receives OTLP (HTTP and gRPC), exports traces to Jaeger and OTLP metrics on `:8889` |
 | Jaeger | `http://localhost:16686` | Trace UI |
@@ -181,19 +197,39 @@ time.
 
 ## Health endpoints
 
-| Probe | Answer |
-| --- | --- |
-| `GET /health/live` | `200 {"status": "ok"}` while the node is up. |
-| `GET /health/ready` | `200 {"status": "ready"}`; `503 {"status": "draining"}` once the node has started shutting down. |
+Two unauthenticated JSON endpoints, served by `ConvergerWeb.Plugs.Health` before any other endpoint plug (no
+`ForceSSL` redirect, no request log line, no telemetry), so load balancers and kubelets can probe the pod IP over
+plain HTTP:
 
-Both need no authentication, are served before the HTTPS redirect (no `FORCE_SSL_EXCLUDE_PATHS` entry needed) and
-are not logged per request. Use `/health/ready` as the load balancer and Kubernetes readiness probe, so a stopping
-node leaves rotation before its WebSockets are drained; see
-[WebSocket limits and draining](websocket-limits.md#draining-on-shutdown). Gate rollouts on `bin/migrate`
-finishing (see [Migrations and maintenance windows](migrations.md)).
+| Endpoint | Answers | Use it for |
+| --- | --- | --- |
+| `GET /health/live` | always `200 {"status":"ok"}` while the VM runs and the endpoint accepts requests | liveness / startup probes. It never touches the database, so a database outage does not restart every replica. |
+| `GET /health/ready` | `200 {"status":"ready","checks":{...}}` when every check passes, otherwise `503` with `"status":"draining"` (the node is shutting down) or `"unavailable"` (any other failed check) | readiness probes and load balancer health checks |
 
-Readiness checks for the database, Oban and migrations, and Kubernetes manifests, are Planned
-([#29](https://github.com/AimTune/converger/issues/29)).
+Readiness checks (`Converger.Health.readiness/0`):
+
+| Check | Fails when | Reason in the response |
+| --- | --- | --- |
+| `database` | `SELECT 1` fails or takes longer than 1 s | `database unavailable` |
+| `oban` | the Oban supervisor is not running | `oban not running` |
+| `draining` | the node is shutting down (`ConvergerWeb.Drain.draining?/0`) | `draining` |
+| `migrations` | a migration shipped with this release is not in `schema_migrations` (reads the table directly, so it does not wait for the migration lock while `bin/migrate` runs; cached once everything is applied) | `migrations pending: N` |
+
+```json
+{"status": "unavailable", "reasons": ["migrations pending: 1"],
+ "checks": {"database": "ok", "oban": "ok", "draining": "ok", "migrations": "error"}}
+```
+
+The response only carries short reasons; details such as connection errors are logged
+(`Readiness check failed: ...`).
+
+**Draining.** The draining state comes from `ConvergerWeb.Drain`
+([ADR-0027](../adr/0027-websocket-limits-backpressure-and-draining.md)), the last child of the application
+supervisor: on SIGTERM it is stopped first, flips readiness to `503 draining`, refuses new sockets and waits
+`WS_DRAIN_DELAY_MS` (5 s) before the endpoint drains its WebSockets in batches. Use `/health/ready` as the load
+balancer and Kubernetes readiness probe with a period shorter than that delay; see
+[WebSocket limits and draining](websocket-limits.md#draining-on-shutdown). On Kubernetes the manifests also add a
+`preStop` sleep so the endpoint removal propagates before SIGTERM.
 
 ## Channel health checks
 

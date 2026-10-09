@@ -69,9 +69,10 @@ request.
 | Probe | Answer |
 | --- | --- |
 | `GET /health/live` | `200 {"status": "ok"}` while the node is up. |
-| `GET /health/ready` | `200 {"status": "ready"}`; `503 {"status": "draining"}` once the node has started shutting down. |
+| `GET /health/ready` | `200 {"status": "ready", "checks": {...}}`; `503 {"status": "draining", ...}` once the node has started shutting down (`"unavailable"` when another check fails). |
 
-Database, Oban and migration checks in readiness are Planned ([#29](https://github.com/AimTune/converger/issues/29)).
+Readiness also checks the database, Oban and pending migrations; see [Observability](observability.md#health-endpoints)
+([ADR-0037](../adr/0037-libcluster-clustering-health-endpoints-and-metrics-on-the-main-port.md)).
 
 ## Draining on shutdown
 
@@ -145,5 +146,5 @@ error; the guard logs it at `info` and counts it as `frame_too_large` instead.
 `test/converger_web/channels/socket_guard_test.exs` opens real WebSockets against a Bandit listener and covers each
 limit, the 1012 drain close and the 503 refusal. The cluster-scale check (10 000 sockets, a rolling restart of a
 2-node cluster, every client reconnected within 30 s and no acknowledged message lost) belongs to the load-testing
-work ([#57](https://github.com/AimTune/converger/issues/57) chaos harness, [#29](https://github.com/AimTune/converger/issues/29)
-clustering).
+work ([#57](https://github.com/AimTune/converger/issues/57) chaos harness; the two-node suite of [#29](https://github.com/AimTune/converger/issues/29),
+[Clustering](clustering.md#the-two-node-test-suite), covers cross-node delivery but not this scale).

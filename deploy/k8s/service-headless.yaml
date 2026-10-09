@@ -1,0 +1,21 @@
+# Node discovery for libcluster (CLUSTER_STRATEGY=kubernetes_dns): its DNS
+# name resolves to the IP of every pod. publishNotReadyAddresses lets pods
+# join the cluster before they are ready (e.g. while migrations run), so
+# PubSub and rate-limit sync are in place when traffic arrives.
+apiVersion: v1
+kind: Service
+metadata:
+  name: converger-headless
+  labels:
+    app.kubernetes.io/name: converger
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    app.kubernetes.io/name: converger
+    app.kubernetes.io/component: server
+  ports:
+    - name: epmd
+      port: 4369
+      targetPort: epmd
+      protocol: TCP

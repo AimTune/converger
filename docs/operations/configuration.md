@@ -115,7 +115,7 @@ All environments. Values are integers; unset or empty variables keep the `config
 
 | Variable | Default | Environment | Meaning |
 | --- | --- | --- | --- |
-| `RATE_LIMIT_BACKEND` | `cluster` when `DNS_CLUSTER_QUERY` is non-empty, otherwise `local` | all except test | `local` or `cluster`; any other value raises at boot. |
+| `RATE_LIMIT_BACKEND` | `cluster` when `CLUSTER_STRATEGY` (or `DNS_CLUSTER_QUERY`) enables clustering, otherwise `local` | all except test | `local` or `cluster`; any other value raises at boot. |
 | `RATE_LIMIT_SYNC_INTERVAL_MS` | `100` | all | How often the `cluster` backend broadcasts counter deltas. |
 
 Limits themselves are not environment variables; see [Rate limiting](rate-limiting.md#tuning).
@@ -143,16 +143,39 @@ All environments. Integers; unset or empty variables keep the `config :converger
 
 The hard frame cap, `config :converger, :websocket_max_frame_size` (`1_048_576`), is compile time.
 
-## Clustering and metrics
+## Clustering
+
+Read in every environment except test (see [Clustering](clustering.md)). The Erlang distribution itself (node name,
+cookie) is configured by `rel/env.sh.eex` when the release starts.
 
 | Variable | Default | Environment | Meaning |
 | --- | --- | --- | --- |
-| `DNS_CLUSTER_QUERY` | unset (clustering off) | prod | DNS name `DNSCluster` queries to find and connect other nodes. Also switches the default rate-limit backend to `cluster` (read in every environment for that purpose). |
-| `PROMETHEUS_PORT` | `9568` (not started in test) | all | Port of the `TelemetryMetricsPrometheus` listener. Setting it in test forces the listener on. See [Observability](observability.md#prometheus-endpoint). |
+| `CLUSTER_STRATEGY` | `none` (`dns` when `DNS_CLUSTER_QUERY` is set) | all except test | How nodes find each other: `none`, `kubernetes_dns`, `dns`, `gossip` or `epmd`. Any other value raises at boot. Anything but `none` also switches the default rate-limit backend to `cluster`. |
+| `CLUSTER_NODE_BASENAME` | `converger` | all except test | Name part of every node (`<basename>@<ip>`). Used by `rel/env.sh.eex` for `RELEASE_NODE` and by the `kubernetes_dns` / `dns` strategies to build node names. |
+| `CLUSTER_SERVICE` | none | `kubernetes_dns` | Headless Service name, e.g. `converger-headless` or `converger-headless.<namespace>.svc.cluster.local`. Required; missing raises at boot. |
+| `CLUSTER_DNS_QUERY` | `DNS_CLUSTER_QUERY` | `dns` | DNS name whose A/AAAA records are the node IPs (e.g. `myapp.internal` on Fly.io). Required. |
+| `CLUSTER_POLL_INTERVAL_MS` | `5000` | `kubernetes_dns`, `dns` | How often DNS is polled for new or removed nodes. |
+| `CLUSTER_GOSSIP_SECRET` | unset | `gossip` | Encrypts and authenticates the gossip packets. Set it; without it any host on the network can announce nodes (connecting still needs the cookie). |
+| `CLUSTER_GOSSIP_PORT`, `CLUSTER_GOSSIP_IF_ADDR`, `CLUSTER_GOSSIP_MULTICAST_ADDR`, `CLUSTER_GOSSIP_MULTICAST_IF` | libcluster defaults (`45892`, `0.0.0.0`, `233.252.1.32`) | `gossip` | UDP multicast settings. |
+| `CLUSTER_GOSSIP_BROADCAST_ONLY` | `false` | `gossip` | `true`/`1`: use broadcast instead of multicast (set `CLUSTER_GOSSIP_MULTICAST_ADDR` to the broadcast address). |
+| `CLUSTER_HOSTS` | empty | `epmd` | Comma-separated node names to connect to (`a@host1,b@host2`). Empty: every node registered in the local EPMD. |
+| `DNS_CLUSTER_QUERY` | unset | all except test | Deprecated alias from the former `dns_cluster` dependency: implies `CLUSTER_STRATEGY=dns` with this query. |
+| `RELEASE_COOKIE` | none when clustering | releases | Shared secret of the Erlang distribution. **Required** when `CLUSTER_STRATEGY` is not `none`: `bin/converger start` refuses to boot without it (the cookie generated at build time is baked into the image). |
+| `RELEASE_DISTRIBUTION` | `name` when clustering, else `sname` | releases | Standard Mix release variable; long names are needed for `name@ip`. |
+| `RELEASE_NODE` | `<CLUSTER_NODE_BASENAME>@<IP>` when clustering | releases | Standard Mix release variable. The IP is `POD_IP`, then `FLY_PRIVATE_IP`, then `hostname -i`. An IPv6 address switches the distribution to `inet6_tcp`. |
+| `POD_IP`, `FLY_PRIVATE_IP` | unset | releases | Node address used for `RELEASE_NODE` (Kubernetes downward API, Fly.io). |
+| `CLUSTER_DIST_PORT` | unset (random port) | releases | Fixed Erlang distribution port of the server, for firewalls and NetworkPolicies. Applied by `rel/env.sh.eex` to `start`/`daemon` only, so `bin/converger rpc` and `remote` can still run in the same pod. The Helm chart sets `9100`. |
 
-Node naming and the distribution cookie use the standard Mix release variables (`RELEASE_COOKIE`,
-`RELEASE_NODE`, `RELEASE_DISTRIBUTION`); Converger does not read them itself and ships no `rel/env.sh.eex`.
-Clustering strategies and their documentation are Planned ([#29](https://github.com/AimTune/converger/issues/29)).
+## Metrics and health
+
+| Variable | Default | Environment | Meaning |
+| --- | --- | --- | --- |
+| `METRICS_TOKEN` | unset | all | Bearer token for `GET /metrics` on the main port (`Authorization: Bearer <token>`). See [Observability](observability.md#prometheus-endpoint). |
+| `METRICS_ALLOWED_IPS` | unset (dev: loopback and private ranges) | all | Comma-separated IPs/CIDRs allowed to read `/metrics` without a token (client IP after `TRUSTED_PROXIES`). With neither variable set, `/metrics` answers `404`. |
+| `PROMETHEUS_PORT` | unset | all | Starts the old separate, **unauthenticated** metrics listener on this port (`/metrics`). Only for scrapers that cannot send a token; never expose it publicly. |
+
+`GET /health/live` and `GET /health/ready` need no configuration. How long a stopping node keeps serving after
+readiness turns `draining` is `WS_DRAIN_DELAY_MS` (see [WebSocket limits and draining](#websocket-limits-and-draining)).
 
 ## OpenTelemetry tracing
 
@@ -237,9 +260,10 @@ These are read by `docker-compose.yml` (from `.env`, see `.env.example`), not by
 | `POSTGRES_PASSWORD` | yes | Password of the compose Postgres; also embedded in the app's `DATABASE_URL`. Use URL-safe characters. |
 | `SECRET_KEY_BASE`, `CLOAK_KEY` | yes | Passed through to the `migrate` and `app` services. |
 | `GF_SECURITY_ADMIN_PASSWORD` | yes | Grafana admin password. |
-| `PHX_HOST`, `FORCE_SSL`, `TRUSTED_PROXIES` | no | Passed through; compose defaults `PHX_HOST=localhost`, `FORCE_SSL=false`. |
+| `PHX_HOST`, `FORCE_SSL`, `TRUSTED_PROXIES`, `METRICS_TOKEN`, `METRICS_ALLOWED_IPS` | no | Passed through; compose defaults `PHX_HOST=localhost`, `FORCE_SSL=false`. |
+| `RELEASE_COOKIE`, `CLUSTER_GOSSIP_SECRET` | with `docker-compose.cluster.yml` | Cookie and gossip secret of the two-node compose cluster. |
 
-Compose also sets `PORT=4000`, `PROMETHEUS_PORT=9568`, `OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318`,
+Compose also sets `PORT=4000`, `OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318`,
 `CREATE_DB=true` for `migrate` and `PHX_SERVER=true` for `app`.
 
 ## Test-only variables
@@ -399,7 +423,9 @@ PgBouncer transaction pooling). See [Migrations and maintenance windows](migrati
 | `:pagination` | see [Pagination](#pagination) | Page size defaults and caps. |
 | `:dead_letters` | `bulk_retry_limit: 10_000`, `export_limit: 10_000` | Max deliveries replayed by one bulk retry call, and max rows in one Deliveries CSV export. See [Replaying dead letters](../delivery.md#replaying-dead-letters). |
 | `:circuit_breaker` | `failure_threshold: 5`, `cooldown_ms: 30_000`, `park_seconds: 600`, `replay_dead_letters_on_close: false`, `replay_window_ms: 3_600_000` | Per-channel delivery circuit breaker and opt-in dead-letter replay on close. See [Circuit breaker](../delivery.md#circuit-breaker). |
-| `:prometheus_port` | `9568`; `false` in test | `false` disables the metrics listener. |
+| `:metrics` | `[]` (dev: `allowed_ips` with loopback and private ranges) | `token:` and `allowed_ips:` for `GET /metrics`; see `METRICS_TOKEN`. |
+| `:prometheus_port` | unset | Port of the optional unauthenticated metrics listener (`PROMETHEUS_PORT`). |
+| `Converger.Health` | `db_timeout_ms: 1000` | Readiness database timeout. |
 | `:force_ssl` | unset outside prod | Keyword list of `Plug.SSL` options, built from the TLS variables in prod; `false` disables. |
 | `:webhook` | `[]` | `allowed_targets`, `allow_private_targets`, `resolver` (SSRF guard), and installation defaults for `connect_timeout` (5000 ms), `receive_timeout` (10000 ms), `max_response_bytes` (1 MiB). |
 | `:channel_signals_async` | `true`; `false` in test | Forward typing indicators and read receipts to external channels (`Converger.Channels.Signals`) in a task under `Converger.TaskSupervisor`. `false` runs them inline in the WebSocket channel process. |
@@ -410,7 +436,7 @@ PgBouncer transaction pooling). See [Migrations and maintenance windows](migrati
 | `:inbound_conversation_idle_timeout_seconds` | unset (no idle timeout) | Global default for starting a new conversation for an inbound participant after inactivity; channels override it with `conversation_idle_timeout_seconds` in their config. |
 | `:api_key_rotation_grace_period` | `86400` (seconds) | How long the previous tenant API key keeps working after a rotation. |
 | `:extra_middleware` | `%{}` | Map of middleware type string to module, merged into the built-in middleware registry. |
-| `:dns_cluster_query` | from `DNS_CLUSTER_QUERY` | Prod only. |
+| `Converger.Cluster` | `strategy: :none` | `strategy:` and libcluster `options:` built from the `CLUSTER_*` variables; see [Clustering](clustering.md). |
 | `:dev_routes` | `true` in dev | Compile-time. Mounts the Swoosh mailbox preview at `/dev/mailbox`. |
 | `:env` | `config_env()` | Used for environment-specific guards (for example the Broadway memory producer). |
 

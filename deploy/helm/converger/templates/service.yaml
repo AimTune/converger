@@ -1,0 +1,40 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "converger.fullname" . }}
+  labels:
+    {{- include "converger.labels" . | nindent 4 }}
+  {{- with .Values.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    {{- include "converger.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.service.port }}
+      targetPort: http
+      protocol: TCP
+{{- if ne .Values.cluster.strategy "none" }}
+---
+# Node discovery for libcluster; includes pods that are not ready yet so a
+# starting pod joins the cluster before it receives traffic.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "converger.fullname" . }}-headless
+  labels:
+    {{- include "converger.labels" . | nindent 4 }}
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    {{- include "converger.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: epmd
+      port: 4369
+      targetPort: epmd
+      protocol: TCP
+{{- end }}

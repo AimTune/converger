@@ -8,20 +8,35 @@ defmodule ConvergerWeb.Telemetry do
 
   @impl true
   def init(_arg) do
-    port = Application.get_env(:converger, :prometheus_port, 9568)
+    # Metrics are aggregated in a TelemetryMetricsPrometheus.Core registry and
+    # served on the main port at /metrics (ConvergerWeb.Plugs.Metrics, behind
+    # METRICS_TOKEN / METRICS_ALLOWED_IPS). A separate, unauthenticated
+    # listener is only started when PROMETHEUS_PORT is set explicitly.
+    standalone_listener =
+      case Application.get_env(:converger, :prometheus_port) do
+        port when is_integer(port) ->
+          [
+            Supervisor.child_spec(
+              {Bandit,
+               plug: {ConvergerWeb.Plugs.Metrics, standalone: true},
+               port: port,
+               startup_log: false},
+              id: :prometheus_listener
+            )
+          ]
 
-    # `prometheus_port: false` disables the metrics listener (used in test).
-    reporters =
-      if port,
-        do: [{TelemetryMetricsPrometheus, [metrics: metrics(), port: port]}],
-        else: []
+        _ ->
+          []
+      end
 
     children =
       [
         # Telemetry poller will execute the given period measurements
         # every 10_000ms. Learn more here: https://hexdocs.pm/telemetry_metrics
-        {:telemetry_poller, measurements: periodic_measurements(), period: 10_000}
-      ] ++ reporters
+        {:telemetry_poller, measurements: periodic_measurements(), period: 10_000},
+        {TelemetryMetricsPrometheus.Core,
+         metrics: metrics(), name: ConvergerWeb.Plugs.Metrics.registry()}
+      ] ++ standalone_listener
 
     Supervisor.init(children, strategy: :one_for_one)
   end

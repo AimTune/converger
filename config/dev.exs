@@ -72,3 +72,10 @@ config :converger, :webhook, allowed_targets: ["localhost", "127.0.0.0/8", "::1"
 # Deterministic encryption key for local development only.
 # Never use this key outside of development.
 config :converger, Converger.Vault, key: Base.encode64("converger-dev-cloak-key-32bytes!")
+
+# Let the docker compose Prometheus (docker/prometheus/prometheus.yml) scrape
+# GET /metrics of the dev server without a token: loopback and private ranges
+# (Docker Desktop's host.docker.internal). Production needs METRICS_TOKEN or
+# METRICS_ALLOWED_IPS, see docs/operations/observability.md.
+config :converger, :metrics,
+  allowed_ips: ["127.0.0.0/8", "::1", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]

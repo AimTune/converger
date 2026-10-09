@@ -1,0 +1,19 @@
+# Client traffic (REST, WebSocket, admin). Only ready pods receive it:
+# GET /health/ready gates the endpoints. Put an Ingress or a LoadBalancer in
+# front of it.
+apiVersion: v1
+kind: Service
+metadata:
+  name: converger
+  labels:
+    app.kubernetes.io/name: converger
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: converger
+    app.kubernetes.io/component: server
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP

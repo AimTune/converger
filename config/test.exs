@@ -46,9 +46,6 @@ config :phoenix, :plug_init_mode, :runtime
 # Use inline pipeline for synchronous testing
 config :converger, pipeline: [backend: Converger.Pipeline.Inline]
 
-# Use a different port for metrics in test to avoid conflicts with dev server
-config :converger, :prometheus_port, false
-
 # Store test uploads in a temp dir (per partition)
 config :converger, Converger.Uploads,
   storage: Converger.Uploads.LocalStorage,
