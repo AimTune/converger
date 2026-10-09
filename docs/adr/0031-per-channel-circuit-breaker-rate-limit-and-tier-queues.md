@@ -119,6 +119,8 @@ so the Broadway and Inline backends feed the breaker as well, although only the 
 - [#49](https://github.com/AimTune/converger/issues/49) durable, signed platform event webhooks for `channel.circuit_*`.
 - [#51](https://github.com/AimTune/converger/issues/51) management API for `rate_limit` and `tier`.
 
+After [#32](https://github.com/AimTune/converger/issues/32) (dead-letter replay, [ADR-0028](0028-dead-letter-replay-in-place-through-oban.md)) merged, this PR also added its optional part: with `replay_dead_letters_on_close: true`, a probe closing the breaker replays the channel's dead letters from the last `replay_window_ms` (`ChannelDeadLetterReplayWorker`, audited as the `system` actor `circuit_breaker`). Replays use the tenant's tier queue.
+
 ## Implementation
 
 - [`Converger.Channels.Circuit`](https://github.com/AimTune/converger/blob/main/lib/converger/channels/circuit.ex): admission, recording, transitions, parking, release, rate limit.

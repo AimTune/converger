@@ -246,6 +246,94 @@ defmodule Converger.Channels.CircuitTest do
     end
   end
 
+  describe "dead-letter replay on close" do
+    defp dead_letter(tenant, channel) do
+      stub_status(400)
+      activity = create_activity(tenant, channel)
+      assert %{cancelled: 1} = Oban.drain_queue(queue: :deliveries)
+      assert %{status: "failed"} = delivery(activity, channel)
+      activity
+    end
+
+    defp close_by_probe(channel) do
+      Circuit.trip(reload(channel), :unhealthy)
+      age_breaker(channel)
+      channel = reload(channel)
+      assert :ok = Circuit.admit(channel)
+      Circuit.record(reload(channel), :ok)
+      assert %{circuit_state: "closed"} = reload(channel)
+    end
+
+    test "is off by default", %{tenant: tenant, channel: channel} do
+      Oban.Testing.with_testing_mode(:manual, fn ->
+        dead_letter(tenant, channel)
+        close_by_probe(channel)
+        refute_enqueued(worker: Converger.Workers.ChannelDeadLetterReplayWorker)
+      end)
+    end
+
+    test "when enabled, a probe closing the breaker replays recent dead letters", %{
+      tenant: tenant,
+      channel: channel
+    } do
+      Application.put_env(:converger, :circuit_breaker,
+        replay_dead_letters_on_close: true,
+        replay_window_ms: 60_000
+      )
+
+      Oban.Testing.with_testing_mode(:manual, fn ->
+        activity = dead_letter(tenant, channel)
+        close_by_probe(channel)
+
+        assert_enqueued(
+          worker: Converger.Workers.ChannelDeadLetterReplayWorker,
+          args: %{channel_id: channel.id}
+        )
+
+        assert %{success: 1} = Oban.drain_queue(queue: :default)
+        assert %{status: "pending", attempts: 0, retry_count: 1} = delivery(activity, channel)
+        assert %{retried_by: "system:circuit_breaker"} = delivery(activity, channel)
+
+        stub_status(200)
+        assert %{success: 1} = Oban.drain_queue(queue: :deliveries)
+        assert %{status: "sent"} = delivery(activity, channel)
+      end)
+    end
+
+    test "a manual resume does not replay", %{tenant: tenant, channel: channel} do
+      Application.put_env(:converger, :circuit_breaker, replay_dead_letters_on_close: true)
+
+      Oban.Testing.with_testing_mode(:manual, fn ->
+        dead_letter(tenant, channel)
+        Circuit.trip(reload(channel), :unhealthy)
+        Channels.resume_deliveries(reload(channel))
+        refute_enqueued(worker: Converger.Workers.ChannelDeadLetterReplayWorker)
+      end)
+    end
+
+    test "replays run in the tenant's tier queue" do
+      tenant = tenant_fixture(%{tier: "high"})
+      channel = webhook_channel_fixture(tenant)
+
+      Oban.Testing.with_testing_mode(:manual, fn ->
+        stub_status(400)
+        activity = create_activity(tenant, channel)
+        assert %{cancelled: 1} = Oban.drain_queue(queue: :deliveries_high)
+
+        {:ok, _} =
+          Deliveries.retry_delivery(delivery(activity, channel), %{type: "admin", id: "x"})
+
+        assert [%{queue: "deliveries_high", state: "available"}] =
+                 Repo.all(
+                   from(j in Oban.Job,
+                     where: j.worker == ^inspect(ActivityDeliveryWorker),
+                     where: j.state == "available"
+                   )
+                 )
+      end)
+    end
+  end
+
   describe "manual pause/resume" do
     test "pause parks deliveries until resumed; both are audited", %{
       tenant: tenant,
