@@ -90,7 +90,7 @@ Every status change is broadcast on the conversation's PubSub topic as `delivery
 }
 ```
 
-The admin conversation view uses it to update delivery badges live. Pushing receipts to WebSocket clients as protocol frames is Planned ([#25](https://github.com/AimTune/converger/issues/25)).
+The admin conversation view uses it to update delivery badges live. Converger API WebSocket clients receive every change as a `deliveryStatus` frame (end users with a `user_id` only for activities they sent); see [WebSocket](../websocket.md#5a-receipts-typing-and-presence).
 
 ## Attempts and retries
 

@@ -6,9 +6,9 @@ sidebar_position: 3
 
 The Converger client API lives under `/api/v1/converger`. End-user clients such as web chat widgets and mobile
 apps use it. It is modelled on Bot Framework Direct Line: your backend exchanges a channel secret for a short-lived
-token, the client starts a conversation with that token, then posts activities over REST and receives them over the
-WebSocket at `streamUrl` (or by polling the activities endpoint with a watermark). Shared conventions (errors, rate
-limits, pagination, idempotency, CORS) are in the [overview](overview.md).
+token, the client starts a conversation with that token, then posts activities over REST (or over the socket with
+`postActivity`) and receives them over the WebSocket at `streamUrl` (or by polling the activities endpoint with a
+watermark). Shared conventions (errors, rate limits, pagination, idempotency, CORS) are in the [overview](overview.md).
 
 Controllers live in [`lib/converger_web/controllers/converger/`](https://github.com/AimTune/converger/tree/main/lib/converger_web/controllers/converger)
 (module prefix `ConvergerWeb.ConvergerAPI`). Field names in this API are camelCase (`conversationId`, `channelData`),
@@ -57,8 +57,8 @@ sequenceDiagram
 
 | Token | Issued by | Can do |
 | --- | --- | --- |
-| Unscoped (no `conversation_id` claim) | `tokens/generate`, `tokens/refresh` of an unscoped token | Create conversations. Accepted for any conversation id of the tenant. |
-| Channel-scoped (`scope: "channel"`, no `conversation_id`) | `tokens/generate` with `"scope": "channel"`, `tokens/refresh` of a channel-scoped token | Everything an unscoped token can do, plus joining `converger:channel:<channel_id>` on the socket of a `websocket` channel to follow every delivery to it (agent console). See [WebSocket](../websocket.md). |
+| Unscoped (no `conversation_id` claim) | `tokens/generate`, `tokens/refresh` of an unscoped token | Create conversations. Accepted for the conversations of its own channel (other channels' conversations get `404`). Cannot join a conversation topic on the WebSocket. |
+| Channel-scoped (`scope: "channel"`, no `conversation_id`) | `tokens/generate` with `"scope": "channel"`, `tokens/refresh` of a channel-scoped token | Everything an unscoped token can do, plus, on the WebSocket (role `agent`), joining `converger:channel:<channel_id>` of a `websocket` channel to follow every delivery to it, and joining the conversations owned by or routed to its channel (agent console). See [WebSocket](../websocket.md). |
 | Conversation-bound | `POST /conversations`, `GET /conversations/:id`, `tokens/refresh` of a bound token | Only its own conversation: other conversation ids get `403`, attachments of other conversations `404`. |
 
 :::tip
@@ -291,6 +291,10 @@ curl -s -X POST "$CONVERGER/api/v1/converger/conversations/$CONV/activities" \
 ```
 
 The full activity arrives on the socket and in the activities list.
+
+The same activity can also be sent over the socket with the `postActivity` event, which shares the
+`activity_create` bucket and replies with `id`, `seq` and `watermark`; see
+[WebSocket](../websocket.md#6-send-activities-over-the-socket).
 
 | Status | Body | Cause |
 | --- | --- | --- |

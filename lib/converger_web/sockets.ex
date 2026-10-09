@@ -15,10 +15,6 @@ defmodule ConvergerWeb.Sockets do
 
   alias ConvergerWeb.SocketPresence
 
-  # Presence key of a socket without an id (a channel-level token without a
-  # user): counted, but it cannot be disconnected by id.
-  @anonymous_prefix "anonymous:"
-
   @doc "Socket id for the Converger API socket (`ConvergerWeb.ConvergerSocket`)."
   def converger_socket_id(%{"tenant_id" => tenant_id} = claims) when is_binary(tenant_id) do
     case subject(claims) do
@@ -38,7 +34,8 @@ defmodule ConvergerWeb.Sockets do
 
   # End-user id when the token names one, otherwise the channel for a
   # channel-scoped token (agent console), otherwise the conversation.
-  # Channel-level tokens without any of them get no id.
+  # Channel-level tokens without any of them get no id (they cannot join, see
+  # ConvergerChannel authorization).
   defp subject(%{"user_id" => user_id}) when is_binary(user_id) and user_id != "",
     do: "user:#{user_id}"
 
@@ -70,7 +67,6 @@ defmodule ConvergerWeb.Sockets do
   def disconnect_channel(channel_id) do
     channel_id
     |> tracked_ids()
-    |> Enum.reject(&String.starts_with?(&1, @anonymous_prefix))
     |> Enum.each(&disconnect_id/1)
 
     :ok
@@ -97,10 +93,10 @@ defmodule ConvergerWeb.Sockets do
   Track the calling channel process (a joined channel) under its socket id.
   The entry disappears automatically when the process exits.
   """
-  def track(%Phoenix.Socket{id: socket_id}, channel_id, meta) do
-    key = socket_id || @anonymous_prefix <> inspect(self())
+  def track(%Phoenix.Socket{id: nil}, _channel_id, _meta), do: :ok
 
-    case SocketPresence.track(self(), topic(channel_id), key, meta) do
+  def track(%Phoenix.Socket{id: socket_id}, channel_id, meta) do
+    case SocketPresence.track(self(), topic(channel_id), socket_id, meta) do
       {:ok, _ref} -> :ok
       {:error, {:already_tracked, _, _, _}} -> :ok
       {:error, reason} -> {:error, reason}

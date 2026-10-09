@@ -25,6 +25,9 @@ config :converger, ConvergerWeb.Endpoint,
   secret_key_base: "9Ov2AhAq9kITaSWzIOHQlF0OjtggqukSSK19U94ghQsnmuWqnKNRkQ/2PjUT9xNm",
   server: false
 
+# No readiness grace period when the test app stops.
+config :converger, :websocket, drain_delay_ms: 0
+
 # In test we don't send emails
 config :converger, Converger.Mailer, adapter: Swoosh.Adapters.Test
 
@@ -71,3 +74,7 @@ config :converger, :webhook,
 
 # Deterministic encryption key for tests only.
 config :converger, Converger.Vault, key: Base.encode64("converger-tst-cloak-key-32bytes!")
+
+# Forward typing indicators and read receipts to external channels inline
+# (Converger.Channels.Signals), so tests see the provider calls synchronously.
+config :converger, :channel_signals_async, false

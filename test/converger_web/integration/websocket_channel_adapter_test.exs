@@ -170,10 +170,10 @@ defmodule ConvergerWeb.Integration.WebSocketChannelAdapterTest do
       assert_push "activitySet", %{activities: [_]}
 
       ref =
-        Phoenix.ChannelTest.push(socket, "new_activity", %{
+        Phoenix.ChannelTest.push(socket, "postActivity", %{
           "conversation_id" => inbound.conversation_id,
           "text" => "On it",
-          "idempotency_key" => "reply-1"
+          "clientId" => "reply-1"
         })
 
       assert_reply ref, :ok, %{id: id, seq: 2}, 2_000
@@ -189,10 +189,10 @@ defmodule ConvergerWeb.Integration.WebSocketChannelAdapterTest do
 
       # A re-send with the same key does not create a second activity.
       ref =
-        Phoenix.ChannelTest.push(socket, "new_activity", %{
+        Phoenix.ChannelTest.push(socket, "postActivity", %{
           "conversation_id" => inbound.conversation_id,
           "text" => "On it",
-          "idempotency_key" => "reply-1"
+          "clientId" => "reply-1"
         })
 
       assert_reply ref, :ok, %{id: ^id, seq: 2}
@@ -207,7 +207,7 @@ defmodule ConvergerWeb.Integration.WebSocketChannelAdapterTest do
       {:ok, conversation} = create_conversation(tenant, other)
 
       ref =
-        Phoenix.ChannelTest.push(socket, "new_activity", %{
+        Phoenix.ChannelTest.push(socket, "postActivity", %{
           "conversation_id" => conversation.id,
           "text" => "x"
         })
@@ -216,10 +216,25 @@ defmodule ConvergerWeb.Integration.WebSocketChannelAdapterTest do
 
       assert {:error, %{reason: "unauthorized"}} =
                console
-               |> connect_socket([])
+               |> connect_socket(scope: "channel")
                |> subscribe_and_join(
                  ConvergerChannel,
                  "converger:conversation:#{conversation.id}"
+               )
+    end
+
+    test "an unscoped channel token cannot join a routed conversation", %{
+      whatsapp: whatsapp,
+      console: console
+    } do
+      activity = whatsapp_message(whatsapp, "wamid.u-1", "hi")
+
+      assert {:error, %{reason: "unauthorized"}} =
+               console
+               |> connect_socket(user_id: "end-user")
+               |> subscribe_and_join(
+                 ConvergerChannel,
+                 "converger:conversation:#{activity.conversation_id}"
                )
     end
 
@@ -245,7 +260,7 @@ defmodule ConvergerWeb.Integration.WebSocketChannelAdapterTest do
 
       {:ok, _, _socket} =
         console
-        |> connect_socket(user_id: "agent-8")
+        |> connect_socket(scope: "channel", user_id: "agent-8")
         |> subscribe_and_join(
           ConvergerChannel,
           "converger:conversation:#{first.conversation_id}",
@@ -273,7 +288,7 @@ defmodule ConvergerWeb.Integration.WebSocketChannelAdapterTest do
 
       {:ok, _, socket} =
         console
-        |> connect_socket(user_id: "agent-9")
+        |> connect_socket(scope: "channel", user_id: "agent-9")
         |> subscribe_and_join(ConvergerChannel, "converger:conversation:#{first.conversation_id}")
 
       wait_until(fn -> Sockets.count_connections(console.id, first.conversation_id) == 1 end)
@@ -306,7 +321,7 @@ defmodule ConvergerWeb.Integration.WebSocketChannelAdapterTest do
 
       {:ok, _, _} =
         console
-        |> connect_socket(user_id: "agent-1")
+        |> connect_socket(scope: "channel", user_id: "agent-1")
         |> subscribe_and_join(
           ConvergerChannel,
           "converger:conversation:#{activity.conversation_id}",
@@ -353,10 +368,10 @@ defmodule ConvergerWeb.Integration.WebSocketChannelAdapterTest do
 
     {:ok, _, socket} =
       channel
-      |> connect_socket(user_id: "u-1")
+      |> connect_socket(conversation_id: conversation.id, user_id: "u-1")
       |> subscribe_and_join(ConvergerChannel, "converger:conversation:#{conversation.id}")
 
-    ref = Phoenix.ChannelTest.push(socket, "new_activity", %{"text" => "hi"})
+    ref = Phoenix.ChannelTest.push(socket, "postActivity", %{"text" => "hi"})
     assert_reply ref, :error, %{reason: "inbound_not_supported"}
     assert {[], false} = Activities.page_activities_since(conversation.id, nil)
   end

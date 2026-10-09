@@ -53,6 +53,8 @@ The behaviour lives in [`lib/converger/channels/adapter.ex`](https://github.com/
 | `verify_inbound_signature/3` | no | `:ok`, `:legacy`, `:missing` or `{:error, reason}` | Provider-native signature check. Missing callback means the generic `x-converger-signature` scheme. |
 | `retry_policy/0` | no | `map` | Adapter defaults merged over the global retry policy and under the channel's `retry_policy`. |
 | `capabilities/0` | no | `[atom]` | What the adapter can do. The pipeline delivers only to channels whose adapter has `:outbound`. Missing callback means `[:inbound, :outbound]`. |
+| `send_typing/2` | no | `:ok` or `{:error, term}` | Shows a WebSocket participant's typing indicator to the channel's participant. Missing callback means the channel gets no typing. |
+| `send_read_receipt/2` | no | `:ok` or `{:error, term}` | Marks the channel participant's messages as read when a WebSocket participant reads them. Missing callback means no read receipts are sent. |
 
 ### `deliver_activity/2`
 
@@ -104,13 +106,13 @@ Status progression is monotonic (`pending` < `sent` < `delivered` < `read`): a `
 
 ## Capability matrix
 
-| Type | Modes | Outbound delivery | Inbound webhook | Status receipts | Inbound signature | Batches |
-| --- | --- | --- | --- | --- | --- | --- |
-| `webhook` | inbound, outbound, duplex | Canonical activity JSON to the configured URL, signed with `x-converger-signature` | One message per request | Yes: `delivery_id` or `provider_message_id` plus `status` | Generic `x-converger-signature` | No (one message per request) |
-| `whatsapp_meta` | inbound, outbound, duplex | Text messages through the Graph API | Yes (Cloud API webhook) | Yes (`statuses`) | Meta `X-Hub-Signature-256` keyed with `app_secret` | Yes: every `entry` / `changes` / `messages` / `statuses` item |
-| `whatsapp_infobip` | inbound, outbound, duplex | Text messages through the Infobip API | Yes (`results`) | Yes (delivery reports in `results`) | Generic `x-converger-signature` (no Infobip-native check) | Yes: every item of `results` |
-| `echo` | outbound | Creates a reply activity from `bot` in the same conversation | No | No | Not applicable | Not applicable |
-| `websocket` | inbound, outbound, duplex | Broadcast to the channel's connected sockets; `pending` until a client is connected, replays or acks ([WebSocket](websocket.md)) | No (clients send over the socket, through the same inbound path) | Client `ack` over the socket | Not applicable (socket token) | Not applicable |
+| Type | Modes | Outbound delivery | Inbound webhook | Status receipts | Inbound signature | Batches | Typing / read receipts out |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `webhook` | inbound, outbound, duplex | Canonical activity JSON to the configured URL, signed with `x-converger-signature` | One message per request | Yes: `delivery_id` or `provider_message_id` plus `status` | Generic `x-converger-signature` | No (one message per request) | No |
+| `whatsapp_meta` | inbound, outbound, duplex | Text messages through the Graph API | Yes (Cloud API webhook) | Yes (`statuses`) | Meta `X-Hub-Signature-256` keyed with `app_secret` | Yes: every `entry` / `changes` / `messages` / `statuses` item | Yes: typing indicator and mark as read |
+| `whatsapp_infobip` | inbound, outbound, duplex | Text messages through the Infobip API | Yes (`results`) | Yes (delivery reports in `results`) | Generic `x-converger-signature` (no Infobip-native check) | Yes: every item of `results` | No |
+| `echo` | outbound | Creates a reply activity from `bot` in the same conversation | No | No | Not applicable | Not applicable | No |
+| `websocket` | inbound, outbound, duplex | Broadcast to the channel's connected sockets; `pending` until a client is connected, replays or acks ([WebSocket](websocket.md)) | No (clients send over the socket, through the same inbound path) | Client `ack` over the socket | Not applicable (socket token) | Not applicable | Not applicable (clients get `typing` and `deliveryStatus` frames) |
 
 Notes:
 

@@ -230,11 +230,16 @@ defmodule Converger.Deliveries do
     end
   end
 
-  def apply_status_update(_channel_id, %{"delivery_id" => delivery_id} = update)
+  # Scoped to the reporting channel, like provider_message_id lookups: a
+  # signed status webhook of one channel must not be able to change the
+  # status of another channel's (or tenant's) delivery by guessing its id.
+  def apply_status_update(channel_id, %{"delivery_id" => delivery_id} = update)
       when is_binary(delivery_id) and delivery_id != "" do
-    case Repo.get(Delivery, delivery_id) do
-      %Delivery{} = delivery -> advance_status(delivery, update)
-      nil -> {:error, :delivery_not_found}
+    with {:ok, id} <- Ecto.UUID.cast(delivery_id),
+         %Delivery{} = delivery <- Repo.get_by(Delivery, id: id, channel_id: channel_id) do
+      advance_status(delivery, update)
+    else
+      _ -> {:error, :delivery_not_found}
     end
   end
 
@@ -330,7 +335,13 @@ defmodule Converger.Deliveries do
           status: delivery.status,
           sent_at: delivery.sent_at,
           delivered_at: delivery.delivered_at,
-          read_at: delivery.read_at
+          read_at: delivery.read_at,
+          # For the WebSocket deliveryStatus frame (ConvergerWeb.ConvergerFrames).
+          seq: delivery.activity.seq,
+          sender: delivery.activity.sender,
+          attempts: delivery.attempts,
+          last_error: delivery.last_error,
+          updated_at: delivery.updated_at
         }
       )
     end

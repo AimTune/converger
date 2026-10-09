@@ -84,7 +84,8 @@ Activities are created from untrusted input (REST bodies, WebSocket payloads, pa
 | --- | --- |
 | `POST /api/v1/conversations/:id/activities` (tenant API key) | The body's `"sender"` when it is a non-empty string, else `"user"`. |
 | `POST /api/v1/converger/conversations/:id/activities` (client API) | `from.id` from the body, else `"user"`. |
-| `new_activity` on `/socket` (`ConversationChannel`) | The token's `sub` claim. Never taken from the payload. |
+| `postActivity` on `/socket/converger` (`ConvergerChannel`) | The token's `user_id` claim, else `from.id` from the payload, else `"user"`. |
+| `new_activity` on `/socket` (`ConversationChannel`, deprecated) | The token's `sub` claim. Never taken from the payload. |
 | Inbound webhook | The adapter's parsed `"sender"` (for example the WhatsApp phone number). |
 | Lifecycle events | `"system"` |
 | Echo adapter replies | `"bot"` |
@@ -94,10 +95,12 @@ Activities are created from untrusted input (REST bodies, WebSocket payloads, pa
 | Source | Key |
 | --- | --- |
 | REST (both APIs) | `x-idempotency-key` request header |
+| WebSocket `postActivity` | `clientId` in the payload (1 to 128 characters of `A-Z a-z 0-9 . _ : ~ -`), stored as `ws:<sender>:<clientId>` |
+| WebSocket `new_activity` (legacy socket, deprecated) | `idempotency_key` in the payload, stored as `ws:<sender>:<idempotency_key>` |
 | Inbound webhooks | the provider message id from the adapter (for example a WhatsApp `wamid`) |
 | Echo replies | `"echo:" <> original_activity_id` |
 
-`create_activity/2` first looks for an existing activity with the same `(conversation_id, idempotency_key)` and returns it unchanged if found. A concurrent insert that loses the race on the unique index is also resolved to the existing activity. A retried request therefore returns `201`/`200` with the **original** activity, even if its body differs. For inbound webhooks, the key is additionally checked across every conversation of the channel before conversation resolution, so a redelivered provider message is recognized even when it would resolve to a new conversation ([ADR-0015](../adr/0015-per-message-idempotent-inbound-batches.md)). Activities without a key are not deduplicated. Client message ids with server acks over WebSocket are Planned ([#24](https://github.com/AimTune/converger/issues/24)).
+`create_activity/2` first looks for an existing activity with the same `(conversation_id, idempotency_key)` and returns it unchanged if found. A concurrent insert that loses the race on the unique index is also resolved to the existing activity. A retried request therefore returns `201`/`200` with the **original** activity, even if its body differs. For inbound webhooks, the key is additionally checked across every conversation of the channel before conversation resolution, so a redelivered provider message is recognized even when it would resolve to a new conversation ([ADR-0015](../adr/0015-per-message-idempotent-inbound-batches.md)). Activities without a key are not deduplicated. A `postActivity` re-sent with the same `clientId` returns the stored activity in its `ok` reply (`id`, `seq`, `watermark`) and creates nothing; see [WebSocket](../websocket.md#6-send-activities-over-the-socket).
 
 ## Sequence numbers (`seq`)
 
