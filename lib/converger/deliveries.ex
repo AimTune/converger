@@ -325,11 +325,17 @@ defmodule Converger.Deliveries do
       |> select([d], d.id)
       |> lock("FOR UPDATE SKIP LOCKED")
 
+    # Lock and fetch the ids first, then update exactly those. A
+    # `LIMIT ... SKIP LOCKED` subquery joined into the UPDATE may be
+    # re-executed by the planner (nested loop), each run skipping the rows the
+    # previous one locked, which updates more rows than the limit.
     {:ok, retried} =
       Repo.transaction(fn ->
+        locked_ids = Repo.all(ids)
+
         retried =
           Delivery
-          |> join(:inner, [d], s in subquery(ids), on: d.id == s.id)
+          |> where([d], d.id in ^locked_ids)
           |> reset_dead_letters(actor)
 
         insert_retry_audit_logs(retried, actor, %{"bulk" => true})
