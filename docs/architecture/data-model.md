@@ -26,6 +26,7 @@ erDiagram
     participants |o--o{ conversations : "talks in"
     conversations ||--o{ activities : contains
     conversations |o--o{ attachments : "uploaded to"
+    conversations ||--o{ conversation_reads : "read up to"
     activities ||--o{ deliveries : "delivered as"
     activities |o--o{ attachments : references
 
@@ -66,6 +67,14 @@ erDiagram
         text status
         bigint last_seq
         jsonb metadata
+    }
+    conversation_reads {
+        uuid id PK
+        uuid tenant_id FK
+        uuid conversation_id FK
+        text reader_id
+        bigint read_seq
+        timestamptz read_at
     }
     participants {
         uuid id PK
@@ -205,6 +214,12 @@ Indexes: `(tenant_id)`, `(channel_id)`, `(participant_id, status)` for resolving
 An external party (phone number, chat id, e-mail) on a channel. Inbound messages without a `conversation_id` resolve their conversation through it, and outbound adapters read the recipient from it ([ADR-0016](../adr/0016-participant-based-conversation-resolution.md)).
 
 Columns: `tenant_id`, `channel_id`, `external_id` (not null), `display_name`, `metadata` (jsonb, default `{}`). Indexes: unique `(channel_id, external_id)`, `(tenant_id)`.
+
+### conversation_reads
+
+The read watermark of each WebSocket reader in a conversation: every activity with `seq <= read_seq` has been read by `reader_id` (the connection's participant id: the token's `user_id`, or `anonymous`). Written by `Converger.Receipts.mark_read/3` with an upsert that only ever raises `read_seq`, capped at `conversations.last_seq` ([ADR-0032](../adr/0032-transient-conversation-signals.md)).
+
+Columns: `tenant_id`, `conversation_id` (both cascade on delete), `reader_id` (text, not null), `read_seq` (bigint, not null), `read_at`. Indexes: unique `(conversation_id, reader_id)` (the upsert conflict target), `(tenant_id)`.
 
 ### activities
 

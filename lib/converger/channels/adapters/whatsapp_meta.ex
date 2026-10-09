@@ -79,6 +79,58 @@ defmodule Converger.Channels.Adapters.WhatsAppMeta do
   end
 
   @doc """
+  Shows the WhatsApp typing indicator to the participant. The Cloud API
+  attaches it to the participant's latest inbound message, which it also
+  marks as read, and clears it after 25 s or when the next message is sent;
+  `isTyping: false` therefore needs no call. Without an inbound message to
+  attach to there is nothing to do.
+  """
+  @impl true
+  def send_typing(channel, %{is_typing: true, provider_message_id: message_id})
+      when is_binary(message_id) do
+    post_status(channel, %{
+      messaging_product: "whatsapp",
+      status: "read",
+      message_id: message_id,
+      typing_indicator: %{type: "text"}
+    })
+  end
+
+  def send_typing(_channel, _signal), do: :ok
+
+  @doc """
+  Marks the participant's messages up to `provider_message_id` as read (blue
+  ticks): the Cloud API marks that message and every earlier one.
+  """
+  @impl true
+  def send_read_receipt(channel, %{provider_message_id: message_id})
+      when is_binary(message_id) do
+    post_status(channel, %{messaging_product: "whatsapp", status: "read", message_id: message_id})
+  end
+
+  def send_read_receipt(_channel, _signal), do: :ok
+
+  defp post_status(channel, payload) do
+    url =
+      "https://graph.facebook.com/#{graph_api_version(channel)}/#{channel.config["phone_number_id"]}/messages"
+
+    options =
+      [
+        json: payload,
+        headers: [{"authorization", "Bearer #{channel.config["access_token"]}"}],
+        receive_timeout: RetryPolicy.for_channel(channel).timeout_ms,
+        retry: false
+      ]
+      |> Keyword.merge(Application.get_env(:converger, :whatsapp_req_options, []))
+
+    case Req.post(url, options) do
+      {:ok, %Req.Response{status: 200}} -> :ok
+      {:ok, %Req.Response{status: status, body: body}} -> {:error, {:http_error, status, body}}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @doc """
   Graph API version used for outbound calls. Resolution order: the channel
   config key `"graph_api_version"`, then
   `config :converger, Converger.Channels.Adapters.WhatsAppMeta, graph_api_version: "..."`,

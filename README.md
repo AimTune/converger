@@ -25,7 +25,7 @@ The site is built with Docusaurus from [`website/`](website/) and uses [`docs/`]
 - **High Performance**: Validated to handle **5,000+ messages/second** on a single node.
 - **Observability Stack**: Built-in support for **OpenTelemetry**, Prometheus, Grafana, Jaeger, and Loki.
 - **Reliability & Safety**:
-    - **Idempotency**: `x-idempotency-key` header (REST) and `idempotency_key` field on the legacy WebSocket `new_activity` push, so clients can retry after a lost reply without duplicates.
+    - **Idempotency**: `x-idempotency-key` header (REST) and `clientId` on the WebSocket `postActivity` push, so clients can retry after a lost reply without duplicates.
     - **Crash-tested**: a [chaos test](docs/chaos.md) kills the node under REST + WebSocket load and checks that no acknowledged message is lost.
     - **Transaction Safety**: Atomic persistence before real-time broadcast.
     - **Rate Limiting**: Tenant and IP-level throttling.
@@ -108,6 +108,20 @@ Every list endpoint and admin table is bounded. Page sizes are set in `config :c
 - Conversations are paged newest first with keyset pagination on `(inserted_at, id)`. To get the next page, pass back `next_cursor`. A malformed `cursor` or `watermark` on the tenant API returns `400`. On the Converger API, an invalid watermark starts from the beginning, as it did before.
 - **Behaviour change:** before this change, both activity endpoints returned the whole history when no watermark was given. They now return one page. Clients that need everything must follow `has_more`.
 - **WebSocket replay on join** is capped at `ws_replay_limit` (100) activities. The Converger channel's replayed `activitySet` frame now carries `has_more`. When it is `true`, fetch the rest over REST from that frame's `watermark` and de-duplicate by activity id against live frames. On the legacy `conversation:*` channel, a `replay_truncated` event (`{has_more, last_activity_id}`) follows a truncated replay. Rejoin with that `last_activity_id` to continue.
+
+---
+
+## 🔌 Client WebSocket
+
+Clients connect to `/socket/converger` with a Converger token, join `converger:conversation:<id>`, receive
+`activitySet` frames and send with `postActivity` (see the [WebSocket guide](docs/websocket.md)).
+
+- **Deprecated:** the legacy socket `/socket` (`conversation:<id>`, `new_activity`), `POST /api/v1/tokens` and
+  channel tokens in `x-channel-token`. They keep working until they are removed (no earlier than two minor
+  releases and 6 months later), and every use logs a `Deprecated ... used` warning. See
+  [migrating from the legacy API](docs/api/migrating-from-legacy.md).
+- **Security fix:** `x-channel-token` now accepts only channel tokens. A conversation token or Converger token sent
+  there used to act as the whole tenant and is now refused with `401`; use `x-api-key` server side.
 
 ---
 

@@ -10,6 +10,17 @@ authenticates with the tenant API key (`x-api-key`) or a channel token (`x-chann
 [authentication](overview.md#authentication). Shared conventions (errors, rate limits, pagination, idempotency)
 are described in the [overview](overview.md).
 
+:::warning
+`x-channel-token`, `POST /api/v1/tokens` and the channel-token route `POST /api/v1/conversations` are deprecated
+([#23](https://github.com/AimTune/converger/issues/23)). They keep working until removal, no earlier than two
+minor releases and six months after #23, and every use logs a warning and adds `Deprecation` and `Link` response
+headers. Use `x-api-key` for server-to-server calls (it is not deprecated) and the [client API](client-api.md) for
+end-user clients. See [migrating from the legacy surfaces](migrating-from-legacy.md).
+
+`x-channel-token` accepts only channel tokens. End-user tokens (conversation tokens from `POST /api/v1/tokens` and
+Converger API tokens) are refused with `401`.
+:::
+
 Controllers: [`ConvergerWeb.TokenController`](https://github.com/AimTune/converger/blob/main/lib/converger_web/controllers/token_controller.ex),
 [`ConversationController`](https://github.com/AimTune/converger/blob/main/lib/converger_web/controllers/conversation_controller.ex),
 [`ActivityController`](https://github.com/AimTune/converger/blob/main/lib/converger_web/controllers/activity_controller.ex),
@@ -19,8 +30,8 @@ Controllers: [`ConvergerWeb.TokenController`](https://github.com/AimTune/converg
 
 | Method | Path | Auth | Purpose |
 | --- | --- | --- | --- |
-| `POST` | `/api/v1/tokens` | `x-channel-token` | Issue a conversation token for the legacy WebSocket |
-| `POST` | `/api/v1/conversations` | `x-channel-token` | Create a conversation on the token's channel |
+| `POST` | `/api/v1/tokens` | `x-channel-token` | Deprecated. Issue a conversation token for the legacy WebSocket |
+| `POST` | `/api/v1/conversations` | `x-channel-token` | Deprecated. Create a conversation on the token's channel |
 | `GET` | `/api/v1/conversations` | `x-api-key` only | List conversations (keyset-paginated, filterable) |
 | `GET` | `/api/v1/conversations/:id` | `x-api-key` or `x-channel-token` | Get a conversation |
 | `POST` | `/api/v1/conversations/:conversation_id/close` | `x-api-key` or `x-channel-token` | Close a conversation |
@@ -35,6 +46,8 @@ Controllers: [`ConvergerWeb.TokenController`](https://github.com/AimTune/converg
 | `GET` | `/api/v1/channels/:channel_id/delivery` | `x-api-key` or `x-channel-token` | Channel delivery state (circuit breaker, rate limit) |
 | `POST` | `/api/v1/channels/:channel_id/pause` | `x-api-key` or `x-channel-token` | Pause outbound deliveries of a channel |
 | `POST` | `/api/v1/channels/:channel_id/resume` | `x-api-key` or `x-channel-token` | Resume deliveries (also closes an open breaker) |
+
+On the routes marked `x-api-key` or `x-channel-token`, only the `x-channel-token` option is deprecated.
 
 The inbound webhook routes `/api/v1/channels/:channel_id/inbound` and `/status` share the `/api/v1` scope but are
 called by providers, not by tenants; see [inbound webhooks](inbound.md).
@@ -137,15 +150,16 @@ Routing rule timestamps have second precision; conversation and activity timesta
 
 ## Tokens
 
-### Issue a conversation token
+### Issue a conversation token (deprecated)
 
 `POST /api/v1/tokens`
 
 Issues a token for an end user to join the legacy WebSocket channel `conversation:<id>` on `/socket/websocket`.
-New clients should use the [client API](client-api.md) and its socket instead.
+This endpoint and the legacy socket are deprecated. New clients should use the [client API](client-api.md) and its
+socket instead; see [migrating from the legacy surfaces](migrating-from-legacy.md).
 
-**Auth:** `x-channel-token` header only (no `x-api-key`). The token's channel must be the conversation's channel,
-and the conversation's tenant must be `active`.
+**Auth:** `x-channel-token` header only (no `x-api-key`); it must hold a channel token. The token's channel must be
+the conversation's channel, and the conversation's tenant must be `active`.
 
 **Rate limit:** `token_create`, 10 per minute per client IP.
 
@@ -171,21 +185,24 @@ curl -s -X POST "$CONVERGER/api/v1/tokens" \
 | --- | --- | --- |
 | `400` | `{"error": "Missing x-channel-token header"}` | No channel token |
 | `400` | `{"errors": {"detail": "Bad Request"}}` | `conversation_id` or `user_id` missing, or `conversation_id` not a UUID |
-| `401` | `{"errors": {"detail": "Unauthorized"}}` | Channel token invalid or expired |
+| `401` | `{"errors": {"detail": "Unauthorized"}}` | Channel token invalid or expired, or not a channel token (for example a conversation token or Converger API token) |
 | `403` | `{"errors": {"detail": "Forbidden"}}` | Token's channel differs from the conversation's channel, or tenant not active |
 | `404` | `{"errors": {"detail": "Not Found"}}` | Unknown conversation |
 | `429` | rate limit body | See [rate limiting](overview.md#rate-limiting) |
 
 ## Conversations
 
-### Create a conversation
+### Create a conversation (deprecated)
 
 `POST /api/v1/conversations`
 
 Creates a conversation on the channel named in the channel token. The tenant and channel come from the token and
 cannot be set in the body.
+This route is deprecated because it authenticates only with `x-channel-token`. End-user clients should create
+conversations with the [client API](client-api.md).
 
-**Auth:** `x-channel-token` only. The channel must belong to the token's tenant and be `active`.
+**Auth:** `x-channel-token` only, holding a channel token (end-user tokens are refused with `401`). The channel
+must belong to the token's tenant and be `active`.
 
 | Body field | Type | Required | Notes |
 | --- | --- | --- | --- |

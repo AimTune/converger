@@ -99,6 +99,7 @@ defmodule ConvergerWeb.Telemetry do
       counter("converger.channel.resumed.count", tags: [:channel_type]),
       counter("converger.deliveries.parked.count", tags: [:channel_type, :reason]),
       counter("converger.deliveries.rate_limited.count", tags: [:channel_type]),
+      counter("converger.socket.limit.count", tags: [:reason]),
       counter("phoenix.socket_connected.count"),
       counter("phoenix.channel_joined.count"),
 

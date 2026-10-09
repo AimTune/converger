@@ -141,7 +141,12 @@ defmodule Converger.Tenants.Tenant do
       case URI.parse(value) do
         %URI{scheme: scheme, host: host}
         when scheme in ["http", "https"] and is_binary(host) and host != "" ->
-          []
+          # The server POSTs health alerts here: apply the same SSRF guard
+          # as webhook channels (private, loopback and metadata targets).
+          case Converger.Channels.UrlGuard.check(value) do
+            :ok -> []
+            {:error, message} -> [{field, "is not allowed: #{message}"}]
+          end
 
         _ ->
           [{field, "must be a valid HTTP or HTTPS URL"}]

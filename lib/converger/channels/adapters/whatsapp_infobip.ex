@@ -5,7 +5,7 @@ defmodule Converger.Channels.Adapters.WhatsAppInfobip do
 
   require Logger
 
-  alias Converger.Channels.DeliveryError
+  alias Converger.Channels.{DeliveryError, UrlGuard}
   alias Converger.Pipeline.RetryPolicy
 
   @impl true
@@ -17,8 +17,17 @@ defmodule Converger.Channels.Adapters.WhatsAppInfobip do
     missing = Enum.filter(required, fn key -> !is_binary(config[key]) or config[key] == "" end)
 
     case missing do
-      [] -> :ok
+      [] -> validate_base_url(config["base_url"])
       fields -> {:error, "whatsapp_infobip config missing: #{Enum.join(fields, ", ")}"}
+    end
+  end
+
+  # base_url is per-tenant config the server sends requests to: same SSRF
+  # guard as webhook channels.
+  defp validate_base_url(url) do
+    case UrlGuard.check(url) do
+      :ok -> :ok
+      {:error, message} -> {:error, "whatsapp_infobip config base_url is not allowed: #{message}"}
     end
   end
 
@@ -32,12 +41,8 @@ defmodule Converger.Channels.Adapters.WhatsAppInfobip do
       activity.metadata["recipient_phone"] || activity.metadata["to"] ||
         Participants.recipient_for(activity, Map.get(channel, :id))
 
-    if is_nil(recipient) do
-      {:error,
-       DeliveryError.permanent(
-         "no recipient: set activity metadata 'recipient_phone' or 'to', or reply in a conversation with a participant on this channel"
-       )}
-    else
+    with {:ok, recipient} <- require_recipient(recipient),
+         :ok <- check_target(base_url) do
       url = "#{base_url}/whatsapp/1/message/text"
 
       payload = %{
@@ -68,6 +73,32 @@ defmodule Converger.Channels.Adapters.WhatsAppInfobip do
         {:error, reason} ->
           {:error, DeliveryError.from_transport(reason, "Infobip API")}
       end
+    end
+  end
+
+  defp require_recipient(nil) do
+    {:error,
+     DeliveryError.permanent(
+       "no recipient: set activity metadata 'recipient_phone' or 'to', or reply in a conversation with a participant on this channel"
+     )}
+  end
+
+  defp require_recipient(recipient), do: {:ok, recipient}
+
+  # Re-checked at send time: DNS may have changed since the config was saved,
+  # and configs saved before the guard existed were never checked.
+  defp check_target(base_url) do
+    case UrlGuard.resolve(base_url || "") do
+      {:ok, _target} ->
+        :ok
+
+      {:error, {:unresolvable, _} = reason} ->
+        {:error,
+         %DeliveryError{reason: "Infobip base_url rejected: " <> UrlGuard.format_error(reason)}}
+
+      {:error, reason} ->
+        {:error,
+         DeliveryError.permanent("Infobip base_url rejected: " <> UrlGuard.format_error(reason))}
     end
   end
 

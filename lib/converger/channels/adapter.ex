@@ -77,11 +77,46 @@ defmodule Converger.Channels.Adapter do
   """
   @callback rate_limit() :: String.t() | nil
 
+  @typedoc """
+  A transient conversation signal forwarded to an external channel (see
+  `Converger.Channels.Signals`):
+
+    - `:conversation_id` - the conversation
+    - `:recipient` - the participant's `external_id` on this channel (e.g. a
+      phone number)
+    - `:provider_message_id` - the provider id of the participant's latest
+      inbound message (up to `:up_to_seq` for read receipts), or nil
+    - `:is_typing` - typing signals only
+    - `:up_to_seq` - read receipts only: every activity up to this seq is read
+  """
+  @type signal :: %{
+          required(:conversation_id) => String.t(),
+          required(:recipient) => String.t(),
+          required(:provider_message_id) => String.t() | nil,
+          optional(:is_typing) => boolean(),
+          optional(:up_to_seq) => pos_integer()
+        }
+
+  @doc """
+  Show (or clear) a typing indicator to the channel's participant, e.g. the
+  WhatsApp typing indicator. Best effort: never retried, errors are logged.
+  """
+  @callback send_typing(channel, signal) :: :ok | {:error, term()}
+
+  @doc """
+  Tell the provider that the participant's messages up to
+  `signal.provider_message_id` have been read (e.g. WhatsApp blue ticks).
+  Best effort: never retried, errors are logged.
+  """
+  @callback send_read_receipt(channel, signal) :: :ok | {:error, term()}
+
   @optional_callbacks [
     parse_status_update: 2,
     verify_inbound_signature: 3,
     retry_policy: 0,
-    rate_limit: 0
+    rate_limit: 0,
+    send_typing: 2,
+    send_read_receipt: 2
   ]
 
   @callback supported_modes() :: [String.t()]
@@ -167,6 +202,38 @@ defmodule Converger.Channels.Adapter do
 
       {:error, _} = err ->
         err
+    end
+  end
+
+  @doc """
+  Forward a typing signal with the channel's adapter. `:unsupported` when the
+  adapter does not implement `c:send_typing/2`.
+  """
+  def send_typing(%{type: type} = channel, signal),
+    do: call_optional(type, :send_typing, [channel, signal])
+
+  @doc """
+  Forward a read receipt with the channel's adapter. `:unsupported` when the
+  adapter does not implement `c:send_read_receipt/2`.
+  """
+  def send_read_receipt(%{type: type} = channel, signal),
+    do: call_optional(type, :send_read_receipt, [channel, signal])
+
+  @doc "Whether the adapter for `type` implements the optional callback `name/arity`."
+  def supports?(type, name, arity) do
+    case adapter_for(type) do
+      {:ok, mod} -> Code.ensure_loaded?(mod) and function_exported?(mod, name, arity)
+      {:error, _} -> false
+    end
+  end
+
+  defp call_optional(type, name, args) do
+    if supports?(type, name, length(args)) do
+      {:ok, mod} = adapter_for(type)
+      # apply/3 because the callback is optional and not every adapter defines it
+      apply(mod, name, args)
+    else
+      :unsupported
     end
   end
 

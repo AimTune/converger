@@ -2,6 +2,62 @@
 
 ## Unreleased
 
+### One client socket stack; legacy socket and tokens deprecated (#23)
+
+- The Converger API socket (`/socket/converger`, topic
+  `converger:conversation:<id>`) now accepts sends: push `postActivity` with an
+  activity (`type`, `text`, `attachments`, `channelData`, optional `clientId`);
+  the reply carries `id`, `seq` and `watermark`. The sender is the token's
+  `user_id` (else `from.id`, else `"user"`), a repeated `clientId` returns the
+  stored activity, and sends share the tenant's `activity_create` rate limit
+  with REST. It is the single implementation of the client protocol.
+- **Deprecated**, removed no earlier than two minor releases and 6 months from
+  now: the legacy socket `/socket` (`UserSocket`, `conversation:<id>`,
+  `new_activity`, `last_activity_id`), `POST /api/v1/tokens`, and channel tokens
+  in `x-channel-token` (`POST /api/v1/conversations` and the tenant API). The
+  tenant API with `x-api-key` is not deprecated. Every use logs a warning
+  (per connection or per request), emits `[:converger, :deprecated, :use]`, and
+  HTTP responses carry `Deprecation` (RFC 9745) and
+  `Link: <...>; rel="deprecation"` headers. Migration guide:
+  `docs/api/migrating-from-legacy.md`; decision: ADR-0026.
+- `converger_js` and the chaos harness use the Converger API socket.
+
+### Receipts, typing indicators and presence on the WebSocket (#25)
+
+- The Converger API socket (`converger:conversation:<id>`) pushes `deliveryStatus` frames for
+  every delivery status change, including WhatsApp `delivered` / `read` receipts, which it used
+  to drop. End users with a `user_id` receive them only for their own activities.
+- Clients can push `typing {isTyping}` (relayed to the other connections, never stored,
+  rate-limited to one state change per 2 s) and `read {watermark}` (stored per reader in the new
+  `conversation_reads` table, never moving backwards; the other participants get a
+  `deliveryStatus` read receipt).
+- `presence` frames per conversation (Phoenix Presence), configurable per channel with the config
+  key `presence` (`identified` by default, `all`, `off`); anonymous end users are not announced by
+  default.
+- New optional adapter callbacks `send_typing/2` and `send_read_receipt/2`; `whatsapp_meta`
+  implements both (Cloud API typing indicator and mark as read).
+- The `delivery_status` PubSub payload (also pushed to the legacy socket) gains `seq`, `sender`,
+  `attempts`, `last_error` and `updated_at`.
+- Migration: `20261010100000_create_conversation_reads`. ADR-0032.
+
+### Security fixes
+
+- Tenant API (`x-channel-token`) accepts only channel tokens (`typ: "channel"`, or the legacy
+  channel-token shape). Conversation tokens and Converger client tokens, which share the signing
+  key and carry a `tenant_id`, were accepted before and unlocked the whole tenant API, including
+  routing-rule CRUD.
+- Converger client tokens are bound to their channel for every conversation endpoint (activities,
+  uploads, resume, attachments); unscoped tokens previously reached every conversation of the
+  tenant. WebSocket joins now require a conversation-bound token.
+- Routing-rule updates can no longer change `tenant_id`.
+- Delivery status updates by `delivery_id` are scoped to the reporting channel.
+- The SSRF guard now also covers the tenant `alert_webhook_url` and the WhatsApp Infobip
+  `base_url`, at save time and at request time.
+- `POST /api/v1/tokens` and `POST /api/v1/conversations` also accept only channel tokens (#23):
+  an end user's token could mint legacy conversation tokens for other conversations of its
+  channel under any user id. The legacy socket accepts only conversation tokens, and legacy
+  verifiers reject Converger client tokens.
+
 ### Converger Protocol v1 specification (#21, refs #63 #68)
 
 Documentation and schemas only; no server behaviour changes.

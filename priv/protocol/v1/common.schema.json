@@ -117,6 +117,7 @@
         "bad_request", "no_session", "unsupported_protocol", "invalid_watermark", "invalid_message",
         "unauthorized", "token_expired", "forbidden", "channel_inactive",
         "rate_limited", "payload_too_large", "too_many_in_flight", "too_many_subscriptions",
+        "slow_consumer",
         "conversation_closed", "conversation_not_found",
         "busy", "interrupted", "not_interrupted", "incomplete_resume", "bot_unavailable",
         "internal", "unavailable"

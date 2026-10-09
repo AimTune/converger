@@ -108,7 +108,7 @@ The toolchain was aligned in the same change (`.tool-versions` and Dockerfile on
 
 - Health and readiness endpoints, k8s manifests and multi-node clustering: [#29](https://github.com/AimTune/converger/issues/29).
 - Graceful degradation and readiness flip under database pressure: [#35](https://github.com/AimTune/converger/issues/35).
-- Socket draining on shutdown for zero-downtime deploys: [#27](https://github.com/AimTune/converger/issues/27).
+- Socket draining on shutdown for zero-downtime deploys: [#27](https://github.com/AimTune/converger/issues/27), decided in [ADR-0027](0027-websocket-limits-backpressure-and-draining.md).
 - Admin 2FA, password reset and session expiry: [#52](https://github.com/AimTune/converger/issues/52).
 - Making Trivy blocking for releases ([ADR-0021](0021-ci-quality-gates-and-lf-line-endings.md)).
 

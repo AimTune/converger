@@ -120,6 +120,28 @@ All environments. Values are integers; unset or empty variables keep the `config
 
 Limits themselves are not environment variables; see [Rate limiting](rate-limiting.md#tuning).
 
+## WebSocket limits and draining
+
+All environments. Integers; unset or empty variables keep the `config :converger, :websocket` default. See
+[WebSocket limits and draining](websocket-limits.md#configuration) for what each one does.
+
+| Variable | Config key | Default |
+| --- | --- | --- |
+| `WS_MAX_FRAME_BYTES` | `max_frame_bytes` | `131072` |
+| `WS_MAX_MESSAGES_PER_WINDOW` | `max_messages` | `20` |
+| `WS_RATE_WINDOW_MS` | `rate_window_ms` | `1000` |
+| `WS_MAX_JOINS` | `max_joins` | `50` |
+| `WS_EPHEMERAL_DROP_QUEUE_LEN` | `ephemeral_drop_queue_len` | `100` |
+| `WS_SLOW_CONSUMER_QUEUE_LEN` | `slow_consumer_queue_len` | `1000` |
+| `WS_RECONNECT_BASE_MS` | `reconnect_base_ms` | `1000` |
+| `WS_RECONNECT_JITTER_MS` | `reconnect_jitter_ms` | `5000` |
+| `WS_DRAIN_DELAY_MS` | `drain_delay_ms` | `5000` (`0` in test) |
+| `WS_DRAIN_BATCH_SIZE` | `drain_batch_size` | `500` |
+| `WS_DRAIN_BATCH_INTERVAL_MS` | `drain_batch_interval_ms` | `1000` |
+| `WS_DRAIN_SHUTDOWN_MS` | `drain_shutdown_ms` | `30000` |
+
+The hard frame cap, `config :converger, :websocket_max_frame_size` (`1_048_576`), is compile time.
+
 ## Clustering and metrics
 
 | Variable | Default | Environment | Meaning |
@@ -309,6 +331,7 @@ PgBouncer transaction pooling). See [Migrations and maintenance windows](migrati
 | `:prometheus_port` | `9568`; `false` in test | `false` disables the metrics listener. |
 | `:force_ssl` | unset outside prod | Keyword list of `Plug.SSL` options, built from the TLS variables in prod; `false` disables. |
 | `:webhook` | `[]` | `allowed_targets`, `allow_private_targets`, `resolver` (SSRF guard), and installation defaults for `connect_timeout` (5000 ms), `receive_timeout` (10000 ms), `max_response_bytes` (1 MiB). |
+| `:channel_signals_async` | `true`; `false` in test | Forward typing indicators and read receipts to external channels (`Converger.Channels.Signals`) in a task under `Converger.TaskSupervisor`. `false` runs them inline in the WebSocket channel process. |
 | `:webhook_req_options`, `:whatsapp_req_options` | `[]` | Extra `Req` options merged into adapter requests (tests use them for `Req.Test` plugs). |
 | `Converger.Channels.Adapters.WhatsappMeta`, `graph_api_version:` | `"v26.0"` | Default Graph API version when the channel config has none. |
 | `:activity_limits` | `max_text_bytes: 65_536`, `max_attachments: 10`, `max_attachment_bytes: 4_096`, `max_metadata_bytes: 16_384` | Activity size limits (attachment and metadata sizes measured as JSON). |

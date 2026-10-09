@@ -4,66 +4,65 @@ defmodule ConvergerWeb.Integration.WebSocketE2ETest do
 
   import Converger.TenantsFixtures
   import Converger.ChannelsFixtures
-  import Converger.ConversationsFixtures
-  alias ConvergerWeb.ConversationChannel
-  alias ConvergerWeb.UserSocket
+  alias ConvergerWeb.{ConvergerChannel, ConvergerSocket}
 
   setup %{conn: conn} do
     tenant = tenant_fixture()
     channel = channel_fixture(tenant)
-    conversation = conversation_fixture(tenant, channel)
 
-    %{conn: conn, tenant: tenant, channel: channel, conversation: conversation}
+    %{conn: conn, channel: channel}
   end
 
-  test "complete flow: API token -> WebSocket join -> Broadcast", %{
+  defp bearer(conn, token), do: put_req_header(conn, "authorization", "Bearer #{token}")
+
+  test "channel secret -> token -> conversation -> socket: send and receive both ways", %{
     conn: conn,
-    tenant: _tenant,
-    channel: channel,
-    conversation: conversation
+    channel: channel
   } do
-    # 1. Get Token via API
-    # Since TokenController.create needs x-channel-token, we need to generate that first
-    # In a real app, the tenant backend generates the channel token.
-    # We'll use our internal helper to generate the starter token.
-    {:ok, channel_token, _} = Converger.Auth.Token.generate_channel_token(channel)
-
-    token_resp =
+    # 1. The integrator's backend exchanges the channel secret for a user token.
+    %{"token" => user_token} =
       conn
-      |> put_req_header("x-channel-token", channel_token)
-      |> post(~p"/api/v1/tokens", %{
-        conversation_id: conversation.id,
-        user_id: "integration-user"
-      })
+      |> bearer(channel.secret)
+      |> post(~p"/api/v1/converger/tokens/generate", %{user: %{id: "e2e-user"}})
+      |> json_response(200)
+
+    # 2. The client starts a conversation and gets a conversation token.
+    %{"conversationId" => conversation_id, "token" => token} =
+      conn
+      |> bearer(user_token)
+      |> post(~p"/api/v1/converger/conversations")
       |> json_response(201)
 
-    assert %{"token" => websocket_token} = token_resp
+    # 3. It connects and joins the single WebSocket entry point.
+    {:ok, socket} = Phoenix.ChannelTest.connect(ConvergerSocket, %{"token" => token})
 
-    # 2. Connect Socket
-    {:ok, socket} = Phoenix.ChannelTest.connect(UserSocket, %{"token" => websocket_token})
+    {:ok, _, socket} =
+      subscribe_and_join(socket, ConvergerChannel, "converger:conversation:#{conversation_id}")
 
-    # 3. Join Channel
-    {:ok, _, _socket} =
-      subscribe_and_join(socket, ConversationChannel, "conversation:#{conversation.id}")
-
-    # 4. Trigger activity via API and check broadcast
-    # Use a separate conn or just call context directly for simplicity in this step,
-    # but let's use the API to be "E2E".
-
-    # assert_broadcast "new_activity", %{text: "E2E message"}
-    # (No wrapper in broadcast, it uses Map/Struct directly in endpoint broadcast)
-
-    # Wait, the POST activities call returns a wrapped response
-    post_resp =
-      conn
-      |> put_req_header("x-channel-token", websocket_token)
-      |> post(~p"/api/v1/conversations/#{conversation.id}/activities", %{
-        text: "E2E message",
-        type: "message"
+    # 4. Sending over the socket: reply, then the activitySet.
+    ref =
+      Phoenix.ChannelTest.push(socket, "postActivity", %{
+        "text" => "over ws",
+        "clientId" => "e2e-1"
       })
-      |> json_response(201)
 
-    assert %{"data" => %{"text" => "E2E message"}} = post_resp
-    assert_broadcast "new_activity", %{text: "E2E message"}
+    assert_reply ref, :ok, %{id: ws_id, watermark: ws_watermark}, 1_000
+
+    assert_push "activitySet", %{
+      activities: [%{id: ^ws_id, text: "over ws", from: %{id: "e2e-user"}}],
+      watermark: ^ws_watermark
+    }
+
+    # 5. Sending over REST reaches the socket the same way.
+    %{"id" => rest_id} =
+      conn
+      |> bearer(token)
+      |> post(~p"/api/v1/converger/conversations/#{conversation_id}/activities", %{
+        type: "message",
+        text: "over rest"
+      })
+      |> json_response(200)
+
+    assert_push "activitySet", %{activities: [%{id: ^rest_id, text: "over rest"}]}
   end
 end

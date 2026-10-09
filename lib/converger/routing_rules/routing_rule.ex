@@ -15,9 +15,18 @@ defmodule Converger.RoutingRules.RoutingRule do
     timestamps(type: :utc_datetime)
   end
 
+  # tenant_id is set once, on create (by the caller, from the authenticated
+  # tenant); an update can never move a rule to another tenant.
+  defp castable_fields(%__MODULE__{tenant_id: nil}),
+    do: [:name, :source_channel_id, :target_channel_ids, :enabled, :tenant_id]
+
+  defp castable_fields(%__MODULE__{}),
+    do: [:name, :source_channel_id, :target_channel_ids, :enabled]
+
+  @doc false
   def changeset(routing_rule, attrs) do
     routing_rule
-    |> cast(attrs, [:name, :source_channel_id, :target_channel_ids, :enabled, :tenant_id])
+    |> cast(attrs, castable_fields(routing_rule))
     |> validate_required([:name, :source_channel_id, :target_channel_ids, :tenant_id])
     |> validate_length(:target_channel_ids, min: 1, max: 20)
     |> foreign_key_constraint(:tenant_id)
