@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Protocol v1 sends with acks on the Phoenix binding (#24)
+
+- `converger:conversation:*` accepts Converger Protocol v1 `text` frames with the event
+  `frame`. A send is stored like `postActivity` (same Inbound path, rate limit and
+  `ws:<sender>:<clientId>` key; a mekik/1 `id` is used when there is no `clientId`) and
+  answered with an `ack {clientId, id, seq, timestamp}` frame, pushed before the sender's
+  own `activitySet`, or an `error` frame with the `clientId`. A resent `clientId` stores
+  nothing and gets the original ack with `duplicate: true`.
+- At most `max_in_flight` (default 32, `WS_MAX_IN_FLIGHT`) unacked sends per connection;
+  the newest beyond it get the retryable `too_many_in_flight`. `welcome.data.limits.maxInFlight`
+  announces the configured value.
+- `postActivity` replies `duplicate: true` for a resent `clientId`, also on non-`websocket`
+  channels.
+- Send parsing is shared by both bindings (`ConvergerWeb.Protocol.Send`). ADR-0029.
+
 ### Receipts, typing, presence, limits and draining on the native transports (#26 follow-up, #25, #27)
 
 - The native endpoint (`/socket/converger/v1`) accepts `typing` and `read` and pushes `deliveryStatus`,

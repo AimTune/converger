@@ -54,7 +54,7 @@ A delivery to a `websocket` channel is one record per activity and channel, not 
 - at least one connected client: the delivery is `sent`, with `connected_clients` in `metadata`;
 - no connected client, or the channel's config has `require_ack: true`: the adapter returns `{:pending, meta}`. The delivery is **handed off**: it stays `pending` with `attempts + 1` (`Deliveries.mark_handed_off/2`) and is not retried. The activity is persisted, so a client gets it by replay when it resumes.
 
-`Deliveries.acknowledge(channel_id, conversation_id, seq)` later marks the handed-off (`attempts > 0`) `pending` deliveries of that channel for the conversation's activities up to `seq` as `sent`, and broadcasts `delivery_status` for each. It runs when a client sends `ack` with a watermark, and when a socket of the channel replays activities on join (unless the channel has `require_ack: true`). Per-socket delivery state and the acks of Converger Protocol v1 are Planned ([#24](https://github.com/AimTune/converger/issues/24)).
+`Deliveries.acknowledge(channel_id, conversation_id, seq)` later marks the handed-off (`attempts > 0`) `pending` deliveries of that channel for the conversation's activities up to `seq` as `sent`, and broadcasts `delivery_status` for each. It runs when a client sends `ack` with a watermark, and when a socket of the channel replays activities on join (unless the channel has `require_ack: true`). This delivery `ack {watermark}` is separate from the Protocol v1 `ack` frame, which the server sends to confirm that a client's own send was stored ([#24](https://github.com/AimTune/converger/issues/24)). Per-socket delivery state is not tracked.
 
 ## Status lifecycle
 

@@ -41,20 +41,10 @@ defmodule ConvergerWeb.ProtocolSocket do
   alias Converger.{Activities, Channels, Conversations, Inbound, RateLimit}
   alias Converger.Auth.ConvergerToken
   alias ConvergerWeb.{ConversationSignals, Protocol, SocketGuard}
-  alias ConvergerWeb.Protocol.{Codec, Feed, Frames}
+  alias ConvergerWeb.Protocol.{Codec, Feed, Frames, Send}
 
   # Frames a client sends that need a bot channel (mekik relay, #64).
   @bot_frames ~w(resume genui_event client_tools client_skills abort survey regenerate edit)
-
-  # Reserved frame types that are not client frames (section 5.5).
-  @reserved ~w(welcome resume genui_event client_tools client_skills abort tool_call skill
-               skills genui genui_components interrupt interrupt_resolved run error typing
-               survey regenerate edit ack deliveryStatus presence conversationUpdate
-               endOfConversation event heartbeat ping read sync auth tokenRefreshed
-               replayTruncated subscribe unsubscribe subscribed unsubscribed message
-               activity activitySet frame hello)
-
-  @message_type ~r/^[a-z][a-z0-9_-]{0,63}$/
 
   ## WebSock callbacks
 
@@ -265,14 +255,14 @@ defmodule ConvergerWeb.ProtocolSocket do
   end
 
   defp handle_frame(%{"type" => type} = frame, state) when is_binary(type) do
-    cond do
-      type == "text" ->
+    case Send.kind(type) do
+      :text ->
         send_message(frame, state)
 
-      type in @reserved ->
+      :reserved ->
         reply([error("bad_request", "#{type} is not a client frame", frame_type: type)], state)
 
-      Regex.match?(@message_type, type) ->
+      :rich ->
         # Rich message types (image, card, ...) are stored from #28 on.
         message = "message type #{type} is not supported yet"
 
@@ -281,7 +271,7 @@ defmodule ConvergerWeb.ProtocolSocket do
           state
         )
 
-      true ->
+      :unknown ->
         reply([error("bad_request", "unknown frame type")], state)
     end
   end
@@ -497,54 +487,14 @@ defmodule ConvergerWeb.ProtocolSocket do
   ## Sending (section 7)
 
   defp send_message(frame, state) do
-    with {:ok, client_id} <- client_id(frame),
-         {:ok, params} <- message_params(frame, client_id),
+    with {:ok, client_id} <- Send.client_id(frame),
+         {:ok, params} <- Send.message_params(frame, client_id),
          :ok <- rate_limit(state.claims) do
       persist(params, client_id, state)
     else
       {:error, code, message, opts} ->
         reply([error(code, message, [frame_type: "text"] ++ opts)], state)
     end
-  end
-
-  # clientId wins; a mekik/1 `id` is used when it has the clientId syntax.
-  defp client_id(%{"clientId" => client_id}) when client_id != nil do
-    if Protocol.client_id?(client_id),
-      do: {:ok, client_id},
-      else: {:error, "bad_request", "invalid clientId", []}
-  end
-
-  defp client_id(%{"id" => id}) do
-    if Protocol.client_id?(id), do: {:ok, id}, else: {:ok, nil}
-  end
-
-  defp client_id(_frame), do: {:ok, nil}
-
-  defp message_params(%{"data" => %{"text" => text} = data} = frame, client_id)
-       when is_binary(text) do
-    attachments = Map.get(data, "attachments") || []
-    metadata = Map.get(frame, "metadata") || %{}
-
-    cond do
-      not is_list(attachments) ->
-        {:error, "bad_request", "data.attachments must be an array", [client_id: client_id]}
-
-      not is_map(metadata) ->
-        {:error, "bad_request", "metadata must be an object", [client_id: client_id]}
-
-      true ->
-        {:ok,
-         %{
-           "type" => "message",
-           "text" => text,
-           "attachments" => attachments,
-           "metadata" => metadata
-         }}
-    end
-  end
-
-  defp message_params(_frame, client_id) do
-    {:error, "bad_request", "a text frame needs data.text", [client_id: client_id]}
   end
 
   defp rate_limit(%{"tenant_id" => tenant_id}) do

@@ -78,6 +78,7 @@ websocket_env = [
   max_messages: "WS_MAX_MESSAGES_PER_WINDOW",
   rate_window_ms: "WS_RATE_WINDOW_MS",
   max_joins: "WS_MAX_JOINS",
+  max_in_flight: "WS_MAX_IN_FLIGHT",
   ephemeral_drop_queue_len: "WS_EPHEMERAL_DROP_QUEUE_LEN",
   slow_consumer_queue_len: "WS_SLOW_CONSUMER_QUEUE_LEN",
   reconnect_base_ms: "WS_RECONNECT_BASE_MS",

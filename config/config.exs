@@ -105,6 +105,9 @@ config :converger, :websocket,
   rate_window_ms: 1_000,
   # Channels one socket may have joined at the same time.
   max_joins: 50,
+  # Unacked sends (v1 `text` frames) per connection on the Phoenix binding
+  # (`limits.maxInFlight`); more draw `too_many_in_flight`.
+  max_in_flight: 32,
   # Socket process mailbox lengths: above the first, ephemeral frames
   # (typing, presence) are dropped; above the second the socket is closed
   # with 4503 `slow_consumer`.

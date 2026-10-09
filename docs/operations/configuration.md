@@ -131,6 +131,7 @@ All environments. Integers; unset or empty variables keep the `config :converger
 | `WS_MAX_MESSAGES_PER_WINDOW` | `max_messages` | `20` |
 | `WS_RATE_WINDOW_MS` | `rate_window_ms` | `1000` |
 | `WS_MAX_JOINS` | `max_joins` | `50` |
+| `WS_MAX_IN_FLIGHT` | `max_in_flight` | `32` |
 | `WS_EPHEMERAL_DROP_QUEUE_LEN` | `ephemeral_drop_queue_len` | `100` |
 | `WS_SLOW_CONSUMER_QUEUE_LEN` | `slow_consumer_queue_len` | `1000` |
 | `WS_RECONNECT_BASE_MS` | `reconnect_base_ms` | `1000` |

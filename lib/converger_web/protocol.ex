@@ -53,9 +53,10 @@ defmodule ConvergerWeb.Protocol do
       "maxFrameBytes" => ConvergerWeb.SocketGuard.config(:max_frame_bytes),
       "maxTextBytes" => activity_limits[:max_text_bytes],
       "maxMetadataBytes" => activity_limits[:max_metadata_bytes],
-      # Sends are processed one at a time per connection, so at most one is
-      # ever unacknowledged; the announced value is the protocol default.
-      "maxInFlight" => 32,
+      # Enforced on the Phoenix binding (ConvergerWeb.Protocol.InFlight). The
+      # native endpoint processes sends one at a time, so at most one of its
+      # sends is ever unacknowledged.
+      "maxInFlight" => ConvergerWeb.Protocol.InFlight.limit(),
       "heartbeatIntervalMs" => config(:heartbeat_interval_ms),
       "idleTimeoutMs" => config(:idle_timeout_ms),
       "replayBatch" => Converger.Pagination.config(:ws_replay_limit),
