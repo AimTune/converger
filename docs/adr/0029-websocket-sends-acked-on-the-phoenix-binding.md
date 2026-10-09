@@ -9,7 +9,7 @@ description: A v1 text frame pushed as the Phoenix event frame is stored synchro
 | **Status** | Accepted |
 | **Date** | 2026-10-10 |
 | **Issue** | [#24](https://github.com/AimTune/converger/issues/24) |
-| **Pull request** | to be added when the PR is opened |
+| **Pull request** | [#127](https://github.com/AimTune/converger/pull/127) |
 | **Related** | [ADR-0015](0015-per-message-idempotent-inbound-batches.md), [ADR-0024](0024-converger-protocol-v1-as-superset-of-mekik-1.md), [ADR-0026](0026-one-client-socket-stack-and-shape-checked-legacy-tokens.md), [ADR-0027](0027-websocket-limits-backpressure-and-draining.md), [ADR-0030](0030-native-websocket-endpoint-and-fallback-transports.md) |
 
 ## Context and problem statement
