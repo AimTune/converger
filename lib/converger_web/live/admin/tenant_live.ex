@@ -149,6 +149,14 @@ defmodule ConvergerWeb.Admin.TenantLive do
               <option :for={tier <- Tenant.tiers()} value={tier} selected={tier == "default"}><%= tier %></option>
             </select>
           </div>
+          <div>
+            <.input
+              field={@form[:retention_days]}
+              type="number"
+              label="Retention (days)"
+              min={Converger.Retention.min_retention_days()}
+            />
+          </div>
           <button type="submit">Create</button>
         </div>
       </.form>
@@ -177,6 +185,7 @@ defmodule ConvergerWeb.Admin.TenantLive do
             <th>Name</th>
             <th>API Key</th>
             <th>Alert Webhook</th>
+            <th>Retention</th>
             <th>Status</th>
             <th>Tier</th>
             <th>Actions</th>
@@ -193,6 +202,7 @@ defmodule ConvergerWeb.Admin.TenantLive do
               </span>
               <span :if={!tenant.alert_webhook_url || tenant.alert_webhook_url == ""} style="color: #aaa;">—</span>
             </td>
+            <td><%= tenant.retention_days %> days</td>
             <td>
               <span class={"badge badge-#{tenant.status}"}>
                 <%= tenant.status %>

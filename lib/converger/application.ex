@@ -24,6 +24,7 @@ defmodule Converger.Application do
         Converger.RateLimit.Supervisor,
         {Oban, oban_config()}
       ] ++
+        Converger.Partitions.boot_children() ++
         Converger.Pipeline.child_specs() ++
         [
           ConvergerWeb.Endpoint,

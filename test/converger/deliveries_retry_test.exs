@@ -73,6 +73,9 @@ defmodule Converger.DeliveriesRetryTest do
             last_error: "HTTP 500",
             retry_count: 0,
             metadata: %{},
+            # Copied from the activity (partition key, issue #30).
+            tenant_id: tenant.id,
+            activity_inserted_at: activity.inserted_at,
             inserted_at: now,
             updated_at: now
           },

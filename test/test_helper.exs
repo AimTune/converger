@@ -8,4 +8,12 @@
 # tests flaked. Passing tests are not slowed down: the assertion returns as
 # soon as the message arrives. refute_receive keeps its own 100 ms default.
 ExUnit.start(exclude: [:benchmark, :minio, :azurite], assert_receive_timeout: 1_000)
+
+# activities/deliveries are partitioned by month (issue #30). Tests backdate
+# rows to 2024, so make sure those months exist, committed outside the
+# sandbox (the migration only creates the current and next months).
+Ecto.Adapters.SQL.Sandbox.checkout(Converger.Repo, sandbox: false)
+Converger.Partitions.ensure_partitions(from: ~D[2024-01-01])
+Ecto.Adapters.SQL.Sandbox.checkin(Converger.Repo)
+
 Ecto.Adapters.SQL.Sandbox.mode(Converger.Repo, :manual)

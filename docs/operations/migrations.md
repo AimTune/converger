@@ -155,6 +155,8 @@ the ones to classify when upgrading an existing installation.
 | `20261009180000_add_keyset_pagination_indexes` | Five composite `(inserted_at, id)` indexes, concurrently | Yes | Yes |
 | `20261009190000_add_retry_policy_to_channels` | `channels.retry_policy` with default `{}` | Yes | Yes |
 | `20261009550000_add_must_change_password_to_admin_users` | `admin_users.must_change_password` default `false` | Yes | Yes |
+| `20261010300000_add_retention_and_archive_parts` | `tenants.retention_days` (default 365, `CHECK > 0`) and the new `archive_parts` table | Yes | Yes |
+| `20261010300100_partition_activities_and_deliveries` | Converts `activities` and `deliveries` into monthly partitioned tables (shadow tables, batched copy, swap), adds `deliveries.tenant_id` and `activity_inserted_at`, drops the foreign keys from and to both tables | **No, maintenance window** (short with the online copy, see below) | **No** (`down` raises) |
 
 Adding a column with a constant default is metadata-only on Postgres 11 and later, which is why the
 `require_signature`, `limits`, `retry_policy` and `must_change_password` migrations are safe online.
@@ -228,6 +230,67 @@ newer (an aggregate over all of `activities` and an update of the affected conve
 status)`) build indexes inside the migration transaction. `CREATE INDEX` without `CONCURRENTLY` takes a `SHARE`
 lock: reads continue, but inserts and updates on the table wait until the build finishes. On small and medium
 tables this takes seconds; on a large `activities` table schedule it like a maintenance window.
+
+#### Partitioning activities and deliveries (`20261010300100`)
+
+Issue [#30](https://github.com/AimTune/converger/issues/30),
+[ADR-0034](../adr/0034-monthly-partitioning-and-per-tenant-retention.md). Converts the plain `activities` and
+`deliveries` tables into tables partitioned by month (`activities` by `inserted_at`, `deliveries` by the new
+`activity_inserted_at`) in three idempotent, resumable phases (`Converger.Partitions.Conversion`):
+
+1. **Prepare**: creates `activities_part` and `deliveries_part` with monthly partitions from the oldest
+   activity's month to 12 months ahead, and row triggers on the legacy tables that mirror every insert, update
+   and delete into them. `CREATE TRIGGER` takes a `SHARE ROW EXCLUSIVE` lock for milliseconds (10 s lock
+   timeout).
+2. **Copy**: copies existing rows in primary-key order, 10,000 per transaction (`SELECT ... FOR SHARE`,
+   `INSERT ... ON CONFLICT DO NOTHING`), with its cursor in `partition_conversion_state`. Old code keeps
+   working; the triggers keep the copy current.
+3. **Swap**: one transaction: `LOCK TABLE activities, deliveries IN ACCESS EXCLUSIVE MODE`, copy what is left,
+   compare `count(*)` of legacy and new tables (rolls everything back on a mismatch), drop the triggers and every
+   foreign key from or to the legacy tables (including `attachments.activity_id`), rename `activities` to
+   `activities_legacy` and `activities_part` to `activities` (same for deliveries, indexes included), create the
+   current and next three months' partitions. Empty legacy tables are dropped; populated ones are kept.
+
+**Fresh installations and installations with up to `PARTITION_MAX_INLINE_ROWS` (default 1,000,000) activities**
+run all three phases inside `bin/migrate`: an ordinary maintenance-window upgrade (stop the old release, migrate,
+start the new one). Time it on a copy: roughly the time to copy both tables plus two `count(*)`.
+
+**Larger installations** must copy online first, otherwise the migration stops with instructions and changes
+nothing:
+
+1. While the **old** release is still serving traffic, run the copy with the **new** image (same environment as
+   `bin/migrate`):
+
+   ```bash
+   bin/converger eval "Converger.Release.prepare_partitioning()"
+   ```
+
+   It prints progress per batch and can be interrupted and re-run. Plan for disk space of about the size of both
+   tables and their indexes, WAL of the same order (watch replicas and archiving), and a small write overhead from
+   the triggers until the swap. Do the maintenance window within 12 months (the shadow partitions created by
+   prepare cover that; running prepare again extends them).
+2. **Maintenance window**: stop the old release, take a backup or note the PITR point, run `bin/migrate`. The swap
+   only copies the rows written since the last copy batch, but the two `count(*)` scan both tables in full: rehearse on a restored copy to
+   know how long the window is. Start the new release.
+3. After verifying the new tables (row counts, a conversation's history, delivery receipts), drop the legacy
+   copies:
+
+   ```bash
+   bin/converger eval "Converger.Release.drop_legacy_partition_tables()"
+   ```
+
+What changes for operators:
+
+- The partitioned tables have no foreign keys. Deleting a tenant, channel or conversation through the application
+  enqueues a `PurgeWorker` job (queue `maintenance`) that deletes their activities and deliveries in batches; a
+  raw-SQL `DELETE FROM tenants` no longer removes them (retention eventually archives such orphans).
+- Old releases cannot run against the new schema: they insert deliveries without `activity_inserted_at`.
+- Rolling back: before the swap, drop the shadow objects (`DROP TABLE activities_part, deliveries_part,
+  partition_conversion_state; DROP TRIGGER converger_mirror ON activities; DROP TRIGGER converger_mirror ON
+  deliveries;`). After the swap, restore the backup; renaming the `*_legacy` tables back loses everything written
+  since the swap and needs the foreign keys recreated by hand.
+- Retention, archive and pruning start with this release: see
+  [Data retention, partitions and archive](retention.md).
 
 #### Concurrent keyset indexes (`20261009180000`)
 

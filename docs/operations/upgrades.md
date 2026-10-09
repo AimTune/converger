@@ -212,3 +212,22 @@ Clients that relied on receiving the whole history in one call must page with th
 [#93](https://github.com/AimTune/converger/pull/93). Earlier builds printed `FORMATTER CRASH` for every production
 log line. If you maintain a fork with a customized `config/prod.exs`, configure LoggerJSON as the
 `:default_handler` formatter as shown in [Observability](observability.md#logging).
+
+### Partitioned activities and deliveries, retention on by default
+
+[#30](https://github.com/AimTune/converger/issues/30), migrations `20261010300000` and `20261010300100`
+(maintenance window).
+
+- `activities` and `deliveries` become monthly partitioned tables without foreign keys. Installations with more
+  than 1,000,000 activities run the online copy first (`Converger.Release.prepare_partitioning/0`) while the old
+  release is still up; `bin/migrate` then only swaps the tables. See
+  [Partitioning activities and deliveries](migrations.md#partitioning-activities-and-deliveries-20261010300100).
+- **Retention starts with this release.** Every tenant gets `retention_days = 365`: on the 1st of the next month,
+  activities and deliveries of months that ended more than a year ago are archived to the attachment storage
+  (`archive/` prefix) and removed from the database. Set a larger `retention_days` per tenant first if you need
+  more history online, and make sure the storage (`UPLOAD_STORAGE`, or `ARCHIVE_BUCKET`) is durable and backed up.
+- `channel_health_checks` older than 7 days and **`audit_logs` older than 365 days** are now deleted daily. Set
+  `AUDIT_LOG_RETENTION_DAYS=0` to keep audit logs forever.
+- Deleting a tenant, channel or conversation removes its activities and deliveries asynchronously (a
+  `PurgeWorker` job on the new `maintenance` queue). Scripts that delete tenants with raw SQL no longer remove them.
+- Old releases cannot run against the new schema; roll back by restoring the pre-upgrade backup.

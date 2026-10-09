@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+### Partitioning, retention and archive for activities and deliveries (#30)
+
+**Maintenance window** on existing installations (migration `20261010300100`); see
+`docs/operations/migrations.md`. Design: `docs/adr/0034-monthly-partitioning-and-per-tenant-retention.md`.
+
+- `activities` (by `inserted_at`) and `deliveries` (by the new `activity_inserted_at`) are monthly range
+  partitioned tables, with no foreign keys. `deliveries` gains `tenant_id`. Partitions are created three months
+  ahead (migration, boot, daily `PartitionMaintenanceWorker`).
+- Existing installations convert with shadow tables, batched copy and swap; above 1,000,000 activities run
+  `Converger.Release.prepare_partitioning/0` online first.
+- Per-tenant retention: `tenants.retention_days` (default 365, minimum `RETENTION_MIN_DAYS`=30). The monthly
+  `RetentionWorker` archives expired months as verified JSONL.gz to the attachment storage
+  (`archive/<tenant>/<YYYY-MM>/`, manifest `archive_parts`), then detaches and drops the partitions, or deletes
+  only the expired tenant's rows. `mix converger.archive.import` / `Converger.Release.import_archive/1`
+  re-import archives.
+- Daily `PruneWorker`: `channel_health_checks` (7 days) and `audit_logs` (365 days), configurable with
+  `HEALTH_CHECK_RETENTION_DAYS` / `AUDIT_LOG_RETENTION_DAYS`.
+- Deleting a tenant, channel or conversation purges its activities and deliveries in batches
+  (`PurgeWorker`) instead of one cascading delete.
+- Idempotency keys are now also honoured when the first copy is in an older month.
+- Benchmark `test/load/partition_drop_benchmark_test.exs` (`--include benchmark`).
+
 ### `websocket` is a first-class duplex channel adapter (#22)
 
 - The `websocket` adapter delivers: it broadcasts each activity (after the channel's

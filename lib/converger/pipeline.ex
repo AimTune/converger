@@ -212,7 +212,7 @@ defmodule Converger.Pipeline do
   def deliver(activity, channel) do
     alias Converger.Deliveries
 
-    case Deliveries.get_or_create_delivery(activity.id, channel.id) do
+    case Deliveries.get_or_create_delivery(activity, channel.id) do
       %{status: status} when status in ~w(sent delivered read) -> :ok
       delivery -> attempt_delivery(delivery, activity, channel)
     end

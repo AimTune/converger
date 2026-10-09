@@ -200,6 +200,25 @@ Applied only when `UPLOAD_STORAGE` is set, and never in test. Otherwise the `con
 | `GOOGLE_CDN_KEY_NAME`, `GOOGLE_CDN_KEY` | none | yes for `google_cdn` | Signed URL key name and key. |
 | `CDN_SIGN_ORIGIN` | unset | no | `plain` CDN only: `true`, `1` or `yes` appends the backend's signed query string (for example an Azure SAS) to the CDN URL. |
 
+## Data retention and archive
+
+See [Data retention, partitions and archive](retention.md) (issue [#30](https://github.com/AimTune/converger/issues/30)). The
+`ARCHIVE_BUCKET` / `ARCHIVE_CONTAINER` / `ARCHIVE_DIR` overrides are read together with `UPLOAD_STORAGE` (only when it is
+set); without them the archive uses the attachment storage.
+
+| Variable | Default | Required | Meaning |
+| --- | --- | --- | --- |
+| `RETENTION_MIN_DAYS` | `30` | no | Platform minimum for `tenants.retention_days`; months that ended less than this many days ago are never archived. |
+| `HEALTH_CHECK_RETENTION_DAYS` | `7` | no | Delete `channel_health_checks` older than this (daily); `0` disables. |
+| `AUDIT_LOG_RETENTION_DAYS` | `365` | no | Delete `audit_logs` older than this (daily); `0` disables. |
+| `PARTITION_MONTHS_AHEAD` | `3` | no | Monthly partitions of `activities` / `deliveries` kept in place ahead of the current month. |
+| `ARCHIVE_BUCKET` | unset (attachment bucket) | no | S3, MinIO, R2 or GCS bucket for the archive, with the `UPLOAD_STORAGE` credentials. |
+| `ARCHIVE_CONTAINER` | unset (attachment container) | no | Azure container for the archive. |
+| `ARCHIVE_DIR` | unset (attachment directory) | no | Directory for the archive with `UPLOAD_STORAGE=local`. |
+| `ARCHIVE_PREFIX` | `archive` | no | First segment of archive object keys. |
+| `ARCHIVE_PART_ROWS` | `50000` | no | Rows per archive object. |
+| `PARTITION_MAX_INLINE_ROWS` | `1000000` | no | Read by the partitioning migration (`bin/migrate`): above this many activities it refuses to copy inline and asks for the online `Converger.Release.prepare_partitioning/0` first. See [Migrations](migrations.md#partitioning-activities-and-deliveries-20261010300100). |
+
 ## Release scripts and seeding
 
 | Variable | Default | Read by | Meaning |
@@ -246,15 +265,19 @@ config :converger, Oban,
     {Oban.Plugins.Cron,
      crontab: [
        {"0 * * * *", Converger.Workers.ConversationExpirationWorker},
-       {"*/5 * * * *", Converger.Workers.ChannelHealthWorker}
+       {"*/5 * * * *", Converger.Workers.ChannelHealthWorker},
+       {"15 0 * * *", Converger.Workers.PartitionMaintenanceWorker},
+       {"30 1 * * *", Converger.Workers.PruneWorker},
+       {"0 2 1 * *", Converger.Workers.RetentionWorker}
      ]}
   ],
-  queues: [default: 10, deliveries_high: 10, deliveries: 20, deliveries_bulk: 5]
+  queues: [default: 10, deliveries_high: 10, deliveries: 20, deliveries_bulk: 5, maintenance: 1]
 ```
 
 | Setting | Value | Notes |
 | --- | --- | --- |
 | Queue `default` | 10 concurrent jobs per node | Conversation expiration (hourly) and channel health checks (every 5 minutes). |
+| Queue `maintenance` | 1 concurrent job per node | Data lifecycle: partitions (daily 00:15 UTC), pruning (daily 01:30 UTC), retention (monthly, 1st at 02:00 UTC) and the `PurgeWorker` jobs enqueued by tenant, channel and conversation deletes. See [Data retention](retention.md). |
 | Queues `deliveries_high`, `deliveries`, `deliveries_bulk` | 10 / 20 / 5 concurrent jobs per node | `Converger.Workers.ActivityDeliveryWorker` (unique per activity and channel), one queue per tenant tier (`tenants.tier`: `high`, `default`, `bulk`); see [flow control](../delivery.md#tenant-tiers-fair-queueing). |
 | `Pruner` | completed/discarded jobs older than 24 h | Keeps `oban_jobs` small. |
 | `Lifeline` | rescues jobs stuck in `executing` after 30 min | Recovers deliveries from a crashed node. |
@@ -307,6 +330,30 @@ config :converger, Converger.RateLimit,
 `limits` overrides built-in bucket defaults installation-wide, e.g. `%{inbound: {1_000, 1_000}}`
 (`{limit, window_ms}`). `clean_period_ms` (default 60000) controls how often expired ETS counters are removed.
 See [Rate limiting](rate-limiting.md).
+
+### Retention, partitions and archive
+
+```elixir
+config :converger, Converger.Partitions,
+  months_ahead: 3,            # PARTITION_MONTHS_AHEAD
+  detach_concurrently: true,  # false in test (the SQL sandbox is one transaction)
+  lock_timeout_ms: 5_000      # for creating, attaching and dropping partitions
+
+config :converger, Converger.Retention,
+  min_retention_days: 30,     # RETENTION_MIN_DAYS
+  health_check_days: 7,       # HEALTH_CHECK_RETENTION_DAYS, 0 or nil disables
+  audit_log_days: 365,        # AUDIT_LOG_RETENTION_DAYS, 0 or nil disables
+  prune_batch_size: 10_000
+
+config :converger, Converger.Archive,
+  storage: nil,               # nil: the attachment storage (Converger.Uploads)
+  storage_opts: [],
+  prefix: "archive",          # ARCHIVE_PREFIX
+  part_rows: 50_000           # ARCHIVE_PART_ROWS
+```
+
+Per-tenant retention is the `tenants.retention_days` column (default 365). See
+[Data retention, partitions and archive](retention.md).
 
 ### Protocol v1 transports
 
