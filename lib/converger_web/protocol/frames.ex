@@ -8,7 +8,7 @@ defmodule ConvergerWeb.Protocol.Frames do
   the same source as REST and the Phoenix channel frames (section 5.4).
   """
 
-  alias Converger.Activities.{Activity, Serializer}
+  alias Converger.Activities.{Activity, Downgrade, Serializer}
   alias ConvergerWeb.Protocol
 
   # code => {number, retryable} (section 12.2)
@@ -78,6 +78,29 @@ defmodule ConvergerWeb.Protocol.Frames do
     |> put_timestamp(canonical)
   end
 
+  # Reactions, edits and deletes (#28) until their own frames are specified
+  # (#68): an `event` named after the activity type, whose `text` is the
+  # plain-text fallback and whose `value` names the referenced activity.
+  defp typed(type, canonical, base, _role, _live?)
+       when type in ["messageReaction", "messageUpdate", "messageDelete"] do
+    value =
+      %{"replyToId" => canonical.reply_to_id}
+      |> maybe_put("text", canonical.text)
+      |> maybe_put("attachments", non_empty(canonical.attachments))
+
+    base
+    |> Map.merge(%{
+      "type" => "event",
+      "data" => %{
+        "name" => type,
+        "text" => Downgrade.text(canonical) || "",
+        "value" => value
+      }
+    })
+    |> put_timestamp(canonical)
+    |> put_metadata(canonical.metadata || %{})
+  end
+
   defp typed("event", canonical, base, _role, _live?) do
     metadata = canonical.metadata || %{}
 
@@ -104,6 +127,7 @@ defmodule ConvergerWeb.Protocol.Frames do
     |> Map.merge(%{"type" => "text", "data" => data})
     |> put_timestamp(canonical)
     |> put_metadata(canonical.metadata)
+    |> put_reply_to(Map.get(canonical, :reply_to_id))
     |> put_client_id(role, canonical.sender, canonical.idempotency_key)
   end
 
@@ -146,6 +170,13 @@ defmodule ConvergerWeb.Protocol.Frames do
 
   defp maybe_put(map, _key, nil), do: map
   defp maybe_put(map, key, value), do: Map.put(map, key, value)
+
+  defp non_empty([_ | _] = list), do: list
+  defp non_empty(_), do: nil
+
+  # A threaded reply names the activity it answers (`replyTo`, section 5.3).
+  defp put_reply_to(frame, nil), do: frame
+  defp put_reply_to(frame, id), do: Map.put(frame, "replyTo", %{"id" => id})
 
   @doc "The `ack` for a persisted send (section 7)."
   def ack(%Activity{} = activity, client_id, duplicate?) do

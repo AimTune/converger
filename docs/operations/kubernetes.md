@@ -11,7 +11,7 @@ The repository ships two ways to run Converger on Kubernetes:
 
 Both run a [clustered](clustering.md) Deployment whose pods only receive traffic once
 [`GET /health/ready`](observability.md#health-endpoints) passes. The design is recorded in
-[ADR-0036](../adr/0036-libcluster-clustering-health-endpoints-and-metrics-on-the-main-port.md).
+[ADR-0037](../adr/0037-libcluster-clustering-health-endpoints-and-metrics-on-the-main-port.md).
 
 ## What `deploy/k8s` contains
 

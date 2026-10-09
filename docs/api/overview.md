@@ -313,7 +313,7 @@ Inbound batches are de-duplicated per message; see [inbound webhooks](inbound.md
 
 ## Mass assignment
 
-Clients can only set an activity's `type`, `text`, `attachments` and `metadata`. The server sets `tenant_id`,
+Clients can only set an activity's `type`, `text`, `attachments`, `metadata` and `reply_to_id`. The server sets `tenant_id`,
 `conversation_id`, `sender`, `idempotency_key`, `seq` and `inserted_at`, ignoring any such fields in a body
 ([ADR-0005](../adr/0005-separate-client-and-system-changesets.md)). Every API renders activities from one canonical
 serializer, so REST, WebSocket and outbound webhook payloads cannot drift
@@ -323,7 +323,7 @@ Activity limits (`config :converger, :activity_limits`), violations of which ret
 
 | Limit | Default |
 | --- | --- |
-| `type` | One of `message`, `event`, `typing`, `conversationUpdate`, `endOfConversation` |
+| `type` | One of `message`, `event`, `typing`, `messageReaction`, `messageUpdate`, `messageDelete`, `conversationUpdate`, `endOfConversation` |
 | `max_text_bytes` | 65,536 bytes of `text` |
 | `max_attachments` | 10 entries in `attachments` |
 | `max_attachment_bytes` | 4,096 bytes per attachment object, measured as JSON |

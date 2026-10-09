@@ -151,6 +151,7 @@ defmodule Converger.Channels.Adapters.Webhook do
       "type" => params["type"] || "message",
       "metadata" => params["metadata"] || %{},
       "attachments" => params["attachments"] || [],
+      "reply_to_id" => string_or_nil(params["reply_to_id"]),
       "idempotency_key" => string_or_nil(params["idempotency_key"]),
       "participant" => participant(params)
     }

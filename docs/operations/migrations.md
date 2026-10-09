@@ -158,6 +158,7 @@ the ones to classify when upgrading an existing installation.
 | `20261009550000_add_must_change_password_to_admin_users` | `admin_users.must_change_password` default `false` | Yes | Yes |
 | `20261010300000_add_retention_and_archive_parts` | `tenants.retention_days` (default 365, `CHECK > 0`) and the new `archive_parts` table | Yes | Yes |
 | `20261010300100_partition_activities_and_deliveries` | Converts `activities` and `deliveries` into monthly partitioned tables (shadow tables, batched copy, swap), adds `deliveries.tenant_id` and `activity_inserted_at`, drops the foreign keys from and to both tables | **No, maintenance window** (short with the online copy, see below) | **No** (`down` raises) |
+| `20261010400000_add_reply_and_edit_columns_to_activities` | Nullable `activities.reply_to_id`, `edited_at`, `deleted_at` on the partitioned table (metadata-only); partial index on `reply_to_id` created `ON ONLY` the parent, built `CONCURRENTLY` on every partition and attached. No foreign key (ADR-0036, ADR-0034) | Yes | Yes |
 
 Adding a column with a constant default is metadata-only on Postgres 11 and later, which is why the
 `require_signature`, `limits`, `retry_policy` and `must_change_password` migrations are safe online.

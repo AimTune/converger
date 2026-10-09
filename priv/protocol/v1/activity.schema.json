@@ -1,0 +1,140 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://converger.aimtune.dev/schemas/protocol/v1/activity.schema.json",
+  "title": "Converger activity (client API shape)",
+  "description": "An activity as returned by the Converger client API (`GET /api/v1/converger/conversations/ID/activities`, `activitySet` frames on /socket/converger) and accepted, without the server fields, by `POST .../activities`. See docs/concepts/activities.md. The activity type vocabulary is closed: an unknown `type` is rejected with 422. Receivers MUST ignore unknown fields.",
+  "type": "object",
+  "required": ["id", "type", "from", "timestamp", "attachments", "conversationId", "channelData"],
+  "properties": {
+    "id": { "type": "string", "description": "Server-assigned UUID." },
+    "type": { "$ref": "#/$defs/activityType" },
+    "from": {
+      "type": "object",
+      "required": ["id"],
+      "properties": { "id": { "type": "string" } }
+    },
+    "text": {
+      "type": ["string", "null"],
+      "description": "Message text. For `messageReaction` the emoji (null or empty: the reaction was removed); for `messageUpdate` the new text."
+    },
+    "timestamp": { "type": "string", "description": "Server time of the insert, ISO 8601 UTC." },
+    "attachments": { "type": "array", "items": { "$ref": "#/$defs/storedAttachment" }, "maxItems": 10 },
+    "conversationId": { "type": "string" },
+    "channelData": { "type": "object", "description": "The activity metadata (at most 16 KiB as JSON)." },
+    "replyToId": {
+      "type": ["string", "null"],
+      "description": "The activity this one refers to, in the same conversation: a threaded reply for `message`; the target (required, a `message`) for `messageReaction`, `messageUpdate` and `messageDelete`."
+    },
+    "editedAt": {
+      "type": ["string", "null"],
+      "description": "Set on the original when a `messageUpdate` for it was accepted. The original's content is unchanged; clients apply the update."
+    },
+    "deletedAt": {
+      "type": ["string", "null"],
+      "description": "Set on the original when a `messageDelete` for it was accepted. Clients hide the original."
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "type": { "enum": ["messageReaction", "messageUpdate", "messageDelete"] } } },
+      "then": { "required": ["replyToId"], "properties": { "replyToId": { "type": "string" } } }
+    }
+  ],
+  "$defs": {
+    "activityType": {
+      "description": "Converger's activity vocabulary. `deliveryReceipt` is internal: servers may emit it, clients cannot create it.",
+      "enum": [
+        "message",
+        "event",
+        "typing",
+        "messageReaction",
+        "messageUpdate",
+        "messageDelete",
+        "conversationUpdate",
+        "endOfConversation",
+        "deliveryReceipt"
+      ]
+    },
+    "attachment": {
+      "description": "An attachment descriptor as accepted on write (at most 4 KiB as JSON). Unknown keys are dropped; provider-specific fields belong in `channelData`.",
+      "type": "object",
+      "required": ["contentType"],
+      "properties": {
+        "contentType": {
+          "type": "string",
+          "maxLength": 255,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*/([A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*|\\*)$",
+          "description": "A MIME type, or a well-known Converger type: `application/vnd.converger.card.*` (requires an object `content`), `application/vnd.converger.location`, `application/vnd.converger.contacts`."
+        },
+        "contentUrl": { "$ref": "#/$defs/url" },
+        "name": { "type": "string", "maxLength": 1024 },
+        "size": { "type": "integer", "minimum": 0 },
+        "thumbnailUrl": { "$ref": "#/$defs/url" },
+        "content": { "type": ["object", "array"] },
+        "channelData": { "type": "object", "description": "Provider passthrough, for example a WhatsApp media id." }
+      },
+      "if": {
+        "properties": { "contentType": { "pattern": "^application/vnd\\.converger\\.card\\." } }
+      },
+      "then": { "required": ["content"], "properties": { "content": { "type": "object" } } }
+    },
+    "storedAttachment": {
+      "description": "Attachments are returned as stored. Attachments written before the attachment schema existed may lack `contentType`.",
+      "type": "object"
+    },
+    "url": {
+      "type": "string",
+      "maxLength": 2048,
+      "pattern": "^(https?://[^/\\s]+|/(?!/))",
+      "description": "An absolute http(s) URL or a server path such as /api/v1/converger/attachments/ID."
+    }
+  },
+  "examples": [
+    {
+      "id": "0e7d4c1a-8b2f-4f6e-a1c3-7d9e2b4f6a80",
+      "type": "message",
+      "from": { "id": "user-1" },
+      "text": "Here is the receipt",
+      "timestamp": "2026-10-09T10:15:02.481230Z",
+      "attachments": [
+        {
+          "contentType": "image/png",
+          "contentUrl": "/api/v1/converger/attachments/7f1c2d3e-4b5a-4c6d-8e9f-0a1b2c3d4e5f",
+          "name": "receipt.png",
+          "size": 48213
+        }
+      ],
+      "conversationId": "5b0c8f2e-3c1d-4a8e-9f3a-1d2e3f4a5b6c",
+      "channelData": {},
+      "replyToId": null,
+      "editedAt": null,
+      "deletedAt": null
+    },
+    {
+      "id": "6d1c0a8e-1f7b-4b9e-8f6a-2c3d4e5f6a7b",
+      "type": "messageReaction",
+      "from": { "id": "16505551234" },
+      "text": "👍",
+      "timestamp": "2026-10-09T10:16:00.000000Z",
+      "attachments": [],
+      "conversationId": "5b0c8f2e-3c1d-4a8e-9f3a-1d2e3f4a5b6c",
+      "channelData": { "whatsapp_type": "reaction", "reaction": { "message_id": "wamid.HBgM", "emoji": "👍" } },
+      "replyToId": "0e7d4c1a-8b2f-4f6e-a1c3-7d9e2b4f6a80",
+      "editedAt": null,
+      "deletedAt": null
+    },
+    {
+      "id": "9a8b7c6d-5e4f-4a3b-9c2d-1e0f9a8b7c6d",
+      "type": "messageUpdate",
+      "from": { "id": "user-1" },
+      "text": "Here is the corrected receipt",
+      "timestamp": "2026-10-09T10:17:00.000000Z",
+      "attachments": [],
+      "conversationId": "5b0c8f2e-3c1d-4a8e-9f3a-1d2e3f4a5b6c",
+      "channelData": {},
+      "replyToId": "0e7d4c1a-8b2f-4f6e-a1c3-7d9e2b4f6a80",
+      "editedAt": null,
+      "deletedAt": null
+    }
+  ]
+}

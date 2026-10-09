@@ -83,11 +83,19 @@ defmodule Converger.Channels.Adapter do
   @callback retry_policy() :: map()
 
   @doc """
-  What the adapter can do. The pipeline delivers only to channels whose
-  adapter has `:outbound`. Adapters that do not define it get
-  `[:inbound, :outbound]`.
+  What the adapter can do, as a list:
+
+    * `:outbound` - the pipeline delivers to channels of this type
+      (`:inbound` likewise names inbound support).
+    * `activity_types: [String.t()]` - the activity types
+      (`Converger.Activities.Activity.types/0`) `deliver_activity/2` renders
+      natively. Other types are downgraded to text or skipped per channel,
+      see `Converger.Activities.Downgrade`. Without this entry every client
+      type is delivered as is.
+
+  Adapters that do not define the callback get `[:inbound, :outbound]`.
   """
-  @callback capabilities() :: [atom()]
+  @callback capabilities() :: [atom() | {:activity_types, [String.t()]}]
 
   @doc """
   Default outbound rate limit of the provider (e.g. `"80/s"`), used when the
@@ -292,6 +300,17 @@ defmodule Converger.Channels.Adapter do
       mod.rate_limit()
     else
       _ -> nil
+    end
+  end
+
+  @doc """
+  The activity types the adapter for `type` delivers natively: the
+  `activity_types:` entry of its capabilities, else every client type.
+  """
+  def activity_types(type) do
+    case List.keyfind(capabilities(type), :activity_types, 0) do
+      {:activity_types, types} -> types
+      nil -> Converger.Activities.Activity.client_types()
     end
   end
 

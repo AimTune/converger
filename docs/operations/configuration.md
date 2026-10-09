@@ -131,6 +131,7 @@ All environments. Integers; unset or empty variables keep the `config :converger
 | `WS_MAX_MESSAGES_PER_WINDOW` | `max_messages` | `20` |
 | `WS_RATE_WINDOW_MS` | `rate_window_ms` | `1000` |
 | `WS_MAX_JOINS` | `max_joins` | `50` |
+| `WS_MAX_IN_FLIGHT` | `max_in_flight` | `32` |
 | `WS_EPHEMERAL_DROP_QUEUE_LEN` | `ephemeral_drop_queue_len` | `100` |
 | `WS_SLOW_CONSUMER_QUEUE_LEN` | `slow_consumer_queue_len` | `1000` |
 | `WS_RECONNECT_BASE_MS` | `reconnect_base_ms` | `1000` |
@@ -420,6 +421,7 @@ PgBouncer transaction pooling). See [Migrations and maintenance windows](migrati
 | `:inbound_signature_tolerance_seconds` | `300` | Allowed clock skew for `x-converger-signature` timestamps. |
 | `:pagination` | see [Pagination](#pagination) | Page size defaults and caps. |
 | `:dead_letters` | `bulk_retry_limit: 10_000`, `export_limit: 10_000` | Max deliveries replayed by one bulk retry call, and max rows in one Deliveries CSV export. See [Replaying dead letters](../delivery.md#replaying-dead-letters). |
+| `:circuit_breaker` | `failure_threshold: 5`, `cooldown_ms: 30_000`, `park_seconds: 600`, `replay_dead_letters_on_close: false`, `replay_window_ms: 3_600_000` | Per-channel delivery circuit breaker and opt-in dead-letter replay on close. See [Circuit breaker](../delivery.md#circuit-breaker). |
 | `:metrics` | `[]` (dev: `allowed_ips` with loopback and private ranges) | `token:` and `allowed_ips:` for `GET /metrics`; see `METRICS_TOKEN`. |
 | `:prometheus_port` | unset | Port of the optional unauthenticated metrics listener (`PROMETHEUS_PORT`). |
 | `Converger.Health` | `db_timeout_ms: 1000` | Readiness database timeout. |

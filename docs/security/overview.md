@@ -368,7 +368,7 @@ with the affected version or commit, reproduction steps and impact. There is no 
 - [ADR-0013: Cluster-wide rate limiting with Hammer and PubSub](../adr/0013-cluster-wide-rate-limiting-with-hammer-and-pubsub.md)
 - [ADR-0014: Webhook SSRF guard and outbound signing](../adr/0014-webhook-ssrf-guard-and-outbound-signing.md)
 - [ADR-0022: Deployment hardening](../adr/0022-deployment-hardening.md)
-- [ADR-0036: libcluster clustering, health endpoints and metrics on the main port](../adr/0036-libcluster-clustering-health-endpoints-and-metrics-on-the-main-port.md)
+- [ADR-0037: libcluster clustering, health endpoints and metrics on the main port](../adr/0037-libcluster-clustering-health-endpoints-and-metrics-on-the-main-port.md)
 
 ## Authorization boundaries
 

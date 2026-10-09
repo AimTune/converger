@@ -19,6 +19,12 @@ defmodule Converger.Channels.Adapters.WhatsAppMeta do
   @impl true
   def rate_limit, do: "80/s"
 
+  # Outbound messages are sent as WhatsApp text. Native outbound reactions,
+  # media and interactive messages are planned (#37); other activity types are
+  # downgraded to text or skipped (Converger.Activities.Downgrade).
+  @impl true
+  def capabilities, do: [:inbound, :outbound, activity_types: ~w(message)]
+
   @impl true
   def validate_config(config) do
     required = ["phone_number_id", "access_token", "verify_token"]
@@ -213,6 +219,9 @@ defmodule Converger.Channels.Adapters.WhatsAppMeta do
       "attachments" => attachments,
       "metadata" => metadata,
       "idempotency_key" => message["id"],
+      # Resolved to `reply_to_id` by the inbound controller: the wamid a
+      # reaction targets, or the message this one replies to.
+      "reply_to_provider_id" => reply_to_provider_id(type, message),
       "participant" => %{"external_id" => from, "display_name" => metadata["profile_name"]}
     }
   end
@@ -230,11 +239,14 @@ defmodule Converger.Channels.Adapters.WhatsAppMeta do
       reject_nil_values(%{
         "contentType" => media["mime_type"] || "application/octet-stream",
         "name" => media["filename"],
-        "provider" => "whatsapp_meta",
-        "providerMediaId" => media["id"],
-        "sha256" => media["sha256"],
-        "voice" => media["voice"],
-        "animated" => media["animated"]
+        "channelData" =>
+          reject_nil_values(%{
+            "provider" => "whatsapp_meta",
+            "providerMediaId" => media["id"],
+            "sha256" => media["sha256"],
+            "voice" => media["voice"],
+            "animated" => media["animated"]
+          })
       })
 
     {"message", media["caption"] || "", [attachment], %{}}
@@ -303,10 +315,13 @@ defmodule Converger.Channels.Adapters.WhatsAppMeta do
      }}
   end
 
+  # A reaction becomes a messageReaction whose `text` is the emoji (empty when
+  # the user removed it); the inbound controller resolves `reaction.message_id`
+  # to the reacted-to activity and falls back to an `event` when it is unknown.
   defp parse_content("reaction", message) do
     reaction = message["reaction"] || %{}
 
-    {"event", reaction["emoji"] || "", [],
+    {"messageReaction", reaction["emoji"] || "", [],
      %{
        "reaction" =>
          reject_nil_values(%{
@@ -323,6 +338,9 @@ defmodule Converger.Channels.Adapters.WhatsAppMeta do
   # loss) and let consumers look at metadata.whatsapp_type.
   defp parse_content(_type, message),
     do: {"message", get_in(message, ["text", "body"]) || "", [], %{}}
+
+  defp reply_to_provider_id("reaction", message), do: get_in(message, ["reaction", "message_id"])
+  defp reply_to_provider_id(_type, message), do: get_in(message, ["context", "id"])
 
   defp profile_name(contacts, from) do
     contact =

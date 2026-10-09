@@ -193,7 +193,7 @@ The server sends one event, `activitySet`:
 | `activities` | Activities in `seq` order. Live frames carry exactly one. |
 | `activities[].from.id` | The activity's `sender` (`"system"` for lifecycle events, `"bot"` for echo replies). |
 | `activities[].channelData` | The activity's `metadata`. |
-| `activities[].type` | `message`, `event`, `typing`, `conversationUpdate` or `endOfConversation`. |
+| `activities[].type` | `message`, `event`, `typing`, `messageReaction`, `messageUpdate`, `messageDelete`, `conversationUpdate` or `endOfConversation`. Activities also carry `replyToId`, `editedAt` and `deletedAt` ([references](concepts/activities.md#references-replies-reactions-edits-and-deletes)). |
 | `watermark` | Opaque position after the last activity in this frame. Store it. |
 | `has_more` | `true` only on a replay frame that hit the replay limit. |
 
@@ -270,7 +270,8 @@ channel.push("postActivity", {
   type: "message",               // default "message"
   text: "Hello!",
   channelData: { locale: "en" }, // optional, stored as the activity's metadata
-  attachments: [],               // optional
+  attachments: [],               // optional, each needs a contentType
+  replyToId: "0e7d...",          // optional; required for messageReaction / messageUpdate / messageDelete
   clientId: "c-17"               // optional, see below
 })
   .receive("ok", ({ id, seq, watermark }) => { /* stored */ })
@@ -283,11 +284,11 @@ to every joined socket, including yours, as an `activitySet`. The reply's `id` a
 - **Sender**: the token's `user_id`. A token without one takes `from.id` from the payload, else `"user"`. Any
   other field (`sender`, `seq`, timestamps) is ignored.
 - **`clientId`** (1 to 128 characters of `A-Z a-z 0-9 . _ : ~ -`): re-sending with the same `clientId`, also
-  after a reconnect, returns the stored activity instead of a duplicate. Keep it across retries; use a new one per
-  message. It is stored as `ws:<sender>:<clientId>`, so it never collides with REST `x-idempotency-key`s or other
-  senders.
-- **Errors** (`reason`): `invalid_activity` (with `errors` per field, e.g. `{"type": ["is invalid"]}` or
-  `{"clientId": [...]}`), `conversation_closed`, `rate_limited` (with `retry_after_ms`; the tenant's
+  after a reconnect, returns the stored activity instead of a duplicate, and the reply then carries
+  `duplicate: true`. Keep it across retries; use a new one per message. It is stored as `ws:<sender>:<clientId>`,
+  so it never collides with REST `x-idempotency-key`s or other senders.
+- **Errors** (`reason`): `invalid_activity` (with `errors` per field, e.g. `{"type": ["is invalid"]}`,
+  `{"reply_to_id": ["does not exist in this conversation"]}` or `{"clientId": [...]}`), `conversation_closed`, `rate_limited` (with `retry_after_ms`; the tenant's
   `activity_create` bucket, shared with REST).
   On a `websocket` channel also `inbound_not_supported` (the channel is `outbound` only) and, on a channel topic,
   `unauthorized` or `not_found`.
@@ -295,6 +296,77 @@ to every joined socket, including yours, as an `activitySet`. The reply's `id` a
   ([WebSocket channel type](channels/websocket.md#receiving-messages-from-sockets)), so the channel must be in mode
   `inbound` or `duplex`. On `converger:channel:<id>` the payload also names its `conversation_id`, which must be
   owned by or routed to the channel.
+
+#### With Protocol v1 frames and acks
+
+On a conversation topic you can also send Converger Protocol v1 `text` frames with the event `frame`
+([protocol, section 7](protocol/v1.md)). This is the same send as `postActivity` (same storage, routing, rate
+limit and `clientId` key, so the two are interchangeable for retries), but the answer is a v1 frame pushed back as a
+`frame` event, and the Phoenix reply is always `ok` (it only says the frame arrived):
+
+```json
+{ "type": "text", "clientId": "3f0c9a52-7c1e-4d0b-9a57-1f2e3d4c5b6a", "data": { "text": "Hello!" }, "metadata": { "locale": "en" } }
+```
+
+```json
+{ "type": "ack", "clientId": "3f0c9a52-7c1e-4d0b-9a57-1f2e3d4c5b6a", "id": "0b9f2d3e-6c1a-4f7e-8f53-0f4f9e6f5a20", "seq": 43, "timestamp": 1760011200123 }
+```
+
+```json
+{ "type": "error", "data": { "code": "conversation_closed", "message": "the conversation is closed", "number": 4000, "retryable": false, "clientId": "3f0c9a52-7c1e-4d0b-9a57-1f2e3d4c5b6a", "frameType": "text" } }
+```
+
+- `data.text` is required; `data.attachments` (legacy attachment objects) and `metadata` (stored as `channelData`)
+  are optional. Without `clientId`, a mekik/1 style `id` with the same syntax is used instead; a send with neither
+  gets no ack.
+- The `ack` arrives after the commit and before your own copy of the activity in `activitySet`. Its `seq` is the
+  `seq` every other client sees; `id` is the activity id.
+- A resent `clientId` stores nothing and gets the original ack with `"duplicate": true`, so after a reconnect you can
+  resend everything that has no ack yet.
+- At most `max_in_flight` (32 by default, `WS_MAX_IN_FLIGHT`) sends per connection may be unacked. If you push more
+  at once, the oldest are accepted and the newest are refused with `too_many_in_flight`; resend them, in order, once
+  acks come in.
+- Errors with `"retryable": true` (`too_many_in_flight`, `rate_limited` with `retryAfterMs`, `internal`) may be
+  resent with the **same** `clientId`. The others must not be: `bad_request` (invalid `clientId`, missing
+  `data.text`), `invalid_message` (validation, `details` per field), `conversation_closed`, `forbidden` (the
+  `websocket` channel is `outbound` only).
+- Only `text` is accepted for now; rich message types (`image`, `location`, ...) get `invalid_message` until
+  [#28](https://github.com/AimTune/converger/issues/28). `frame` is refused on `converger:channel:<id>` topics.
+
+A client outbox built on this (keep every send until it is acked, resend on every rejoin):
+
+```js
+const outbox = new Map(); // clientId -> { frame, resolve, reject }
+
+channel.on("frame", (frame) => {
+  const clientId = frame.type === "ack" ? frame.clientId : frame.data?.clientId;
+  const entry = clientId && outbox.get(clientId);
+  if (!entry) return;
+
+  if (frame.type === "ack") {
+    outbox.delete(clientId);
+    entry.resolve(frame); // { id, seq, timestamp, duplicate? }
+  } else if (!frame.data.retryable) {
+    outbox.delete(clientId);
+    entry.reject(new Error(frame.data.code));
+  } else {
+    setTimeout(() => channel.push("frame", entry.frame), frame.data.retryAfterMs ?? 1000);
+  }
+});
+
+function send(text) {
+  const frame = { type: "text", clientId: crypto.randomUUID(), data: { text } };
+  return new Promise((resolve, reject) => {
+    outbox.set(frame.clientId, { frame, resolve, reject });
+    channel.push("frame", frame);
+  });
+}
+
+// The "ok" hook runs on the first join and on every automatic rejoin.
+channel.join().receive("ok", () => {
+  for (const { frame } of outbox.values()) channel.push("frame", frame);
+});
+```
 
 ### 7. Send activities (REST)
 
@@ -315,7 +387,7 @@ x-idempotency-key: 7d2c1c1e-client-generated
 
 Your own activity also comes back over the socket as an `activitySet`. Use `x-idempotency-key` so that a retry after a timeout returns the same activity instead of creating a second one. Errors: `422` (validation, with field errors), `409` (`conversation_closed`), `503` (could not be accepted, retry), `429` (rate limit, bucket `activity_create` per tenant). See [client API](api/client-api.md).
 
-Any other event pushed on a `converger:conversation:*` topic is answered with `error` `bad_request`; the connection stays open.
+Any other event pushed on a `converger:conversation:*` topic is answered with the reply `{"reason": "bad_request"}`; the connection stays open.
 
 ### 8. Acknowledge activities
 
@@ -530,6 +602,9 @@ Join `conversation:<conversation_id>`, optionally with the id of the last activi
   "metadata": {},
   "idempotency_key": null,
   "seq": 43,
+  "reply_to_id": null,
+  "edited_at": null,
+  "deleted_at": null,
   "conversation_id": "6f1c0e7e-1f0b-4a5e-9a39-2b7c6f0d9a11",
   "tenant_id": "3a0d5e1c-8a7b-4b8e-9b1f-1c2d3e4f5a6b",
   "inserted_at": "2026-10-09T12:00:00.123456Z"
@@ -559,7 +634,7 @@ Join `conversation:<conversation_id>`, optionally with the id of the last activi
 
 ### Client to server
 
-Push `new_activity` with client fields only (`type`, `text`, `attachments`, `metadata`) and an optional `idempotency_key`; anything else, such as `sender` or `inserted_at`, is ignored. The sender is the token's `sub`.
+Push `new_activity` with client fields only (`type`, `text`, `attachments`, `metadata`, `reply_to_id`) and an optional `idempotency_key`; anything else, such as `sender` or `inserted_at`, is ignored. The sender is the token's `sub`.
 
 ```json
 { "type": "message", "text": "Hello!", "metadata": { "locale": "en" } }

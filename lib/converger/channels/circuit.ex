@@ -32,6 +32,10 @@ defmodule Converger.Channels.Circuit do
     * `cooldown_ms` (default `30_000`) - time open before a probe
     * `park_seconds` (default `600`) - how long a parked job sleeps before it
       re-checks on its own (it is released earlier on close/resume)
+    * `replay_dead_letters_on_close` (default `false`) - when a probe closes
+      the breaker, replay the channel's dead letters that failed within the
+      last `replay_window_ms` (default 1 hour), see
+      `Converger.Workers.ChannelDeadLetterReplayWorker`
 
   Telemetry: `[:converger, :channel, :circuit_opened | :circuit_closed |
   :paused | :resumed]` and `[:converger, :deliveries, :parked |
@@ -44,13 +48,24 @@ defmodule Converger.Channels.Circuit do
   alias Converger.Channels.{Adapter, Channel, DeliveryError}
   alias Converger.Deliveries.Delivery
   alias Converger.Repo
-  alias Converger.Workers.{ActivityDeliveryWorker, ChannelCircuitProbeWorker}
+
+  alias Converger.Workers.{
+    ActivityDeliveryWorker,
+    ChannelCircuitProbeWorker,
+    ChannelDeadLetterReplayWorker
+  }
 
   @parked_priority 3
   @default_priority 1
   @breaker_states ~w(open half_open)
 
-  @defaults [failure_threshold: 5, cooldown_ms: 30_000, park_seconds: 600]
+  @defaults [
+    failure_threshold: 5,
+    cooldown_ms: 30_000,
+    park_seconds: 600,
+    replay_dead_letters_on_close: false,
+    replay_window_ms: :timer.hours(1)
+  ]
 
   @doc "Effective breaker configuration."
   def config do
@@ -279,6 +294,7 @@ defmodule Converger.Channels.Circuit do
     )
 
     schedule_follow_up(channel, to)
+    if event == :circuit_closed, do: maybe_replay_dead_letters(channel, now)
     broadcast(channel, to, event, reason, now)
 
     # Automatic transitions are worth an alert; a human pause/resume is not.
@@ -293,6 +309,17 @@ defmodule Converger.Channels.Circuit do
 
   defp schedule_follow_up(channel, "closed"), do: release_parked(channel.id)
   defp schedule_follow_up(_channel, _state), do: :ok
+
+  # Opt-in: once a probe proved the endpoint is back, replay what died while
+  # it was down. A manual resume does not, the operator can replay explicitly.
+  defp maybe_replay_dead_letters(channel, now) do
+    config = config()
+
+    if config[:replay_dead_letters_on_close] do
+      since = DateTime.add(now, -config[:replay_window_ms], :millisecond)
+      ChannelDeadLetterReplayWorker.enqueue(channel.id, since)
+    end
+  end
 
   # --- Parking ---
 

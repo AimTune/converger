@@ -19,7 +19,7 @@ defmodule Converger.Health do
   ## Draining
 
   The draining state has one source of truth, `ConvergerWeb.Drain`
-  (ADR-0027, WebSocket limits and draining; ADR-0036): on shutdown it flips
+  (ADR-0027, WebSocket limits and draining; ADR-0037): on shutdown it flips
   `ConvergerWeb.Drain.draining?/0`, which this check reads, and waits
   `drain_delay_ms` (`WS_DRAIN_DELAY_MS`) before the endpoint drains its
   sockets. Readiness then fails with `draining`.

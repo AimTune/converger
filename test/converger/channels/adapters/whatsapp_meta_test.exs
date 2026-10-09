@@ -168,8 +168,10 @@ defmodule Converger.Channels.Adapters.WhatsAppMetaTest do
       assert [
                %{
                  "contentType" => "image/jpeg",
-                 "providerMediaId" => "media-123",
-                 "provider" => "whatsapp_meta"
+                 "channelData" => %{
+                   "providerMediaId" => "media-123",
+                   "provider" => "whatsapp_meta"
+                 }
                }
              ] = message["attachments"]
 
@@ -210,14 +212,21 @@ defmodule Converger.Channels.Adapters.WhatsAppMetaTest do
       assert {:ok, [doc, loc, btn, react]} =
                WhatsAppMeta.parse_inbound(@channel, webhook(messages))
 
-      assert [%{"contentType" => "application/pdf", "name" => "a.pdf", "providerMediaId" => "m1"}] =
-               doc["attachments"]
+      assert [
+               %{
+                 "contentType" => "application/pdf",
+                 "name" => "a.pdf",
+                 "channelData" => %{"providerMediaId" => "m1"}
+               }
+             ] = doc["attachments"]
 
       assert [%{"content" => %{"latitude" => 1.5, "longitude" => 2.5}}] = loc["attachments"]
       assert loc["text"] == "HQ"
       assert btn["text"] == "Yes"
       assert btn["metadata"]["interactive_reply"]["id"] == "yes"
-      assert react["type"] == "event"
+      assert react["type"] == "messageReaction"
+      assert react["text"] == "👍"
+      assert react["reply_to_provider_id"] == "wamid.orig"
       assert react["metadata"]["reaction"] == %{"message_id" => "wamid.orig", "emoji" => "👍"}
     end
 
@@ -229,6 +238,7 @@ defmodule Converger.Channels.Adapters.WhatsAppMetaTest do
 
       assert {:ok, [message]} = WhatsAppMeta.parse_inbound(@channel, webhook([reply]))
       assert message["metadata"]["reply_to"] == "wamid.original"
+      assert message["reply_to_provider_id"] == "wamid.original"
     end
 
     test "returns an empty list for a status-only payload" do

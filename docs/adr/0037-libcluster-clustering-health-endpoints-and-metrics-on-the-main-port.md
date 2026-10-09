@@ -1,6 +1,6 @@
 ---
-title: "ADR-0036: libcluster clustering, health endpoints and metrics on the main port"
-sidebar_label: "0036 Clustering and health"
+title: "ADR-0037: libcluster clustering, health endpoints and metrics on the main port"
+sidebar_label: "0037 Clustering and health"
 description: Nodes discover each other with libcluster strategies chosen at runtime, readiness is an unauthenticated JSON probe that gates traffic on database, Oban, draining and migrations, Prometheus metrics move to the main port behind a token, and a two-node :peer suite verifies the cluster in CI.
 ---
 

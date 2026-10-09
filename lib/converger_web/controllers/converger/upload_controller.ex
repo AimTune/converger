@@ -40,6 +40,7 @@ defmodule ConvergerWeb.ConvergerAPI.UploadController do
           }
         ],
         "metadata" => activity_meta["channelData"] || activity_meta["metadata"] || %{},
+        "reply_to_id" => activity_meta["replyToId"],
         "tenant_id" => tenant_id,
         "conversation_id" => conversation_id
       }

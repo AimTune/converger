@@ -26,6 +26,7 @@ Server-Sent Events stream drops `typing` and `presence` for a lagging client the
 | Hard frame cap (`websocket_max_frame_size`, compile time) | 1 MiB | Bandit closes the socket with **1009**. Logged at `info`, not as a crash. |
 | Inbound frames per socket (`max_messages` per `rate_window_ms`) | 20 per 1 000 ms | The frame is not processed; error reply `{"reason": "rate_limited", "retryAfterMs": N}`, where `N` is the time left in the window. Heartbeats and joins count. |
 | Joined channels per socket (`max_joins`) | 50 | The join is refused with `{"reason": "too_many_joins"}`. Rejoining an already joined topic is allowed. |
+| Unacked v1 sends per connection on the Phoenix binding (`max_in_flight`) | 32 | The newest sends beyond it get the `error` frame `too_many_in_flight` (retryable with the same `clientId`); the oldest are processed in order. Announced as `welcome.data.limits.maxInFlight`. |
 | Outbound backlog (`slow_consumer_queue_len`) | 1 000 frames | The socket is closed with **4503** and the reason `{"reason": "slow_consumer", "retryAfterMs": N}`. |
 | Ephemeral backlog (`ephemeral_drop_queue_len`) | 100 frames | Ephemeral frames (typing, presence) are dropped. |
 | Idle timeout (Phoenix `timeout`) | 60 000 ms | A socket that sends nothing, heartbeats included, is closed. |
@@ -71,7 +72,7 @@ request.
 | `GET /health/ready` | `200 {"status": "ready", "checks": {...}}`; `503 {"status": "draining", ...}` once the node has started shutting down (`"unavailable"` when another check fails). |
 
 Readiness also checks the database, Oban and pending migrations; see [Observability](observability.md#health-endpoints)
-([ADR-0036](../adr/0036-libcluster-clustering-health-endpoints-and-metrics-on-the-main-port.md)).
+([ADR-0037](../adr/0037-libcluster-clustering-health-endpoints-and-metrics-on-the-main-port.md)).
 
 ## Draining on shutdown
 
@@ -125,6 +126,7 @@ variable (integers; unset or empty keeps the default).
 | `WS_MAX_MESSAGES_PER_WINDOW` | `max_messages` | `20` | Inbound frames allowed per socket per window. |
 | `WS_RATE_WINDOW_MS` | `rate_window_ms` | `1000` | Rate window length. |
 | `WS_MAX_JOINS` | `max_joins` | `50` | Channels one socket may join at the same time. |
+| `WS_MAX_IN_FLIGHT` | `max_in_flight` | `32` | Unacked v1 `text` sends per Phoenix connection ([ADR-0029](../adr/0029-websocket-sends-acked-on-the-phoenix-binding.md)). |
 | `WS_EPHEMERAL_DROP_QUEUE_LEN` | `ephemeral_drop_queue_len` | `100` | Outbound backlog above which ephemeral frames are dropped. |
 | `WS_SLOW_CONSUMER_QUEUE_LEN` | `slow_consumer_queue_len` | `1000` | Outbound backlog above which the socket is closed with 4503. |
 | `WS_RECONNECT_BASE_MS` | `reconnect_base_ms` | `1000` | Base of the `retryAfterMs` sent with 1012 and 4503 closes. |

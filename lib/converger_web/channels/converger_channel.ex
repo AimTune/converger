@@ -34,6 +34,11 @@ defmodule ConvergerWeb.ConvergerChannel do
       (`Converger.Deliveries.acknowledge/3`). On a channel topic the payload
       names its `conversation_id`.
     * `typing`, `read` - conversation topics only.
+    * `frame` - a Converger Protocol v1 client frame (conversation topics
+      only). A `text` frame is a send: it is stored like `postActivity` and
+      answered with an `ack` or `error` frame, pushed as the event `frame`;
+      the Phoenix reply is only a transport receipt. At most `max_in_flight`
+      sends may be unacked (`ConvergerWeb.Protocol.InFlight`).
 
   Unless the channel requires acks (`require_ack: true` in its config), a
   replay also marks the replayed activities' deliveries `sent`.
@@ -59,6 +64,7 @@ defmodule ConvergerWeb.ConvergerChannel do
   alias Converger.Pipeline.Middleware
   alias ConvergerWeb.ConvergerAPI.ActivityJSON
   alias ConvergerWeb.{ConversationSignals, SocketGuard}
+  alias ConvergerWeb.Protocol.{Frames, InFlight, Send}
 
   @impl true
   def join("converger:conversation:" <> conversation_id, payload, socket) do
@@ -77,6 +83,7 @@ defmodule ConvergerWeb.ConvergerChannel do
         |> assign(:participant, ConversationSignals.participant(claims))
         |> assign(:presence?, ConversationSignals.presence?(channel, claims))
         |> assign(:typing, ConversationSignals.new_typing())
+        |> assign(:in_flight, InFlight.new())
 
       # Queued before subscribing, so every live frame is handled after the
       # replay and dropped when the replay already covered it.
@@ -159,7 +166,7 @@ defmodule ConvergerWeb.ConvergerChannel do
         |> client_params()
         |> Map.merge(%{
           "sender" => sender,
-          "idempotency_key" => client_id && "ws:#{sender}:#{client_id}"
+          "idempotency_key" => client_id && Frames.client_key(sender, client_id)
         })
 
       socket.assigns.channel
@@ -193,10 +200,49 @@ defmodule ConvergerWeb.ConvergerChannel do
 
   # --- Client frames ---
 
-  # Typing and read receipts belong to one conversation.
+  # Typing, read receipts and v1 sends belong to one conversation.
   def handle_in(event, _payload, %{assigns: %{source: :channel}} = socket)
-      when event in ["typing", "read"],
+      when event in ["typing", "read", "frame"],
       do: bad_request(socket)
+
+  # `frame`: a Converger Protocol v1 client frame (docs/protocol/v1.md,
+  # sections 2.2 and 7). The protocol answer is pushed as a `frame` event;
+  # the Phoenix reply only says the frame arrived. Typing and read receipts
+  # have their own events on this binding.
+  def handle_in("frame", %{} = frame, socket) do
+    case Send.kind(frame["type"]) do
+      :text ->
+        send_frame(frame, socket)
+
+      :rich ->
+        # Rich message types (image, card, ...) are stored from #28 on.
+        type = frame["type"]
+
+        push_frames(socket, [
+          Frames.error("invalid_message", "message type #{type} is not supported yet",
+            frame_type: type,
+            client_id: valid_client_id(frame)
+          )
+        ])
+
+        {:reply, :ok, socket}
+
+      :reserved ->
+        type = frame["type"]
+        message = "#{type} is not a client frame on this binding"
+        push_frames(socket, [Frames.error("bad_request", message, frame_type: type)])
+        {:reply, :ok, socket}
+
+      :unknown ->
+        push_frames(socket, [Frames.error("bad_request", "unknown frame type")])
+        {:reply, :ok, socket}
+    end
+  end
+
+  def handle_in("frame", _payload, socket) do
+    push_frames(socket, [Frames.error("bad_request", "a frame must be a JSON object")])
+    {:reply, :ok, socket}
+  end
 
   # `typing {isTyping}`: relayed to the conversation's other connections and,
   # when the adapter supports it, to the external channel. Never stored.
@@ -242,7 +288,8 @@ defmodule ConvergerWeb.ConvergerChannel do
       "type" => payload["type"] || "message",
       "text" => payload["text"],
       "attachments" => payload["attachments"] || [],
-      "metadata" => payload["channelData"] || %{}
+      "metadata" => payload["channelData"] || %{},
+      "reply_to_id" => payload["replyToId"]
     }
   end
 
@@ -287,7 +334,16 @@ defmodule ConvergerWeb.ConvergerChannel do
   defp receive_message(%{type: "websocket"} = channel, message, conversation_id),
     do: Inbound.receive_message(channel, message, conversation_id: conversation_id)
 
+  # A resent clientId is reported as `:duplicate` (the `duplicate: true` of an
+  # ack), as `Converger.Inbound` does for `websocket` channels.
   defp receive_message(channel, message, conversation_id) do
+    case Activities.get_activity_by_idempotency_key(conversation_id, message["idempotency_key"]) do
+      nil -> create_message(channel, message, conversation_id)
+      existing -> {:duplicate, existing}
+    end
+  end
+
+  defp create_message(channel, message, conversation_id) do
     message
     |> Activities.create_client_activity(%{
       tenant_id: channel.tenant_id,
@@ -302,6 +358,114 @@ defmodule ConvergerWeb.ConvergerChannel do
     end
   end
 
+  # A v1 send (`frame` event with a `text` frame). Runs in this channel
+  # process, one send at a time and in order: the ack is pushed right after
+  # the commit, before this process handles the activity's broadcast, so the
+  # sender gets its ack before its own `activitySet`.
+  defp send_frame(frame, socket) do
+    max = InFlight.limit()
+    {decision, window} = InFlight.admit(socket.assigns.in_flight, max, &send_frame?/1)
+    socket = assign(socket, :in_flight, window)
+
+    frames =
+      case decision do
+        :accept ->
+          persist_frame(frame, socket)
+
+        :reject ->
+          [
+            Frames.error("too_many_in_flight", "more than #{max} sends are unacked",
+              frame_type: "text",
+              client_id: valid_client_id(frame)
+            )
+          ]
+      end
+
+    push_frames(socket, frames)
+    {:reply, :ok, socket}
+  end
+
+  defp send_frame?(%{"type" => type}), do: Send.kind(type) == :text
+  defp send_frame?(_payload), do: false
+
+  defp persist_frame(frame, socket) do
+    %{channel: channel, converger_claims: claims, conversation_id: conversation_id} =
+      socket.assigns
+
+    sender = sender(claims, %{})
+
+    with {:ok, client_id} <- Send.client_id(frame),
+         {:ok, params} <- Send.message_params(frame, client_id),
+         :ok <- rate_limit(claims["tenant_id"]) do
+      message =
+        Map.merge(params, %{
+          "sender" => sender,
+          "idempotency_key" => client_id && Frames.client_key(sender, client_id)
+        })
+
+      channel
+      |> receive_message(message, conversation_id)
+      |> send_result(client_id)
+    else
+      {:error, code, message, opts} ->
+        [Frames.error(code, message, [frame_type: "text"] ++ opts)]
+
+      {:error, %{reason: "rate_limited", retry_after_ms: retry_after_ms}} ->
+        [
+          Frames.error("rate_limited", "too many messages",
+            frame_type: "text",
+            client_id: valid_client_id(frame),
+            retry_after_ms: retry_after_ms
+          )
+        ]
+    end
+  end
+
+  defp send_result({tag, _activity}, nil) when tag in [:created, :duplicate], do: []
+
+  defp send_result({tag, activity}, client_id) when tag in [:created, :duplicate],
+    do: [Frames.ack(activity, client_id, tag == :duplicate)]
+
+  defp send_result(result, client_id) do
+    opts = [frame_type: "text", client_id: client_id]
+
+    frame =
+      case result do
+        {:rejected, changeset} ->
+          details = Frames.changeset_details(changeset)
+
+          Frames.error(
+            "invalid_message",
+            "the message failed validation",
+            [details: details] ++ opts
+          )
+
+        {:error, :conversation_closed} ->
+          Frames.error("conversation_closed", "the conversation is closed", opts)
+
+        {:error, :inbound_not_supported} ->
+          Frames.error("forbidden", "the channel does not accept messages (mode outbound)", opts)
+
+        {:error, :not_found} ->
+          Frames.error("conversation_not_found", "the conversation does not exist", opts)
+
+        {:error, reason} ->
+          Logger.warning("Protocol send failed", reason: inspect(reason))
+          Frames.error("internal", "the message could not be accepted, retry", opts)
+      end
+
+    [frame]
+  end
+
+  defp valid_client_id(frame) do
+    case Send.client_id(frame) do
+      {:ok, client_id} -> client_id
+      {:error, _, _, _} -> nil
+    end
+  end
+
+  defp push_frames(socket, frames), do: Enum.each(frames, &push(socket, "frame", &1))
+
   defp target_conversation(%{assigns: %{source: :channel}} = socket, payload) do
     %{channel: channel, converger_claims: claims} = socket.assigns
 
@@ -314,9 +478,9 @@ defmodule ConvergerWeb.ConvergerChannel do
   defp target_conversation(socket, _payload), do: {:ok, socket.assigns.conversation_id}
 
   defp reply_to_post({tag, activity}, socket) when tag in [:created, :duplicate] do
-    {:reply,
-     {:ok, %{id: activity.id, seq: activity.seq, watermark: Watermark.encode(activity.seq)}},
-     socket}
+    reply = %{id: activity.id, seq: activity.seq, watermark: Watermark.encode(activity.seq)}
+    reply = if tag == :duplicate, do: Map.put(reply, :duplicate, true), else: reply
+    {:reply, {:ok, reply}, socket}
   end
 
   defp reply_to_post({:rejected, changeset}, socket),

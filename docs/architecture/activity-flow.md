@@ -15,21 +15,21 @@ The short version:
 
 ## Entry points
 
-All entry points call `Activities.create_client_activity/2`, which keeps only `Activity.client_fields/0` (`type`, `text`, `attachments`, `metadata`) from the untrusted input and merges in server-controlled system attributes (`tenant_id`, `conversation_id`, `sender`, `idempotency_key`). Fields such as `inserted_at` or `seq` in a request body are ignored ([ADR-0005](../adr/0005-separate-client-and-system-changesets.md)).
+All entry points call `Activities.create_client_activity/2`, which keeps only `Activity.client_fields/0` (`type`, `text`, `attachments`, `metadata`, `reply_to_id`) from the untrusted input and merges in server-controlled system attributes (`tenant_id`, `conversation_id`, `sender`, `idempotency_key`). Fields such as `inserted_at` or `seq` in a request body are ignored ([ADR-0005](../adr/0005-separate-client-and-system-changesets.md)).
 
 | Entry point | Module | `sender` | `idempotency_key` |
 | --- | --- | --- | --- |
 | `POST /api/v1/conversations/:id/activities` (tenant API) | `ConvergerWeb.ActivityController` | `sender` from the body, default `"user"` | `x-idempotency-key` header |
 | `POST /api/v1/converger/conversations/:id/activities` (client API) | `ConvergerWeb.ConvergerAPI.ActivityController` | `from.id` from the body, default `"user"` | `x-idempotency-key` header |
 | `POST /api/v1/channels/:channel_id/inbound` (provider webhook) | `ConvergerWeb.InboundController` via `Converger.Inbound` | parsed by the adapter (for example the WhatsApp phone number) | the provider message id (for example a WhatsApp `wamid`), if any |
-| `postActivity` push on `converger:conversation:<id>` or `converger:channel:<id>` (Converger API socket) | `ConvergerWeb.ConvergerChannel`; via `Converger.Inbound` when the token's channel is a `websocket` channel | the token's `user_id` claim, else `from.id` from the payload, else `"user"` | `ws:<sender>:<clientId>` when the payload carries `clientId` |
+| `postActivity` push on `converger:conversation:<id>` or `converger:channel:<id>`, or a v1 `text` frame pushed as `frame` on a conversation topic (Converger API socket) | `ConvergerWeb.ConvergerChannel`; via `Converger.Inbound` when the token's channel is a `websocket` channel | the token's `user_id` claim, else `from.id` from the payload, else `"user"` | `ws:<sender>:<clientId>` when the payload carries `clientId` (a v1 frame: or a mekik/1 `id` with the clientId syntax) |
 | `new_activity` push on `conversation:<id>` (legacy socket, deprecated) | `ConvergerWeb.ConversationChannel` | the token's `sub` claim | `ws:<sender>:<idempotency_key>` when the payload carries `idempotency_key` |
 | Close / reopen / expiration | `Converger.Conversations` | `"system"` | none |
 
 Inbound webhooks and client API socket messages both go through [`Converger.Inbound.receive_message/3`](https://github.com/AimTune/converger/blob/main/lib/converger/inbound.ex), which requires the channel's mode to be `inbound` or `duplex` (`{:error, :inbound_not_supported}` otherwise) and checks `Activities.get_activity_by_channel_idempotency_key/2` **before** resolving the conversation, so a provider re-delivery of a message that already created an activity is acknowledged as a duplicate without touching any conversation ([ADR-0015](../adr/0015-per-message-idempotent-inbound-batches.md), [ADR-0016](../adr/0016-participant-based-conversation-resolution.md)).
 
 :::note
-The Converger API socket is the single client socket stack ([#23](https://github.com/AimTune/converger/issues/23)). Its `postActivity` event replies `{id, seq, watermark}` on success and `{reason}` on failure (`invalid_activity`, `conversation_closed`, `rate_limited`); see [WebSocket](../websocket.md#6-send-activities-over-the-socket). It also accepts `ack {watermark}`, which marks the deliveries of a `websocket` channel `sent` ([#22](https://github.com/AimTune/converger/issues/22), [ADR-0033](../adr/0033-websocket-channel-adapter-delivery.md)). Protocol v1 `ack` frames for client ids are planned ([#24](https://github.com/AimTune/converger/issues/24)). The legacy socket and its `new_activity` push are deprecated ([migrating from the legacy surfaces](../api/migrating-from-legacy.md)).
+The Converger API socket is the single client socket stack ([#23](https://github.com/AimTune/converger/issues/23)). Its `postActivity` event replies `{id, seq, watermark}` on success and `{reason}` on failure (`invalid_activity`, `conversation_closed`, `rate_limited`); see [WebSocket](../websocket.md#6-send-activities-over-the-socket). It also accepts `ack {watermark}`, which marks the deliveries of a `websocket` channel `sent` ([#22](https://github.com/AimTune/converger/issues/22), [ADR-0033](../adr/0033-websocket-channel-adapter-delivery.md)). A v1 `text` frame pushed as the event `frame` is the same send, answered with an `ack` frame (`clientId`, `id`, `seq`, `timestamp`, `duplicate`) or an `error` frame ([#24](https://github.com/AimTune/converger/issues/24), [ADR-0029](../adr/0029-websocket-sends-acked-on-the-phoenix-binding.md)). The legacy socket and its `new_activity` push are deprecated ([migrating from the legacy surfaces](../api/migrating-from-legacy.md)).
 :::
 
 ## The transaction
@@ -77,7 +77,7 @@ If both `conversation_id` and `idempotency_key` are present, the activity with t
 
 ### 2. Validation
 
-`Activity.changeset/2` validates the type (`message`, `event`, `typing`, `conversationUpdate`, `endOfConversation`) and the size limits (`config :converger, :activity_limits`; defaults: 65,536 bytes of text, 10 attachments, 4,096 bytes per attachment, 16,384 bytes of metadata, measured as JSON). `apply_action(:insert)` runs before any SQL, so an invalid activity never takes the conversation lock.
+`Activity.changeset/3` validates the type (`message`, `event`, `typing`, `messageReaction`, `messageUpdate`, `messageDelete`, `conversationUpdate`, `endOfConversation`; the internal `deliveryReceipt` only with `internal: true`), the attachments (`Converger.Activities.ActivityAttachment`: `contentType` required) and the size limits (`config :converger, :activity_limits`; defaults: 65,536 bytes of text, 10 attachments, 4,096 bytes per attachment, 16,384 bytes of metadata, measured as JSON). `apply_action(:insert)` runs before any SQL, so an invalid activity never takes the conversation lock.
 
 ### 3. Lock, lifecycle check and `seq` allocation in one statement
 
@@ -125,7 +125,7 @@ ConvergerWeb.Endpoint.broadcast!(
 )
 ```
 
-The payload is the single canonical map from `Converger.Activities.Serializer` ([ADR-0004](../adr/0004-single-canonical-activity-serializer.md)): `id`, `type`, `sender`, `text`, `attachments`, `metadata`, `idempotency_key`, `seq`, `conversation_id`, `tenant_id`, `inserted_at`. REST responses, WebSocket frames and webhook payloads are all derived from the same map, so they cannot drift.
+The payload is the single canonical map from `Converger.Activities.Serializer` ([ADR-0004](../adr/0004-single-canonical-activity-serializer.md)): `id`, `type`, `sender`, `text`, `attachments`, `metadata`, `idempotency_key`, `seq`, `reply_to_id`, `edited_at`, `deleted_at`, `conversation_id`, `tenant_id`, `inserted_at`. REST responses, WebSocket frames and webhook payloads are all derived from the same map, so they cannot drift.
 
 Broadcasting after commit means a subscriber never sees an activity that later rolls back. The broadcast is not durable: a client that is not connected (or a node that crashes right after commit) misses it and catches up from the database using `seq` watermarks. See [Real-time](realtime.md).
 

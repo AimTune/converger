@@ -8,7 +8,7 @@ Converger scales horizontally: every node runs the same release, serves HTTP and
 jobs. Postgres is the shared state. On top of that the nodes form an **Erlang cluster** so that in-memory,
 real-time state reaches every node. This page explains how nodes find each other, what the cluster is used for,
 and how it is tested. The decision is recorded in
-[ADR-0036](../adr/0036-libcluster-clustering-health-endpoints-and-metrics-on-the-main-port.md); Kubernetes
+[ADR-0037](../adr/0037-libcluster-clustering-health-endpoints-and-metrics-on-the-main-port.md); Kubernetes
 specifics are on the [Kubernetes](kubernetes.md) page.
 
 ## What needs the cluster
