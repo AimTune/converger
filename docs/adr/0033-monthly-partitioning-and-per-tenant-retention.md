@@ -134,7 +134,14 @@ Details:
 
 ### Positive
 
-- Dropping a month is a detach plus `DROP TABLE`: 45 ms (detach, both tables) and 149 ms (drop, both tables) for 200,000 activities and 200,000 deliveries while 8 writers inserted activities through the normal code path; the slowest insert during the drop took 56 ms, in line with the writers' normal p99 on the same machine. Deleting the same rows with `DELETE` took 1,010 ms and grows linearly with the month's size; detach and drop do not. (Docker Desktop on Windows, Postgres 17; `test/load/partition_drop_benchmark_test.exs`.)
+- Dropping a month is a detach plus `DROP TABLE`, measured with 8 writers inserting activities through the normal code path the whole time (`test/load/partition_drop_benchmark_test.exs`, Docker Desktop on Windows, Postgres 17):
+
+  | Rows per table and month | `DETACH ... CONCURRENTLY` (both tables) | `DROP TABLE` (both) | Slowest insert during the drop | `DELETE` of the same rows |
+  | --- | --- | --- | --- | --- |
+  | 200,000 | 45 ms | 149 ms | 56 ms | 1,010 ms |
+  | 1,000,000 | 31 ms | 400 ms | 18 ms | 2,911 ms |
+
+  Writers were never blocked (the slowest insert during the drop was below the writers' normal p99 of 62 ms in the larger run). `DELETE` grows linearly with the month and leaves dead tuples and WAL behind; detach is constant and the drop only unlinks files. The 100M-row run from the issue was not done on this machine.
 - Recent data and its indexes live in small partitions; old months stop costing cache and vacuum.
 - Every guarantee of ADR-0006, ADR-0015 and ADR-0017 is kept; idempotency is now also correct across month boundaries.
 - Per-tenant retention with an exact, verified archive, and a re-import path.
