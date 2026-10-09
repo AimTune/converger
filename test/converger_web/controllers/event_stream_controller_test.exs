@@ -116,6 +116,67 @@ defmodule ConvergerWeb.ConvergerAPI.EventStreamControllerTest do
     assert ConvergerWeb.Sockets.count(ctx.channel.id) == 1
   end
 
+  describe "signals and draining" do
+    setup ctx do
+      on_exit(&ConvergerWeb.Drain.reset/0)
+
+      {:ok, bob_token, _} =
+        ConvergerToken.generate_conversation_token(ctx.channel, ctx.conversation.id,
+          user_id: "bob"
+        )
+
+      %{token: bob_token}
+    end
+
+    test "typing and read receipts of other participants are streamed", ctx do
+      client = open(ctx, "")
+      alice = ConvergerWeb.ConversationSignals.participant(%{"user_id" => "alice"})
+      activity!(ctx.conversation, "one")
+      {%{id: "1"}, client} = Client.sse_recv(client)
+
+      # As if Alice typed on a WebSocket of the same conversation.
+      ConvergerWeb.Endpoint.broadcast!(
+        ConvergerWeb.ConversationSignals.topic(ctx.conversation.id),
+        "typing",
+        %{participant: alice, is_typing: true}
+      )
+
+      assert {%{id: nil, frame: %{"type" => "typing", "isTyping" => true}}, client} =
+               Client.sse_recv(client)
+
+      {:ok, 1} = ConvergerWeb.ConversationSignals.read(ctx.conversation.id, alice, 1)
+
+      assert {%{frame: %{"type" => "deliveryStatus", "data" => %{"upToSeq" => 1}}}, _} =
+               Client.sse_recv(client)
+    end
+
+    test "an identified viewer is online for presence while the stream is open", ctx do
+      _client = open(ctx, "")
+      topic = ConvergerWeb.ConversationPresence.topic(ctx.conversation.id)
+      assert %{"bob" => _} = ConvergerWeb.ConversationPresence.list(topic)
+    end
+
+    test "draining ends the stream with unavailable", ctx do
+      client = open(ctx, "")
+      ConvergerWeb.ProtocolConnections.drain()
+
+      assert {%{frame: %{"type" => "error", "data" => %{"code" => "unavailable"} = data}}, client} =
+               Client.sse_recv(client)
+
+      assert data["retryAfterMs"] > 0
+      assert {:done, _} = Client.sse_recv(client)
+      assert ConvergerWeb.ProtocolConnections.count() == 0
+    end
+
+    test "new streams are refused with 503 while the node drains", ctx do
+      ConvergerWeb.Drain.start_draining()
+      port = Client.start_server()
+
+      assert {503, _} =
+               Client.sse_connect(port, ctx.path, [{"authorization", "Bearer #{ctx.token}"}])
+    end
+  end
+
   describe "refused requests" do
     test "without a token: 401", %{conn: conn, path: path} do
       assert conn |> get(path) |> json_response(401)

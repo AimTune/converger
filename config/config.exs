@@ -35,15 +35,13 @@ config :converger, :pagination,
 
 # Converger Protocol v1 transports: the native WebSocket (/socket/converger/v1)
 # and the Server-Sent Events stream (see ConvergerWeb.Protocol). The replay
-# batch is :ws_replay_limit above.
+# batch is :ws_replay_limit above; frame size, rate and draining limits are the
+# shared client WebSocket limits (config :converger, :websocket, below).
 config :converger, ConvergerWeb.Protocol,
   # outbound silence before the server sends a `heartbeat`
   heartbeat_interval_ms: 30_000,
   # inbound silence before the socket is closed with 4408
   idle_timeout_ms: 60_000,
-  # larger frames get `payload_too_large`; above the hard cap the socket closes (1009)
-  max_frame_bytes: 131_072,
-  max_frame_hard_bytes: 1_048_576,
   # frames replayed per handshake or `sync`; beyond it `replayTruncated`
   replay_max: 10_000
 

@@ -20,6 +20,8 @@ defmodule Converger.Application do
         {Phoenix.PubSub, name: Converger.PubSub},
         ConvergerWeb.SocketPresence,
         ConvergerWeb.ConversationPresence,
+        # Native v1 WebSockets and SSE streams, drained by ConvergerWeb.Drain.
+        ConvergerWeb.ProtocolConnections,
         {Task.Supervisor, name: Converger.TaskSupervisor},
         Converger.RateLimit.Supervisor,
         {Oban, oban_config()}

@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### Receipts, typing, presence, limits and draining on the native transports (#26 follow-up, #25, #27)
+
+- The native endpoint (`/socket/converger/v1`) accepts `typing` and `read` and pushes `deliveryStatus`,
+  `typing` and `presence`, as the Phoenix binding does; `welcome.data.capabilities` now reports `receipts`,
+  `typing` and `presence` (per channel config). The SSE stream delivers the same frames and counts an
+  identified viewer as online.
+- The #25 logic moved from `ConvergerWeb.ConvergerChannel` into `ConvergerWeb.ConversationSignals`, shared by
+  the channel, the native socket and the SSE stream (no behaviour change on the Phoenix binding).
+- The client WebSocket limits (`config :converger, :websocket`, `WS_*`) apply to the native endpoint: frame
+  size, frames per window (`rate_limited` error with `retryAfterMs`), ephemeral frames dropped and close 4503
+  for slow consumers. The unreleased `max_frame_bytes` / `max_frame_hard_bytes` keys of
+  `config :converger, ConvergerWeb.Protocol` are removed in favour of these.
+- Draining: while the node drains, new native connections and SSE streams get 503 with `Retry-After`; on
+  shutdown open ones are closed in paced batches (`ConvergerWeb.ProtocolConnections`) with 1012, or an
+  `unavailable` error event on SSE. The `ConvergerWeb.Drain` shutdown timeout grows by `drain_shutdown_ms`.
+- ADR-0033.
+
 ### Native Protocol v1 WebSocket, MessagePack, SSE and long-poll fallbacks (#26)
 
 - `GET /socket/converger/v1`: the native Converger Protocol v1 endpoint (`ConvergerWeb.ProtocolSocket`, a

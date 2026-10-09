@@ -391,14 +391,19 @@ named by its `type`; persistent frames carry their `seq` as the event `id`.
   from the beginning; one above the conversation head draws an `error` event `invalid_watermark` and the stream
   continues live.
 - A `heartbeat` event is sent every 30 s (`heartbeat_interval_ms`).
-- The stream ends after an `error` event `token_expired` when the token expires, or `channel_inactive` when the
-  channel is deactivated. Reconnect with a fresh token and the last `seq`.
+- Receipts, typing and presence of the other participants arrive as `deliveryStatus`, `typing` and `presence`
+  events (no `id`), as on the WebSocket. An identified viewer (token with `user_id`) counts as online for presence
+  while the stream is open. Send read receipts and typing over a WebSocket; the stream is receive-only.
+- The stream ends after an `error` event `token_expired` when the token expires, `channel_inactive` when the
+  channel is deactivated, or `unavailable` (with `retryAfterMs`) when the node shuts down. Reconnect with a fresh
+  token (after `token_expired`) and the last `seq`. While a node shuts down, new streams are refused with `503` and
+  `Retry-After`.
 - `from` is relative to the token's `user_id` (or `?userId=`): that user's activities are `user`, everyone else's
   `bot`.
 - Send with [Post an activity](#post-an-activity) and an `X-Idempotency-Key`.
 
 Errors: `401` (no or invalid token), `403` (token bound to another conversation), `404` (unknown conversation or
-one of another channel).
+one of another channel), `503` (the node is draining; retry after `Retry-After` seconds).
 
 ## Uploads
 

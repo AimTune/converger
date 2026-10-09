@@ -154,9 +154,14 @@ defmodule ConvergerWeb.SocketGuard do
     })
   end
 
-  # Fixed window per socket, kept in the socket process. Returns nil when the
-  # frame is allowed, otherwise the ms until the window resets.
-  defp rate_limited do
+  @doc """
+  Counts one inbound frame against the per-socket rate (`:max_messages` per
+  `:rate_window_ms`, a fixed window kept in the calling socket process).
+  Returns nil when the frame is allowed, otherwise the ms until the window
+  resets.
+  """
+  @spec rate_limited() :: nil | pos_integer()
+  def rate_limited do
     now = System.monotonic_time(:millisecond)
     window = config(:rate_window_ms)
 
@@ -217,26 +222,37 @@ defmodule ConvergerWeb.SocketGuard do
     _ -> :error
   end
 
-  # Close reasons are at most 123 bytes; these stay well below.
-  defp close(code, reason, state) do
+  defp close(code, reason, state), do: {:stop, :normal, close_detail(code, reason), state}
+
+  @doc """
+  The WebSocket close detail `{code, reason}` for a limit: the reason is JSON,
+  `{"reason": reason}`, plus a jittered `retryAfterMs` for 1012 (draining)
+  and 4503 (slow consumer). Shared with `ConvergerWeb.ProtocolSocket`.
+  """
+  @spec close_detail(integer(), String.t()) :: {integer(), String.t()}
+  def close_detail(code, reason) do
+    # Close reasons are at most 123 bytes; these stay well below.
     detail =
       if code in [@close_restart, @close_slow_consumer],
         do: %{reason: reason, retryAfterMs: retry_after_ms()},
         else: %{reason: reason}
 
-    {:stop, :normal, {code, Jason.encode!(detail)}, state}
+    {code, Jason.encode!(detail)}
   end
 
-  defp retry_after_ms do
+  @doc "A jittered reconnect delay in ms (`:reconnect_base_ms` plus up to `:reconnect_jitter_ms`)."
+  def retry_after_ms do
     config(:reconnect_base_ms) + :rand.uniform(config(:reconnect_jitter_ms) + 1) - 1
   end
 
-  defp queue_len(pid) do
+  @doc "Messages waiting in `pid`'s mailbox (frames not yet written to a socket's client)."
+  def queue_len(pid) do
     case Process.info(pid, :message_queue_len) do
       {:message_queue_len, len} -> len
       nil -> 0
     end
   end
 
-  defp config(key), do: Application.fetch_env!(:converger, :websocket)[key]
+  @doc "A limit from `config :converger, :websocket`."
+  def config(key), do: Application.fetch_env!(:converger, :websocket)[key]
 end

@@ -57,6 +57,7 @@ supersedes the old one and both are linked. Read
 | [0027](0027-websocket-limits-backpressure-and-draining.md) | WebSocket limits in the socket transport, mailbox backpressure and readiness-gated draining | Accepted | [#27](https://github.com/AimTune/converger/issues/27) / [#117](https://github.com/AimTune/converger/pull/117) |
 | [0030](0030-native-websocket-endpoint-and-fallback-transports.md) | Native v1 WebSocket on WebSock, MessagePack by subprotocol, SSE and long-poll fallbacks | Accepted | [#26](https://github.com/AimTune/converger/issues/26) / [#122](https://github.com/AimTune/converger/pull/122) |
 | [0032](0032-transient-conversation-signals.md) | Transient conversation signals: receipts, typing and presence over dedicated topics, stored read watermarks, optional adapter callbacks | Accepted | [#25](https://github.com/AimTune/converger/issues/25) |
+| [0033](0033-native-transports-share-signals-limits-and-draining.md) | Native transports share the signals core, the client WebSocket limits and draining | Accepted | [#26](https://github.com/AimTune/converger/issues/26), [#25](https://github.com/AimTune/converger/issues/25), [#27](https://github.com/AimTune/converger/issues/27) |
 
 ### Security
 

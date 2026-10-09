@@ -10,7 +10,9 @@ defmodule ConvergerWeb.Drain do
   (`ConvergerWeb.SocketGuard`). Then the endpoint stops and Phoenix's socket
   drainer closes the remaining sockets in batches of `:drain_batch_size`
   every `:drain_batch_interval_ms`, each with close code 1012 and a jittered
-  `retryAfterMs` (`ConvergerWeb.SocketGuard`).
+  `retryAfterMs` (`ConvergerWeb.SocketGuard`). The native Protocol v1
+  connections (WebSocket and SSE), which Phoenix's drainer does not know, are
+  drained first, the same way, by `ConvergerWeb.ProtocolConnections.drain/0`.
   """
 
   use GenServer
@@ -58,8 +60,9 @@ defmodule ConvergerWeb.Drain do
     %{
       id: __MODULE__,
       start: {__MODULE__, :start_link, [opts]},
-      # terminate/2 sleeps for the drain delay
-      shutdown: config(:drain_delay_ms) + 5_000
+      # terminate/2 sleeps for the drain delay, then paces the native
+      # connections (at most :drain_shutdown_ms)
+      shutdown: config(:drain_delay_ms) + config(:drain_shutdown_ms) + 5_000
     }
   end
 
@@ -77,6 +80,9 @@ defmodule ConvergerWeb.Drain do
     Logger.info("Draining: readiness is now 503, closing sockets in #{delay} ms")
     start_draining()
     Process.sleep(delay)
+    # Phoenix drains its own sockets when the endpoint stops, right after
+    # this; the native v1 connections are drained here.
+    ConvergerWeb.ProtocolConnections.drain()
   end
 
   defp config(key), do: Application.fetch_env!(:converger, :websocket)[key]
