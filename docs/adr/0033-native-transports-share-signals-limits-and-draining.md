@@ -9,7 +9,7 @@ description: The native Protocol v1 WebSocket and the SSE stream reuse one extra
 | **Status** | Accepted |
 | **Date** | 2026-10-10 |
 | **Issues** | [#26](https://github.com/AimTune/converger/issues/26) (follow-up), [#25](https://github.com/AimTune/converger/issues/25), [#27](https://github.com/AimTune/converger/issues/27) |
-| **Pull request** | to be linked |
+| **Pull request** | [#123](https://github.com/AimTune/converger/pull/123) |
 | **Related** | [ADR-0030](0030-native-websocket-endpoint-and-fallback-transports.md), [ADR-0032](0032-transient-conversation-signals.md), [ADR-0027](0027-websocket-limits-backpressure-and-draining.md) |
 
 ## Context and problem statement
