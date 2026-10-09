@@ -9,7 +9,7 @@ description: activities is range partitioned by inserted_at and deliveries by th
 | **Status** | Accepted |
 | **Date** | 2026-10-09 |
 | **Issue** | [#30](https://github.com/AimTune/converger/issues/30) |
-| **Pull request** | [#PRNUM](https://github.com/AimTune/converger/pull/PRNUM) |
+| **Pull request** | [#124](https://github.com/AimTune/converger/pull/124) |
 | **Related** | [ADR-0001](0001-transactional-outbox-with-oban.md), [ADR-0006](0006-per-conversation-seq-and-opaque-watermarks.md), [ADR-0015](0015-per-message-idempotent-inbound-batches.md), [ADR-0017](0017-conversation-lifecycle-enforced-under-the-seq-lock.md), [ADR-0007](0007-attachment-storage-with-hand-written-signing.md), [ADR-0022](0022-deployment-hardening.md) |
 
 `activities` and `deliveries` are the two tables that grow with traffic. This ADR records how they are partitioned, how the uniqueness guarantees of [ADR-0006](0006-per-conversation-seq-and-opaque-watermarks.md) and [ADR-0015](0015-per-message-idempotent-inbound-batches.md) survive partitioning, how per-tenant retention works on partitions that all tenants share, and how existing installations get there.
