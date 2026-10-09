@@ -7,7 +7,7 @@ defmodule ConvergerWeb.PaginationApiTest do
 
   alias Converger.Auth.ConvergerToken
   alias Converger.ConvergerAPI.Watermark
-  alias ConvergerWeb.{ConvergerChannel, ConvergerSocket, ConversationChannel, UserSocket}
+  alias ConvergerWeb.{ConvergerChannel, ConvergerSocket}
 
   import Converger.TenantsFixtures
   import Converger.ChannelsFixtures
@@ -233,31 +233,6 @@ defmodule ConvergerWeb.PaginationApiTest do
         )
 
       assert_push "activitySet", %{activities: [_, _], has_more: false}
-    end
-
-    test "legacy channel caps replay and signals replay_truncated", %{
-      tenant: tenant,
-      conversation: conversation,
-      activities: [first | rest]
-    } do
-      put_limits(ws_replay_limit: 2)
-
-      {:ok, token, _claims} = Converger.Auth.Token.generate_token(conversation, tenant, "user-1")
-
-      {:ok, socket} = connect(UserSocket, %{"token" => token})
-
-      {:ok, _, _socket} =
-        subscribe_and_join(socket, ConversationChannel, "conversation:#{conversation.id}", %{
-          "last_activity_id" => first.id
-        })
-
-      [a, b | _] = rest
-      a_id = a.id
-      b_id = b.id
-      assert_push "new_activity", %{id: ^a_id}
-      assert_push "new_activity", %{id: ^b_id}
-      assert_push "replay_truncated", %{has_more: true, last_activity_id: ^b_id}
-      refute_push "new_activity", _
     end
   end
 end

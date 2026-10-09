@@ -1,6 +1,6 @@
 ---
-title: "ADR-0026: Native v1 WebSocket on WebSock, MessagePack by subprotocol, SSE and long-poll fallbacks"
-sidebar_label: "0026 Native WebSocket and fallbacks"
+title: "ADR-0030: Native v1 WebSocket on WebSock, MessagePack by subprotocol, SSE and long-poll fallbacks"
+sidebar_label: "0030 Native WebSocket and fallbacks"
 description: Protocol v1 gets a raw WebSocket endpoint implemented directly on WebSock, encodings negotiated by subprotocol, and Server-Sent Events plus Phoenix long-polling for networks that block WebSockets, all sharing one frame and ordering core.
 ---
 
@@ -10,7 +10,7 @@ description: Protocol v1 gets a raw WebSocket endpoint implemented directly on W
 | **Date** | 2026-10-09 |
 | **Issue** | [#26](https://github.com/AimTune/converger/issues/26) |
 | **Pull request** | to be linked on merge |
-| **Related** | [ADR-0024](0024-converger-protocol-v1-as-superset-of-mekik-1.md), [ADR-0006](0006-per-conversation-seq-and-opaque-watermarks.md), [ADR-0020](0020-per-subject-socket-ids-and-presence.md), [ADR-0013](0013-cluster-wide-rate-limiting-with-hammer-and-pubsub.md) |
+| **Related** | [ADR-0024](0024-converger-protocol-v1-as-superset-of-mekik-1.md), [ADR-0006](0006-per-conversation-seq-and-opaque-watermarks.md), [ADR-0020](0020-per-subject-socket-ids-and-presence.md), [ADR-0013](0013-cluster-wide-rate-limiting-with-hammer-and-pubsub.md), [ADR-0026](0026-one-client-socket-stack-and-shape-checked-legacy-tokens.md), [ADR-0027](0027-websocket-limits-backpressure-and-draining.md), [ADR-0032](0032-transient-conversation-signals.md) |
 
 ## Context and problem statement
 
@@ -84,9 +84,10 @@ Chosen option: **"WebSock handler from a route"**:
   same v1 frames with `seq` as the SSE `id`, so a reconnecting `EventSource` resumes through
   `Last-Event-ID`; sending stays on REST. Phoenix long-polling is enabled on `/socket/converger` as
   the last resort for the Phoenix binding.
-- Sends on the native socket use the client's `clientId` as the activity's idempotency key under
-  the existing unique index (spec section 7), so the native socket already gives exactly-once
-  persistence and acks.
+- Sends on the native socket store the `clientId` as the idempotency key `ws:<sender>:<clientId>`,
+  the scheme the Phoenix binding's `postActivity` uses (ADR-0026), under the existing unique index
+  (spec section 7). The native socket therefore gives exactly-once persistence and acks, and a
+  resend over either WebSocket binding is recognised.
 
 ## Consequences
 
@@ -108,9 +109,9 @@ Chosen option: **"WebSock handler from a route"**:
 
 ### Follow-ups
 
-- [#22](https://github.com/AimTune/converger/issues/22), [#23](https://github.com/AimTune/converger/issues/23): v1 on the Phoenix binding reuses `Frames` and `Feed`.
-- [#25](https://github.com/AimTune/converger/issues/25): `typing`, `read`, receipts and presence (accepted and ignored until then).
-- [#27](https://github.com/AimTune/converger/issues/27): draining (close 1012) and per-connection limits.
+- [#22](https://github.com/AimTune/converger/issues/22): v1 framing on the Phoenix binding can reuse `Frames` and `Feed`.
+- Transient signals ([ADR-0032](0032-transient-conversation-signals.md), #25) on the native endpoint: `typing`, `read`, `deliveryStatus` and `presence` are pushed on the Phoenix binding only; the native endpoint accepts and ignores client `typing`/`read` for now.
+- Per-connection limits and draining ([ADR-0027](0027-websocket-limits-backpressure-and-draining.md), #27) on the native endpoint: it enforces its own frame size caps and idle timeout, but not yet the per-connection message rate, slow-consumer close (4503) or readiness-gated draining (1012).
 - [#28](https://github.com/AimTune/converger/issues/28): rich message types (answered with `invalid_message` until then).
 - [#64](https://github.com/AimTune/converger/issues/64): channel-scoped sockets and the bot relay (`bot_unavailable` until then).
 

@@ -51,6 +51,14 @@ config :converger, ConvergerWeb.Protocol,
 # keep them out of request logs.
 config :phoenix, :filter_parameters, ["password", "token", "secret"]
 
+# Dead-letter replay and export (see Converger.Deliveries.retry_dead_letters/3
+# and ConvergerWeb.DeliveryExportController).
+config :converger, :dead_letters,
+  # Max deliveries replayed by one bulk retry call
+  bulk_retry_limit: 10_000,
+  # Max rows in one CSV export
+  export_limit: 10_000
+
 # Serialize migration runs with a session-level Postgres advisory lock instead
 # of the default table lock. Concurrent `Converger.Release.migrate/0` calls
 # (e.g. several replicas or init containers starting at once) wait for the
@@ -82,7 +90,43 @@ config :converger, ConvergerWeb.Endpoint,
     layout: false
   ],
   pubsub_server: Converger.PubSub,
-  live_view: [signing_salt: "a84R5GFm"]
+  live_view: [signing_salt: "a84R5GFm"],
+  # An oversize WebSocket frame is answered with close code 1009 by Bandit and
+  # reported by ConvergerWeb.SocketGuard; don't log it as a crash.
+  http: [websocket_options: [log_protocol_errors: false]]
+
+# Client WebSocket limits and draining (ConvergerWeb.SocketGuard,
+# ConvergerWeb.Drain); WS_* env vars in config/runtime.exs. See
+# docs/operations/websocket-limits.md.
+config :converger, :websocket,
+  # Frames above this are answered with `payload_too_large` and not processed.
+  max_frame_bytes: 131_072,
+  # Inbound frames per socket per window (heartbeats included); above it
+  # every frame is answered with `rate_limited` and `retryAfterMs`.
+  max_messages: 20,
+  rate_window_ms: 1_000,
+  # Channels one socket may have joined at the same time.
+  max_joins: 50,
+  # Socket process mailbox lengths: above the first, ephemeral frames
+  # (typing, presence) are dropped; above the second the socket is closed
+  # with 4503 `slow_consumer`.
+  ephemeral_drop_queue_len: 100,
+  slow_consumer_queue_len: 1_000,
+  # `retryAfterMs` in drain and slow-consumer closes is this base plus a
+  # random jitter in 0..reconnect_jitter_ms.
+  reconnect_base_ms: 1_000,
+  reconnect_jitter_ms: 5_000,
+  # On shutdown, readiness reports "draining" and new sockets are refused for
+  # drain_delay_ms (so the load balancer stops routing here) before the
+  # sockets are closed in batches.
+  drain_delay_ms: 5_000,
+  drain_batch_size: 500,
+  drain_batch_interval_ms: 1_000,
+  drain_shutdown_ms: 30_000
+
+# The hard frame cap is applied by Bandit when the socket is mounted, so it is
+# read at compile time; frames above it close the socket with 1009.
+config :converger, :websocket_max_frame_size, 1_048_576
 
 # Configures the mailer
 #

@@ -120,7 +120,8 @@ When no row is updated and the conversation exists, `Activities.create_activity/
 | Path | Result |
 | --- | --- |
 | REST (`/api/v1`, `/api/v1/converger`) | `409 {"error": "conversation_closed", "detail": "Conversation is closed"}` |
-| WebSocket `new_activity` push | error reply with reason `conversation_closed` |
+| WebSocket `postActivity` push (Converger API socket) | error reply with reason `conversation_closed` |
+| WebSocket `new_activity` push (legacy socket, deprecated) | error reply with reason `conversation_closed` |
 | Echo adapter replying into a conversation closed meanwhile | the reply is dropped, and the delivery counts as successful |
 | Inbound webhook | never reaches a closed conversation through participant resolution (see below). A request with an explicit `conversation_id` of a closed conversation stops with `409`. |
 
@@ -130,7 +131,7 @@ Use `Conversations.open?/1` or `ensure_open/1` to check the status before expens
 
 | Path | Credentials | Channel |
 | --- | --- | --- |
-| `POST /api/v1/conversations` | `x-channel-token` (channel token, shown in the admin channel table, valid 1 h) | The token's channel. It must be active. The body may carry `metadata`. |
+| `POST /api/v1/conversations` (deprecated) | `x-channel-token` (channel token, shown in the admin channel table, valid 1 h; deprecated, see [migrating from the legacy surfaces](../api/migrating-from-legacy.md)) | The token's channel. It must be active. The body may carry `metadata`. |
 | `POST /api/v1/converger/conversations` | bearer Converger token | The token's channel. Returns a conversation-scoped token and `streamUrl`. |
 | Inbound webhook | channel signature | Resolved automatically (see below). |
 

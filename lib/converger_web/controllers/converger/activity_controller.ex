@@ -4,7 +4,9 @@ defmodule ConvergerWeb.ConvergerAPI.ActivityController do
   alias Converger.{Activities, Conversations}
   alias Converger.ConvergerAPI.Watermark
   alias Converger.Pagination
-  import ConvergerWeb.Helpers.Authorization, only: [authorize_conversation: 2]
+
+  import ConvergerWeb.Helpers.Authorization,
+    only: [authorize_channel: 2, authorize_conversation: 2]
 
   plug ConvergerWeb.Plugs.RateLimit,
        [bucket: :activity_create, scope: :tenant]
@@ -16,8 +18,9 @@ defmodule ConvergerWeb.ConvergerAPI.ActivityController do
     claims = conn.assigns.converger_claims
 
     with :ok <- authorize_conversation(claims, conversation_id),
-         %Conversations.Conversation{} = _conversation <-
-           Conversations.get_conversation(conversation_id, claims["tenant_id"]) do
+         %Conversations.Conversation{} = conversation <-
+           Conversations.get_conversation(conversation_id, claims["tenant_id"]),
+         :ok <- authorize_channel(claims, conversation) do
       idempotency_key = get_req_header(conn, "x-idempotency-key") |> List.first()
 
       from = params["from"] || %{}
@@ -56,8 +59,9 @@ defmodule ConvergerWeb.ConvergerAPI.ActivityController do
     claims = conn.assigns.converger_claims
 
     with :ok <- authorize_conversation(claims, conversation_id),
-         %Conversations.Conversation{} = _conversation <-
-           Conversations.get_conversation(conversation_id, claims["tenant_id"]) do
+         %Conversations.Conversation{} = conversation <-
+           Conversations.get_conversation(conversation_id, claims["tenant_id"]),
+         :ok <- authorize_channel(claims, conversation) do
       # `?limit=` defaults to :activity_default_limit and is capped at
       # :activity_max_limit (config :converger, :pagination). An invalid
       # watermark starts from the beginning, as before. The integer seq of

@@ -51,6 +51,8 @@ defmodule ConvergerWeb.Router do
   scope "/api/v1", ConvergerWeb do
     pipe_through :api
 
+    # Deprecated (#23), like every `x-channel-token` use: legacy conversation
+    # tokens. Converger tokens come from /api/v1/converger/tokens/generate.
     post "/tokens", TokenController, :create
 
     resources "/conversations", ConversationController, only: [:index, :create, :show] do
@@ -61,6 +63,11 @@ defmodule ConvergerWeb.Router do
 
     resources "/routing_rules", RoutingRuleController,
       only: [:index, :show, :create, :update, :delete]
+
+    # Dead-letter inspection and replay
+    get "/deliveries", DeliveryController, :index
+    post "/deliveries/:id/retry", DeliveryController, :retry
+    post "/channels/:channel_id/deliveries/retry", DeliveryController, :bulk_retry
 
     # Inbound webhook endpoints for external channel integrations
     get "/channels/:channel_id/inbound", InboundController, :verify
@@ -155,10 +162,18 @@ defmodule ConvergerWeb.Router do
       live "/conversations", ConversationLive, :index
       live "/conversations/:id", ConversationLive, :show
       live "/routing_rules", RoutingRuleLive
+      live "/deliveries", DeliveryLive
       live "/audit_logs", AuditLogLive
       live "/users", AdminUserLive
       live "/tenant_users", TenantUserLive
     end
+  end
+
+  # Admin CSV export of deliveries (IP whitelist + session auth)
+  scope "/admin", ConvergerWeb do
+    pipe_through [:browser, :admin_auth, :admin_session, :require_admin]
+
+    get "/deliveries/export", DeliveryExportController, :admin
   end
 
   # Oban Web dashboard (IP whitelist + admin session; role checks in
@@ -193,9 +208,17 @@ defmodule ConvergerWeb.Router do
       live "/channels", ChannelLive
       live "/conversations", ConversationLive, :index
       live "/conversations/:id", ConversationLive, :show
+      live "/deliveries", DeliveryLive
       live "/routing_rules", RoutingRuleLive
       live "/users", UserLive
     end
+  end
+
+  # Tenant portal CSV export of deliveries (session auth)
+  scope "/portal", ConvergerWeb do
+    pipe_through [:browser, :tenant_session, :require_tenant]
+
+    get "/deliveries/export", DeliveryExportController, :portal
   end
 
   # Enable Swoosh mailbox preview in development

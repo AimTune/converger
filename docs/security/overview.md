@@ -18,7 +18,7 @@ in depth in [Security: client IPs, proxies and admin access](../security.md); th
 | Tenant backend (server to server) | `x-api-key: cvg_live_...` | `ConvergerWeb.Plugs.TenantAuth` | `tenants.api_key_hash` (SHA-256) |
 | Channel integration | Channel secret as `Authorization: Bearer ...` on `POST /api/v1/converger/tokens/generate` | `ConvergerWeb.Plugs.ConvergerAuth` (`mode: :secret`) | `channels.secret` (AES-GCM encrypted) + `channels.secret_hash` (SHA-256, for lookup) |
 | End-user client (widget, SDK) | Converger token (JWT) as Bearer or socket `token` param | `ConvergerWeb.Plugs.ConvergerAuth` (`mode: :token`), `ConvergerWeb.ConvergerSocket` | Not stored (stateless JWT) |
-| Legacy client | Channel token in `x-channel-token`, conversation token on `/socket` | `ConvergerWeb.Plugs.TenantAuth`, `ConvergerWeb.UserSocket` | Not stored (stateless JWT) |
+| Legacy client (deprecated, see [migrating](../api/migrating-from-legacy.md)) | Channel token in `x-channel-token`, conversation token on `/socket` | `ConvergerWeb.Plugs.TenantAuth`, `ConvergerWeb.UserSocket` | Not stored (stateless JWT) |
 | External provider (WhatsApp, webhook sender) | Request signature over the raw body | `ConvergerWeb.InboundController` + `Converger.Channels.InboundSignature` or the adapter's own scheme | Uses the channel secret / adapter config |
 
 ## Authentication
@@ -90,8 +90,22 @@ is the endpoint's `SECRET_KEY_BASE`.
 | Token | Module | Claims | Lifetime | Issued by |
 | --- | --- | --- | --- | --- |
 | Converger token | `Converger.Auth.ConvergerToken` | `type: "converger"`, `channel_id`, `tenant_id`, `sub`, optional `conversation_id` and `user_id` | 1800 s | `POST /api/v1/converger/tokens/generate` (channel secret), `POST /api/v1/converger/tokens/refresh` (valid token) |
-| Conversation token (legacy) | `Converger.Auth.Token` | `conversation_id`, `tenant_id`, `sub` | 3600 s | `POST /api/v1/tokens` |
-| Channel token (legacy) | `Converger.Auth.Token.generate_channel_token/1` | `channel_id`, `tenant_id`, `sub: "channel_<id>"` | 3600 s | Shown on the admin channel page (`/admin/channels`) |
+| Conversation token (legacy, deprecated) | `Converger.Auth.Token` | `conversation_id`, `tenant_id`, `sub` | 3600 s | `POST /api/v1/tokens` |
+| Channel token (legacy, deprecated) | `Converger.Auth.Token.generate_channel_token/1` | `channel_id`, `tenant_id`, `sub: "channel_<id>"` | 3600 s | Shown on the admin channel page (`/admin/channels`) |
+
+Because the signer is shared, every verifier also checks the token's shape
+([ADR-0026](../adr/0026-one-client-socket-stack-and-shape-checked-legacy-tokens.md)):
+
+- `x-channel-token` (`TenantAuth`, `POST /api/v1/tokens`, `POST /api/v1/conversations`) accepts only channel tokens
+  (`Converger.Auth.Token.verify_channel_token/1`: `channel_id`, no `conversation_id`, no `type` claim). Conversation
+  tokens and Converger tokens are refused with `401`. Before [#23](https://github.com/AimTune/converger/issues/23)
+  any Converger-signed JWT was accepted there, so a conversation token sent as `x-channel-token` acted as the whole
+  tenant.
+- The legacy socket `/socket` accepts only conversation tokens (`verify_conversation_token/1`).
+- Converger tokens are rejected by both legacy verifiers.
+
+The legacy tokens and the legacy socket are deprecated; see
+[migrating from the legacy surfaces](../api/migrating-from-legacy.md).
 
 Converger tokens are rejected unless `type` is `"converger"`, and every authenticated request re-checks that the
 token's channel is still `active` (`403` otherwise). Consequences of the stateless design:
@@ -110,7 +124,7 @@ Revocation, refresh rotation, scoped tokens and a dedicated signing key with `ki
 | Socket | Connect parameter | Join rule |
 | --- | --- | --- |
 | `/socket/converger` (`ConvergerWeb.ConvergerSocket`) | `token`: a Converger token; the channel must be active for the token's tenant | `converger:conversation:<id>`: allowed when the token's `conversation_id` equals `<id>`, or, for a channel-level token, when the conversation belongs to the token's tenant and channel |
-| `/socket` (`ConvergerWeb.UserSocket`, legacy) | `token`: a conversation token | `conversation:<id>`: only the conversation named in the token, and only while its channel is active |
+| `/socket` (`ConvergerWeb.UserSocket`, legacy, deprecated) | `token`: a conversation token (Converger tokens and channel tokens are refused at connect) | `conversation:<id>`: only the conversation named in the token, and only while its channel is active |
 
 Sockets get a per-subject id (`converger_socket:<tenant_id>:user:<user_id>` or `...:conversation:<id>`), never a
 per-channel one, so a forced disconnect affects one end user only
@@ -347,3 +361,25 @@ with the affected version or commit, reproduction steps and impact. There is no 
 - [ADR-0013: Cluster-wide rate limiting with Hammer and PubSub](../adr/0013-cluster-wide-rate-limiting-with-hammer-and-pubsub.md)
 - [ADR-0014: Webhook SSRF guard and outbound signing](../adr/0014-webhook-ssrf-guard-and-outbound-signing.md)
 - [ADR-0022: Deployment hardening](../adr/0022-deployment-hardening.md)
+
+## Authorization boundaries
+
+These rules were tightened after a review of the token and URL handling (see the
+[CHANGELOG](https://github.com/AimTune/converger/blob/main/CHANGELOG.md)):
+
+- **Tenant API credentials.** Only the tenant API key and channel tokens unlock the tenant API.
+  All JWTs share one signing key, so `TenantAuth` checks what a token *is*: conversation tokens and
+  Converger client tokens carry a `tenant_id` too, but they belong to end users and are rejected.
+  See [API authentication](../api/overview.md).
+- **Channel binding.** A Converger client token is bound to its channel: conversations, activities,
+  uploads and attachments of other channels are `404`, even in the same tenant. Joining a conversation
+  over the WebSocket needs a conversation-bound token.
+- **Tenant ownership is immutable.** A routing rule's `tenant_id` is set on create from the
+  authenticated tenant and cannot be changed by an update.
+- **Delivery receipts are scoped.** A status webhook updates only deliveries of the channel it was
+  sent to, whether it identifies them by `provider_message_id` or by `delivery_id`.
+- **SSRF guard everywhere the server makes requests to configured URLs.** Webhook targets, the tenant
+  `alert_webhook_url` and the WhatsApp Infobip `base_url` are checked when saved and again before each
+  request (DNS can change, and older configurations were saved before the guard existed). Private,
+  loopback, link-local and metadata targets are refused unless explicitly allowed
+  (`WEBHOOK_ALLOWED_TARGETS`, see [webhooks](../webhooks.md)).

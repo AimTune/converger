@@ -448,29 +448,26 @@ defmodule ConvergerWeb.ProtocolSocket do
   end
 
   defp persist(params, client_id, state) do
-    case Activities.get_activity_by_idempotency_key(state.conversation_id, client_id) do
-      nil ->
-        create(params, client_id, state)
+    key = idempotency_key(state.user_id, client_id)
 
-      %{sender: sender} = existing when sender == state.user_id ->
-        reply([Frames.ack(existing, client_id, true)], state)
-
-      _someone_else ->
-        message = "clientId was already used by another sender"
-
-        reply(
-          [error("invalid_message", message, client_id: client_id, frame_type: "text")],
-          state
-        )
+    case Activities.get_activity_by_idempotency_key(state.conversation_id, key) do
+      nil -> create(params, client_id, key, state)
+      existing -> reply([Frames.ack(existing, client_id, true)], state)
     end
   end
 
-  defp create(params, client_id, state) do
+  # Namespaced by sender, as the Phoenix binding's `postActivity` does, so a
+  # clientId never collides with another sender's or a REST
+  # X-Idempotency-Key, and a resend over either binding is recognised.
+  defp idempotency_key(_sender, nil), do: nil
+  defp idempotency_key(sender, client_id), do: Frames.client_key(sender, client_id)
+
+  defp create(params, client_id, key, state) do
     system_attrs = %{
       "sender" => state.user_id,
       "tenant_id" => state.claims["tenant_id"],
       "conversation_id" => state.conversation_id,
-      "idempotency_key" => client_id
+      "idempotency_key" => key
     }
 
     opts = [client_id: client_id, frame_type: "text"]

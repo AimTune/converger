@@ -186,6 +186,22 @@ Callback checklist:
 | `parse_status_update/2` | no | `{:ok, [update]}` or `:ignore`. |
 | `verify_inbound_signature/3` | no | Implement when the provider signs webhooks natively. Without it, the generic `x-converger-signature` scheme keyed with the channel `secret` applies. |
 | `retry_policy/0` | no | Adapter defaults (`max_attempts`, `backoff`, `base_ms`, `max_ms`, `timeout_ms`) between the global config and the channel's own `retry_policy`. |
+| `send_typing/2` | no | Show (or clear) a typing indicator to the channel's participant when a WebSocket participant types. Return `:ok` or `{:error, reason}`. |
+| `send_read_receipt/2` | no | Tell the provider the participant's messages were read when a WebSocket participant sends `read`. Return `:ok` or `{:error, reason}`. |
+
+### Typing and read receipts (optional)
+
+`Converger.Channels.Signals` calls `send_typing/2` and `send_read_receipt/2` for the channels an activity from the same sender would be delivered to, but only when your adapter implements the callback and the conversation has a participant on the channel. Both receive the channel and a signal map:
+
+| Key | Value |
+| --- | --- |
+| `:conversation_id` | the conversation |
+| `:recipient` | the participant's `external_id` on your channel (the number to address) |
+| `:provider_message_id` | the `idempotency_key` of the participant's latest inbound activity (for read receipts: the latest one up to `:up_to_seq`), or `nil` |
+| `:is_typing` | typing only: `true` or `false` |
+| `:up_to_seq` | read receipts only: everything up to this `seq` was read |
+
+Signals are best effort: they run in a task under `Converger.TaskSupervisor`, are never retried, and an `{:error, reason}` or a raise is only logged. Do not retry inside the callback (pass `retry: false` to Req). Return `:ok` without calling the provider when there is nothing to do, for example `is_typing: false` on a provider that clears indicators on its own, or a `nil` `:provider_message_id`. Typing is forwarded at most every 20 seconds per WebSocket connection. See [ADR-0032](../adr/0032-transient-conversation-signals.md) and the WhatsApp Cloud API implementation in `whatsapp_meta.ex`.
 
 ## 2. Register the type
 

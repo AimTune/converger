@@ -26,6 +26,7 @@ erDiagram
     participants |o--o{ conversations : "talks in"
     conversations ||--o{ activities : contains
     conversations |o--o{ attachments : "uploaded to"
+    conversations ||--o{ conversation_reads : "read up to"
     activities ||--o{ deliveries : "delivered as"
     activities |o--o{ attachments : references
 
@@ -62,6 +63,14 @@ erDiagram
         bigint last_seq
         jsonb metadata
     }
+    conversation_reads {
+        uuid id PK
+        uuid tenant_id FK
+        uuid conversation_id FK
+        text reader_id
+        bigint read_seq
+        timestamptz read_at
+    }
     participants {
         uuid id PK
         uuid tenant_id FK
@@ -90,6 +99,7 @@ erDiagram
         integer attempts
         text last_error
         text provider_message_id
+        integer retry_count
     }
     routing_rules {
         uuid id PK
@@ -196,6 +206,12 @@ An external party (phone number, chat id, e-mail) on a channel. Inbound messages
 
 Columns: `tenant_id`, `channel_id`, `external_id` (not null), `display_name`, `metadata` (jsonb, default `{}`). Indexes: unique `(channel_id, external_id)`, `(tenant_id)`.
 
+### conversation_reads
+
+The read watermark of each WebSocket reader in a conversation: every activity with `seq <= read_seq` has been read by `reader_id` (the connection's participant id: the token's `user_id`, or `anonymous`). Written by `Converger.Receipts.mark_read/3` with an upsert that only ever raises `read_seq`, capped at `conversations.last_seq` ([ADR-0032](../adr/0032-transient-conversation-signals.md)).
+
+Columns: `tenant_id`, `conversation_id` (both cascade on delete), `reader_id` (text, not null), `read_seq` (bigint, not null), `read_at`. Indexes: unique `(conversation_id, reader_id)` (the upsert conflict target), `(tenant_id)`.
+
 ### activities
 
 | Column | Type | Notes |
@@ -232,8 +248,10 @@ One row per activity and target channel; the source of truth for delivery state 
 | `sent_at`, `delivered_at`, `read_at` | timestamps | Set on send and on provider receipts. |
 | `provider_message_id` | text | Provider id (e.g. a WhatsApp message id) used to correlate receipts. |
 | `metadata` | jsonb, default `{}` | Adapter response metadata. |
+| `retry_count` | integer, not null, default `0` | Manual replays of the dead letter. |
+| `retried_by`, `retried_at` | text, timestamp | Who replayed it last (`"<actor type>:<actor id>"`) and when. |
 
-Indexes: unique `(activity_id, channel_id)`, `(activity_id)`, `(channel_id)`, `(status)`, partial `(provider_message_id)` and `(channel_id, provider_message_id)` `WHERE provider_message_id IS NOT NULL`, and the keyset index `(inserted_at, id)`.
+Indexes: unique `(activity_id, channel_id)`, `(activity_id)`, `(channel_id)`, `(status)`, partial `(provider_message_id)` and `(channel_id, provider_message_id)` `WHERE provider_message_id IS NOT NULL`, and the keyset indexes `(inserted_at, id)`, `(status, updated_at, id)` and `(channel_id, status, updated_at, id)` (the last two for the dead-letter lists).
 
 ### routing_rules
 
@@ -245,7 +263,7 @@ Uploaded files ([storage](../storage.md)). Columns: `tenant_id` (not null), `con
 
 ### audit_logs
 
-Append-only (`updated_at` disabled) trail of administrative changes. Columns: `tenant_id` (nullable, `ON DELETE SET NULL` so the trail outlives the tenant), `actor_type`, `actor_id`, `action`, `resource_type`, `resource_id`, `changes` (jsonb, with secrets redacted, [ADR-0012](../adr/0012-secrets-at-rest-and-audit-redaction.md)). Indexes: `(tenant_id)`, `(resource_type, resource_id)`, `(actor_type, actor_id)`, `(action)`, `(inserted_at)`, `(inserted_at, id)`.
+Append-only (`updated_at` disabled) trail of administrative changes. Columns: `tenant_id` (nullable, `ON DELETE SET NULL` so the trail outlives the tenant), `actor_type`, `actor_id`, `action`, `resource_type`, `resource_id`, `changes` (jsonb, with secrets redacted, [ADR-0012](../adr/0012-secrets-at-rest-and-audit-redaction.md)). Actions: `create`, `update`, `delete`, `toggle_status`, `toggle_enabled`, `rotate_api_key`, `retry` (dead-letter replay). Resource types: `tenant`, `channel`, `routing_rule`, `admin_user`, `tenant_user`, `delivery`. Indexes: `(tenant_id)`, `(resource_type, resource_id)`, `(actor_type, actor_id)`, `(action)`, `(inserted_at)`, `(inserted_at, id)`.
 
 ### channel_health_checks
 

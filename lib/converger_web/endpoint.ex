@@ -11,21 +11,39 @@ defmodule ConvergerWeb.Endpoint do
     same_site: "Lax"
   ]
 
+  # Client sockets. Frames above the hard cap close the socket with 1009;
+  # refused connections (draining) get 503. Per-socket limits are enforced by
+  # ConvergerWeb.SocketGuard; on shutdown sockets are drained in batches
+  # (ConvergerWeb.Drain). See docs/operations/websocket-limits.md.
+  @client_websocket [
+    timeout: 60_000,
+    max_frame_size: Application.compile_env(:converger, :websocket_max_frame_size, 1_048_576),
+    error_handler: {ConvergerWeb.SocketGuard, :handle_error, []}
+  ]
+
+  # Deprecated (#23): the pre-v1 legacy socket. Use /socket/converger, the
+  # single WebSocket entry point. See ConvergerWeb.Deprecation.
   socket "/socket", ConvergerWeb.UserSocket,
-    websocket: true,
-    longpoll: false
+    websocket: @client_websocket,
+    longpoll: false,
+    drainer: {ConvergerWeb.Drain, :drainer_config, []}
 
   # Long-polling is the last-resort fallback for networks that block
   # WebSockets (the `phoenix` JS client falls back to it automatically). The
   # native v1 endpoint (/socket/converger/v1) and the SSE stream are routed
   # in ConvergerWeb.Router.
   socket "/socket/converger", ConvergerWeb.ConvergerSocket,
-    websocket: true,
-    longpoll: true
+    websocket: @client_websocket,
+    longpoll: true,
+    drainer: {ConvergerWeb.Drain, :drainer_config, []}
 
   socket "/live", Phoenix.LiveView.Socket,
     websocket: [connect_info: [:peer_data, session: @session_options]],
     longpoll: [connect_info: [session: @session_options]]
+
+  # GET /health/live and /health/ready for load balancers and Kubernetes.
+  # First, so probes are not redirected to HTTPS or logged per request.
+  plug ConvergerWeb.Plugs.Health
 
   # Must run before anything that reads conn.remote_ip (AdminAuth, RateLimit)
   # and before ForceSSL, which only trusts X-Forwarded-Proto from the proxies

@@ -236,7 +236,9 @@ defmodule ConvergerWeb.ProtocolSocketTest do
       assert %{"type" => "ack", "clientId" => "c-1", "seq" => 1, "id" => ^id} = again
       assert again["duplicate"] == true
 
-      assert [%Activity{text: "hi", sender: "alice", idempotency_key: "c-1"}] = Repo.all(Activity)
+      assert [%Activity{text: "hi", sender: "alice", idempotency_key: "ws:alice:c-1"}] =
+               Repo.all(Activity)
+
       # Echo rule: the sending connection does not get its own turn back.
       Client.refute_frame(client)
     end
@@ -261,6 +263,38 @@ defmodule ConvergerWeb.ProtocolSocketTest do
       {at_agent, _agent} = Client.recv(agent)
       assert %{"seq" => ^seq, "from" => "bot", "sender" => %{"id" => "alice"}} = at_agent
       refute Map.has_key?(at_agent, "clientId")
+    end
+
+    test "a clientId already sent with postActivity on the Phoenix binding is a duplicate", ctx do
+      # postActivity stores clientIds under the same per-sender key.
+      {:ok, earlier} =
+        Activities.create_client_activity(%{"text" => "hi"}, %{
+          "sender" => "alice",
+          "tenant_id" => ctx.tenant.id,
+          "conversation_id" => ctx.conversation.id,
+          "idempotency_key" => "ws:alice:c-5"
+        })
+
+      {_welcome, client} = join(ctx.port, token(ctx.channel, ctx.conversation, user_id: "alice"))
+      {_replayed, client} = Client.recv(client)
+
+      client =
+        Client.push(client, %{"type" => "text", "clientId" => "c-5", "data" => %{"text" => "hi"}})
+
+      assert {%{"type" => "ack", "id" => id, "duplicate" => true}, _client} = Client.recv(client)
+      assert id == earlier.id
+    end
+
+    test "the same clientId from different senders creates separate activities", ctx do
+      {_welcome, alice} = join(ctx.port, token(ctx.channel, ctx.conversation, user_id: "alice"))
+      {_welcome, bob} = join(ctx.port, token(ctx.channel, ctx.conversation, user_id: "bob"))
+      frame = %{"type" => "text", "clientId" => "c-1", "data" => %{"text" => "hi"}}
+
+      alice = Client.push(alice, frame)
+      {%{"type" => "ack", "seq" => 1}, _alice} = Client.recv_type(alice, "ack")
+      bob = Client.push(bob, frame)
+      assert {%{"type" => "ack", "seq" => 2} = ack, _bob} = Client.recv_type(bob, "ack")
+      refute Map.has_key?(ack, "duplicate")
     end
 
     test "a mekik/1 id is used as the clientId", ctx do

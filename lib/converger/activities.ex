@@ -164,6 +164,28 @@ defmodule Converger.Activities do
   end
 
   @doc """
+  The idempotency key (for inbound provider messages: the provider message
+  id, e.g. a WhatsApp `wamid`) of the latest activity in the conversation
+  sent by `sender`, optionally only among activities with `seq <= max_seq`.
+  Nil when there is none.
+  """
+  def latest_idempotency_key(conversation_id, sender, max_seq \\ nil) do
+    query =
+      from(a in Activity,
+        where:
+          a.conversation_id == ^conversation_id and a.sender == ^sender and
+            not is_nil(a.idempotency_key),
+        order_by: [desc: a.seq],
+        limit: 1,
+        select: a.idempotency_key
+      )
+
+    query = if max_seq, do: where(query, [a], a.seq <= ^max_seq), else: query
+
+    Repo.one(query)
+  end
+
+  @doc """
   Create an activity from untrusted client input.
 
   Only `Activity.client_fields/0` are taken from `client_params` (REST body,

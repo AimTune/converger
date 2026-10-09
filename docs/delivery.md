@@ -1,6 +1,6 @@
 ---
 title: Delivery and retries
-description: How Converger tracks, retries and dead-letters deliveries to external channels - per-channel retry policies, DeliveryError, Oban attempts, Lifeline, unique jobs and health checks.
+description: How Converger tracks, retries, dead-letters and replays deliveries to external channels - per-channel retry policies, DeliveryError, Oban attempts, Lifeline, unique jobs, dead-letter replay and health checks.
 sidebar_position: 6
 ---
 
@@ -31,11 +31,11 @@ stateDiagram-v2
     delivered --> read: receipt
     sent --> failed: failed receipt
     delivered --> failed: failed receipt
-    failed --> [*]
+    failed --> pending: replay
     read --> [*]
 ```
 
-Provider receipts only move a delivery forward (`pending` < `sent` < `delivered` < `read`); a late `delivered` after `read` is ignored. A `failed` receipt is applied from any status except `read`, and nothing moves a delivery out of `failed` automatically. Every change is broadcast as `delivery_status` on `conversation:<conversation_id>`.
+Provider receipts only move a delivery forward (`pending` < `sent` < `delivered` < `read`); a late `delivered` after `read` is ignored. A `failed` receipt is applied from any status except `read`, and nothing moves a delivery out of `failed` automatically: only a [replay](#replaying-dead-letters) does. Every change is broadcast as `delivery_status` on `conversation:<conversation_id>`.
 
 `attempts` counts attempts made, successful or not: `mark_sent/2`, `mark_attempt_failed/3` and `mark_dead/2` all increment it.
 
@@ -183,38 +183,82 @@ Nothing else happens automatically: the activity stays committed and other chann
 
 | Where | What you see |
 | --- | --- |
+| Deliveries page (`/admin/deliveries`, `/portal/deliveries`) | Failed deliveries by default, filterable by tenant (admin only), channel, status and date range, with the error, attempts, replay history and a payload preview. See [Deliveries page](#deliveries-page). |
+| Tenant API | `GET /api/v1/deliveries?status=failed` with the same filters; see [tenant API](api/tenant-api.md#deliveries). |
 | Admin dashboard (`/admin`) | Count of `failed` deliveries (`Deliveries.count_by_status/0`). |
 | Admin conversation view (`/admin/conversations/:id`) | Per-activity delivery badge; failed deliveries are marked. |
 | Oban Web (`/admin/oban`) | Cancelled `ActivityDeliveryWorker` jobs with their error, until the Pruner removes them after 24 hours. |
-| Elixir API | `Converger.Deliveries.list_dead_letters/2` and `paginate_dead_letters/2` (keyset on `(updated_at, id)`, most recent first; filters `channel_id`, `activity_id`). |
+| Elixir API | `Converger.Deliveries.search_deliveries/2` (filters `status`, `channel_id`, `activity_id`, `tenant_id`, `from`, `to`), and `list_dead_letters/2` / `paginate_dead_letters/2` for `status: "failed"`. All are keyset-paginated on `(updated_at, id)`, most recent first. |
 | SQL | `SELECT id, activity_id, channel_id, attempts, last_error, updated_at FROM deliveries WHERE status = 'failed' ORDER BY updated_at DESC;` |
 | Metrics | Attach a handler to `[:converger, :deliveries, :dead_lettered]`; it is not exported as a Prometheus metric by default. |
 
-### Replaying a dead letter (manual)
+### Replaying dead letters
 
-There is no replay endpoint yet. A dead letter can be re-enqueued from a remote console; the unique job constraint allows it because the previous job was cancelled:
+Fix the cause first (for example the channel's webhook URL), then replay. A replay sends the stored activity again through the channel's middleware and adapter, exactly like the first attempt. The design is recorded in [ADR-0028](adr/0028-dead-letter-replay-in-place-through-oban.md).
 
-```elixir
-alias Converger.{Repo, Deliveries}
-alias Converger.Deliveries.Delivery
+| Where | One delivery | Many deliveries |
+| --- | --- | --- |
+| Deliveries page | **Retry** button on a failed row | **Retry all failed**: every failed delivery that matches the current filters |
+| Tenant API | `POST /api/v1/deliveries/:id/retry` | `POST /api/v1/channels/:channel_id/deliveries/retry`, optionally with `from`, `to`, `activity_id` |
+| Elixir | `Deliveries.retry_delivery(delivery, actor)` | `Deliveries.retry_dead_letters(filters, actor, limit: n)` |
 
-delivery = Deliveries.get_delivery!("<delivery_id>")
+`actor` is `%{type: "admin" | "tenant_api" | "tenant_user" | "system", id: id}`, the same shape as for audit logs.
 
-# Reset the counters, otherwise the first failure dead-letters it again
-# (attempts is already at max_attempts).
-{:ok, delivery} =
-  delivery |> Delivery.changeset(%{status: "pending", attempts: 0}) |> Repo.update()
+A replay, in one transaction:
 
-%{activity_id: delivery.activity_id, channel_id: delivery.channel_id}
-|> Converger.Workers.ActivityDeliveryWorker.new()
-|> Oban.insert()
+1. moves the delivery from `failed` to `pending` with an `UPDATE ... WHERE status = 'failed'`. A delivery that is not (or no longer) failed is not touched, so two operators clicking at once replay it once;
+2. resets `attempts` to `0`, so the channel's [retry policy](#retry-policy) starts over (otherwise the first failure would dead-letter it again), increments `retry_count`, and sets `retried_by` (`"<actor type>:<actor id>"`) and `retried_at`;
+3. inserts one `ActivityDeliveryWorker` job, unless a job for the same activity and channel is still `available`, `scheduled`, `executing`, `retryable` or `suspended`;
+4. writes an audit log entry with action `retry` and resource type `delivery` (`changes` holds the activity and channel ids, the new `retry_count`, and for a single retry the previous `status`, `attempts` and `last_error`; bulk entries carry `"bulk": true`).
+
+After commit it broadcasts `delivery_status` with `status: "pending"` and emits `[:converger, :deliveries, :retried]` (measurement `count`, metadata `delivery_ids`).
+
+Rules:
+
+- Only `failed` deliveries can be replayed. The API answers `409` for any other status.
+- Deliveries on an **inactive** channel are refused (`400 Channel is inactive`) and skipped by bulk replays. Enable the channel first.
+- Replays always go through Oban, whatever the pipeline backend, the same as automatic retries ([ADR-0002](adr/0002-broadway-for-throughput-oban-for-retries.md)). The job is inserted in the same transaction as the reset, so a committed replay always has its job.
+- `last_error` is kept until the next attempt overwrites it, so the cause stays visible while the replay is pending.
+- A delivery that was `sent` and then failed by a provider receipt is sent to the provider again: that is what replay means.
+
+Bulk replays work in chunks of 500 deliveries, oldest failure first. Each chunk selects its rows with `FOR UPDATE SKIP LOCKED` and commits separately, so concurrent bulk replays never pick the same delivery and a large replay does not hold one long transaction. Only deliveries that were already failed when the call started are replayed: one that fails again during the call (a permanent error fails after one attempt) is not picked up a second time. One call replays at most `bulk_retry_limit` deliveries (default 10 000, see [configuration](#configuration)). The result says whether more remain:
+
+```json
+{ "retried": 10000, "has_more": true }
 ```
 
-Retrying the cancelled job from Oban Web also re-runs the delivery, with the same caveat about `attempts`.
+Retrying a cancelled job from Oban Web also re-runs the delivery, but it does not reset `attempts`, so the first failure dead-letters it again, and it is neither audited nor recorded in `retried_by`. Use the Deliveries page or the API instead.
 
 :::info Planned
-A dead-letter queue with inspection and replay through the API and admin UI: Planned ([#32](https://github.com/AimTune/converger/issues/32)). A per-channel circuit breaker, provider rate limiting and tenant-fair queueing: Planned ([#31](https://github.com/AimTune/converger/issues/31)).
+Automatic replay when a channel's circuit breaker closes depends on the breaker itself. The per-channel circuit breaker, provider rate limiting and tenant-fair queueing are Planned ([#31](https://github.com/AimTune/converger/issues/31)).
 :::
+
+### Deliveries page
+
+`/admin/deliveries` (all tenants) and `/portal/deliveries` (the user's tenant) list deliveries, most recently changed first, with **Load more**. The filters (tenant for admins, channel, status, from and to date) are kept in the URL. The status filter defaults to `failed`. The from and to dates are UTC days and filter on `updated_at`, the time of the last status change.
+
+Each row shows the channel, the activity, the status, `attempts`, `retry_count` with `retried_by` and `retried_at`, `last_error`, and a **Payload** preview: the canonical activity ([ADR-0004](adr/0004-single-canonical-activity-serializer.md)) with sensitive keys such as `api_key`, `password` and `*_token` replaced by `"[REDACTED]"` (`Converger.Secrets.redact/1`). This is the stored activity, before the channel's middleware transformed its copy.
+
+| Role | Browse and export | Retry |
+| --- | --- | --- |
+| Admin `super_admin`, `admin` | yes | yes |
+| Admin `viewer` | yes | no |
+| Tenant user `owner`, `admin`, `member` | yes, own tenant only | yes, own tenant only |
+| Tenant user `viewer` | yes, own tenant only | no |
+
+**Export CSV** downloads the rows that match the current filters (`/admin/deliveries/export`, `/portal/deliveries/export`, streamed, at most `export_limit` rows). The columns are `id`, `tenant_id`, `channel_id`, `channel_name`, `activity_id`, `status`, `attempts`, `last_error`, `retry_count`, `retried_by`, `retried_at`, `inserted_at` and `updated_at`. Payloads are not exported. Text that starts with `=`, `+`, `-` or `@` is prefixed with `'` so that spreadsheets do not evaluate provider error text as a formula. The portal export is always limited to the user's tenant, whatever the query string says.
+
+### Configuration
+
+```elixir
+config :converger, :dead_letters,
+  # Max deliveries replayed by one bulk retry call (API or "Retry all failed")
+  bulk_retry_limit: 10_000,
+  # Max rows in one CSV export
+  export_limit: 10_000
+```
+
+The API's bulk `limit` parameter can lower `bulk_retry_limit` for one call but not raise it.
 
 ## Oban Web dashboard
 
@@ -262,4 +306,4 @@ Health checks older than 7 days are pruned at the end of each run. Health is inf
 
 - [Delivery pipeline](architecture/delivery-pipeline.md) and [Activity flow](architecture/activity-flow.md)
 - [Webhooks](webhooks.md)
-- [ADR-0019](adr/0019-per-channel-retry-policy-delivery-error-and-lifeline.md), [ADR-0002](adr/0002-broadway-for-throughput-oban-for-retries.md), [ADR-0001](adr/0001-transactional-outbox-with-oban.md)
+- [ADR-0019](adr/0019-per-channel-retry-policy-delivery-error-and-lifeline.md), [ADR-0002](adr/0002-broadway-for-throughput-oban-for-retries.md), [ADR-0001](adr/0001-transactional-outbox-with-oban.md), [ADR-0028](adr/0028-dead-letter-replay-in-place-through-oban.md)

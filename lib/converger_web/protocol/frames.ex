@@ -104,7 +104,7 @@ defmodule ConvergerWeb.Protocol.Frames do
     |> Map.merge(%{"type" => "text", "data" => data})
     |> put_timestamp(canonical)
     |> put_metadata(canonical.metadata)
-    |> put_client_id(role, canonical.idempotency_key)
+    |> put_client_id(role, canonical.sender, canonical.idempotency_key)
   end
 
   defp role("system", _user_id), do: "system"
@@ -123,11 +123,26 @@ defmodule ConvergerWeb.Protocol.Frames do
   defp put_metadata(frame, _metadata), do: frame
 
   # The sender's other connections de-duplicate their own turns by clientId.
-  defp put_client_id(frame, "user", key) do
-    if Protocol.client_id?(key), do: Map.put(frame, "clientId", key), else: frame
+  # Only keys stored by a WebSocket send of this sender (`client_key/2`) are
+  # client ids; REST keys and provider message ids are never exposed.
+  defp put_client_id(frame, "user", sender, key) when is_binary(key) do
+    prefix = client_key(sender, "")
+
+    client_id =
+      if String.starts_with?(key, prefix),
+        do: binary_part(key, byte_size(prefix), byte_size(key) - byte_size(prefix))
+
+    if Protocol.client_id?(client_id), do: Map.put(frame, "clientId", client_id), else: frame
   end
 
-  defp put_client_id(frame, _role, _key), do: frame
+  defp put_client_id(frame, _role, _sender, _key), do: frame
+
+  @doc """
+  The idempotency key a WebSocket send with `client_id` is stored under:
+  `ws:<sender>:<clientId>`, shared by the native endpoint and the Phoenix
+  binding's `postActivity`.
+  """
+  def client_key(sender, client_id), do: "ws:#{sender}:#{client_id}"
 
   defp maybe_put(map, _key, nil), do: map
   defp maybe_put(map, key, value), do: Map.put(map, key, value)
