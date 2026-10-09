@@ -19,6 +19,14 @@ defmodule Converger.Tenants do
 
   def get_tenant!(id), do: Repo.get!(Tenant, id)
 
+  @doc "Returns the tenant with `id`, or `nil` (also for a malformed id)."
+  def get_tenant(id) do
+    case Ecto.UUID.cast(id) do
+      {:ok, uuid} -> Repo.get(Tenant, uuid)
+      :error -> nil
+    end
+  end
+
   @default_rotation_grace_period 24 * 60 * 60
 
   @doc """

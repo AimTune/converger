@@ -3,7 +3,7 @@ defmodule ConvergerWeb.ConvergerChannel do
 
   require Logger
 
-  alias Converger.{Activities, Conversations}
+  alias Converger.Activities
   alias Converger.ConvergerAPI.Watermark
   alias Converger.Pagination
   alias ConvergerWeb.ConvergerAPI.ActivityJSON
@@ -99,12 +99,11 @@ defmodule ConvergerWeb.ConvergerChannel do
     conversation_id == claim_cid
   end
 
-  defp authorized?(conversation_id, %{"channel_id" => channel_id, "tenant_id" => tenant_id}) do
-    case Conversations.get_conversation(conversation_id, tenant_id) do
-      %Conversations.Conversation{channel_id: ^channel_id} -> true
-      _ -> false
-    end
-  end
-
+  # Only conversation-bound tokens may join. A channel-level token (from
+  # POST /tokens/generate, typically held by an end-user widget) must first
+  # create or resume a conversation (POST/GET /conversations), which returns a
+  # conversation token; letting it join any conversation of the channel would
+  # expose other users' conversations. Channel-wide agent sockets get an
+  # explicit `scope: "channel"` claim in Protocol v1 (#64/#67).
   defp authorized?(_, _), do: false
 end

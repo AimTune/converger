@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Security fixes
+
+- Tenant API (`x-channel-token`) accepts only channel tokens (`typ: "channel"`, or the legacy
+  channel-token shape). Conversation tokens and Converger client tokens, which share the signing
+  key and carry a `tenant_id`, were accepted before and unlocked the whole tenant API, including
+  routing-rule CRUD.
+- Converger client tokens are bound to their channel for every conversation endpoint (activities,
+  uploads, resume, attachments); unscoped tokens previously reached every conversation of the
+  tenant. WebSocket joins now require a conversation-bound token.
+- Routing-rule updates can no longer change `tenant_id`.
+- Delivery status updates by `delivery_id` are scoped to the reporting channel.
+- The SSRF guard now also covers the tenant `alert_webhook_url` and the WhatsApp Infobip
+  `base_url`, at save time and at request time.
+
 ### Converger Protocol v1 specification (#21, refs #63 #68)
 
 Documentation and schemas only; no server behaviour changes.
