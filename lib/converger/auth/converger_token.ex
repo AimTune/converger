@@ -37,8 +37,19 @@ defmodule Converger.Auth.ConvergerToken do
         _ -> claims
       end
 
+    # `scope: "channel"` lets the socket follow every conversation of the
+    # channel (agent console, ConvergerWeb.ConvergerChannel). Never combined
+    # with a conversation restriction.
+    claims =
+      if Keyword.get(opts, :scope) == "channel" and is_nil(conversation_id),
+        do: Map.put(claims, "scope", "channel"),
+        else: claims
+
     generate_and_sign(claims, Converger.Auth.Signer.signer())
   end
+
+  @doc "Token scopes accepted by `generate_token/2` (`:scope` option)."
+  def scopes, do: ["channel"]
 
   def generate_conversation_token(channel, conversation_id, opts \\ []) do
     generate_token(channel, Keyword.put(opts, :conversation_id, conversation_id))
@@ -60,6 +71,7 @@ defmodule Converger.Auth.ConvergerToken do
         generate_token(channel,
           conversation_id: claims["conversation_id"],
           user_id: claims["user_id"],
+          scope: claims["scope"],
           expires_in: @default_expiry
         )
 

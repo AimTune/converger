@@ -37,12 +37,19 @@ Receipt tracking was added by migration [`20260227200000_add_receipt_tracking_to
 
 When an activity is created, `Converger.Pipeline.resolve_delivery_channels/1` picks the targets, and the Oban backend inserts one `ActivityDeliveryWorker` job per target **in the activity's transaction** ([ADR-0001](../adr/0001-transactional-outbox-with-oban.md)). The delivery row itself is created by the job on its first run (`get_or_create_delivery/2`). Targets are:
 
-- the conversation's own channel, if its type is delivered through an adapter (`echo`, `webhook`, `whatsapp_meta`, `whatsapp_infobip`) and its mode is `outbound` or `duplex`;
+- the conversation's own channel, if its adapter has the `:outbound` capability (every type today: `echo`, `webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip`) and its mode is `outbound` or `duplex`;
 - plus the targets of enabled [routing rules](routing-rules.md) whose source is that channel, if they are active, deliverable and `outbound`/`duplex`;
-- minus the participant's own channel when the activity was sent by that participant (no echo back to the author);
-- minus every non-`webhook` channel for `conversationUpdate` lifecycle events.
+- minus the participant's own channel when the activity was sent by that participant (no echo back to the author), unless that channel is a `websocket` channel;
+- minus every channel other than `webhook` and `websocket` for `conversationUpdate` lifecycle events.
 
-`websocket` channels never get delivery records. Their clients receive the PubSub broadcast. Per-socket delivery with acks is Planned ([#22](https://github.com/AimTune/converger/issues/22), [#24](https://github.com/AimTune/converger/issues/24)).
+### WebSocket deliveries
+
+A delivery to a `websocket` channel is one record per activity and channel, not per socket. The adapter broadcasts the activity to the channel's sockets and reports how many clients are connected ([ADR-0028](../adr/0028-websocket-channel-adapter-delivery.md)):
+
+- at least one connected client: the delivery is `sent`, with `connected_clients` in `metadata`;
+- no connected client, or the channel's config has `require_ack: true`: the adapter returns `{:pending, meta}`. The delivery is **handed off**: it stays `pending` with `attempts + 1` (`Deliveries.mark_handed_off/2`) and is not retried. The activity is persisted, so a client gets it by replay when it resumes.
+
+`Deliveries.acknowledge(channel_id, conversation_id, seq)` later marks the handed-off (`attempts > 0`) `pending` deliveries of that channel for the conversation's activities up to `seq` as `sent`, and broadcasts `delivery_status` for each. It runs when a client sends `ack` with a watermark, and when a socket of the channel replays activities on join (unless the channel has `require_ack: true`). Per-socket delivery state and the acks of Converger Protocol v1 are Planned ([#24](https://github.com/AimTune/converger/issues/24)).
 
 ## Status lifecycle
 
@@ -51,6 +58,8 @@ stateDiagram-v2
   [*] --> pending : job runs, row created
   pending --> pending : attempt failed, retries left
   pending --> sent : adapter accepted
+  pending --> pending : handed off, no receipt (websocket)
+  pending --> sent : client ack / replay (websocket)
   pending --> failed : retries exhausted / permanent error / middleware halt
   sent --> delivered : provider receipt
   sent --> read : provider receipt
@@ -94,6 +103,7 @@ The admin conversation view uses it to update delivery badges live. Pushing rece
 | Adapter result | Effect on the delivery | Job |
 | --- | --- | --- |
 | `:ok` / `{:ok, meta}` | `sent`, `sent_at` set, `attempts + 1`, `meta` merged into `metadata`, `provider_message_id` taken from `whatsapp_message_id` / `infobip_message_id` | done |
+| `{:pending, meta}` (`websocket` only: no connected client, or `require_ack: true`) | stays `pending`, `attempts + 1`, `last_error` cleared, `meta` merged into `metadata`; marked `sent` later by `Deliveries.acknowledge/3` | done, not retried |
 | `{:error, %DeliveryError{retryable?: false}}` (for example HTTP 400 or 404, missing recipient) | `failed` (dead letter) | cancelled |
 | any other `{:error, reason}`, retries left | stays `pending`, `attempts + 1`, `last_error` set | retried after backoff |
 | any other `{:error, reason}`, retries exhausted | `failed` | cancelled |

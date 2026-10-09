@@ -14,7 +14,7 @@ Today's WebSocket interface is Phoenix Channels framing with Converger-specific 
 
 | Path | Socket module | Topic | Use |
 | --- | --- | --- | --- |
-| `/socket/converger/websocket` | `ConvergerWeb.ConvergerSocket` | `converger:conversation:<conversation_id>` | **Recommended.** Converger client API (Direct Line-inspired): `activitySet` frames with watermarks. Receive-only; send over REST. |
+| `/socket/converger/websocket` | `ConvergerWeb.ConvergerSocket` | `converger:conversation:<conversation_id>`, `converger:channel:<channel_id>` | **Recommended.** Converger client API (Direct Line-inspired): `activitySet` frames with watermarks; send with `new_activity` (or over REST), acknowledge with `ack`. |
 | `/socket/websocket` | `ConvergerWeb.UserSocket` | `conversation:<conversation_id>` | Legacy. Canonical `new_activity` frames, send over the socket, `delivery_status` frames. Will be deprecated ([#23](https://github.com/AimTune/converger/issues/23)). |
 
 Both are Phoenix sockets (declared in [endpoint.ex](https://github.com/AimTune/converger/blob/main/lib/converger_web/endpoint.ex) as `/socket/converger` and `/socket`; the WebSocket transport is mounted under `/websocket`). Long-polling is disabled. Messages use the Phoenix V2 JSON serializer (`vsn=2.0.0`, the default of the `phoenix` JavaScript client).
@@ -39,7 +39,9 @@ Content-Type: application/json
 { "conversationId": null, "token": "<token>", "expires_in": 1800 }
 ```
 
-`user.id` is optional but recommended: it becomes the token's `user_id` claim and the socket id (`converger_socket:<tenant_id>:user:alice`), which lets the server disconnect that one user. This endpoint is rate-limited per channel (bucket `token_generate`, 10 per minute by default).
+`user.id` is optional but recommended: it becomes the token's `user_id` claim and the socket id (`converger_socket:<tenant_id>:user:alice`), which lets the server disconnect that one user. It is also the sender of the activities the socket sends. This endpoint is rate-limited per channel (bucket `token_generate`, 10 per minute by default).
+
+For an agent console that follows every conversation of a `websocket` channel, add `"scope": "channel"` to the body. The token gets the claim `scope: "channel"`, which is required to join `converger:channel:<channel_id>` ([Follow a whole channel](#follow-a-whole-channel)); `tokens/refresh` keeps it. Any other `scope` value is rejected with `400`.
 
 ### 2. Start or resume a conversation
 
@@ -92,13 +94,18 @@ Join `converger:conversation:<conversation_id>`. The join payload may carry the 
 { "watermark": "c2VxOjQy" }
 ```
 
-Authorization: a conversation token must name this conversation; a token without `conversation_id` may join any conversation of its channel.
+Authorization: a conversation token must name this conversation. A token without `conversation_id` may join any conversation of its channel (**owned**) and, when its channel is a `websocket` channel, any conversation of a channel that an enabled routing rule routes to it (**routed**, for example a WhatsApp conversation routed to an agent console). The token's channel must be active.
+
+| | Owned conversation | Routed conversation |
+| --- | --- | --- |
+| Receives | every activity of the conversation, as committed | what the pipeline delivers to the token's channel, after that channel's [middleware](concepts/middleware.md) |
+| Replay | activities as stored | activities through the channel's middleware; an activity the middleware halts is skipped |
 
 | Join reply | Meaning |
 | --- | --- |
 | `{"status": "ok", "response": {}}` | Joined. |
-| `{"status": "error", "response": {"reason": "unauthorized"}}` | The token does not grant this conversation. |
-| `{"status": "error", "response": {"reason": "invalid_topic"}}` | The topic is not `converger:conversation:<id>`. |
+| `{"status": "error", "response": {"reason": "unauthorized"}}` | The token does not grant this conversation, or its channel is not active. |
+| `{"status": "error", "response": {"reason": "invalid_topic"}}` | The topic is neither `converger:conversation:<id>` nor `converger:channel:<id>`. |
 
 ### 5. Receive activities
 
@@ -134,11 +141,39 @@ The server sends one event, `activitySet`:
 
 The activity objects are produced by the same function as the REST API (`GET .../activities`), so they are identical.
 
+The server tracks the last `seq` it pushed on the topic: an activity is pushed at most once, in order. If a live activity arrives with a gap before it (a broadcast lost between nodes, deliveries finishing out of order), the server first reads the missing activities from the database and pushes them in one `activitySet`.
+
 When the conversation is closed or reopened, you receive an activity with `"type": "conversationUpdate"`, `"from": {"id": "system"}` and `channelData` such as `{"event": "conversation_closed", "status": "closed", "reason": "manual"}` (`reason` is `"expired"` for inactivity closes). Sending into a closed conversation returns `409 conversation_closed` until it is reopened.
 
-### 6. Send activities (REST)
+### 6. Send activities
 
-The Converger API channel does not handle client events; send over REST with the same token:
+Push `new_activity` on the joined topic:
+
+```json
+{ "type": "message", "text": "Hello!", "channelData": { "locale": "en" }, "idempotency_key": "7d2c1c1e-client-generated" }
+```
+
+| Field | Meaning |
+| --- | --- |
+| `text`, `type` (default `message`), `attachments`, `channelData` | The activity's client fields. Anything else is ignored. |
+| `idempotency_key` | Optional, at most 255 bytes. A re-send with the same key returns the stored activity instead of creating a second one. |
+| `conversation_id` | Required on `converger:channel:<id>`; ignored on a conversation topic. |
+
+The sender is the token's `user_id` (or its `sub`), never a client value. The message goes through the same inbound path as webhooks ([WebSocket channel type](channels/websocket.md#receiving-messages-from-sockets)): the token's channel must be in mode `inbound` or `duplex`, and the activity goes through the pipeline (routing rules, middleware, deliveries).
+
+| Reply | Meaning |
+| --- | --- |
+| `{"status": "ok", "response": {"id": "...", "seq": 18}}` | Stored (or already stored with this key). |
+| `{"status": "error", "response": {"reason": "invalid_activity", "errors": {...}}}` | Validation failed. |
+| `{"status": "error", "response": {"reason": "conversation_closed"}}` | Reopen the conversation first. |
+| `{"status": "error", "response": {"reason": "inbound_not_supported"}}` | The token's channel is `outbound` only. |
+| `{"status": "error", "response": {"reason": "unauthorized"}}` | On a channel topic: the conversation is not owned by or routed to the channel. |
+| `{"status": "error", "response": {"reason": "unavailable"}}` | Could not be accepted now; retry with the same key. |
+| `{"status": "error", "response": {"reason": "bad_request"}}` | Malformed payload or unknown event. |
+
+Client-generated ids with protocol acks (`clientId`, `ack` frames) are Planned ([#24](https://github.com/AimTune/converger/issues/24)).
+
+You can also send over REST with the same token:
 
 ```http
 POST /api/v1/converger/conversations/6f1c0e7e-1f0b-4a5e-9a39-2b7c6f0d9a11/activities
@@ -155,18 +190,41 @@ x-idempotency-key: 7d2c1c1e-client-generated
 
 Your own activity also comes back over the socket as an `activitySet`. Use `x-idempotency-key` so that a retry after a timeout returns the same activity instead of creating a second one. Errors: `422` (validation, with field errors), `409` (`conversation_closed`), `503` (could not be accepted, retry), `429` (rate limit, bucket `activity_create` per tenant). See [client API](api/client-api.md).
 
-:::warning
-Do not push events on a `converger:conversation:*` topic. The channel has no `handle_in`, so an incoming event crashes the channel process; the client receives `phx_error` and rejoins.
-:::
+### 7. Acknowledge activities
+
+On a `websocket` channel, each activity delivered to the channel has a [delivery](concepts/deliveries.md) row. Tell the server what you have received with `ack`:
+
+```json
+{ "watermark": "c2VxOjQz" }
+```
+
+`watermark` is a frame's watermark, or a `seq` as a number or decimal string; on `converger:channel:<id>` add the frame's `conversation_id`. Every pending delivery of the channel in that conversation up to the watermark is marked `sent`. The reply is `{"acknowledged": <count>}`, or `{"reason": "invalid_ack"}`.
+
+Acks are required when the channel's config has `require_ack: true`: its deliveries stay `pending` until a client acknowledges them. Otherwise a delivery is `sent` as soon as one client is connected, or when a client replays it after reconnecting ([WebSocket channel type](channels/websocket.md#delivery)).
+
+### Follow a whole channel
+
+With a token issued with `"scope": "channel"` (step 1), join `converger:channel:<channel_id>` (the token's own channel, which must be a `websocket` channel) to receive every activity delivered to the channel, across conversations. This is how an agent console follows the conversations routed to it. Each `activitySet` carries the conversation:
+
+```json
+{
+  "conversation_id": "6f1c0e7e-1f0b-4a5e-9a39-2b7c6f0d9a11",
+  "activities": [{ "id": "...", "type": "message", "from": { "id": "16505550022" }, "text": "Where is my order?" }],
+  "watermark": "c2VxOjQz",
+  "has_more": false
+}
+```
+
+The channel topic starts live, with no replay; catch up on a conversation over REST or by joining its conversation topic with a watermark. `new_activity` and `ack` on this topic name their `conversation_id`. Per-conversation watermarks in one handshake are Planned ([#64](https://github.com/AimTune/converger/issues/64), [#67](https://github.com/AimTune/converger/issues/67)).
 
 ### Resume without losing activities
 
 Activities are committed before they are broadcast, and each frame tells you its watermark, so a client can always catch up:
 
 1. Keep the `watermark` of the last `activitySet` you processed (persist it if the client may restart).
-2. On every (re)join, send `{"watermark": "<last>"}` in the join payload. Without a watermark you start live with no replay.
+2. On every (re)join, send `{"watermark": "<last>"}` in the join payload. Without a watermark you start live, from the conversation's current head, with no replay.
 3. The server replays up to `ws_replay_limit` activities (default `100`, `PAGINATION_WS_REPLAY_LIMIT`) after that watermark in one `activitySet`. If it has `has_more: true`, fetch the rest with `GET /api/v1/converger/conversations/:id/activities?watermark=<that frame's watermark>` and repeat until `has_more` is `false`.
-4. Live frames may arrive while you replay (the subscription starts before the replay query). De-duplicate by activity `id`.
+4. Live frames that the replay already covered are not pushed again. When a replay stops at `has_more`, the server also fills the rest in on the next live activity (gap detection); if you fetch over REST at the same time, de-duplicate by activity `id`.
 
 Watermarks are opaque; today they are URL-safe Base64 of `seq:<n>` (`c2VxOjQy` is `seq:42`), and older activity-id watermarks are still accepted. An invalid watermark is treated as "no watermark". Do not parse or construct them.
 
@@ -177,7 +235,7 @@ If you are not using the `phoenix` JavaScript client, frames are JSON arrays `[j
 ```json
 ["1", "1", "converger:conversation:6f1c0e7e-1f0b-4a5e-9a39-2b7c6f0d9a11", "phx_join", {"watermark": "c2VxOjQy"}]
 ["1", "1", "converger:conversation:6f1c0e7e-1f0b-4a5e-9a39-2b7c6f0d9a11", "phx_reply", {"status": "ok", "response": {}}]
-["1", null, "converger:conversation:6f1c0e7e-1f0b-4a5e-9a39-2b7c6f0d9a11", "activitySet", {"activities": [], "watermark": "c2VxOjQz", "has_more": false}]
+["1", null, "converger:conversation:6f1c0e7e-1f0b-4a5e-9a39-2b7c6f0d9a11", "activitySet", {"activities": [{"id": "0b9f2d3e-6c1a-4f7e-8f53-0f4f9e6f5a20", "type": "message", "text": "Hello!"}], "watermark": "c2VxOjQz", "has_more": false}]
 [null, "2", "phoenix", "heartbeat", {}]
 [null, "2", "phoenix", "phx_reply", {"status": "ok", "response": {}}]
 ```

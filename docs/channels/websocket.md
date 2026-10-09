@@ -1,73 +1,109 @@
 ---
 title: WebSocket channel type
-description: What the websocket channel type does today, how WebSocket clients receive activities, and the planned first-class duplex adapter.
+description: How the websocket channel adapter delivers activities to connected clients, tracks deliveries, receives messages from sockets and bridges other channels to an agent console.
 sidebar_position: 4
 ---
 
-The `websocket` channel type is the home of conversations whose participants are connected over WebSockets: a web chat widget, an agent console, a test client. Today the adapter itself ([`lib/converger/channels/adapters/websocket.ex`](https://github.com/AimTune/converger/blob/main/lib/converger/channels/adapters/websocket.ex)) is a stub. Real-time delivery does not go through it; it goes through the PubSub broadcast that every activity gets after it is committed.
+The `websocket` channel type is the home of clients connected over WebSockets: a web chat widget, an agent console, a test client. It is a regular channel adapter ([`lib/converger/channels/adapters/websocket.ex`](https://github.com/AimTune/converger/blob/main/lib/converger/channels/adapters/websocket.ex)): the pipeline delivers to it through the channel's middleware and records a delivery for every activity, it can be the target of a routing rule, and messages its clients send go through the same inbound path as webhooks. The design is recorded in [ADR-0028](../adr/0028-websocket-channel-adapter-delivery.md).
 
 For the client side (sockets, topics, frames, tokens, replay), see the [WebSocket API](../websocket.md).
 
-## What the adapter does today
+## Configuration
+
+| Field | Value |
+| --- | --- |
+| `type` | `websocket` |
+| `mode` | `inbound`, `outbound` or `duplex` (default). `outbound` or `duplex` to receive deliveries; `inbound` or `duplex` to accept messages from its sockets. |
+| `config.require_ack` | `true` or `false` (default). With `true`, a delivery stays `pending` until a client acknowledges it, even when clients are connected. |
+
+Existing `websocket` channels, which could only be `outbound` before, were changed to `duplex` by migration `20261010040000_make_websocket_channels_duplex`.
+
+## Adapter callbacks
 
 | Callback | Behaviour |
 | --- | --- |
-| `supported_modes/0` | `["outbound"]`. Creating a `websocket` channel in another mode fails with `websocket channels only support modes: outbound`. |
-| `validate_config/1` | Accepts any config; there is nothing to configure. |
-| `deliver_activity/2` | Returns `:ok` without doing anything. |
-| `parse_inbound/2` | `{:error, "websocket channel does not receive inbound webhooks"}`. |
+| `supported_modes/0` | `["inbound", "outbound", "duplex"]`. |
+| `capabilities/0` | `[:inbound, :outbound]`: the pipeline delivers to it. |
+| `validate_config/1` | `require_ack` must be `true`, `false` (or the strings `"true"`, `"false"`) or empty. |
+| `deliver_activity/2` | Broadcasts the activity and returns `{:ok, %{connected_clients: n}}` or `{:pending, %{connected_clients: n}}`, see below. |
+| `parse_inbound/2` | `{:error, ...}`: clients send over the socket, not through `/inbound`. |
 
-In addition, `websocket` is **not** in the pipeline's list of adapter-delivered types (`@delivery_types ~w(echo webhook whatsapp_meta whatsapp_infobip)` in [`lib/converger/pipeline.ex`](https://github.com/AimTune/converger/blob/main/lib/converger/pipeline.ex)). As a consequence:
+## Delivery
 
-- no delivery row and no delivery job is created for a `websocket` channel, so `deliver_activity/2` is never actually called by the pipeline;
-- a `websocket` channel cannot be the target of a routing rule: targets of excluded types are filtered out;
-- there is no record of whether any connected client received an activity;
-- websocket channels are not part of [channel health checks](overview.md#channel-health).
+`deliver_activity/2` receives the activity after the channel's middleware and broadcasts its canonical JSON ([ADR-0004](../adr/0004-single-canonical-activity-serializer.md)) on two PubSub topics:
 
-## How clients receive activities
+| PubSub topic | Who listens |
+| --- | --- |
+| `channel:<channel id>` | Sockets that follow the whole channel (`converger:channel:<channel id>`, an agent console). |
+| `channel:<channel id>:conversation:<conversation id>` | Sockets of the channel joined to that conversation when the conversation belongs to another channel (routed). |
 
-Every committed activity, whatever the channel type of its conversation, is broadcast by `Converger.Pipeline.broadcast/1` (run in the backend's `after_commit/1`, outside the database transaction):
+It then counts the connected clients with `ConvergerWeb.Sockets.count_connections/2`: joined channel processes of this channel that follow the conversation or the whole channel, across nodes (Phoenix Presence, [ADR-0020](../adr/0020-per-subject-socket-ids-and-presence.md)).
 
-```elixir
-ConvergerWeb.Endpoint.broadcast!(
-  "conversation:#{activity.conversation_id}",
-  "new_activity",
-  Converger.Activities.Serializer.canonical(activity)
-)
+| Situation | Adapter result | Delivery |
+| --- | --- | --- |
+| At least one client, `require_ack` off | `{:ok, %{connected_clients: n}}` | `sent`, `metadata.connected_clients = n` |
+| No client connected | `{:pending, %{connected_clients: 0}}` | stays `pending`, `attempts` incremented, not retried |
+| `require_ack: true` | `{:pending, %{connected_clients: n}}` | stays `pending` until a client sends `ack` |
+
+A pending delivery is not a failure and never dead-letters. It is marked `sent` by `Converger.Deliveries.acknowledge/3` when a client of the channel:
+
+- sends `ack {watermark}` covering the activity, or
+- joins the conversation with a watermark and gets the activity in the replay (only when `require_ack` is off).
+
+Activities are persisted, so offline buffering is the replay from the client's watermark ([ADR-0006](../adr/0006-per-conversation-seq-and-opaque-watermarks.md)); there is no separate queue.
+
+### What the pipeline delivers to a websocket channel
+
+A `websocket` channel is delivered to like any channel in mode `outbound` or `duplex` ([Delivery pipeline](../architecture/delivery-pipeline.md)), with two differences:
+
+- **Lifecycle events** (`conversationUpdate` on close and reopen) are delivered to `websocket` channels, as to webhooks. Messaging adapters such as WhatsApp still skip them.
+- **No echo exclusion.** An inbound message from the conversation's participant is not delivered back to the participant's own channel, except when that channel is a `websocket` channel: other sockets of the channel (the participant's other tabs, an agent console on the same channel) need it, and the sending socket drops its own frame by `seq`.
+
+## Receiving messages from sockets
+
+A client sends with the `new_activity` event on `/socket/converger` ([WebSocket API](../websocket.md#6-send-activities)). The message goes through `Converger.Inbound.receive_message/3`, the function inbound webhooks use as well, so:
+
+- the channel must be `inbound` or `duplex`, otherwise the reply is `inbound_not_supported`;
+- the activity is created with `Activities.create_client_activity/2` and goes through the pipeline: middleware of every target channel, routing rules, deliveries and retries ([ADR-0003](../adr/0003-pipeline-is-the-only-delivery-path.md));
+- the sender is the token's `user_id` (or its `sub`), never a client-supplied value;
+- an optional `idempotency_key` is stored as `ws:<sender>:<key>`, so a re-send returns the stored activity instead of creating a second one.
+
+## Bridging another channel to an agent console
+
+A routing rule from a channel to a `websocket` channel makes that channel's conversations visible to the `websocket` channel's sockets. For example, WhatsApp to an agent console:
+
+```mermaid
+sequenceDiagram
+  participant WA as WhatsApp user
+  participant M as whatsapp_meta channel
+  participant P as Pipeline
+  participant C as websocket channel (console)
+  participant A as Agent socket
+
+  WA->>M: inbound webhook
+  M->>P: Inbound.receive_message, activity committed
+  P->>C: routing rule target: deliver_activity
+  C->>A: activitySet on converger:channel:<console id>
+  Note over P,C: delivery sent (1 client) or pending (none)
+  A->>C: new_activity {conversation_id, text}
+  C->>P: Inbound.receive_message, activity committed
+  P->>M: primary channel: middleware, deliver_activity
+  M->>WA: Graph API message
 ```
 
-The payload is the canonical activity JSON ([ADR-0004](../adr/0004-single-canonical-activity-serializer.md)), the same shape as the REST API. Two sockets consume this topic:
+1. Create the console channel: type `websocket`, mode `duplex`.
+2. Create a routing rule with the WhatsApp channel as source and the console as target.
+3. Issue a channel-scoped token for the console: `POST /api/v1/converger/tokens/generate` with the console's secret and `{"scope": "channel", "user": {"id": "agent-7"}}`.
+4. The console joins `converger:channel:<console id>` and receives an `activitySet` with `conversation_id` for every WhatsApp message.
+5. The agent replies with `new_activity` and the `conversation_id`. The reply is an activity of the WhatsApp conversation: the pipeline delivers it to WhatsApp, with the WhatsApp channel's middleware, and to the console's sockets.
 
-| Socket | Topic joined by the client | What the client gets |
-| --- | --- | --- |
-| `/socket` (`ConvergerWeb.UserSocket`) | `conversation:<conversation id>` | `new_activity` events with the canonical activity. The client can also push `new_activity` to create activities; replay with `last_activity_id` on join. |
-| `/socket/converger` (`ConvergerWeb.ConvergerSocket`, client API) | `converger:conversation:<conversation id>` | `activitySet` frames `{activities, watermark, has_more}`; replay after an opaque `watermark` on join ([ADR-0006](../adr/0006-per-conversation-seq-and-opaque-watermarks.md)). Activities are sent over REST. |
-
-Because the broadcast is independent of the channel type, a WebSocket client can follow a conversation on **any** channel (for example watch a WhatsApp conversation live), as long as its token authorizes that conversation. What the `websocket` type adds is a channel to own conversations that have no external provider: tokens for the client API are generated with the channel `secret` (`POST /api/v1/converger/tokens/generate`), and conversations created with those tokens belong to that channel.
-
-Activities sent by WebSocket clients go through `Activities.create_client_activity/2` and therefore through the same pipeline as every other activity: middleware of the target channels, routing rules, deliveries and retries apply ([ADR-0003](../adr/0003-pipeline-is-the-only-delivery-path.md)). For example, a client writing into a conversation whose channel is `whatsapp_meta` (mode `outbound` or `duplex`) produces a WhatsApp delivery.
-
-When a channel is deactivated (status other than `active`), its connected sockets are disconnected and cannot rejoin.
-
-:::note
-The broadcast is fire-and-forget. A client that is not connected when an activity is broadcast catches up through replay on its next join (`last_activity_id` or `watermark`), not through a buffered delivery.
-:::
-
-## Planned: first-class duplex adapter
-
-Making `websocket` a real adapter is Planned ([#22](https://github.com/AimTune/converger/issues/22)). The proposal:
-
-- `supported_modes/0` becomes `inbound`, `outbound` and `duplex`;
-- `deliver_activity/2` broadcasts the canonical activity on a channel-scoped topic and reports the number of connected clients; with no client connected the delivery stays `pending` and is replayed on the next resume;
-- deliveries are marked `sent` when a client acknowledges the frame, with an optional per-channel `require_ack`;
-- inbound frames go through the same context function as inbound webhooks, so middleware and routing apply identically;
-- the hardcoded type lists are replaced by adapter capabilities (adapter behaviour v2, Planned ([#36](https://github.com/AimTune/converger/issues/36))), so `websocket` channels can be routing targets, for example WhatsApp to an agent console;
-- topics allow subscribing to a whole channel (agent console) or to a single conversation (end-user widget).
-
-The wire protocol for this work is Converger Protocol v1 (spec in progress, [#21](https://github.com/AimTune/converger/issues/21), [#63](https://github.com/AimTune/converger/issues/63)).
+A token of the console without `scope` can also join `converger:conversation:<id>` for one routed conversation. Such a routed socket receives the console's deliveries, after the console's middleware; a socket of the conversation's own channel receives every activity as committed.
 
 ## Related
 
 - [WebSocket API](../websocket.md)
 - [Channels and adapters](overview.md)
+- [Routing rules](../concepts/routing-rules.md)
+- [Deliveries](../concepts/deliveries.md)
+- [ADR-0028](../adr/0028-websocket-channel-adapter-delivery.md): the websocket channel adapter and pending receipts.
 - [ADR-0020](../adr/0020-per-subject-socket-ids-and-presence.md): per-subject socket ids and presence.

@@ -21,14 +21,15 @@ All entry points call `Activities.create_client_activity/2`, which keeps only `A
 | --- | --- | --- | --- |
 | `POST /api/v1/conversations/:id/activities` (tenant API) | `ConvergerWeb.ActivityController` | `sender` from the body, default `"user"` | `x-idempotency-key` header |
 | `POST /api/v1/converger/conversations/:id/activities` (client API) | `ConvergerWeb.ConvergerAPI.ActivityController` | `from.id` from the body, default `"user"` | `x-idempotency-key` header |
-| `POST /api/v1/channels/:channel_id/inbound` (provider webhook) | `ConvergerWeb.InboundController` | parsed by the adapter (for example the WhatsApp phone number) | the provider message id (for example a WhatsApp `wamid`), if any |
+| `POST /api/v1/channels/:channel_id/inbound` (provider webhook) | `ConvergerWeb.InboundController` via `Converger.Inbound` | parsed by the adapter (for example the WhatsApp phone number) | the provider message id (for example a WhatsApp `wamid`), if any |
+| `new_activity` push on `converger:conversation:<id>` or `converger:channel:<id>` (client API socket) | `ConvergerWeb.ConvergerChannel` via `Converger.Inbound` | the token's `user_id` claim, else its `sub` | `idempotency_key` from the payload, stored as `ws:<sender>:<key>` |
 | `new_activity` push on `conversation:<id>` (legacy socket) | `ConvergerWeb.ConversationChannel` | the token's `sub` claim | none |
 | Close / reopen / expiration | `Converger.Conversations` | `"system"` | none |
 
-Inbound webhooks additionally check `Activities.get_activity_by_channel_idempotency_key/2` **before** resolving the conversation, so a provider re-delivery of a message that already created an activity is acknowledged as a duplicate without touching any conversation ([ADR-0015](../adr/0015-per-message-idempotent-inbound-batches.md), [ADR-0016](../adr/0016-participant-based-conversation-resolution.md)).
+Inbound webhooks and client API socket messages both go through [`Converger.Inbound.receive_message/3`](https://github.com/AimTune/converger/blob/main/lib/converger/inbound.ex), which requires the channel's mode to be `inbound` or `duplex` (`{:error, :inbound_not_supported}` otherwise) and checks `Activities.get_activity_by_channel_idempotency_key/2` **before** resolving the conversation, so a provider re-delivery of a message that already created an activity is acknowledged as a duplicate without touching any conversation ([ADR-0015](../adr/0015-per-message-idempotent-inbound-batches.md), [ADR-0016](../adr/0016-participant-based-conversation-resolution.md)).
 
 :::note
-The Converger client API WebSocket (`converger:conversation:<id>`) is receive-only today; clients send activities over REST. Client-generated ids with server acks over WebSocket are planned ([#24](https://github.com/AimTune/converger/issues/24)).
+The Converger client API WebSocket accepts `new_activity` (reply `{id, seq}`) and `ack` events over the Phoenix channel binding ([#22](https://github.com/AimTune/converger/issues/22), [ADR-0028](../adr/0028-websocket-channel-adapter-delivery.md)). Client-generated activity ids and the acks of Converger Protocol v1 are Planned ([#24](https://github.com/AimTune/converger/issues/24)).
 :::
 
 ## The transaction
@@ -105,12 +106,12 @@ The activity is inserted with the allocated `seq`. Two unique indexes protect it
 
 Still inside the transaction, `Converger.Pipeline.enqueue/1` calls the configured backend. With the default `Converger.Pipeline.Oban` backend this:
 
-1. resolves the target channels (`Pipeline.resolve_delivery_channels/1`): the conversation's channel if its type is deliverable (`echo`, `webhook`, `whatsapp_meta`, `whatsapp_infobip`) and its mode is `outbound` or `duplex`, plus the active, deliverable targets of the routing rules of that channel; minus the participant's own channel when the activity was sent by the participant (no echo back); and, for lifecycle events, only `webhook` channels;
+1. resolves the target channels (`Pipeline.resolve_delivery_channels/1`): the conversation's channel if its adapter has the `:outbound` capability (all five channel types today) and its mode is `outbound` or `duplex`, plus the active, deliverable targets of the routing rules of that channel; minus the participant's own channel when the activity was sent by the participant (no echo back; not applied to a `websocket` channel); and, for lifecycle events, only `webhook` and `websocket` channels;
 2. inserts one `ActivityDeliveryWorker` job per channel with args `%{activity_id, channel_id}`.
 
 Because `oban_jobs` lives in the same database, the jobs commit or roll back with the activity ([ADR-0001](../adr/0001-transactional-outbox-with-oban.md)). If any insert fails, `enqueue/1` returns an error, the whole transaction rolls back and the caller gets `{:error, :delivery_enqueue_failed}` (HTTP `503`, "Activity could not be accepted, please retry"). There is never a committed activity without its delivery jobs.
 
-`websocket` channels are not in the deliverable list: their clients are reached by the PubSub broadcast, not by an adapter.
+`websocket` channels are deliverable like the other types. Sockets that joined a conversation of its own channel get the after-commit broadcast below; the `websocket` adapter reaches sockets that follow the whole channel or a routed conversation ([Delivery pipeline](delivery-pipeline.md#adapters), [ADR-0028](../adr/0028-websocket-channel-adapter-delivery.md)).
 
 ### 6. After commit: broadcast
 
@@ -181,7 +182,7 @@ sequenceDiagram
 
 1. **Delivery record.** `Deliveries.get_or_create_delivery/2` returns the single `deliveries` row for the activity and channel (unique on `(activity_id, channel_id)`), creating it with `status: "pending"`, `attempts: 0` on the first attempt. If the row is already `sent`, `delivered` or `read`, the attempt returns `:ok` without calling the provider again.
 2. **Middleware.** `Pipeline.Middleware.run/2` applies the channel's `transformations` in order. A middleware that returns `{:halt, reason}`, raises or throws halts the chain; the delivery is dead-lettered immediately with `last_error` `"halted: <reason>"` and the job is cancelled ([ADR-0008](../adr/0008-middleware-receives-channel-and-crashes-are-contained.md)).
-3. **Adapter.** `Channels.Adapter.deliver_activity/2` dispatches to the adapter for the channel type. `:ok` or `{:ok, response_meta}` marks the delivery `sent` (incrementing `attempts`, storing `sent_at`, merging metadata, and extracting `provider_message_id` from `whatsapp_message_id` / `infobip_message_id` for later receipt correlation).
+3. **Adapter.** `Channels.Adapter.deliver_activity/2` dispatches to the adapter for the channel type. `:ok` or `{:ok, response_meta}` marks the delivery `sent` (incrementing `attempts`, storing `sent_at`, merging metadata, and extracting `provider_message_id` from `whatsapp_message_id` / `infobip_message_id` for later receipt correlation). `{:pending, response_meta}` (the `websocket` adapter when no client is connected, or the channel has `require_ack: true`) keeps the delivery `pending`, increments `attempts` and is not retried; `Deliveries.acknowledge/3` marks it `sent` once a client acknowledges or replays it.
 4. **Failures.** `{:error, %DeliveryError{retryable?: false}}` dead-letters at once. Any other error counts one failed attempt against the channel's retry policy; the delivery stays `pending` until `attempts` reaches `max_attempts`, then becomes `failed`. Details in [Delivery and retries](../delivery.md).
 
 Every status change of a delivery (`sent`, `failed`, and later provider receipts `delivered` / `read`) is broadcast as `delivery_status` on `conversation:<conversation_id>`.

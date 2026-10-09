@@ -15,6 +15,10 @@ defmodule ConvergerWeb.Sockets do
 
   alias ConvergerWeb.SocketPresence
 
+  # Presence key of a socket without an id (a channel-level token without a
+  # user): counted, but it cannot be disconnected by id.
+  @anonymous_prefix "anonymous:"
+
   @doc "Socket id for the Converger API socket (`ConvergerWeb.ConvergerSocket`)."
   def converger_socket_id(%{"tenant_id" => tenant_id} = claims) when is_binary(tenant_id) do
     case subject(claims) do
@@ -32,11 +36,14 @@ defmodule ConvergerWeb.Sockets do
 
   def user_socket_id(_claims), do: nil
 
-  # End-user id when the token names one, otherwise the conversation.
-  # Channel-level tokens without either get no id (they cannot join a
-  # conversation without one, see ConvergerChannel authorization).
+  # End-user id when the token names one, otherwise the channel for a
+  # channel-scoped token (agent console), otherwise the conversation.
+  # Channel-level tokens without any of them get no id.
   defp subject(%{"user_id" => user_id}) when is_binary(user_id) and user_id != "",
     do: "user:#{user_id}"
+
+  defp subject(%{"scope" => "channel", "channel_id" => channel_id}) when is_binary(channel_id),
+    do: "channel:#{channel_id}"
 
   defp subject(%{"conversation_id" => conversation_id}) when is_binary(conversation_id),
     do: "conversation:#{conversation_id}"
@@ -63,6 +70,7 @@ defmodule ConvergerWeb.Sockets do
   def disconnect_channel(channel_id) do
     channel_id
     |> tracked_ids()
+    |> Enum.reject(&String.starts_with?(&1, @anonymous_prefix))
     |> Enum.each(&disconnect_id/1)
 
     :ok
@@ -72,13 +80,27 @@ defmodule ConvergerWeb.Sockets do
   def count(channel_id), do: channel_id |> tracked_ids() |> length()
 
   @doc """
+  Number of joined channel processes of `channel_id` that receive live
+  activities of `conversation_id`: sockets joined to that conversation and
+  sockets following the whole channel (`scope: "channel"`). Used by the
+  `websocket` adapter to tell whether a delivery reached a client.
+  """
+  def count_connections(channel_id, conversation_id) do
+    channel_id
+    |> topic()
+    |> SocketPresence.list()
+    |> Enum.flat_map(fn {_key, %{metas: metas}} -> metas end)
+    |> Enum.count(&(&1[:scope] == "channel" or &1[:conversation_id] == conversation_id))
+  end
+
+  @doc """
   Track the calling channel process (a joined channel) under its socket id.
   The entry disappears automatically when the process exits.
   """
-  def track(%Phoenix.Socket{id: nil}, _channel_id, _meta), do: :ok
-
   def track(%Phoenix.Socket{id: socket_id}, channel_id, meta) do
-    case SocketPresence.track(self(), topic(channel_id), socket_id, meta) do
+    key = socket_id || @anonymous_prefix <> inspect(self())
+
+    case SocketPresence.track(self(), topic(channel_id), key, meta) do
       {:ok, _ref} -> :ok
       {:error, {:already_tracked, _, _, _}} -> :ok
       {:error, reason} -> {:error, reason}

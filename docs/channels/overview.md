@@ -35,7 +35,7 @@ The mode decides the direction of traffic:
 - `outbound`: the pipeline delivers activities to the channel. Inbound messages are refused (`400 Channel does not accept inbound messages`); delivery receipts are still accepted.
 - `duplex`: both.
 
-The changeset rejects a mode the adapter does not support (`<type> channels only support modes: ...`). `echo` and `websocket` are `outbound` only; the others support all three modes.
+The changeset rejects a mode the adapter does not support (`<type> channels only support modes: ...`). `echo` is `outbound` only; the others support all three modes.
 
 Channels are created and edited in the admin panel (`/admin/channels`) and the tenant portal (`/portal/channels`). The config form fields per type are listed on each adapter page.
 
@@ -47,16 +47,18 @@ The behaviour lives in [`lib/converger/channels/adapter.ex`](https://github.com/
 | --- | --- | --- | --- |
 | `supported_modes/0` | yes | `[String.t()]` | Modes the type accepts, checked by the channel changeset. |
 | `validate_config/1` | yes | `:ok` or `{:error, message}` | Validates `channel.config` on create and update. The message becomes a `config` error on the changeset. |
-| `deliver_activity/2` | yes | `:ok`, `{:ok, map}` or `{:error, term}` | Delivers one activity to the provider. Called by the pipeline only. |
+| `deliver_activity/2` | yes | `:ok`, `{:ok, map}`, `{:pending, map}` or `{:error, term}` | Delivers one activity to the provider. Called by the pipeline only. |
 | `parse_inbound/2` | yes | `{:ok, [message]}`, `{:ok, message}` or `{:error, term}` | Turns an inbound webhook body into zero or more messages. |
 | `parse_status_update/2` | no | `{:ok, [update]}`, `:ignore` or `{:error, term}` | Extracts delivery and read receipts. Missing callback means `:ignore`. |
 | `verify_inbound_signature/3` | no | `:ok`, `:legacy`, `:missing` or `{:error, reason}` | Provider-native signature check. Missing callback means the generic `x-converger-signature` scheme. |
 | `retry_policy/0` | no | `map` | Adapter defaults merged over the global retry policy and under the channel's `retry_policy`. |
+| `capabilities/0` | no | `[atom]` | What the adapter can do. The pipeline delivers only to channels whose adapter has `:outbound`. Missing callback means `[:inbound, :outbound]`. |
 
 ### `deliver_activity/2`
 
 - `:ok`: the delivery is marked `sent`.
 - `{:ok, map}`: marked `sent`; the map is merged into the delivery's `metadata`. If it contains `whatsapp_message_id` or `infobip_message_id`, that value is stored as the delivery's `provider_message_id`, which is how later receipts find the delivery (see `Converger.Deliveries.mark_sent/2`).
+- `{:pending, map}`: handed off, but receipt is not confirmed yet. The delivery stays `pending` (`attempts` incremented, map merged into `metadata`) and is **not** retried; `Converger.Deliveries.acknowledge/3` marks it `sent` later. The `websocket` adapter returns it when no client is connected or the channel requires acks.
 - `{:error, %Converger.Channels.DeliveryError{retryable?: false}}`: the delivery is dead-lettered after this attempt (`status: "failed"`), no retry.
 - `{:error, %DeliveryError{retry_after_ms: ms}}`: retried, and the next attempt waits `ms` instead of the policy backoff.
 - any other `{:error, term}`: retryable; the next attempt follows the channel's retry policy until `max_attempts` is reached.
@@ -108,14 +110,14 @@ Status progression is monotonic (`pending` < `sent` < `delivered` < `read`): a `
 | `whatsapp_meta` | inbound, outbound, duplex | Text messages through the Graph API | Yes (Cloud API webhook) | Yes (`statuses`) | Meta `X-Hub-Signature-256` keyed with `app_secret` | Yes: every `entry` / `changes` / `messages` / `statuses` item |
 | `whatsapp_infobip` | inbound, outbound, duplex | Text messages through the Infobip API | Yes (`results`) | Yes (delivery reports in `results`) | Generic `x-converger-signature` (no Infobip-native check) | Yes: every item of `results` |
 | `echo` | outbound | Creates a reply activity from `bot` in the same conversation | No | No | Not applicable | Not applicable |
-| `websocket` | outbound | No-op; clients receive activities through the PubSub broadcast | No (clients send over the socket) | No | Not applicable | Not applicable |
+| `websocket` | inbound, outbound, duplex | Broadcast to the channel's connected sockets; `pending` until a client is connected, replays or acks ([WebSocket](websocket.md)) | No (clients send over the socket, through the same inbound path) | Client `ack` over the socket | Not applicable (socket token) | Not applicable |
 
 Notes:
 
-- The pipeline only calls adapters for `echo`, `webhook`, `whatsapp_meta` and `whatsapp_infobip` (`@delivery_types` in [`lib/converger/pipeline.ex`](https://github.com/AimTune/converger/blob/main/lib/converger/pipeline.ex)). `websocket` channels get no delivery rows.
-- Conversation lifecycle events (close, reopen) are delivered only to `webhook` channels.
-- An inbound message from the conversation's participant is never delivered back to that participant's own channel.
-- Outbound WhatsApp media, templates and interactive messages are planned ([#37](https://github.com/AimTune/converger/issues/37)). Adapter capabilities declared by the adapter itself are planned in adapter behaviour v2 ([#36](https://github.com/AimTune/converger/issues/36)).
+- The pipeline calls the adapter of every channel whose adapter has the `:outbound` capability (`Adapter.capability?/2`, used by `resolve_delivery_channels/1` in [`lib/converger/pipeline.ex`](https://github.com/AimTune/converger/blob/main/lib/converger/pipeline.ex)): all five types today.
+- Conversation lifecycle events (close, reopen) are delivered only to `webhook` and `websocket` channels.
+- An inbound message from the conversation's participant is never delivered back to that participant's own channel, unless it is a `websocket` channel (its other sockets need it).
+- Outbound WhatsApp media, templates and interactive messages are planned ([#37](https://github.com/AimTune/converger/issues/37)). `capabilities/0` currently only drives pipeline delivery; the rest of adapter behaviour v2 (config schema, registry, capability-driven health checks and admin forms) is planned ([#36](https://github.com/AimTune/converger/issues/36)).
 
 ## Inbound endpoints
 

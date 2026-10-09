@@ -9,8 +9,19 @@ defmodule Converger.Channels.Adapter do
   @type activity :: Converger.Activities.Activity.t()
   @type config :: map()
 
+  @doc """
+  Deliver an activity to the channel.
+
+    * `:ok` / `{:ok, meta}` - delivered; the delivery is marked `sent`, with
+      `meta` merged into its metadata.
+    * `{:pending, meta}` - handed off, but receipt is not confirmed yet (a
+      WebSocket channel with no connected client, or one that requires client
+      acks). The delivery stays `pending` and is **not** retried; it is marked
+      `sent` later by `Converger.Deliveries.acknowledge/3`.
+    * `{:error, reason}` - failed; retried according to the retry policy.
+  """
   @callback deliver_activity(channel, activity) ::
-              :ok | {:ok, map()} | {:error, term()}
+              :ok | {:ok, map()} | {:pending, map()} | {:error, term()}
 
   @callback validate_config(config) ::
               :ok | {:error, String.t()}
@@ -71,7 +82,19 @@ defmodule Converger.Channels.Adapter do
   """
   @callback retry_policy() :: map()
 
-  @optional_callbacks [parse_status_update: 2, verify_inbound_signature: 3, retry_policy: 0]
+  @doc """
+  What the adapter can do. The pipeline delivers only to channels whose
+  adapter has `:outbound`. Adapters that do not define it get
+  `[:inbound, :outbound]`.
+  """
+  @callback capabilities() :: [atom()]
+
+  @optional_callbacks [
+    parse_status_update: 2,
+    verify_inbound_signature: 3,
+    retry_policy: 0,
+    capabilities: 0
+  ]
 
   @callback supported_modes() :: [String.t()]
 
@@ -168,6 +191,25 @@ defmodule Converger.Channels.Adapter do
       _ -> %{}
     end
   end
+
+  @default_capabilities [:inbound, :outbound]
+
+  @doc "Capabilities of the adapter for `type` (empty for an unknown type)."
+  def capabilities(type) do
+    case adapter_for(type) do
+      {:ok, mod} ->
+        # apply/3 because the callback is optional and not every adapter defines it
+        if Code.ensure_loaded?(mod) and function_exported?(mod, :capabilities, 0),
+          do: apply(mod, :capabilities, []),
+          else: @default_capabilities
+
+      {:error, _} ->
+        []
+    end
+  end
+
+  @doc "Whether the adapter for `type` has `capability`."
+  def capability?(type, capability), do: capability in capabilities(type)
 
   def supported_modes(nil), do: ~w(inbound outbound duplex)
 

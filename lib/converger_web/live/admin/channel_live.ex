@@ -362,6 +362,12 @@ defmodule ConvergerWeb.Admin.ChannelLive do
     ]
   end
 
+  defp config_fields("websocket") do
+    [
+      {"require_ack", "Require client ack", "false (default) or true", :text}
+    ]
+  end
+
   defp config_fields(_), do: []
 
   defp mode_label("inbound"), do: "← Inbound (receive only)"

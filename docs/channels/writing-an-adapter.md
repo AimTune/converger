@@ -181,11 +181,12 @@ Callback checklist:
 | --- | --- | --- |
 | `supported_modes/0` | yes | Subset of `inbound`, `outbound`, `duplex`. The channel changeset enforces it. |
 | `validate_config/1` | yes | Return `{:error, "<type> config ..."}` messages; they are shown as `config` errors in the admin UI. Runs on every create and update. |
-| `deliver_activity/2` | yes | Called only by the pipeline. Return `:ok`, `{:ok, map}` or `{:error, reason}`, preferably `{:error, %DeliveryError{}}`. |
+| `deliver_activity/2` | yes | Called only by the pipeline. Return `:ok`, `{:ok, map}` or `{:error, reason}`, preferably `{:error, %DeliveryError{}}`. Return `{:pending, map}` only when the hand-off succeeded but receipt is confirmed later (the `websocket` adapter); the delivery stays `pending` without a retry. |
 | `parse_inbound/2` | yes | Return a list, even for one message. An empty list for payloads with only receipts. `{:error, message}` when the body is not your provider's format at all (answered with `400`). Adapters without inbound support return `{:error, "..."}` unconditionally. |
 | `parse_status_update/2` | no | `{:ok, [update]}` or `:ignore`. |
 | `verify_inbound_signature/3` | no | Implement when the provider signs webhooks natively. Without it, the generic `x-converger-signature` scheme keyed with the channel `secret` applies. |
 | `retry_policy/0` | no | Adapter defaults (`max_attempts`, `backoff`, `base_ms`, `max_ms`, `timeout_ms`) between the global config and the channel's own `retry_policy`. |
+| `capabilities/0` | no | Defaults to `[:inbound, :outbound]`. Leave `:outbound` out for an adapter that never delivers; the pipeline then creates no deliveries for its channels. |
 
 ## 2. Register the type
 
@@ -195,7 +196,6 @@ Today the type string is listed in several places. For `acme_sms`:
 | --- | --- | --- |
 | [`lib/converger/channels/channel.ex`](https://github.com/AimTune/converger/blob/main/lib/converger/channels/channel.ex) | add `acme_sms` to `@channel_types` | `validate_inclusion(:type, ...)` and the admin type dropdown (`Channel.channel_types/0`) |
 | [`lib/converger/channels/adapter.ex`](https://github.com/AimTune/converger/blob/main/lib/converger/channels/adapter.ex) | add `"acme_sms" -> {:ok, Converger.Channels.Adapters.AcmeSms}` to `adapter_for/1` | dispatch of every callback |
-| [`lib/converger/pipeline.ex`](https://github.com/AimTune/converger/blob/main/lib/converger/pipeline.ex) | add to `@delivery_types` (outbound adapters only) | without it no delivery is ever created for the channel |
 | [`lib/converger/channels/health.ex`](https://github.com/AimTune/converger/blob/main/lib/converger/channels/health.ex) | add to the type list in `check_all_channels/1` | [health checks](overview.md#channel-health) |
 | [`lib/converger_web/live/admin/dashboard_live.ex`](https://github.com/AimTune/converger/blob/main/lib/converger_web/live/admin/dashboard_live.ex) | add to the type list of the health query | dashboard health counts |
 | [`lib/converger_web/live/admin/channel_live.ex`](https://github.com/AimTune/converger/blob/main/lib/converger_web/live/admin/channel_live.ex) | add `config_fields("acme_sms")` and optionally `config_summary/1` | config form; use field type `:password` for secrets |

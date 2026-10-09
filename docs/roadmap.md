@@ -82,7 +82,7 @@ WebSocket becomes the primary channel, with a documented wire protocol that any 
 | --- | --- | --- |
 | [#63](https://github.com/AimTune/converger/issues/63) | Converger Protocol v1 must be wire-compatible with mekik/1 (hello/welcome, seq envelope, chativa frame vocabulary) | Open ([ADR-0024](adr/0024-converger-protocol-v1-as-superset-of-mekik-1.md)) |
 | [#21](https://github.com/AimTune/converger/issues/21) | Specify the Converger Protocol v1 (WebSocket wire protocol) | Open |
-| [#22](https://github.com/AimTune/converger/issues/22) | Make `websocket` a first-class duplex channel adapter (deliver to sockets, offline buffering, fan-out target) | Open |
+| [#22](https://github.com/AimTune/converger/issues/22) | Make `websocket` a first-class duplex channel adapter (deliver to sockets, offline buffering, fan-out target) | Open (implemented, pending merge; [ADR-0028](adr/0028-websocket-channel-adapter-delivery.md)) |
 | [#23](https://github.com/AimTune/converger/issues/23) | Unify `UserSocket`/`ConversationChannel` and `ConvergerSocket`/`ConvergerChannel` into one protocol implementation | Open |
 | [#24](https://github.com/AimTune/converger/issues/24) | Client-side message ids with server acks over WebSocket (at-least-once send, exactly-once persistence) | Open |
 | [#25](https://github.com/AimTune/converger/issues/25) | Push delivery/read receipts, typing indicators and presence to WebSocket clients | Open |

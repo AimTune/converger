@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+### `websocket` is a first-class duplex channel adapter (#22)
+
+- The `websocket` adapter delivers: it broadcasts each activity (after the channel's
+  middleware) to the channel's sockets and records a delivery. With no connected client,
+  or with `require_ack: true` in the channel config, the delivery stays `pending` (new
+  adapter result `{:pending, meta}`, not retried) until a client replays or sends
+  `ack {watermark}`.
+- `websocket` channels can be routing rule targets: e.g. WhatsApp to an agent console.
+  The hardcoded `@delivery_types` list is replaced by an optional adapter
+  `capabilities/0` callback (`:outbound`).
+- `/socket/converger`: `new_activity` sends through the new `Converger.Inbound` context
+  (the same path as inbound webhooks; requires mode `inbound` or `duplex`), `ack`,
+  routed conversation topics, and `converger:channel:<id>` for tokens issued with
+  `{"scope": "channel"}`. Conversation topics drop duplicate frames and fill `seq` gaps
+  from the database. Unknown events are answered with `bad_request` instead of crashing
+  the channel.
+- `websocket` channels support all three modes; existing ones (necessarily `outbound`)
+  become `duplex` (migration `20261010040000_make_websocket_channels_duplex`).
+- Lifecycle events are delivered to `websocket` channels too, and the participant echo
+  rule does not apply to them.
+- `docs/adr/0028-websocket-channel-adapter-delivery.md` records the design.
+
 ### Converger Protocol v1 specification (#21, refs #63 #68)
 
 Documentation and schemas only; no server behaviour changes.

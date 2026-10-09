@@ -53,7 +53,7 @@ flowchart TD
   T2 --> F{"Active, deliverable type,<br/>mode outbound/duplex?"}
   F -- yes --> T3["Target"]
   F -- no --> X["Skipped"]
-  T1 --> E["Drop participant's own channel if the participant sent it;<br/>drop non-webhook targets for lifecycle events"]
+  T1 --> E["Drop participant's own channel if the participant sent it;<br/>drop non-webhook, non-websocket targets for lifecycle events"]
   T3 --> E
   E --> J["One Oban delivery job per channel"]
 ```
@@ -62,9 +62,9 @@ The details that matter:
 
 - **The source is the conversation's channel**, not the path the activity came in on. An inbound WhatsApp message, an agent reply posted through the tenant API, and an echo reply in the same conversation all fan out through the same rules.
 - **One hop.** Only rules whose source is the conversation's channel apply. A target channel's own rules are **not** followed. Routing is not transitive, and cycle detection is a safety net for rule edits.
-- **Deliverable types** are `echo`, `webhook`, `whatsapp_meta` and `whatsapp_infobip`. A `websocket` target gets no adapter delivery. Its clients see conversations through the PubSub broadcast. A first-class WebSocket fan-out target is Planned ([#22](https://github.com/AimTune/converger/issues/22)).
-- **No echo to the author.** When the activity's `sender` is the conversation participant's `external_id`, the participant's own channel is dropped, so a WhatsApp user does not get their own message back. Rule targets still receive it.
-- **Lifecycle events** (`conversationUpdate` from close and reopen) go only to `webhook` targets.
+- **Deliverable types** are those whose adapter has the `:outbound` capability: all five types today (`echo`, `webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip`). A `websocket` target gets a delivery like any other: its adapter pushes the activity, after the target's middleware, to the target channel's sockets that follow the whole channel (`converger:channel:<id>`, an agent console) or that joined the conversation. A socket of a `websocket` channel may join `converger:conversation:<id>` of a conversation on another channel when an enabled rule routes that channel to it ([Client API](../api/client-api.md), [ADR-0028](../adr/0028-websocket-channel-adapter-delivery.md)).
+- **No echo to the author.** When the activity's `sender` is the conversation participant's `external_id`, the participant's own channel is dropped, so a WhatsApp user does not get their own message back. Rule targets still receive it. A `websocket` channel is never dropped by this rule: it serves many sockets, and the sending socket drops its own frame by `seq`.
+- **Lifecycle events** (`conversationUpdate` from close and reopen) go only to `webhook` and `websocket` targets.
 - Each target gets its own [delivery](deliveries.md), its own retries, and its own [middleware](middleware.md) chain (the target channel's `transformations`).
 
 ### Example

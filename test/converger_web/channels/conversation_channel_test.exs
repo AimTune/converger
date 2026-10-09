@@ -10,6 +10,8 @@ defmodule ConvergerWeb.ConversationChannelTest do
   import Converger.ConversationsFixtures
   import Converger.ActivitiesFixtures
 
+  # The pipeline (inline in tests) runs in the channel process before it
+  # replies, so replies get more than the 100 ms default on a loaded machine.
   setup do
     tenant = tenant_fixture()
     channel = channel_fixture(tenant)
@@ -37,7 +39,7 @@ defmodule ConvergerWeb.ConversationChannelTest do
         "idempotency_key" => "from-client"
       })
 
-    assert_reply ref, :ok, %{id: id, seq: 1}
+    assert_reply ref, :ok, %{id: id, seq: 1}, 1_000
 
     [activity] = Converger.Activities.list_activities_for_conversation(conversation.id)
     assert activity.id == id
@@ -59,11 +61,11 @@ defmodule ConvergerWeb.ConversationChannelTest do
       conversation: conversation
     } do
       ref = push(socket, "new_activity", %{"text" => "once", "idempotency_key" => "k-1"})
-      assert_reply ref, :ok, %{id: id, seq: 1}
+      assert_reply ref, :ok, %{id: id, seq: 1}, 1_000
 
       # e.g. the client lost the connection before the reply and re-sends
       ref = push(socket, "new_activity", %{"text" => "once", "idempotency_key" => "k-1"})
-      assert_reply ref, :ok, %{id: ^id, seq: 1}
+      assert_reply ref, :ok, %{id: ^id, seq: 1}, 1_000
 
       assert [%{id: ^id}] = Converger.Activities.list_activities_for_conversation(conversation.id)
     end
@@ -74,7 +76,7 @@ defmodule ConvergerWeb.ConversationChannelTest do
       token: token
     } do
       ref = push(socket, "new_activity", %{"text" => "once", "idempotency_key" => "k-2"})
-      assert_reply ref, :ok, %{id: id}
+      assert_reply ref, :ok, %{id: id}, 1_000
 
       {:ok, socket2} = connect(UserSocket, %{"token" => token})
 
@@ -82,7 +84,7 @@ defmodule ConvergerWeb.ConversationChannelTest do
         subscribe_and_join(socket2, ConversationChannel, "conversation:#{conversation.id}")
 
       ref = push(socket2, "new_activity", %{"text" => "once", "idempotency_key" => "k-2"})
-      assert_reply ref, :ok, %{id: ^id}
+      assert_reply ref, :ok, %{id: ^id}, 1_000
 
       assert [_] = Converger.Activities.list_activities_for_conversation(conversation.id)
     end
@@ -101,7 +103,7 @@ defmodule ConvergerWeb.ConversationChannelTest do
         })
 
       ref = push(socket, "new_activity", %{"text" => "user-1", "idempotency_key" => "shared"})
-      assert_reply ref, :ok, %{id: id1}
+      assert_reply ref, :ok, %{id: id1}, 1_000
 
       {:ok, token2, _} = Token.generate_token(conversation, tenant, "user-2")
       {:ok, socket2} = connect(UserSocket, %{"token" => token2})
@@ -110,7 +112,7 @@ defmodule ConvergerWeb.ConversationChannelTest do
         subscribe_and_join(socket2, ConversationChannel, "conversation:#{conversation.id}")
 
       ref = push(socket2, "new_activity", %{"text" => "user-2", "idempotency_key" => "shared"})
-      assert_reply ref, :ok, %{id: id2}
+      assert_reply ref, :ok, %{id: id2}, 1_000
 
       assert Enum.uniq([rest.id, id1, id2]) |> length() == 3
 
@@ -131,7 +133,7 @@ defmodule ConvergerWeb.ConversationChannelTest do
       end
 
       ref = push(socket, "new_activity", %{"text" => "no key", "idempotency_key" => nil})
-      assert_reply ref, :ok
+      assert_reply ref, :ok, %{}, 1_000
 
       assert [%{idempotency_key: nil}] =
                Converger.Activities.list_activities_for_conversation(conversation.id)
@@ -314,7 +316,7 @@ defmodule ConvergerWeb.ConversationChannelTest do
       channel: channel
     } do
       ref = push(socket, "new_activity", %{"text" => "hi there"})
-      assert_reply ref, :ok
+      assert_reply ref, :ok, %{}, 1_000
 
       assert_receive {:webhook_request, %{"text" => "[WS] hi there", "id" => activity_id}}
       refute_receive {:webhook_request, _}, 200

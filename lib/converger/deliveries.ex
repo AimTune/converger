@@ -89,6 +89,49 @@ defmodule Converger.Deliveries do
     end
   end
 
+  @doc """
+  Record a hand-off whose receipt is not confirmed yet (an adapter returned
+  `{:pending, meta}`, e.g. a WebSocket channel with no connected client).
+  The delivery stays `pending`; `attempts > 0` marks it as handed off, which
+  is what `acknowledge/3` looks for.
+  """
+  def mark_handed_off(delivery, response_metadata \\ %{}) do
+    delivery
+    |> Delivery.changeset(%{
+      status: "pending",
+      attempts: delivery.attempts + 1,
+      last_error: nil,
+      metadata: Map.merge(delivery.metadata || %{}, response_metadata)
+    })
+    |> Repo.update()
+  end
+
+  @doc """
+  Mark the handed-off deliveries to `channel_id` of every activity of
+  `conversation_id` up to and including `seq` as `sent`: a client of the
+  channel has received them (it acknowledged them or they were replayed to
+  it). Deliveries not handed off yet (`attempts == 0`) are left alone, so the
+  pipeline still broadcasts them to the channel's other sockets.
+
+  Returns the number of deliveries marked.
+  """
+  def acknowledge(channel_id, conversation_id, seq) when is_integer(seq) do
+    now = DateTime.utc_now()
+
+    {count, deliveries} =
+      from(d in Delivery,
+        join: a in assoc(d, :activity),
+        where:
+          d.channel_id == ^channel_id and d.status == "pending" and d.attempts > 0 and
+            a.conversation_id == ^conversation_id and a.seq <= ^seq,
+        select: d
+      )
+      |> Repo.update_all(set: [status: "sent", sent_at: now, updated_at: now])
+
+    Enum.each(deliveries, &broadcast_status_update/1)
+    count
+  end
+
   @doc deprecated: "Use mark_sent/2 instead"
   def mark_delivered(delivery, response_metadata \\ %{}) do
     mark_sent(delivery, response_metadata)
