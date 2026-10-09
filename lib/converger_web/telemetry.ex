@@ -92,6 +92,7 @@ defmodule ConvergerWeb.Telemetry do
       # Custom App Metrics
       counter("converger.activities.create.count"),
       counter("converger.rate_limit.exceeded.count", tags: [:bucket]),
+      counter("converger.socket.limit.count", tags: [:reason]),
       counter("phoenix.socket_connected.count"),
       counter("phoenix.channel_joined.count"),
 

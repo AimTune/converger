@@ -423,12 +423,37 @@ Rejoin with the `id` of the last activity you processed as `last_activity_id`. T
 - **Typing**: an activity with `"type": "typing"` is accepted, persisted and broadcast like any other activity. Ephemeral typing indicators are planned ([#25](https://github.com/AimTune/converger/issues/25)).
 - **Receipts**: only the legacy socket pushes `delivery_status`; the Converger API socket does not ([#25](https://github.com/AimTune/converger/issues/25)).
 
-## Disconnects
+## Limits and disconnects
+
+Each socket is limited (defaults; operators can change them, see [WebSocket limits and draining](operations/websocket-limits.md)):
+
+| Limit | Default | What you get |
+| --- | --- | --- |
+| Frame size | 128 KiB | Error reply `{"reason": "payload_too_large"}`; the frame is ignored. Above 1 MiB the socket is closed with 1009. |
+| Frames sent per socket | 20 per second, heartbeats and joins included | Error reply `{"reason": "rate_limited", "retryAfterMs": N}`; the frame is ignored. Wait `N` ms before sending again. |
+| Joined channels per socket | 50 | The join is refused with `{"reason": "too_many_joins"}`. |
+| Reading speed | the server buffers up to 1 000 frames for you | The socket is closed with 4503 `slow_consumer`. |
 
 The server closes sockets when:
 
 - the channel is deactivated or deleted: every tracked socket of the channel is disconnected, and reconnects are refused while it stays inactive;
-- an operator disconnects one user or conversation (`ConvergerWeb.Sockets.disconnect_user/2`, `disconnect_conversation/2`).
+- an operator disconnects one user or conversation (`ConvergerWeb.Sockets.disconnect_user/2`, `disconnect_conversation/2`);
+- the node shuts down (a deploy): close code **1012** with the reason `{"reason": "unavailable", "retryAfterMs": N}`. While a node is draining it refuses new connections with HTTP 503 and `Retry-After`; reconnect and the load balancer sends you to another node;
+- the client cannot keep up: close code **4503** with `{"reason": "slow_consumer", "retryAfterMs": N}`;
+- a frame exceeds the hard size cap (1009), or nothing was received for 60 s (send heartbeats).
+
+Close reasons with `retryAfterMs` are JSON in the WebSocket close frame (`event.reason` in the browser). On every close except an auth failure, reconnect with **jittered** exponential backoff and resume from your last watermark (`converger:` socket) or `last_activity_id` (legacy socket) so you miss nothing. Jitter matters: without it, every client of a restarted node reconnects at the same instant. A client that manages its own reconnects should wait `retryAfterMs` when the close carries one. The `phoenix` client schedules its reconnect before `onClose` callbacks run, so give it a jittered `reconnectAfterMs` instead (its default has no jitter):
+
+```javascript
+const socket = new Socket(url, {
+  params: { token },
+  // 1 s, 2 s, 4 s ... capped at 30 s, each with up to 50% random jitter.
+  reconnectAfterMs: (tries) => {
+    const base = Math.min(30_000, 1_000 * 2 ** (tries - 1));
+    return base / 2 + Math.random() * (base / 2);
+  },
+});
+```
 
 The `phoenix` client reconnects automatically with backoff and rejoins its channels; handle a refused connection (inactive channel, expired token) by fetching a new token. Sockets connected with a channel-level token that has neither `user_id` nor `conversation_id` have no socket id and cannot be disconnected individually or by channel, so always issue tokens with `user.id`.
 

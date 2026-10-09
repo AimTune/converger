@@ -97,6 +97,7 @@ Telemetry metric names are converted to Prometheus names by replacing `.` with `
 | `oban.job.exception.duration` | last value (ms) | | Failed Oban job executions |
 | `converger.activities.create.count` | counter | | Every created activity |
 | `converger.rate_limit.exceeded.count` | counter | `bucket` | Rejected rate-limited requests and login lockouts |
+| `converger.socket.limit.count` | counter | `reason` | WebSocket limit hits: `rate_limited`, `payload_too_large`, `frame_too_large`, `too_many_joins`, `slow_consumer`, `ephemeral_dropped`, `draining` (see [WebSocket limits](websocket-limits.md)) |
 
 Most timings are `last_value` gauges, which show the latest sample rather than a distribution. Use them for
 "is anything wrong" checks, and use traces for latency analysis. `converger.repo.query.queue_time` growing is
@@ -174,15 +175,19 @@ time.
 
 ## Health endpoints
 
-There is no `/health` or readiness endpoint yet. Until one exists:
+| Probe | Answer |
+| --- | --- |
+| `GET /health/live` | `200 {"status": "ok"}` while the node is up. |
+| `GET /health/ready` | `200 {"status": "ready"}`; `503 {"status": "draining"}` once the node has started shutting down. |
 
-- use a TCP probe on `PORT` for liveness and readiness;
-- if the load balancer health-checks over plain HTTP while `FORCE_SSL` is on, either send `Host: localhost` or add
-  the probe path to `FORCE_SSL_EXCLUDE_PATHS` (see [Deployment](../deployment.md#tls-hsts-and-websocket-origins));
-- gate rollouts on `bin/migrate` finishing (see [Migrations and maintenance windows](migrations.md)).
+Both need no authentication, are served before the HTTPS redirect (no `FORCE_SSL_EXCLUDE_PATHS` entry needed) and
+are not logged per request. Use `/health/ready` as the load balancer and Kubernetes readiness probe, so a stopping
+node leaves rotation before its WebSockets are drained; see
+[WebSocket limits and draining](websocket-limits.md#draining-on-shutdown). Gate rollouts on `bin/migrate`
+finishing (see [Migrations and maintenance windows](migrations.md)).
 
-`GET /health/live` and `GET /health/ready` (database, Oban, draining, migrations) and Kubernetes manifests are
-Planned ([#29](https://github.com/AimTune/converger/issues/29)).
+Readiness checks for the database, Oban and migrations, and Kubernetes manifests, are Planned
+([#29](https://github.com/AimTune/converger/issues/29)).
 
 ## Channel health checks
 
@@ -229,6 +234,8 @@ With the current metrics, reasonable starting alerts are:
 - `rate(phoenix_http_request_count{status=~"5.."}[5m])` above your baseline;
 - `converger_repo_query_queue_time` consistently above a few milliseconds (pool saturation);
 - `rate(converger_rate_limit_exceeded_count[5m])` by `bucket` (abuse, or limits set too low);
+- `rate(converger_socket_limit_count{reason="slow_consumer"}[5m])` (clients on slow networks, or a node too busy to
+  write to its sockets) and the other `reason`s (abusive clients, or WebSocket limits set too low);
 - channel health transitions to `unhealthy` (from the alert webhook or the logs);
 - `Delivery dead-lettered` warnings in the logs.
 
