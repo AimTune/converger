@@ -113,8 +113,13 @@ These events are emitted but not yet exported. Attach your own handler (or add a
 | `[:converger, :deliveries, :dead_lettered]` | `attempts` | `delivery_id`, `activity_id`, `channel_id`, `error` |
 | `[:converger, :middleware, :exception]` | `count` | `middleware`, `type`, `activity_id`, `channel_id`, `kind`, `reason`, `stacktrace` |
 | `[:converger, :rate_limit, :exceeded]` | `count` | `bucket`, `key`, `limit`, `scale_ms`, `retry_after_ms` (exported as the counter above, by `bucket`) |
+| `[:converger, :deprecated, :use]` | `count` (always 1) | `surface` (`:legacy_socket`, `:token_endpoint` for `POST /api/v1/tokens`, `:channel_token` for other `x-channel-token` uses), `tenant_id`, and `conversation_id` for the socket |
 
 Oban, Ecto, Phoenix and Bandit also emit their standard telemetry events.
+
+Every use of a deprecated surface also logs a `Deprecated <surface> used` warning (once per connection for the legacy
+socket, once per request for HTTP) with `deprecated` and `tenant_id` in the log metadata. Search for these warnings
+to find integrations that still need to [migrate](../api/migrating-from-legacy.md).
 
 ## Tracing with OpenTelemetry
 

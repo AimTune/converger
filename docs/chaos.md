@@ -90,7 +90,7 @@ builds the release image.
 | Transport | Request | Acknowledged when |
 | --- | --- | --- |
 | REST | `POST /api/v1/conversations/:id/activities` with `x-api-key` and `x-idempotency-key` | `2xx` response with the activity id |
-| WebSocket | legacy socket `/socket/websocket`, channel `conversation:ID`, push `new_activity` with `idempotency_key` | `phx_reply` with status `ok` (the response carries the activity `id` and `seq`) |
+| WebSocket | Converger API socket `/socket/converger/websocket`, channel `converger:conversation:ID`, push `postActivity` with `clientId` | `phx_reply` with status `ok` (the response carries the activity `id`, `seq` and `watermark`) |
 
 Every message keeps its idempotency key across retries. Connection errors,
 timeouts and `5xx` responses are retried with backoff. A WebSocket push whose
@@ -161,6 +161,9 @@ channel
 
 Keep the key when re-sending after a timeout or reconnect; use a new one per
 message.
+
+Since [#23](https://github.com/AimTune/converger/issues/23) the harness drives the Converger API socket with
+`postActivity` and `clientId` instead; the legacy push is deprecated.
 
 ### Deliveries stuck for 30 minutes after a crash
 

@@ -21,6 +21,8 @@ defmodule ConvergerWeb.Endpoint do
     error_handler: {ConvergerWeb.SocketGuard, :handle_error, []}
   ]
 
+  # Deprecated (#23): the pre-v1 legacy socket. Use /socket/converger, the
+  # single WebSocket entry point. See ConvergerWeb.Deprecation.
   socket "/socket", ConvergerWeb.UserSocket,
     websocket: @client_websocket,
     longpoll: false,
