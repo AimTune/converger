@@ -9,7 +9,7 @@ description: A replayed dead letter keeps its delivery row, is flipped from fail
 | **Status** | Accepted |
 | **Date** | 2026-10-09 |
 | **Issue** | [#32](https://github.com/AimTune/converger/issues/32) |
-| **Pull request** | Pending |
+| **Pull request** | [#121](https://github.com/AimTune/converger/pull/121) |
 | **Related** | [ADR-0001](0001-transactional-outbox-with-oban.md), [ADR-0002](0002-broadway-for-throughput-oban-for-retries.md), [ADR-0012](0012-secrets-at-rest-and-audit-redaction.md), [ADR-0018](0018-keyset-pagination.md), [ADR-0019](0019-per-channel-retry-policy-delivery-error-and-lifeline.md) |
 
 ## Context and problem statement
