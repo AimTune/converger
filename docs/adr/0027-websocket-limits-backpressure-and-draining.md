@@ -9,7 +9,7 @@ description: Per-socket frame, rate and join limits and slow-consumer protection
 | **Status** | Accepted |
 | **Date** | 2026-10-09 |
 | **Issue** | [#27](https://github.com/AimTune/converger/issues/27) |
-| **Pull request** | to be added on merge |
+| **Pull request** | [#117](https://github.com/AimTune/converger/pull/117) |
 | **Related** | [ADR-0013](0013-cluster-wide-rate-limiting-with-hammer-and-pubsub.md), [ADR-0020](0020-per-subject-socket-ids-and-presence.md), [ADR-0022](0022-deployment-hardening.md), [ADR-0024](0024-converger-protocol-v1-as-superset-of-mekik-1.md) |
 
 ## Context and problem statement
