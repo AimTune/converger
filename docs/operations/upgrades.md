@@ -30,8 +30,7 @@ Rollback: redeploy the previous image when the migrations were expand-only; for 
 
 | Source | What it tells you |
 | --- | --- |
-| [`CHANGELOG.md`](https://github.com/AimTune/converger/blob/main/CHANGELOG.md) | Toolchain and dependency upgrades with notes, currently all under **Unreleased**. |
-| [`VERSIONS.md`](https://github.com/AimTune/converger/blob/main/VERSIONS.md) | Feature roadmap grouped into milestones (v1.0 MVP to v3.0 Enterprise). These are planning milestones, not git tags or package versions, and some checkboxes lag behind the code (for example channel config encryption at rest is implemented). |
+| [`CHANGELOG.md`](https://github.com/AimTune/converger/blob/main/CHANGELOG.md) | Notable changes in [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format, currently all under **Unreleased**. Its last section, "Milestones before this changelog", keeps the former `VERSIONS.md` feature milestones (v1.0 MVP to v3.0 Enterprise). Those are planning milestones, not git tags or package versions, and some checkboxes lag behind the code. |
 | Pull request descriptions | Each merged PR has a "Deployment notes" or "Breaking changes" section when operators must act. |
 | `mix.exs` | Application version, currently `0.1.0`. |
 

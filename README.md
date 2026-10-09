@@ -2,7 +2,7 @@
 
 **Multi-tenant, high-performance real-time messaging backbone.**
 
-Converger is a scalable messaging infrastructure built with **Elixir** and **Phoenix Channels**. It enables applications to create isolated conversations, exchange activities, and stream messages in real-time with ultra-low latency.
+Converger is a scalable messaging infrastructure built with **Elixir** and **Phoenix Channels**. It connects a tenant's channels (webhooks, WhatsApp, WebSocket clients) through conversations: every activity is persisted first, streamed to connected clients in real time, and delivered to the conversation's channel and any routed channels with retries.
 
 ## Documentation
 
@@ -22,7 +22,7 @@ The site is built with Docusaurus from [`website/`](website/) and uses [`docs/`]
 
 - **Multi-tenant by Design**: Full data isolation and tenant-scoped authentication via API Keys.
 - **Real-time Engine**: Powered by Phoenix Channels for instant, bidirectional messaging.
-- **High Performance**: Validated to handle **5,000+ messages/second** on a single node.
+- **Channels and routing**: Pluggable channel adapters with `inbound`, `outbound` or `duplex` modes, and routing rules that fan activities out to other channels.
 - **Observability Stack**: Built-in support for **OpenTelemetry**, Prometheus, Grafana, Jaeger, and Loki.
 - **Reliability & Safety**:
     - **Idempotency**: `x-idempotency-key` header (REST) and `idempotency_key` field on the legacy WebSocket `new_activity` push, so clients can retry after a lost reply without duplicates.
@@ -35,22 +35,21 @@ The site is built with Docusaurus from [`website/`](website/) and uses [`docs/`]
 
 ## 🛠️ Tech Stack
 
-- **Linguagem/Framework**: [Elixir](https://elixir-lang.org/) / [Phoenix Framework](https://www.phoenixframework.org/)
+- **Language/Framework**: [Elixir](https://elixir-lang.org/) / [Phoenix Framework](https://www.phoenixframework.org/)
 - **Database**: [PostgreSQL](https://www.postgresql.org/)
-- **Background Jobs**: [Oban](https://github.com/soren/oban)
+- **Background Jobs**: [Oban](https://github.com/oban-bg/oban)
 - **Monitoring**: OpenTelemetry, Prometheus, Grafana
 - **Traces**: Jaeger
 - **Logs**: Loki
 
 ---
 
-## 🏎️ Performance Benchmarks
+## 🏎️ Performance
 
-In recent stress tests on a live PostgreSQL database:
-- **Simulated Concurrency**: 1,000 concurrent WebSocket sessions.
-- **Peak Throughput**: **~5,200 messages/second**.
-- **Sustained Load**: Stable **~4,300 msgs/sec** during 100,000 message bursts.
-- **Efficiency**: Optimized connection pool management (pool size: 100).
+There are no published throughput numbers yet. Earlier figures in this README came from an in-process test and
+were removed because they did not reflect a real deployment. A load testing harness with published baselines is
+planned in [#34](https://github.com/AimTune/converger/issues/34). Durability under failure is tested today by the
+[chaos test](docs/chaos.md).
 
 ---
 
@@ -64,7 +63,7 @@ In recent stress tests on a live PostgreSQL database:
 ### Installation
 1.  **Clone the repository**:
     ```bash
-    git clone https://github.com/username/converger.git
+    git clone https://github.com/AimTune/converger.git
     cd converger
     ```
 2.  **Install dependencies**:
@@ -135,16 +134,43 @@ Production setup, migrations, backups and upgrades are covered in
 ## 🏗️ Architecture
 
 ```mermaid
-graph TD
-    Client[Client App/SDK] -->|WebSocket/REST| API[Converger API]
-    API -->|Auth| PG[(Postgres)]
-    API -->|Broadcast| PubSub[Phoenix PubSub]
-    PubSub -->|Real-time| Client
-    API -->|Telemetry| OTEL[OpenTelemetry Collector]
-    OTEL --> Prometheus
-    OTEL --> Jaeger
-    OTEL --> Loki
+flowchart LR
+    subgraph In["Inbound (channel mode inbound or duplex)"]
+        Client["Client app / SDK<br/>REST or WebSocket"]
+        Provider["Provider webhook<br/>WhatsApp, generic webhook"]
+    end
+
+    subgraph Converger
+        API["API and sockets<br/>auth, rate limits, signatures"]
+        Conv["Conversation<br/>activity stored with seq"]
+        Pipe["Delivery pipeline<br/>Oban, Broadway or Inline"]
+        Rules["Routing rules"]
+    end
+
+    PG[("PostgreSQL<br/>activities, outbox, deliveries")]
+    PubSub["Phoenix PubSub"]
+
+    subgraph Out["Outbound (channel mode outbound or duplex)"]
+        Own["Conversation's channel<br/>adapter"]
+        Routed["Routed target channels<br/>adapters"]
+        WS["WebSocket clients"]
+    end
+
+    Client --> API
+    Provider --> API
+    API --> Conv
+    Conv -->|"same transaction"| PG
+    Conv --> PubSub --> WS
+    Conv --> Pipe
+    Pipe --> Rules
+    Pipe -->|"retries, dead letters"| Own
+    Rules -->|"fan-out"| Routed
 ```
+
+Every activity is committed together with its outbox job before anything is broadcast or delivered, so a crash
+cannot lose an acknowledged message ([ADR-0001](docs/adr/0001-transactional-outbox-with-oban.md)). The full picture
+is in the [architecture overview](https://converger.aimtune.dev/architecture/overview). Telemetry goes to
+OpenTelemetry, Prometheus, Jaeger and Loki ([Observability](https://converger.aimtune.dev/operations/observability)).
 
 The WebSocket wire protocol (Converger Protocol v1, a superset of mekik/1) is specified in
 [docs/protocol/v1.md](docs/protocol/v1.md), with the rich message vocabulary in
@@ -152,5 +178,14 @@ The WebSocket wire protocol (Converger Protocol v1, a superset of mekik/1) is sp
 
 ---
 
+## 🤝 Contributing and community
+
+- [Contributing guide](CONTRIBUTING.md) and [code of conduct](CODE_OF_CONDUCT.md)
+- [Security policy](SECURITY.md): report vulnerabilities privately, never in a public issue
+- [Changelog](CHANGELOG.md) and [roadmap](https://converger.aimtune.dev/roadmap)
+
+---
+
 ## 📄 License
-This project is commercially licensed. See `LICENSE` for details (if applicable).
+
+Converger is released under the [MIT License](LICENSE).

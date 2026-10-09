@@ -184,6 +184,8 @@ const config: Config = {
             { label: "Contributing", to: "/contributing" },
             { label: "GitHub", href: GITHUB_REPO },
             { label: "Issues", href: `${GITHUB_REPO}/issues` },
+            { label: "Security policy", href: `${GITHUB_REPO}/blob/main/SECURITY.md` },
+            { label: "License (MIT)", href: `${GITHUB_REPO}/blob/main/LICENSE` },
           ],
         },
       ],

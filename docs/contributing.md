@@ -8,6 +8,26 @@ Thanks for helping with Converger. This page covers the workflow from a fresh cl
 local setup, branch and commit conventions, the checks CI runs (and how to run them first), Windows specifics,
 and the rule that every change ships with its documentation.
 
+## Code of conduct, issues and license
+
+- Everyone taking part follows the
+  [code of conduct](https://github.com/AimTune/converger/blob/main/CODE_OF_CONDUCT.md) (Contributor Covenant 2.1).
+  Report violations to the address given there.
+- Open issues with the forms in
+  [`.github/ISSUE_TEMPLATE/`](https://github.com/AimTune/converger/tree/main/.github/ISSUE_TEMPLATE): **Bug report**,
+  **Feature request** or **Channel adapter request** (collected in
+  [#44](https://github.com/AimTune/converger/issues/44)). Blank issues are disabled.
+- **Security problems never go in a public issue.** Follow
+  [`SECURITY.md`](https://github.com/AimTune/converger/blob/main/SECURITY.md) (private advisory or email); see also
+  [Reporting a vulnerability](security/overview.md#reporting-a-vulnerability).
+- Converger is licensed under the [MIT License](https://github.com/AimTune/converger/blob/main/LICENSE). By
+  opening a pull request you agree that your contribution is licensed under the same terms (inbound = outbound;
+  there is no CLA). Code copied from elsewhere must have a compatible license, and its notice is kept next to it
+  (as for the vendored mekik fixtures in `test/protocol/fixtures/mekik/`).
+  See [ADR-0026](adr/0026-mit-license-and-community-health-files.md).
+- Notable changes go in [`CHANGELOG.md`](https://github.com/AimTune/converger/blob/main/CHANGELOG.md) under
+  **Unreleased** ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format), in the same pull request.
+
 ## Development setup
 
 The full walkthrough is in [Getting started](./getting-started.md). In short:

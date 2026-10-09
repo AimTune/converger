@@ -334,10 +334,17 @@ before the password is checked, and unauthenticated health endpoints for load ba
 
 ## Reporting a vulnerability
 
-Do not open a public issue for security problems. Open a private security advisory on GitHub
-(**Security** tab, **Report a vulnerability**) at
-[github.com/AimTune/converger/security/advisories/new](https://github.com/AimTune/converger/security/advisories/new),
-with the affected version or commit, reproduction steps and impact. There is no `SECURITY.md` yet.
+Do not open a public issue for security problems. The process is in
+[`SECURITY.md`](https://github.com/AimTune/converger/blob/main/SECURITY.md):
+
+- Preferred: a private security advisory on GitHub (**Security** tab, **Report a vulnerability**) at
+  [github.com/AimTune/converger/security/advisories/new](https://github.com/AimTune/converger/security/advisories/new).
+- Fallback: email `hamzaagareng@gmail.com` with the subject `[converger security]`.
+
+Include the affected version or commit, the deployment type, reproduction steps and impact. Reports are
+acknowledged within 3 business days and assessed within 10. Disclosure is agreed with the reporter (90 days by
+default) and published as a GitHub security advisory. Until releases are tagged, only the latest `main` receives
+fixes.
 
 ## Related ADRs
 

@@ -1,0 +1,67 @@
+name: Bug report
+description: Something in Converger does not work as documented.
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Security problems go to a [private advisory](https://github.com/AimTune/converger/security/advisories/new), not here.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Requests (curl, WebSocket frames), channel type and config (without secrets), or a failing test.
+      placeholder: |
+        1. Create a channel of type `webhook` with ...
+        2. POST /api/v1/...
+        3. ...
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - REST API
+        - WebSocket / Protocol v1
+        - Delivery pipeline / retries
+        - Channel adapter
+        - Inbound webhooks
+        - Admin panel / tenant portal
+        - Deployment / configuration
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: The `main` commit SHA or image tag you run.
+    validations:
+      required: true
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: How do you run Converger?
+      options:
+        - docker compose
+        - Docker image / Kubernetes
+        - mix release
+        - mix phx.server (development)
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Relevant log lines or error responses. Remove tokens, API keys and personal data.
+      render: text

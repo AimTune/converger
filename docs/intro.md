@@ -97,3 +97,9 @@ Broadway (`Converger.Pipeline.Broadway`) and inline (`Converger.Pipeline.Inline`
 - [Architecture overview](architecture/overview.md): processes, supervision, the activity flow and the delivery pipeline.
 - [Architecture decision records](adr/index.md): why things are built the way they are.
 - [Roadmap](roadmap.md): what is done and what is next.
+
+## License
+
+Converger is open source under the [MIT License](https://github.com/AimTune/converger/blob/main/LICENSE)
+([ADR-0026](adr/0026-mit-license-and-community-health-files.md)). Contributions are welcome: see
+[Contributing](contributing.md).

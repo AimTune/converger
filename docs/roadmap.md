@@ -137,7 +137,7 @@ Make Converger adoptable by someone who has never read its source: a license, a 
 
 | Issue | Title | State |
 | --- | --- | --- |
-| [#48](https://github.com/AimTune/converger/issues/48) | Documentation site and OSS hygiene: guides, adapter authoring, deployment, LICENSE, CONTRIBUTING, SECURITY, templates, CHANGELOG | Open (this site, [ADR-0025](adr/0025-docusaurus-site-and-docs-with-every-change.md)) |
+| [#48](https://github.com/AimTune/converger/issues/48) | Documentation site and OSS hygiene: guides, adapter authoring, deployment, LICENSE, CONTRIBUTING, SECURITY, templates, CHANGELOG | Done: docs site ([ADR-0025](adr/0025-docusaurus-site-and-docs-with-every-change.md)); MIT license, `SECURITY.md`, code of conduct, issue forms and changelog ([ADR-0026](adr/0026-mit-license-and-community-health-files.md)) |
 | [#45](https://github.com/AimTune/converger/issues/45) | OpenAPI 3.1 specification, Swagger UI, consistent error envelope and API versioning policy | Open |
 | [#46](https://github.com/AimTune/converger/issues/46) | TypeScript SDK (`@converger/client`) implementing Protocol v1 with reconnect, watermark resume, outbox and token refresh | Open |
 | [#47](https://github.com/AimTune/converger/issues/47) | Server-side SDKs: Python and Go (REST + WebSocket), Elixir client library, signature verification helpers | Open |
