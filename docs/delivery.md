@@ -220,7 +220,7 @@ Rules:
 
 - Only `failed` deliveries can be replayed. The API answers `409` for any other status.
 - Deliveries on an **inactive** channel are refused (`400 Channel is inactive`) and skipped by bulk replays. Enable the channel first.
-- Replays always go through Oban, whatever the pipeline backend, the same as automatic retries ([ADR-0002](adr/0002-broadway-for-throughput-oban-for-retries.md)). The job is inserted in the same transaction as the reset, so a committed replay always has its job.
+- Replays always go through Oban, whatever the pipeline backend, the same as automatic retries ([ADR-0002](adr/0002-broadway-for-throughput-oban-for-retries.md)), in the queue of the tenant's [tier](#tenant-tiers-fair-queueing). A channel can also replay its recent dead letters automatically when its [circuit breaker closes](#circuit-breaker) (opt-in). The job is inserted in the same transaction as the reset, so a committed replay always has its job.
 - `last_error` is kept until the next attempt overwrites it, so the cause stays visible while the replay is pending.
 - A delivery that was `sent` and then failed by a provider receipt is sent to the provider again: that is what replay means.
 
@@ -231,10 +231,6 @@ Bulk replays work in chunks of 500 deliveries, oldest failure first. Each chunk 
 ```
 
 Retrying a cancelled job from Oban Web also re-runs the delivery, but it does not reset `attempts`, so the first failure dead-letters it again, and it is neither audited nor recorded in `retried_by`. Use the Deliveries page or the API instead.
-
-:::info Planned
-Automatic replay of dead letters when a channel's circuit breaker closes (an optional part of [#32](https://github.com/AimTune/converger/issues/32)) is not implemented. Note that while a breaker is open, deliveries are [parked](#circuit-breaker) rather than dead-lettered, so they need no replay.
-:::
 
 ### Deliveries page
 
@@ -347,8 +343,12 @@ Configuration (defaults shown):
 config :converger, :circuit_breaker,
   failure_threshold: 5,   # consecutive transient failures before opening
   cooldown_ms: 30_000,    # time open before a probe
-  park_seconds: 600       # sleep of a parked job before it re-checks on its own
+  park_seconds: 600,      # sleep of a parked job before it re-checks on its own
+  replay_dead_letters_on_close: false,  # opt-in, see below
+  replay_window_ms: 3_600_000          # how far back dead letters are replayed
 ```
+
+**Replaying dead letters on close (opt-in).** With `replay_dead_letters_on_close: true`, a probe that closes the breaker also enqueues `Converger.Workers.ChannelDeadLetterReplayWorker` (queue `default`). It replays the channel's dead letters that failed within the last `replay_window_ms`, using the [bulk replay](#replaying-dead-letters) rules, as the `system` actor `circuit_breaker`: every replay is audited and has `retried_by: "system:circuit_breaker"`. These are typically deliveries that used up their retries just before the breaker opened. Dead letters from permanent errors in the window are replayed too and fail again after one attempt. A manual resume never replays; use the Deliveries page or the API for that.
 
 When the breaker opens or closes, the tenant's `alert_webhook_url` (if set) receives a POST. The request is fire-and-forget with a 10 s timeout, and a failed probe re-opening the breaker sends nothing:
 

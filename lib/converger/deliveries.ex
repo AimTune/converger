@@ -415,13 +415,20 @@ defmodule Converger.Deliveries do
       |> Repo.all()
       |> MapSet.new()
 
+    # Replays run in the queue of the tenant's tier, like first attempts.
+    queues =
+      deliveries
+      |> Enum.map(& &1.channel_id)
+      |> Enum.uniq()
+      |> Map.new(&{&1, Converger.Pipeline.Oban.queue_for_channel(&1)})
+
     jobs =
       for %{activity_id: activity_id, channel_id: channel_id} <- deliveries,
           not MapSet.member?(running, {activity_id, channel_id}) do
-        Converger.Workers.ActivityDeliveryWorker.new(%{
-          activity_id: activity_id,
-          channel_id: channel_id
-        })
+        Converger.Workers.ActivityDeliveryWorker.new(
+          %{activity_id: activity_id, channel_id: channel_id},
+          queue: Map.fetch!(queues, channel_id)
+        )
       end
 
     Oban.insert_all(jobs)
