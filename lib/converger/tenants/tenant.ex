@@ -7,6 +7,7 @@ defmodule Converger.Tenants.Tenant do
   @api_key_prefix "cvg_live_"
   # Number of random characters (after the prefix) kept for display.
   @display_chars 4
+  @tiers ~w(high default bulk)
 
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
@@ -21,11 +22,13 @@ defmodule Converger.Tenants.Tenant do
     field :previous_api_key_expires_at, :utc_datetime_usec
     field :status, :string, default: "active"
     field :alert_webhook_url, :string
+    # Delivery queue tier, see Converger.Pipeline.Oban.queue_for_tier/1.
+    field :tier, :string, default: "default"
     # Rate-limit overrides, see Converger.RateLimit and limits_changeset/2.
     field :limits, :map, default: %{}
     field :allowed_upload_types, {:array, :string}
     # Activities and deliveries older than this many days are archived to
-    # object storage and removed (Converger.Retention, ADR-0026).
+    # object storage and removed (Converger.Retention, ADR-0033).
     field :retention_days, :integer, default: 365
 
     timestamps(type: :utc_datetime_usec)
@@ -34,11 +37,22 @@ defmodule Converger.Tenants.Tenant do
   @doc "Public prefix of every generated API key."
   def api_key_prefix, do: @api_key_prefix
 
+  @doc "Delivery queue tiers, see `Converger.Pipeline.Oban.queue_for_tier/1`."
+  def tiers, do: @tiers
+
   @doc false
   def changeset(tenant, attrs) do
     tenant
-    |> cast(attrs, [:name, :status, :alert_webhook_url, :allowed_upload_types, :retention_days])
+    |> cast(attrs, [
+      :name,
+      :status,
+      :alert_webhook_url,
+      :allowed_upload_types,
+      :tier,
+      :retention_days
+    ])
     |> validate_required([:name, :retention_days])
+    |> validate_inclusion(:tier, @tiers)
     |> validate_number(:retention_days,
       greater_than_or_equal_to: Converger.Retention.min_retention_days()
     )
@@ -140,7 +154,12 @@ defmodule Converger.Tenants.Tenant do
       case URI.parse(value) do
         %URI{scheme: scheme, host: host}
         when scheme in ["http", "https"] and is_binary(host) and host != "" ->
-          []
+          # The server POSTs health alerts here: apply the same SSRF guard
+          # as webhook channels (private, loopback and metadata targets).
+          case Converger.Channels.UrlGuard.check(value) do
+            :ok -> []
+            {:error, message} -> [{field, "is not allowed: #{message}"}]
+          end
 
         _ ->
           [{field, "must be a valid HTTP or HTTPS URL"}]

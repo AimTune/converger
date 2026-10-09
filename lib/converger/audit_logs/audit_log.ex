@@ -18,8 +18,14 @@ defmodule Converger.AuditLogs.AuditLog do
   end
 
   @valid_actor_types ~w(admin tenant_api tenant_user system)
-  @valid_actions ~w(create update delete toggle_status toggle_enabled rotate_api_key)
-  @valid_resource_types ~w(tenant channel routing_rule admin_user tenant_user)
+  @valid_actions ~w(
+    create update delete toggle_status toggle_enabled rotate_api_key retry
+    pause_deliveries resume_deliveries
+  )
+  @valid_resource_types ~w(tenant channel routing_rule admin_user tenant_user delivery)
+
+  def valid_actions, do: @valid_actions
+  def valid_resource_types, do: @valid_resource_types
 
   def changeset(audit_log, attrs) do
     audit_log

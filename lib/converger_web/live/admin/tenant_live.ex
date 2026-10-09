@@ -68,6 +68,21 @@ defmodule ConvergerWeb.Admin.TenantLive do
     end
   end
 
+  def handle_event("cycle_tier", %{"id" => id}, socket) do
+    tenant = Tenants.get_tenant!(id)
+    tiers = Tenant.tiers()
+    index = Enum.find_index(tiers, &(&1 == tenant.tier)) || 0
+    next = Enum.at(tiers, rem(index + 1, length(tiers)))
+
+    case Tenants.update_tenant(tenant, %{tier: next}, socket.assigns.actor) do
+      {:ok, _tenant} ->
+        {:noreply, assign(socket, tenants: list_tenants()) |> put_flash(:info, "Tier updated")}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Failed to update tier")}
+    end
+  end
+
   def handle_event("delete", %{"id" => id}, socket) do
     tenant = Tenants.get_tenant!(id)
 
@@ -129,6 +144,12 @@ defmodule ConvergerWeb.Admin.TenantLive do
             />
           </div>
           <div>
+            <label style="display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.85em; color: #555;">Delivery tier</label>
+            <select name="tenant[tier]" style="padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+              <option :for={tier <- Tenant.tiers()} value={tier} selected={tier == "default"}><%= tier %></option>
+            </select>
+          </div>
+          <div>
             <.input
               field={@form[:retention_days]}
               type="number"
@@ -166,6 +187,7 @@ defmodule ConvergerWeb.Admin.TenantLive do
             <th>Alert Webhook</th>
             <th>Retention</th>
             <th>Status</th>
+            <th>Tier</th>
             <th>Actions</th>
           </tr>
         </thead>
@@ -185,6 +207,16 @@ defmodule ConvergerWeb.Admin.TenantLive do
               <span class={"badge badge-#{tenant.status}"}>
                 <%= tenant.status %>
               </span>
+            </td>
+            <td>
+              <button
+                phx-click="cycle_tier"
+                phx-value-id={tenant.id}
+                class="badge"
+                title="Delivery queue tier: high → default → bulk"
+              >
+                <%= tenant.tier %>
+              </button>
             </td>
             <td>
               <button phx-click="toggle_status" phx-value-id={tenant.id} class="badge">

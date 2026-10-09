@@ -71,6 +71,32 @@ if pagination_overrides != [] do
   config :converger, :pagination, pagination_overrides
 end
 
+# Client WebSocket limits and draining (defaults in config/config.exs), e.g.
+# WS_MAX_MESSAGES_PER_WINDOW=50. See docs/operations/websocket-limits.md.
+websocket_env = [
+  max_frame_bytes: "WS_MAX_FRAME_BYTES",
+  max_messages: "WS_MAX_MESSAGES_PER_WINDOW",
+  rate_window_ms: "WS_RATE_WINDOW_MS",
+  max_joins: "WS_MAX_JOINS",
+  ephemeral_drop_queue_len: "WS_EPHEMERAL_DROP_QUEUE_LEN",
+  slow_consumer_queue_len: "WS_SLOW_CONSUMER_QUEUE_LEN",
+  reconnect_base_ms: "WS_RECONNECT_BASE_MS",
+  reconnect_jitter_ms: "WS_RECONNECT_JITTER_MS",
+  drain_delay_ms: "WS_DRAIN_DELAY_MS",
+  drain_batch_size: "WS_DRAIN_BATCH_SIZE",
+  drain_batch_interval_ms: "WS_DRAIN_BATCH_INTERVAL_MS",
+  drain_shutdown_ms: "WS_DRAIN_SHUTDOWN_MS"
+]
+
+websocket_overrides =
+  for {key, var} <- websocket_env, value = System.get_env(var), value not in [nil, ""] do
+    {key, String.to_integer(value)}
+  end
+
+if websocket_overrides != [] do
+  config :converger, :websocket, websocket_overrides
+end
+
 # Oban Lifeline: jobs left `executing` by a node that died (SIGKILL, OOM, lost
 # host) are made available again after OBAN_LIFELINE_RESCUE_AFTER_SECONDS
 # (default 30 minutes, config/config.exs), checked every

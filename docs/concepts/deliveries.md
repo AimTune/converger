@@ -4,7 +4,7 @@ description: A delivery records one activity being sent to one channel - statuse
 sidebar_position: 7
 ---
 
-A delivery is the record of one [activity](activities.md) being sent to one [channel](channels.md) through its adapter. There is at most one delivery per `(activity, channel)` pair. It tracks the outcome (`pending`, `sent`, `delivered`, `read`, `failed`), the number of attempts, the last error, and the provider's message id, so that later delivery and read receipts can be matched to it.
+A delivery is the record of one [activity](activities.md) being sent to one [channel](channels.md) through its adapter. There is at most one delivery per `(activity, channel)` pair. It tracks the outcome (`pending`, `paused`, `sent`, `delivered`, `read`, `failed`), the number of attempts, the last error, and the provider's message id, so that later delivery and read receipts can be matched to it.
 
 This page describes the record. The [delivery pipeline](../delivery.md) page covers the job mechanics (Oban, backends, Lifeline) in depth.
 
@@ -19,7 +19,7 @@ Table `deliveries`:
 | `id` | uuid | | Primary key. Webhook requests send it as `x-converger-delivery-id`, which stays stable across retries. |
 | `activity_id` | uuid | | The activity. Unique together with `channel_id`. |
 | `channel_id` | uuid | | The target channel. |
-| `status` | text | `"pending"` | `pending`, `sent`, `delivered`, `read`, `failed`. |
+| `status` | text | `"pending"` | `pending`, `paused`, `sent`, `delivered`, `read`, `failed`. `paused` means parked by an open [circuit breaker](../delivery.md#circuit-breaker) or a manual pause. |
 | `attempts` | integer | `0` | Attempts made, successful or not. Drives the retry policy. |
 | `last_error` | text | | Message of the last failure, or the provider's error for a `failed` receipt. |
 | `sent_at` | utc_datetime_usec | | When the adapter accepted the message (or the provider's `sent` receipt time). |
@@ -27,9 +27,14 @@ Table `deliveries`:
 | `read_at` | utc_datetime_usec | | Provider read receipt. |
 | `provider_message_id` | text | | For example the WhatsApp `wamid` or the Infobip message id. Used to correlate receipts. |
 | `metadata` | map | `{}` | Adapter response metadata, merged on success. |
+| `retry_count` | integer | `0` | How many times the delivery was replayed from the dead-letter queue. |
+| `retried_by` | text | | Who replayed it last, as `"<actor type>:<actor id>"` (for example `"tenant_api:<tenant id>"` or `"admin:ops@example.com"`). |
+| `retried_at` | utc_datetime_usec | | When it was last replayed. |
 | `inserted_at`, `updated_at` | utc_datetime_usec | | |
 
-Indexes: `(activity_id)`, `(channel_id)`, `(status)`, unique `(activity_id, channel_id)`, and partial indexes on `(provider_message_id)` and `(channel_id, provider_message_id)` where `provider_message_id IS NOT NULL`.
+Indexes: `(activity_id)`, `(channel_id)`, `(status)`, unique `(activity_id, channel_id)`, and partial indexes on `(provider_message_id)` and `(channel_id, provider_message_id)` where `provider_message_id IS NOT NULL`, plus `(inserted_at, id)`, `(status, updated_at, id)` and `(channel_id, status, updated_at, id)` for the keyset-paginated lists.
+
+Replay tracking (`retry_count`, `retried_by`, `retried_at`) was added by migration [`20261010032000_add_replay_tracking_to_deliveries`](https://github.com/AimTune/converger/blob/main/priv/repo/migrations/20261010032000_add_replay_tracking_to_deliveries.exs), and the dead-letter indexes by [`20261010032100_add_dead_letter_indexes_to_deliveries`](https://github.com/AimTune/converger/blob/main/priv/repo/migrations/20261010032100_add_dead_letter_indexes_to_deliveries.exs) (built `CONCURRENTLY`).
 
 Receipt tracking was added by migration [`20260227200000_add_receipt_tracking_to_deliveries`](https://github.com/AimTune/converger/blob/main/priv/repo/migrations/20260227200000_add_receipt_tracking_to_deliveries.exs). It added `sent_at`, `read_at` and `provider_message_id`, renamed the old success status `delivered` to `sent` (adapter success only means the message left Converger, while `delivered` is now reserved for the provider's receipt), copied `delivered_at` to `sent_at`, and backfilled `provider_message_id` from `metadata.whatsapp_message_id` or `metadata.infobip_message_id`.
 
@@ -50,18 +55,21 @@ When an activity is created, `Converger.Pipeline.resolve_delivery_channels/1` pi
 stateDiagram-v2
   [*] --> pending : job runs, row created
   pending --> pending : attempt failed, retries left
+  pending --> paused : breaker open / channel paused
+  paused --> pending : breaker closed / channel resumed
   pending --> sent : adapter accepted
   pending --> failed : retries exhausted / permanent error / middleware halt
   sent --> delivered : provider receipt
   sent --> read : provider receipt
   delivered --> read : provider receipt
   sent --> failed : provider "failed" receipt
+  failed --> pending : replay (API or Deliveries page)
   delivered --> failed : provider "failed" receipt
   pending --> delivered : early receipt
   pending --> read : early receipt
 ```
 
-Status ranks are `pending` 0, `sent` 1, `delivered` 2, `read` 3, and `failed` -1. Receipts only move a delivery **forward** (`Deliveries.advance_status/2`):
+Status ranks are `pending` 0, `paused` 0, `sent` 1, `delivered` 2, `read` 3, and `failed` -1. Receipts only move a delivery **forward** (`Deliveries.advance_status/2`):
 
 - a receipt with a higher rank than the current status is applied, and a stale one (for example `delivered` after `read`) is ignored;
 - `failed` is applied from any status except `read`;
@@ -81,7 +89,7 @@ Every status change is broadcast on the conversation's PubSub topic as `delivery
 }
 ```
 
-The admin conversation view uses it to update delivery badges live. Pushing receipts to WebSocket clients as protocol frames is Planned ([#25](https://github.com/AimTune/converger/issues/25)).
+The admin conversation view uses it to update delivery badges live. Converger API WebSocket clients receive every change as a `deliveryStatus` frame (end users with a `user_id` only for activities they sent); see [WebSocket](../websocket.md#5a-receipts-typing-and-presence).
 
 ## Attempts and retries
 
@@ -137,4 +145,6 @@ A delivery is dead-lettered (`status: "failed"`) when its retries run out, when 
 - broadcasts `delivery_status`;
 - cancels the Oban job.
 
-`Deliveries.list_dead_letters/2` and `paginate_dead_letters/2` list failed deliveries, most recently failed first (keyset on `(updated_at, id)`). Failures also lower the channel's [health](channels.md#health-checks) status and can trigger the tenant's alert webhook. A dead-letter queue with inspection and replay through the API and admin UI is Planned ([#32](https://github.com/AimTune/converger/issues/32)).
+`Deliveries.list_dead_letters/2` and `paginate_dead_letters/2` list failed deliveries, most recently failed first (keyset on `(updated_at, id)`). Failures also lower the channel's [health](channels.md#health-checks) status and can trigger the tenant's alert webhook.
+
+Dead letters can be inspected and replayed on the **Deliveries** page of the admin panel and the tenant portal, and through the [tenant API](../api/tenant-api.md#deliveries). A replay moves the delivery back to `pending`, resets `attempts`, records `retry_count`, `retried_by` and `retried_at`, writes an audit log entry and enqueues a new job. See [Replaying dead letters](../delivery.md#replaying-dead-letters) for the rules.

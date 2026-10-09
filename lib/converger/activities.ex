@@ -153,6 +153,39 @@ defmodule Converger.Activities do
   end
 
   @doc """
+  The activity of `conversation_id` stored with `idempotency_key`, or nil.
+  Lets a sender tell a retransmitted send apart from a new one (the
+  WebSocket `ack` reports `duplicate: true`).
+  """
+  def get_activity_by_idempotency_key(_conversation_id, nil), do: nil
+
+  def get_activity_by_idempotency_key(conversation_id, idempotency_key) do
+    Repo.get_by(Activity, conversation_id: conversation_id, idempotency_key: idempotency_key)
+  end
+
+  @doc """
+  The idempotency key (for inbound provider messages: the provider message
+  id, e.g. a WhatsApp `wamid`) of the latest activity in the conversation
+  sent by `sender`, optionally only among activities with `seq <= max_seq`.
+  Nil when there is none.
+  """
+  def latest_idempotency_key(conversation_id, sender, max_seq \\ nil) do
+    query =
+      from(a in Activity,
+        where:
+          a.conversation_id == ^conversation_id and a.sender == ^sender and
+            not is_nil(a.idempotency_key),
+        order_by: [desc: a.seq],
+        limit: 1,
+        select: a.idempotency_key
+      )
+
+    query = if max_seq, do: where(query, [a], a.seq <= ^max_seq), else: query
+
+    Repo.one(query)
+  end
+
+  @doc """
   Create an activity from untrusted client input.
 
   Only `Activity.client_fields/0` are taken from `client_params` (REST body,
@@ -273,7 +306,7 @@ defmodule Converger.Activities do
   end
 
   # `activities` is partitioned by month and the unique index on
-  # (conversation_id, idempotency_key) exists per partition only (ADR-0026),
+  # (conversation_id, idempotency_key) exists per partition only (ADR-0033),
   # so it cannot see a duplicate that was committed in the previous month's
   # partition. This lookup closes that gap: it runs after next_seq/2 took the
   # conversation row lock, which every insert into the conversation takes
@@ -357,7 +390,7 @@ defmodule Converger.Activities do
 
   @doc """
   Deletes an activity and its deliveries. The partitioned tables have no
-  foreign keys (ADR-0026), so the deliveries are removed here rather than by
+  foreign keys (ADR-0033), so the deliveries are removed here rather than by
   `ON DELETE CASCADE`.
   """
   def delete_activity(%Activity{} = activity) do

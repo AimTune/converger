@@ -238,6 +238,7 @@ baseline_alias_usage = [
                :processed,
                :reason,
                :rows,
+               :signal,
                :source,
                :status,
                :tenant_id,

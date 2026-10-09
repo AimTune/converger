@@ -3,7 +3,7 @@ defmodule Converger.Partitions.Conversion do
   Converts the plain (pre-#30) `activities` and `deliveries` tables into
   monthly partitioned tables: create partitioned shadow tables, copy in
   batches, swap. See docs/operations/migrations.md ("Partitioning
-  activities and deliveries") and ADR-0026.
+  activities and deliveries") and ADR-0033.
 
   Three phases, each idempotent and resumable:
 
@@ -45,8 +45,12 @@ defmodule Converger.Partitions.Conversion do
 
   @activity_columns ~w(id tenant_id conversation_id type sender text attachments metadata
                        idempotency_key inserted_at updated_at seq)
+  # The legacy columns as of the migrations before 20261010300100 (including
+  # the dead-letter replay columns of 20261010032000). swap/2 refuses to run
+  # if the legacy table has a column the shadow table lacks.
   @delivery_columns ~w(id activity_id channel_id status attempts last_error delivered_at
-                       metadata inserted_at updated_at sent_at read_at provider_message_id)
+                       metadata inserted_at updated_at sent_at read_at provider_message_id
+                       retry_count retried_by retried_at)
 
   @doc "Whether `table` is already a partitioned table."
   def partitioned?(repo, table) do
@@ -136,6 +140,8 @@ defmodule Converger.Partitions.Conversion do
   """
   def prepare(repo, opts \\ []) do
     today = Keyword.get_lazy(opts, :today, &Date.utc_today/0)
+    # Fail before creating anything if the legacy schema has unknown columns.
+    Enum.each(Partitions.tables(), &legacy_columns(repo, &1))
 
     repo.query!("""
     CREATE TABLE IF NOT EXISTS #{@state_table} (
@@ -214,6 +220,9 @@ defmodule Converger.Partitions.Conversion do
         sent_at timestamp without time zone,
         read_at timestamp without time zone,
         provider_message_id text,
+        retry_count integer NOT NULL DEFAULT 0,
+        retried_by character varying(255),
+        retried_at timestamp without time zone,
         tenant_id uuid NOT NULL,
         activity_inserted_at timestamp without time zone NOT NULL,
         CONSTRAINT deliveries_part_pkey PRIMARY KEY (id, activity_inserted_at)
@@ -225,23 +234,29 @@ defmodule Converger.Partitions.Conversion do
       "CREATE INDEX IF NOT EXISTS deliveries_part_provider_message_id_index ON deliveries_part (provider_message_id) WHERE provider_message_id IS NOT NULL",
       "CREATE INDEX IF NOT EXISTS deliveries_part_channel_id_provider_message_id_index ON deliveries_part (channel_id, provider_message_id) WHERE provider_message_id IS NOT NULL",
       "CREATE INDEX IF NOT EXISTS deliveries_part_inserted_at_id_index ON deliveries_part (inserted_at, id)",
-      "CREATE INDEX IF NOT EXISTS deliveries_part_tenant_id_id_index ON deliveries_part (tenant_id, id)"
+      "CREATE INDEX IF NOT EXISTS deliveries_part_tenant_id_id_index ON deliveries_part (tenant_id, id)",
+      # Dead-letter lists (20261010032100).
+      "CREATE INDEX IF NOT EXISTS deliveries_part_status_updated_at_id_index ON deliveries_part (status, updated_at, id)",
+      "CREATE INDEX IF NOT EXISTS deliveries_part_channel_id_status_updated_at_id_index ON deliveries_part (channel_id, status, updated_at, id)"
     ]
   end
 
   defp install_triggers(repo) do
-    a_cols = Enum.join(@activity_columns, ", ")
-    a_new = Enum.map_join(@activity_columns, ", ", &"NEW.#{&1}")
+    a_columns = legacy_columns(repo, "activities")
+    d_columns = legacy_columns(repo, "deliveries")
+
+    a_cols = Enum.join(a_columns, ", ")
+    a_new = Enum.map_join(a_columns, ", ", &"NEW.#{&1}")
 
     a_set =
-      Enum.map_join(@activity_columns -- ~w(id inserted_at), ", ", &"#{&1} = EXCLUDED.#{&1}")
+      Enum.map_join(a_columns -- ~w(id inserted_at), ", ", &"#{&1} = EXCLUDED.#{&1}")
 
-    d_cols = Enum.join(@delivery_columns, ", ")
-    d_new = Enum.map_join(@delivery_columns, ", ", &"NEW.#{&1}")
+    d_cols = Enum.join(d_columns, ", ")
+    d_new = Enum.map_join(d_columns, ", ", &"NEW.#{&1}")
 
     d_set =
       Enum.map_join(
-        (@delivery_columns -- ~w(id)) ++ ["tenant_id"],
+        (d_columns -- ~w(id)) ++ ["tenant_id"],
         ", ",
         &"#{&1} = EXCLUDED.#{&1}"
       )
@@ -372,7 +387,10 @@ defmodule Converger.Partitions.Conversion do
               [table]
             )
 
-          %{rows: [[n, last]]} = repo.query!(copy_sql(table), [cursor, batch], timeout: :infinity)
+          %{rows: [[n, last]]} =
+            repo.query!(copy_sql(table, legacy_columns(repo, table)), [cursor, batch],
+              timeout: :infinity
+            )
 
           if n > 0 do
             repo.query!(
@@ -389,12 +407,40 @@ defmodule Converger.Partitions.Conversion do
     n
   end
 
+  @doc """
+  Columns of the legacy `table` that are copied and mirrored: the known
+  columns that exist there (older schemas may lack recent ones, which then
+  take their defaults). Raises if the legacy table has a column the shadow
+  table does not know, rather than silently dropping its data.
+  """
+  def legacy_columns(repo, table) do
+    known = if table == "activities", do: @activity_columns, else: @delivery_columns
+
+    %{rows: rows} =
+      repo.query!(
+        "SELECT attname FROM pg_attribute WHERE attrelid = to_regclass($1) " <>
+          "AND attnum > 0 AND NOT attisdropped",
+        [table]
+      )
+
+    present = List.flatten(rows)
+
+    case present -- known do
+      [] ->
+        Enum.filter(known, &(&1 in present))
+
+      unknown ->
+        raise "partition conversion: #{table} has columns #{inspect(unknown)} that the " <>
+                "partitioned table does not have; nothing was changed"
+    end
+  end
+
   # FOR SHARE makes a concurrent UPDATE or DELETE either finish first (and
   # the batch sees its result) or wait for the batch: a copied row can never
   # overwrite a newer version the mirror trigger already wrote, and a
   # deleted row is never resurrected.
-  defp copy_sql("activities") do
-    cols = Enum.join(@activity_columns, ", ")
+  defp copy_sql("activities", columns) do
+    cols = Enum.join(columns, ", ")
 
     """
     WITH batch AS (
@@ -406,9 +452,9 @@ defmodule Converger.Partitions.Conversion do
     """
   end
 
-  defp copy_sql("deliveries") do
-    cols = Enum.join(@delivery_columns, ", ")
-    b_cols = Enum.map_join(@delivery_columns, ", ", &"b.#{&1}")
+  defp copy_sql("deliveries", columns) do
+    cols = Enum.join(columns, ", ")
+    b_cols = Enum.map_join(columns, ", ", &"b.#{&1}")
 
     """
     WITH batch AS (
@@ -517,7 +563,7 @@ defmodule Converger.Partitions.Conversion do
 
   # Foreign keys from or to the legacy tables (activities -> tenants and
   # conversations, deliveries -> activities and channels, attachments ->
-  # activities). The partitioned tables have none, see ADR-0026.
+  # activities). The partitioned tables have none, see ADR-0033.
   defp drop_legacy_foreign_keys(repo) do
     %{rows: rows} =
       repo.query!("""

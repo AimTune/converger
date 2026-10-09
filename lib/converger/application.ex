@@ -19,13 +19,18 @@ defmodule Converger.Application do
         {DNSCluster, query: Application.get_env(:converger, :dns_cluster_query) || :ignore},
         {Phoenix.PubSub, name: Converger.PubSub},
         ConvergerWeb.SocketPresence,
+        ConvergerWeb.ConversationPresence,
+        {Task.Supervisor, name: Converger.TaskSupervisor},
         Converger.RateLimit.Supervisor,
         {Oban, oban_config()}
       ] ++
         Converger.Partitions.boot_children() ++
         Converger.Pipeline.child_specs() ++
         [
-          ConvergerWeb.Endpoint
+          ConvergerWeb.Endpoint,
+          # Last: stopped first on shutdown, it flips readiness to 503 and
+          # waits before the endpoint drains its sockets.
+          ConvergerWeb.Drain
         ]
 
     # See https://hexdocs.pm/elixir/Supervisor.html

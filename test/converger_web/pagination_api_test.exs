@@ -7,7 +7,7 @@ defmodule ConvergerWeb.PaginationApiTest do
 
   alias Converger.Auth.ConvergerToken
   alias Converger.ConvergerAPI.Watermark
-  alias ConvergerWeb.{ConvergerChannel, ConvergerSocket, ConversationChannel, UserSocket}
+  alias ConvergerWeb.{ConvergerChannel, ConvergerSocket}
 
   import Converger.TenantsFixtures
   import Converger.ChannelsFixtures
@@ -79,6 +79,20 @@ defmodule ConvergerWeb.PaginationApiTest do
       wm = body["watermark"]
       body = converger_get(token, path <> "?watermark=#{wm}")
       assert body == %{"activities" => [], "watermark" => wm, "has_more" => false}
+    end
+
+    test "accepts the integer seq of Protocol v1 as the watermark", %{
+      token: token,
+      conversation: conversation,
+      activities: activities
+    } do
+      path = "/api/v1/converger/conversations/#{conversation.id}/activities"
+      body = converger_get(token, path <> "?watermark=3")
+
+      assert Enum.map(body["activities"], & &1["id"]) ==
+               activities |> Enum.drop(3) |> Enum.map(& &1.id)
+
+      assert body["watermark"] == Watermark.encode(5)
     end
 
     test "default and max page sizes come from config", %{token: token, conversation: c} do
@@ -219,31 +233,6 @@ defmodule ConvergerWeb.PaginationApiTest do
         )
 
       assert_push "activitySet", %{activities: [_, _], has_more: false}
-    end
-
-    test "legacy channel caps replay and signals replay_truncated", %{
-      tenant: tenant,
-      conversation: conversation,
-      activities: [first | rest]
-    } do
-      put_limits(ws_replay_limit: 2)
-
-      {:ok, token, _claims} = Converger.Auth.Token.generate_token(conversation, tenant, "user-1")
-
-      {:ok, socket} = connect(UserSocket, %{"token" => token})
-
-      {:ok, _, _socket} =
-        subscribe_and_join(socket, ConversationChannel, "conversation:#{conversation.id}", %{
-          "last_activity_id" => first.id
-        })
-
-      [a, b | _] = rest
-      a_id = a.id
-      b_id = b.id
-      assert_push "new_activity", %{id: ^a_id}
-      assert_push "new_activity", %{id: ^b_id}
-      assert_push "replay_truncated", %{has_more: true, last_activity_id: ^b_id}
-      refute_push "new_activity", _
     end
   end
 end

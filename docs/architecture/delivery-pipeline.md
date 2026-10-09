@@ -56,10 +56,10 @@ The worker ([source](https://github.com/AimTune/converger/blob/main/lib/converge
 
 | Option | Value | Why |
 | --- | --- | --- |
-| `queue` | `:deliveries` | Concurrency 20 per node (`queues: [default: 10, deliveries: 20]`). |
+| `queue` | per tenant tier | `deliveries_high` (10 per node), `deliveries` (20, also the default) or `deliveries_bulk` (5), chosen from `tenants.tier` at enqueue (`Converger.Pipeline.Oban.queue_for_tier/1`). |
 | `priority` | `1` | |
 | `max_attempts` | `100` | Only a safety cap. The channel's retry policy decides when to stop, by cancelling the job. |
-| `unique` | `[keys: [:activity_id, :channel_id], period: :infinity]` | One live job per activity and channel, ever. Cancelled and discarded jobs are not counted, so a dead delivery can be re-enqueued explicitly. |
+| `unique` | `[fields: [:worker, :args], keys: [:activity_id, :channel_id], period: :infinity]` | One live job per activity and channel, ever. Cancelled and discarded jobs are not counted, so a dead delivery can be re-enqueued explicitly. |
 | `backoff/1` | channel policy or `Retry-After` | See [Delivery and retries](../delivery.md). |
 
 `perform/1` returns `:ok` on success, `{:error, reason}` for a retryable failure (Oban schedules the next attempt) and `{:cancel, reason}` when the delivery was dead-lettered or halted by middleware.

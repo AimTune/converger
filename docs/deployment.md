@@ -62,6 +62,10 @@ See [TLS, HSTS and WebSocket origins](#tls-hsts-and-websocket-origins).
 | `PHX_HOST` | `example.com` | Public host name used when generating URLs (prod only). URLs are generated as `https://PHX_HOST:443`. |
 | `PORT` | `4000` | Port the HTTP endpoint listens on (prod; also honoured in dev). |
 
+WebSocket limits and draining are tuned with `WS_*` variables (frame size, message rate, joins, slow consumers,
+drain delay and batches); see [WebSocket limits and draining](operations/websocket-limits.md#configuration).
+Load balancers and Kubernetes probe `GET /health/live` and `GET /health/ready`.
+
 ### Database
 
 | Variable | Default | Description |
@@ -466,8 +470,14 @@ Rolling upgrade (expand-only migrations):
 
 1. Build and push the new image.
 2. Run `bin/migrate` once with the **new** image.
-3. Roll the replicas to the new image (`bin/server`). Readiness should gate
-   traffic; old and new replicas coexist safely.
+3. Roll the replicas to the new image (`bin/server`), one at a time. Use
+   `GET /health/ready` as the readiness probe and give each replica a
+   termination grace period of at least 60 s. On `SIGTERM` a replica turns
+   not-ready, refuses new WebSockets, then closes its sockets in batches with
+   1012 and a jittered `retryAfterMs`, so clients move to the other replicas
+   without a reconnect storm. See
+   [WebSocket limits and draining](operations/websocket-limits.md#draining-on-shutdown).
+   Old and new replicas coexist safely.
 4. Watch error rate, latency, Oban queue depth and delivery failures
    (Grafana/Prometheus) for a while.
 
@@ -513,6 +523,9 @@ the Prometheus metrics on `PROMETHEUS_PORT`):
   autovacuum for them, and keep conversation expiry (Oban) enabled.
 - **File descriptors**: raise `ulimit -n` (e.g. 65536) for many WebSocket
   connections; Bandit defaults are fine otherwise.
+- **Per-socket memory** is bounded by the WebSocket limits (1 MiB hard frame
+  cap, at most 1 000 frames buffered for a slow client); see
+  [WebSocket limits and draining](operations/websocket-limits.md).
 
 ## Toolchain versions
 

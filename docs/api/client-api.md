@@ -6,9 +6,9 @@ sidebar_position: 3
 
 The Converger client API lives under `/api/v1/converger`. End-user clients such as web chat widgets and mobile
 apps use it. It is modelled on Bot Framework Direct Line: your backend exchanges a channel secret for a short-lived
-token, the client starts a conversation with that token, then posts activities over REST and receives them over the
-WebSocket at `streamUrl` (or by polling the activities endpoint with a watermark). Shared conventions (errors, rate
-limits, pagination, idempotency, CORS) are in the [overview](overview.md).
+token, the client starts a conversation with that token, then posts activities over REST (or over the socket with
+`postActivity`) and receives them over the WebSocket at `streamUrl` (or by polling the activities endpoint with a
+watermark). Shared conventions (errors, rate limits, pagination, idempotency, CORS) are in the [overview](overview.md).
 
 Controllers live in [`lib/converger_web/controllers/converger/`](https://github.com/AimTune/converger/tree/main/lib/converger_web/controllers/converger)
 (module prefix `ConvergerWeb.ConvergerAPI`). Field names in this API are camelCase (`conversationId`, `channelData`),
@@ -26,6 +26,7 @@ unlike the snake_case tenant API.
 | `POST` | `/api/v1/converger/conversations/:id/reopen` | Bearer converger token | Reopen the conversation |
 | `POST` | `/api/v1/converger/conversations/:conversation_id/activities` | Bearer converger token | Post an activity |
 | `GET` | `/api/v1/converger/conversations/:conversation_id/activities` | Bearer converger token | List activities after a watermark |
+| `GET` | `/api/v1/converger/conversations/:conversation_id/events` | Bearer converger token or `?token=` | Server-Sent Events stream of Protocol v1 frames (fallback when WebSockets are blocked) |
 | `POST` | `/api/v1/converger/conversations/:conversation_id/upload` | Bearer converger token | Upload a file as a new activity (multipart) |
 | `GET` | `/api/v1/converger/attachments/:id` | Bearer converger token | Download an uploaded file |
 
@@ -289,6 +290,10 @@ curl -s -X POST "$CONVERGER/api/v1/converger/conversations/$CONV/activities" \
 
 The full activity arrives on the socket and in the activities list.
 
+The same activity can also be sent over the socket with the `postActivity` event, which shares the
+`activity_create` bucket and replies with `id`, `seq` and `watermark`; see
+[WebSocket](../websocket.md#6-send-activities-over-the-socket).
+
 | Status | Body | Cause |
 | --- | --- | --- |
 | `403` | `{"errors": {"detail": "Forbidden"}}` | Token bound to another conversation |
@@ -349,8 +354,51 @@ curl -s "$CONVERGER/api/v1/converger/conversations/$CONV/activities?watermark=c2
   frame's watermark.
 - Unlike the tenant API, an invalid watermark is not an error here: the list starts at the beginning of the
   conversation. Watermarks issued before `seq` existed (Base64 activity ids) are still accepted.
+- The integer `seq` used by [Protocol v1](../protocol/v1.md) frames (for example the `watermark` of a
+  `replayTruncated` frame) is also accepted: `?watermark=42` means "after seq 42". Responses still return the
+  opaque form until the migration in section 6.5 of the spec.
 
 Errors: `403` (token bound to another conversation), `404` (unknown or foreign conversation).
+
+### Stream events (Server-Sent Events)
+
+```http
+GET /api/v1/converger/conversations/6f1c0e7e-1f0b-4a5e-9a39-2b7c6f0d9a11/events?watermark=41
+Authorization: Bearer <conversation token>
+Accept: text/event-stream
+```
+
+```text
+retry: 3000
+
+id: 42
+event: text
+data: {"type":"text","id":"…","seq":42,"from":"bot","sender":{"id":"bot-1","role":"bot"},"data":{"text":"Hi!"},"timestamp":1750000000000}
+
+event: heartbeat
+data: {"type":"heartbeat","timestamp":1750000030000,"headSeq":42}
+```
+
+A fallback for networks that block WebSockets. Each event is a [Protocol v1](../protocol/v1.md) server frame
+named by its `type`; persistent frames carry their `seq` as the event `id`.
+
+- The token may be passed as `?token=` because the browser `EventSource` cannot set headers (query-string tokens
+  are filtered from request logs). The stream is authorized like the activities endpoint, and the conversation
+  must belong to the token's channel.
+- Resume: `Last-Event-ID` (sent automatically by a reconnecting `EventSource`) or `?watermark=` (an integer seq or
+  an opaque watermark); `Last-Event-ID` wins. No watermark replays the whole conversation (at most 10 000 frames,
+  then a `replayTruncated` event: page the rest with the activities endpoint above). An invalid watermark starts
+  from the beginning; one above the conversation head draws an `error` event `invalid_watermark` and the stream
+  continues live.
+- A `heartbeat` event is sent every 30 s (`heartbeat_interval_ms`).
+- The stream ends after an `error` event `token_expired` when the token expires, or `channel_inactive` when the
+  channel is deactivated. Reconnect with a fresh token and the last `seq`.
+- `from` is relative to the token's `user_id` (or `?userId=`): that user's activities are `user`, everyone else's
+  `bot`.
+- Send with [Post an activity](#post-an-activity) and an `X-Idempotency-Key`.
+
+Errors: `401` (no or invalid token), `403` (token bound to another conversation), `404` (unknown conversation or
+one of another channel).
 
 ## Uploads
 

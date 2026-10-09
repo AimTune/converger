@@ -55,7 +55,10 @@ defmodule Converger.Partitions.ConversionTest do
       updated_at timestamp without time zone NOT NULL,
       sent_at timestamp without time zone,
       read_at timestamp without time zone,
-      provider_message_id text
+      provider_message_id text,
+      retry_count integer NOT NULL DEFAULT 0,
+      retried_by character varying(255),
+      retried_at timestamp without time zone
     )
     """,
     "CREATE UNIQUE INDEX deliveries_activity_id_channel_id_index ON deliveries (activity_id, channel_id)"
@@ -141,7 +144,12 @@ defmodule Converger.Partitions.ConversionTest do
     # Writes after (and during) the copy are mirrored by the triggers.
     a4 = insert_legacy_activity(ctx, 4, ~N[2026-01-24 09:00:00])
     d4 = insert_legacy_delivery(ctx, a4, "pending")
-    Repo.query!("UPDATE deliveries SET status = 'read' WHERE id = $1", [Ecto.UUID.dump!(d2)])
+
+    Repo.query!(
+      "UPDATE deliveries SET status = 'read', retry_count = 1, retried_by = 'admin:ops' WHERE id = $1",
+      [Ecto.UUID.dump!(d2)]
+    )
+
     Repo.query!("UPDATE activities SET text = 'edited' WHERE id = $1", [Ecto.UUID.dump!(a3)])
     # Deleting an activity cascades to its legacy deliveries; both mirror.
     Repo.query!("DELETE FROM activities WHERE id = $1", [Ecto.UUID.dump!(a1)])
@@ -194,9 +202,9 @@ defmodule Converger.Partitions.ConversionTest do
     assert [] = rows("SELECT 1 FROM activities WHERE id = $1", [Ecto.UUID.dump!(a1)])
     assert [] = rows("SELECT 1 FROM deliveries WHERE id = $1", [Ecto.UUID.dump!(d1)])
 
-    assert [["read", tenant, ~N[2025-12-15 10:00:00.000000]]] =
+    assert [["read", 1, "admin:ops", tenant, ~N[2025-12-15 10:00:00.000000]]] =
              rows(
-               "SELECT status, tenant_id, activity_inserted_at FROM deliveries WHERE id = $1",
+               "SELECT status, retry_count, retried_by, tenant_id, activity_inserted_at FROM deliveries WHERE id = $1",
                [Ecto.UUID.dump!(d2)]
              )
 
@@ -224,6 +232,13 @@ defmodule Converger.Partitions.ConversionTest do
     refute Partitions.table_exists?(Repo, "activities_legacy")
     # Idempotent.
     assert :ok = Conversion.run(Repo)
+  end
+
+  test "refuses to convert when the legacy table has a column it does not know" do
+    Repo.query!("ALTER TABLE deliveries ADD COLUMN surprise text")
+
+    assert_raise RuntimeError, ~r/surprise/, fn -> Conversion.run(Repo) end
+    refute Conversion.prepared?(Repo)
   end
 
   test "refuses to copy a large table inline unless prepared first", ctx do

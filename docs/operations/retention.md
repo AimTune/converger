@@ -7,7 +7,7 @@ sidebar_position: 6
 `activities` and `deliveries` grow with traffic, so they are stored in **monthly partitions** and old months are
 **archived to object storage and removed** according to each tenant's retention. Smaller operational tables
 (`channel_health_checks`, `audit_logs`) are pruned by age. The design and the options that were rejected are in
-[ADR-0026](../adr/0026-monthly-partitioning-and-per-tenant-retention.md); the migration that converts an existing
+[ADR-0033](../adr/0033-monthly-partitioning-and-per-tenant-retention.md); the migration that converts an existing
 installation is described in [Migrations](migrations.md#partitioning-activities-and-deliveries-20261010300100).
 
 ## Monthly partitions

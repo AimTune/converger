@@ -56,8 +56,8 @@ flowchart LR
 
 WebSocket is meant to be Converger's primary, first-class channel. Two socket stacks exist today:
 
-- `/socket` (`UserSocket`, topic `conversation:<id>`), authenticated with a conversation token.
-- `/socket/converger` (`ConvergerSocket`, topic `converger:conversation:<id>`), the client API inspired by Bot Framework Direct Line, authenticated with a Converger token. On join it replays activities after an opaque watermark.
+- `/socket/converger` (`ConvergerSocket`, topic `converger:conversation:<id>`), the client API inspired by Bot Framework Direct Line, authenticated with a Converger token. On join it replays activities after an opaque watermark, and clients send activities on it with `postActivity`. It is the single client socket stack ([#23](https://github.com/AimTune/converger/issues/23)).
+- `/socket` (`UserSocket`, topic `conversation:<id>`), authenticated with a conversation token. **Deprecated**: new clients use `/socket/converger`; see [migrating from the legacy surfaces](api/migrating-from-legacy.md).
 
 Both receive the same canonical activity payload as REST (see [ADR-0004](adr/0004-single-canonical-activity-serializer.md)). The direction is to merge them into one documented wire protocol, the Converger Protocol v1 (spec in progress, [#21](https://github.com/AimTune/converger/issues/21), [#63](https://github.com/AimTune/converger/issues/63)). It will be wire-compatible with mekik/1 ([ADR-0024](adr/0024-converger-protocol-v1-as-superset-of-mekik-1.md)) and will add client message ids with server acks, receipts, typing and presence. That work is tracked in the v3.0 epic [#58](https://github.com/AimTune/converger/issues/58). Today the `websocket` channel type is outbound-only and reaches its clients through the PubSub broadcast. Making it a full duplex adapter is Planned ([#22](https://github.com/AimTune/converger/issues/22)).
 
@@ -88,7 +88,7 @@ Broadway (`Converger.Pipeline.Broadway`) and inline (`Converger.Pipeline.Inline`
 - **Not a bot framework or AI agent runtime.** It carries messages to and from bots. It does not decide what to answer. The `echo` channel is a test helper, not a bot.
 - **Not a chat UI.** The admin and portal show transcripts for operators. End-user widgets connect over the WebSocket or REST client API.
 - **Not a general-purpose message broker.** Activities are conversation-scoped and stored in Postgres. Kafka and RabbitMQ appear only as optional Broadway producers. Broker channels are Planned ([#42](https://github.com/AimTune/converger/issues/42)).
-- **Not finished.** Conditional routing ([#43](https://github.com/AimTune/converger/issues/43)), a dead-letter replay UI ([#32](https://github.com/AimTune/converger/issues/32)), a management API ([#51](https://github.com/AimTune/converger/issues/51)) and the SDKs ([#46](https://github.com/AimTune/converger/issues/46)) are on the [roadmap](roadmap.md).
+- **Not finished.** Conditional routing ([#43](https://github.com/AimTune/converger/issues/43)), a management API ([#51](https://github.com/AimTune/converger/issues/51)) and the SDKs ([#46](https://github.com/AimTune/converger/issues/46)) are on the [roadmap](roadmap.md).
 
 ## Where to go next
 

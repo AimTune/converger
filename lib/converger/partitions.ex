@@ -1,7 +1,7 @@
 defmodule Converger.Partitions do
   @moduledoc """
   Monthly range partitions of `activities` and `deliveries` (issue #30,
-  [ADR-0026](docs/adr/0026-monthly-partitioning-and-per-tenant-retention.md)).
+  [ADR-0033](docs/adr/0033-monthly-partitioning-and-per-tenant-retention.md)).
 
   * `activities` is partitioned by `inserted_at`.
   * `deliveries` is partitioned by `activity_inserted_at`, the `inserted_at`
@@ -194,7 +194,7 @@ defmodule Converger.Partitions do
   partition key, which `(conversation_id, seq)` and
   `(conversation_id, idempotency_key)` do not. They are therefore unique per
   partition; global uniqueness is guaranteed by the application (see
-  ADR-0026). For `deliveries` the parent has a real unique index
+  ADR-0033). For `deliveries` the parent has a real unique index
   `(activity_id, channel_id, activity_inserted_at)`; it is created on the
   partition up front only so its name is predictable for
   `Ecto.Changeset.unique_constraint/3`.

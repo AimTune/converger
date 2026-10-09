@@ -1,7 +1,7 @@
 defmodule Converger.Archive do
   @moduledoc """
   Archive of expired `activities` and `deliveries` rows in object storage
-  (issue #30, ADR-0026), and re-import of archived files.
+  (issue #30, ADR-0033), and re-import of archived files.
 
   Objects are gzip-compressed JSON Lines, one row per line, every column of
   the table as produced by Postgres `row_to_json` (timestamps are UTC

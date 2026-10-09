@@ -19,6 +19,14 @@ defmodule Converger.Tenants do
 
   def get_tenant!(id), do: Repo.get!(Tenant, id)
 
+  @doc "Returns the tenant with `id`, or `nil` (also for a malformed id)."
+  def get_tenant(id) do
+    case Ecto.UUID.cast(id) do
+      {:ok, uuid} -> Repo.get(Tenant, uuid)
+      :error -> nil
+    end
+  end
+
   @default_rotation_grace_period 24 * 60 * 60
 
   @doc """
@@ -145,7 +153,7 @@ defmodule Converger.Tenants do
   with the row (`ON DELETE CASCADE`); its activities and deliveries live in
   partitioned tables without foreign keys and are removed in batches by
   `Converger.Workers.PurgeWorker`, enqueued in the same transaction
-  (ADR-0026), so the delete never holds locks for the duration of a
+  (ADR-0033), so the delete never holds locks for the duration of a
   full-table cascade.
   """
   def delete_tenant(%Tenant{} = tenant, actor \\ nil) do

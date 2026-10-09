@@ -1,6 +1,6 @@
 ---
-title: "ADR-0026: Monthly partitioning of activities and deliveries, per-tenant retention and verified archives"
-sidebar_label: "0026 Partitioning and retention"
+title: "ADR-0033: Monthly partitioning of activities and deliveries, per-tenant retention and verified archives"
+sidebar_label: "0033 Partitioning and retention"
 description: activities is range partitioned by inserted_at and deliveries by their activity's inserted_at; per-partition unique indexes plus the conversation row lock keep seq and idempotency keys unique; there are no foreign keys on the partitioned tables; expired data is archived as verified JSONL.gz before a month is detached and dropped or a tenant's rows are deleted.
 ---
 
@@ -9,7 +9,7 @@ description: activities is range partitioned by inserted_at and deliveries by th
 | **Status** | Accepted |
 | **Date** | 2026-10-09 |
 | **Issue** | [#30](https://github.com/AimTune/converger/issues/30) |
-| **Pull request** | [#114](https://github.com/AimTune/converger/pull/114) |
+| **Pull request** | [#PRNUM](https://github.com/AimTune/converger/pull/PRNUM) |
 | **Related** | [ADR-0001](0001-transactional-outbox-with-oban.md), [ADR-0006](0006-per-conversation-seq-and-opaque-watermarks.md), [ADR-0015](0015-per-message-idempotent-inbound-batches.md), [ADR-0017](0017-conversation-lifecycle-enforced-under-the-seq-lock.md), [ADR-0007](0007-attachment-storage-with-hand-written-signing.md), [ADR-0022](0022-deployment-hardening.md) |
 
 `activities` and `deliveries` are the two tables that grow with traffic. This ADR records how they are partitioned, how the uniqueness guarantees of [ADR-0006](0006-per-conversation-seq-and-opaque-watermarks.md) and [ADR-0015](0015-per-message-idempotent-inbound-batches.md) survive partitioning, how per-tenant retention works on partitions that all tenants share, and how existing installations get there.

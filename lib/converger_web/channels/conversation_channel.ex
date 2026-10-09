@@ -1,4 +1,10 @@
 defmodule ConvergerWeb.ConversationChannel do
+  @moduledoc """
+  Legacy `conversation:<id>` topic of `ConvergerWeb.UserSocket`.
+  **Deprecated** (#23): `ConvergerWeb.ConvergerChannel` covers it (sending
+  is the `postActivity` event there). Kept unchanged until removal.
+  """
+
   use ConvergerWeb, :channel
 
   require Logger

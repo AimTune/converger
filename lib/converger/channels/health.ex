@@ -14,6 +14,7 @@ defmodule Converger.Channels.Health do
 
   alias Converger.Channels.Channel
   alias Converger.Channels.HealthCheck
+  alias Converger.Channels.UrlGuard
   alias Converger.Deliveries.Delivery
   alias Converger.Repo
 
@@ -177,22 +178,38 @@ defmodule Converger.Channels.Health do
         checked_at: DateTime.to_iso8601(health_check.checked_at)
       }
 
-      Task.start(fn ->
-        case Converger.HTTP.post(tenant.alert_webhook_url, json: payload, receive_timeout: 10_000) do
-          {:ok, %{status: status}} when status in 200..299 ->
-            Logger.info(
-              "Health alert sent for channel #{channel.id} to #{tenant.alert_webhook_url}"
-            )
+      Task.start(fn -> post_alert(channel, tenant.alert_webhook_url, payload) end)
+    end
+  end
 
-          {:ok, %{status: status}} ->
-            Logger.warning("Health alert webhook returned #{status} for channel #{channel.id}")
+  # Re-check the target at send time (DNS may have changed since the URL was
+  # saved, and URLs saved before the guard existed were never checked), and
+  # never follow redirects to a target that was not checked.
+  defp post_alert(channel, url, payload) do
+    case UrlGuard.resolve(url) do
+      {:ok, _target} ->
+        do_post_alert(channel, url, payload)
 
-          {:error, reason} ->
-            Logger.warning(
-              "Health alert webhook failed for channel #{channel.id}: #{inspect(reason)}"
-            )
-        end
-      end)
+      {:error, reason} ->
+        Logger.warning(
+          "Health alert for channel #{channel.id} not sent: target rejected (" <>
+            UrlGuard.format_error(reason) <> ")"
+        )
+    end
+  end
+
+  defp do_post_alert(channel, url, payload) do
+    case Converger.HTTP.post(url, json: payload, receive_timeout: 10_000, redirect: false) do
+      {:ok, %{status: status}} when status in 200..299 ->
+        Logger.info("Health alert sent for channel #{channel.id} to #{url}")
+
+      {:ok, %{status: status}} ->
+        Logger.warning("Health alert webhook returned #{status} for channel #{channel.id}")
+
+      {:error, reason} ->
+        Logger.warning(
+          "Health alert webhook failed for channel #{channel.id}: #{inspect(reason)}"
+        )
     end
   end
 

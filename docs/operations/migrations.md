@@ -234,7 +234,7 @@ tables this takes seconds; on a large `activities` table schedule it like a main
 #### Partitioning activities and deliveries (`20261010300100`)
 
 Issue [#30](https://github.com/AimTune/converger/issues/30),
-[ADR-0026](../adr/0026-monthly-partitioning-and-per-tenant-retention.md). Converts the plain `activities` and
+[ADR-0033](../adr/0033-monthly-partitioning-and-per-tenant-retention.md). Converts the plain `activities` and
 `deliveries` tables into tables partitioned by month (`activities` by `inserted_at`, `deliveries` by the new
 `activity_inserted_at`) in three idempotent, resumable phases (`Converger.Partitions.Conversion`):
 

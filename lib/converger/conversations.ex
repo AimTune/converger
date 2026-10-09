@@ -281,7 +281,7 @@ defmodule Converger.Conversations do
 
   @doc """
   Deletes a conversation. Its activities and their deliveries (partitioned
-  tables without foreign keys, ADR-0026) are purged by a
+  tables without foreign keys, ADR-0033) are purged by a
   `Converger.Workers.PurgeWorker` job enqueued in the same transaction.
   """
   def delete_conversation(%Conversation{} = conversation) do

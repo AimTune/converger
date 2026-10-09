@@ -88,7 +88,7 @@ defmodule Converger.Activities.Activity do
     |> foreign_key_constraint(:tenant_id)
     |> foreign_key_constraint(:conversation_id)
     # Unique per monthly partition (`activities_pYYYY_MM_conversation_id_idempotency_key_index`,
-    # ADR-0026); create_activity/2 also re-checks under the conversation lock,
+    # ADR-0033); create_activity/2 also re-checks under the conversation lock,
     # which makes the key unique across partitions.
     |> unique_constraint([:conversation_id, :idempotency_key],
       name: "_conversation_id_idempotency_key_index",

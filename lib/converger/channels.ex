@@ -6,7 +6,7 @@ defmodule Converger.Channels do
   import Ecto.Query, warn: false
   alias Ecto.Multi
   alias Converger.Repo
-  alias Converger.Channels.Channel
+  alias Converger.Channels.{Channel, Circuit}
   alias Converger.AuditLogs
   alias Converger.AuditLogs.Changes
 
@@ -110,7 +110,7 @@ defmodule Converger.Channels do
 
   # The channel's conversations cascade with the row. Their activities, and
   # deliveries to this channel, are in partitioned tables without foreign keys
-  # (ADR-0026) and are purged in batches by PurgeWorker jobs enqueued in the
+  # (ADR-0033) and are purged in batches by PurgeWorker jobs enqueued in the
   # same transaction (the conversation ids are captured before the cascade).
   defp do_delete_channel(channel, actor) do
     alias Converger.Workers.PurgeWorker
@@ -153,6 +153,43 @@ defmodule Converger.Channels do
         changes: Changes.for_delete(channel)
       })
     end)
+  end
+
+  @doc """
+  Pause deliveries to a channel: new and pending deliveries are parked
+  (`status: "paused"`) until `resume_deliveries/2`. See `Converger.Channels.Circuit`.
+  """
+  def pause_deliveries(%Channel{} = channel, actor \\ nil) do
+    {:ok, updated} = Circuit.pause(channel)
+    audit_circuit(channel, updated, "pause_deliveries", actor)
+    {:ok, updated}
+  end
+
+  @doc """
+  Resume deliveries to a paused channel (or force-close an open circuit
+  breaker) and release its parked deliveries.
+  """
+  def resume_deliveries(%Channel{} = channel, actor \\ nil) do
+    {:ok, updated} = Circuit.resume(channel)
+    audit_circuit(channel, updated, "resume_deliveries", actor)
+    {:ok, updated}
+  end
+
+  defp audit_circuit(_before, _updated, _action, nil), do: :ok
+
+  defp audit_circuit(before, updated, action, actor) do
+    AuditLogs.create_audit_log(%{
+      tenant_id: before.tenant_id,
+      actor_type: actor.type,
+      actor_id: actor.id,
+      action: action,
+      resource_type: "channel",
+      resource_id: before.id,
+      changes: %{
+        "before" => %{"circuit_state" => before.circuit_state},
+        "after" => %{"circuit_state" => updated.circuit_state}
+      }
+    })
   end
 
   def change_channel(%Channel{} = channel, attrs \\ %{}) do

@@ -59,6 +59,43 @@ defmodule ConvergerWeb.Admin.ChannelLive do
     {:noreply, assign(socket, health_map: health_map)}
   end
 
+  def handle_info(%{event: "circuit_changed", payload: payload}, socket) do
+    channels =
+      Enum.map(socket.assigns.channels, fn
+        %{id: id} = channel when id == payload.channel_id ->
+          %{
+            channel
+            | circuit_state: payload.circuit_state,
+              circuit_changed_at: payload.changed_at
+          }
+
+        channel ->
+          channel
+      end)
+
+    {:noreply, assign(socket, channels: channels)}
+  end
+
+  def handle_event("pause_deliveries", %{"id" => id}, socket) do
+    channel = Channels.get_channel!(id)
+    {:ok, _} = Channels.pause_deliveries(channel, socket.assigns.actor)
+
+    {:noreply,
+     socket
+     |> assign(channels: load_channels(socket.assigns.mode_filter))
+     |> put_flash(:info, "Deliveries paused")}
+  end
+
+  def handle_event("resume_deliveries", %{"id" => id}, socket) do
+    channel = Channels.get_channel!(id)
+    {:ok, _} = Channels.resume_deliveries(channel, socket.assigns.actor)
+
+    {:noreply,
+     socket
+     |> assign(channels: load_channels(socket.assigns.mode_filter))
+     |> put_flash(:info, "Deliveries resumed")}
+  end
+
   def handle_event("save", %{"channel" => params}, socket) do
     transformations = build_transformations(socket.assigns.transformations)
     params = Map.put(params, "transformations", transformations)
@@ -243,6 +280,18 @@ defmodule ConvergerWeb.Admin.ChannelLive do
   defp health_label("unhealthy"), do: "Unhealthy"
   defp health_label(_), do: "—"
 
+  defp circuit_color("closed"), do: "#4CAF50"
+  defp circuit_color("half_open"), do: "#FF9800"
+  defp circuit_color("open"), do: "#f44336"
+  defp circuit_color("paused"), do: "#607D8B"
+  defp circuit_color(_), do: "#9E9E9E"
+
+  defp circuit_label("closed"), do: "Flowing"
+  defp circuit_label("half_open"), do: "Probing"
+  defp circuit_label("open"), do: "Breaker open"
+  defp circuit_label("paused"), do: "Paused"
+  defp circuit_label(state), do: state
+
   defp channel_health_status(health_map, channel_id) do
     case Map.get(health_map, channel_id) do
       %{status: status} -> status
@@ -421,6 +470,10 @@ defmodule ConvergerWeb.Admin.ChannelLive do
             <label style="display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.85em; color: #555;">Name</label>
             <.input field={@form[:name]} placeholder="Channel Name" />
           </div>
+          <div>
+            <label style="display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.85em; color: #555;">Rate limit</label>
+            <.input field={@form[:rate_limit]} placeholder="e.g. 80/s (optional)" />
+          </div>
           <div style="padding-bottom: 8px;">
             <.input
               type="checkbox"
@@ -572,6 +625,7 @@ defmodule ConvergerWeb.Admin.ChannelLive do
             <th>Tenant</th>
             <th>Status</th>
             <th>Health</th>
+            <th>Delivery</th>
             <th>Config</th>
             <th>Middleware</th>
             <th>Token</th>
@@ -601,6 +655,16 @@ defmodule ConvergerWeb.Admin.ChannelLive do
               </span>
             </td>
             <td>
+              <span
+                id={"circuit-#{channel.id}"}
+                title={"#{channel.consecutive_failures} consecutive failure(s); rate limit: #{channel.rate_limit || "adapter default"}"}
+                style={"display: inline-flex; align-items: center; gap: 4px; color: #{circuit_color(channel.circuit_state)}; font-size: 0.85em;"}
+              >
+                <span style={"width: 8px; height: 8px; border-radius: 50%; background: #{circuit_color(channel.circuit_state)}; display: inline-block;"}></span>
+                <%= circuit_label(channel.circuit_state) %>
+              </span>
+            </td>
+            <td>
               <span :if={config_summary(channel) != ""} style="font-size: 0.8em; color: #666;" title={config_detail(channel)}>
                 <%= config_summary(channel) %>
               </span>
@@ -624,6 +688,26 @@ defmodule ConvergerWeb.Admin.ChannelLive do
             <td style="white-space: nowrap;">
               <button phx-click="toggle_status" phx-value-id={channel.id} class="badge">
                 <%= if channel.status == "active", do: "Disable", else: "Enable" %>
+              </button>
+              <button
+                :if={channel.circuit_state == "closed"}
+                phx-click="pause_deliveries"
+                phx-value-id={channel.id}
+                class="badge"
+                style="margin-left: 4px;"
+                title="Park outbound deliveries until resumed"
+              >
+                Pause deliveries
+              </button>
+              <button
+                :if={channel.circuit_state != "closed"}
+                phx-click="resume_deliveries"
+                phx-value-id={channel.id}
+                class="badge"
+                style="margin-left: 4px;"
+                title="Close the breaker and release parked deliveries"
+              >
+                Resume deliveries
               </button>
               <button
                 phx-click="toggle_require_signature"

@@ -5,7 +5,7 @@
 ### Partitioning, retention and archive for activities and deliveries (#30)
 
 **Maintenance window** on existing installations (migration `20261010300100`); see
-`docs/operations/migrations.md`. Design: `docs/adr/0026-monthly-partitioning-and-per-tenant-retention.md`.
+`docs/operations/migrations.md`. Design: `docs/adr/0033-monthly-partitioning-and-per-tenant-retention.md`.
 
 - `activities` (by `inserted_at`) and `deliveries` (by the new `activity_inserted_at`) are monthly range
   partitioned tables, with no foreign keys. `deliveries` gains `tenant_id`. Partitions are created three months
@@ -23,6 +23,82 @@
   (`PurgeWorker`) instead of one cascading delete.
 - Idempotency keys are now also honoured when the first copy is in an older month.
 - Benchmark `test/load/partition_drop_benchmark_test.exs` (`--include benchmark`).
+
+### Native Protocol v1 WebSocket, MessagePack, SSE and long-poll fallbacks (#26)
+
+- `GET /socket/converger/v1`: the native Converger Protocol v1 endpoint (`ConvergerWeb.ProtocolSocket`, a
+  `WebSock` handler). Raw frames, no Phoenix framing: `hello`/`welcome`, replay after an integer `seq`
+  watermark (legacy opaque watermarks accepted), `text` sends with `clientId`, `ack` (`duplicate: true` on
+  retransmission), `sync`, `ping`/`heartbeat`, in-band token refresh with `auth`/`tokenRefreshed`, error
+  frames with stable codes, close codes 4400/4401/4403/4408/1008, idle timeout and frame size limits. Works
+  with unmodified mekik/1 clients (no subprotocol, `id` used as `clientId`).
+- Encodings by subprotocol: `converger.v1` / `converger.v1+json` (JSON) and `converger.v1+msgpack`
+  (MessagePack, binary messages). Adds `msgpax` as a dependency and `mint_web_socket` as a test-only one.
+- `GET /api/v1/converger/conversations/:id/events`: Server-Sent Events fallback with the same v1 frames; the
+  `seq` is the event `id`, so `EventSource` resumes through `Last-Event-ID`. Accepts `?token=`.
+- Long-polling enabled on `/socket/converger` as the last-resort fallback for the Phoenix binding.
+- `GET /api/v1/converger/conversations/:id/activities` also accepts the integer `seq` as `?watermark=`.
+- New config `config :converger, ConvergerWeb.Protocol` (heartbeat, idle timeout, frame caps,
+  `replay_max`); `token` and `secret` query parameters are filtered from request logs.
+- `examples/python/converger_ws.py`: a client using only the `websockets` library.
+- ADR-0030; `docs/protocol/v1.md` statuses updated; `docs/websocket.md`, `docs/api/client-api.md`,
+  `docs/architecture/realtime.md` and `docs/operations/configuration.md` document the new transports.
+
+### One client socket stack; legacy socket and tokens deprecated (#23)
+
+- The Converger API socket (`/socket/converger`, topic
+  `converger:conversation:<id>`) now accepts sends: push `postActivity` with an
+  activity (`type`, `text`, `attachments`, `channelData`, optional `clientId`);
+  the reply carries `id`, `seq` and `watermark`. The sender is the token's
+  `user_id` (else `from.id`, else `"user"`), a repeated `clientId` returns the
+  stored activity, and sends share the tenant's `activity_create` rate limit
+  with REST. It is the single implementation of the client protocol.
+- **Deprecated**, removed no earlier than two minor releases and 6 months from
+  now: the legacy socket `/socket` (`UserSocket`, `conversation:<id>`,
+  `new_activity`, `last_activity_id`), `POST /api/v1/tokens`, and channel tokens
+  in `x-channel-token` (`POST /api/v1/conversations` and the tenant API). The
+  tenant API with `x-api-key` is not deprecated. Every use logs a warning
+  (per connection or per request), emits `[:converger, :deprecated, :use]`, and
+  HTTP responses carry `Deprecation` (RFC 9745) and
+  `Link: <...>; rel="deprecation"` headers. Migration guide:
+  `docs/api/migrating-from-legacy.md`; decision: ADR-0026.
+- `converger_js` and the chaos harness use the Converger API socket.
+
+### Receipts, typing indicators and presence on the WebSocket (#25)
+
+- The Converger API socket (`converger:conversation:<id>`) pushes `deliveryStatus` frames for
+  every delivery status change, including WhatsApp `delivered` / `read` receipts, which it used
+  to drop. End users with a `user_id` receive them only for their own activities.
+- Clients can push `typing {isTyping}` (relayed to the other connections, never stored,
+  rate-limited to one state change per 2 s) and `read {watermark}` (stored per reader in the new
+  `conversation_reads` table, never moving backwards; the other participants get a
+  `deliveryStatus` read receipt).
+- `presence` frames per conversation (Phoenix Presence), configurable per channel with the config
+  key `presence` (`identified` by default, `all`, `off`); anonymous end users are not announced by
+  default.
+- New optional adapter callbacks `send_typing/2` and `send_read_receipt/2`; `whatsapp_meta`
+  implements both (Cloud API typing indicator and mark as read).
+- The `delivery_status` PubSub payload (also pushed to the legacy socket) gains `seq`, `sender`,
+  `attempts`, `last_error` and `updated_at`.
+- Migration: `20261010100000_create_conversation_reads`. ADR-0032.
+
+### Security fixes
+
+- Tenant API (`x-channel-token`) accepts only channel tokens (`typ: "channel"`, or the legacy
+  channel-token shape). Conversation tokens and Converger client tokens, which share the signing
+  key and carry a `tenant_id`, were accepted before and unlocked the whole tenant API, including
+  routing-rule CRUD.
+- Converger client tokens are bound to their channel for every conversation endpoint (activities,
+  uploads, resume, attachments); unscoped tokens previously reached every conversation of the
+  tenant. WebSocket joins now require a conversation-bound token.
+- Routing-rule updates can no longer change `tenant_id`.
+- Delivery status updates by `delivery_id` are scoped to the reporting channel.
+- The SSRF guard now also covers the tenant `alert_webhook_url` and the WhatsApp Infobip
+  `base_url`, at save time and at request time.
+- `POST /api/v1/tokens` and `POST /api/v1/conversations` also accept only channel tokens (#23):
+  an end user's token could mint legacy conversation tokens for other conversations of its
+  channel under any user id. The legacy socket accepts only conversation tokens, and legacy
+  verifiers reject Converger client tokens.
 
 ### Converger Protocol v1 specification (#21, refs #63 #68)
 
