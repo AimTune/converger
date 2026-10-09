@@ -105,7 +105,8 @@ channel.push("postActivity", { type: "message", text: "hi", clientId: key })
   .receive("error", ({ reason }) => {});
 ```
 
-`postActivity` takes `type` (default `message`), `text`, `attachments` and `channelData`. The sender is the
+`postActivity` takes `type` (default `message`), `text`, `attachments`, `channelData` and `replyToId`
+([references](../concepts/activities.md#references-replies-reactions-edits-and-deletes)). The sender is the
 token's `user_id`; without one, `from.id`, else `"user"`. Errors: `invalid_activity` (with `errors` per field),
 `conversation_closed`, `rate_limited` (with `retry_after_ms`, shared with REST's `activity_create` limit).
 Keep the `clientId` when re-sending after a timeout or reconnect; use a new one per message.

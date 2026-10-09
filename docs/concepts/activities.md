@@ -4,7 +4,7 @@ description: Activities are the messages and events of a conversation - schema, 
 sidebar_position: 6
 ---
 
-An activity is one message or event in a [conversation](conversations.md): a user's text, a bot reply, an upload, a typing notice, a lifecycle event. Activities are immutable once written. They are ordered by a server-assigned, gap-free sequence number `seq`, and every outward representation (REST, WebSocket, webhooks) is built from one canonical serializer.
+An activity is one message or event in a [conversation](conversations.md): a user's text, a bot reply, an upload, a reaction, an edit, a typing notice, a lifecycle event. Activities are append-only: an edit or delete is a new activity that refers to the original ([edits and deletes](#edits-and-deletes)). They are ordered by a server-assigned, gap-free sequence number `seq`, and every outward representation (REST, WebSocket, webhooks) is built from one canonical serializer.
 
 Source: [`lib/converger/activities/activity.ex`](https://github.com/AimTune/converger/blob/main/lib/converger/activities/activity.ex), [`lib/converger/activities.ex`](https://github.com/AimTune/converger/blob/main/lib/converger/activities.ex), [`lib/converger/activities/serializer.ex`](https://github.com/AimTune/converger/blob/main/lib/converger/activities/serializer.ex).
 
@@ -18,27 +18,33 @@ Table `activities`:
 | `tenant_id` | uuid | server | From the credentials. |
 | `conversation_id` | uuid | server | From the URL or token. |
 | `seq` | bigint | server | Per-conversation sequence number: 1, 2, 3, ... `(conversation_id, seq)` is unique. |
-| `type` | text | client | Default `"message"`. Must be a known type. |
+| `type` | text | client | Default `"message"`. Must be a known [type](#types); anything else is rejected with `422`. |
 | `sender` | text | server | Required. Who sent it (see [Sender](#sender)). |
 | `text` | text | client | Optional. At most 65,536 bytes. |
 | `attachments` | array of maps | client | Default `[]`. At most 10, each at most 4,096 bytes as JSON. |
 | `metadata` | map | client | Default `{}`. At most 16,384 bytes as JSON. Exposed as `channelData` in the client API. |
 | `idempotency_key` | text | server | From the `x-idempotency-key` header or the provider message id. `(conversation_id, idempotency_key)` is unique where not null. |
+| `reply_to_id` | uuid | client | Optional. The activity this one refers to, in the same conversation ([references](#references-replies-reactions-edits-and-deletes)). No foreign key (`activities` is partitioned, [ADR-0034](../adr/0034-monthly-partitioning-and-per-tenant-retention.md)); the reference can dangle once retention drops the original's month. |
+| `edited_at`, `deleted_at` | utc_datetime_usec | server | Stamped on a message when a `messageUpdate` or `messageDelete` for it is accepted. Never cast from input. |
 | `inserted_at`, `updated_at` | utc_datetime_usec | server | The server timestamp always wins. Clients cannot set it. |
 
 ### Types
 
-`Activity.types/0`:
+Converger's own activity vocabulary, kept stable (`Activity.types/0`, decided in [ADR-0036](../adr/0036-rich-activity-model.md)):
 
 | Type | Typical use |
 | --- | --- |
-| `message` | A chat message (text and/or attachments). The default. |
+| `message` | A chat message (text and/or attachments). The default. With `reply_to_id` it is a threaded reply. |
 | `event` | An application event. Put the payload in `metadata`. |
-| `typing` | A typing indicator. |
+| `typing` | A stored typing indicator, kept for existing clients that post it over REST. Live typing is the transient `typing` signal, which is never stored ([ADR-0032](../adr/0032-transient-conversation-signals.md)); external channels get it through `send_typing/2`. `typing` activities are never delivered to messaging adapters. |
+| `messageReaction` | A reaction to a message. `text` is the emoji (or a short reaction name, at most 64 bytes); empty means the sender removed their reaction. `reply_to_id` (required) is the message. |
+| `messageUpdate` | An edit. `text` and/or `attachments` are the new content; `reply_to_id` (required) is the edited message. |
+| `messageDelete` | A delete. `reply_to_id` (required) is the deleted message. |
 | `conversationUpdate` | A conversation lifecycle change. The server emits these with sender `"system"` on close and reopen ([conversations](conversations.md#lifecycle)). |
 | `endOfConversation` | The sender signals the end of the conversation. The server attaches no behavior to this type: it does not close the conversation, so use the close endpoint for that. |
+| `deliveryReceipt` | Internal. Only the server may create it (`create_activity(attrs, internal: true)`); clients get `422`. Never delivered to channels. Reserved: nothing emits it today, since delivery and read receipts are transient `deliveryStatus` signals plus stored read watermarks ([ADR-0032](../adr/0032-transient-conversation-signals.md)). |
 
-Any other `type` is rejected with `422`. A richer activity model (reactions, edits, threading, rich message vocabulary) is Planned ([#28](https://github.com/AimTune/converger/issues/28), [#68](https://github.com/AimTune/converger/issues/68)).
+Any other `type` is rejected with `422`. The rich message vocabulary (buttons, cards, carousels as typed payloads) is Planned ([#68](https://github.com/AimTune/converger/issues/68)); until then cards travel as `application/vnd.converger.card.*` attachments.
 
 ### Size limits
 
@@ -66,15 +72,72 @@ Override them with `config :converger, :activity_limits, max_text_bytes: ..., ..
 
 `contentUrl` is served through an authenticated endpoint, or redirected to a signed storage/CDN URL. See [storage](../storage.md) and [ADR-0007](../adr/0007-attachment-storage-with-hand-written-signing.md).
 
+Every attachment written through any entry point is validated and normalised by the embedded schema `Converger.Activities.ActivityAttachment`:
+
+| Field | Type | Rule |
+| --- | --- | --- |
+| `contentType` | string | **Required.** A MIME type (`image/png`, `image/*`) or a well-known Converger type, at most 255 characters. |
+| `contentUrl` | string | Optional. An absolute `http`/`https` URL or a server path such as `/api/v1/converger/attachments/ID`. `javascript:`, `data:` and other schemes are rejected. At most 2,048 characters. |
+| `name` | string | Optional. File name, at most 1,024 characters. |
+| `size` | integer | Optional. Bytes, `>= 0`. |
+| `thumbnailUrl` | string | Optional. Same rules as `contentUrl`. |
+| `content` | object or array | Optional. Inline payload for structured attachments. |
+| `channelData` | object | Optional. Provider passthrough (for example a WhatsApp `providerMediaId`). |
+
+Other keys are dropped; nil values are omitted. An attachment without `contentType` is rejected with `422` (`{"errors": {"attachments": ["attachment 0: contentType can't be blank"]}}`).
+
+Well-known content types:
+
+| `contentType` | `content` |
+| --- | --- |
+| `application/vnd.converger.card.*` (for example `application/vnd.converger.card.hero`) | Required, an object: the card. Renderers that do not know the card type show the activity `text`. |
+| `application/vnd.converger.location` | `{latitude, longitude, name?, address?, url?}` |
+| `application/vnd.converger.contacts` | `[{name, phones}]` |
+
+Validation applies to new writes only. Attachments stored before it (possibly without `contentType`, or with provider keys at the top level) are returned exactly as stored. The JSON Schema is published with the protocol as `$defs/attachment` of [`priv/protocol/v1/activity.schema.json`](https://github.com/AimTune/converger/blob/main/priv/protocol/v1/activity.schema.json).
+
+## References: replies, reactions, edits and deletes
+
+`reply_to_id` names another activity **of the same conversation**; a reference to an unknown activity, or to one in another conversation, is rejected with `422` (`{"errors": {"reply_to_id": ["does not exist in this conversation"]}}`). The check runs in the insert transaction, after the `seq` is allocated under the conversation row lock, and a rejected activity rolls its `seq` back. There is no database foreign key (`activities` is partitioned by month, [ADR-0034](../adr/0034-monthly-partitioning-and-per-tenant-retention.md)), so once retention drops the month holding an original, later activities may still name it in `reply_to_id`: clients must treat an unknown `replyToId` as "original unavailable".
+
+| Type | `reply_to_id` | Target | Who may send it |
+| --- | --- | --- | --- |
+| `message` | optional: a threaded reply | any activity | anyone |
+| `messageReaction` | required | a `message` | anyone |
+| `messageUpdate` | required | a `message` that is not deleted | the original's sender only |
+| `messageDelete` | required | a `message` that is not deleted | the original's sender only |
+
+### Edits and deletes
+
+An edit or delete is a new activity with its own `seq`, so every client sees it in order, also on replay. Accepting a `messageUpdate` stamps `edited_at` on the original; accepting a `messageDelete` stamps `deleted_at`. Both happen in the same transaction as the insert. The original's `text` and `attachments` are **not** rewritten: clients (SDKs) apply the update or hide the deleted message. A deleted message cannot be edited or deleted again. Removing the stored content of a deleted message (redaction, retention) is not part of this; see Planned retention ([#30](https://github.com/AimTune/converger/issues/30)).
+
+### Inbound references
+
+Adapters name the provider message a reply or reaction refers to (a WhatsApp `context.id` or `reaction.message_id`). The inbound controller resolves it to an activity of the same conversation with `Activities.get_activity_by_provider_message_id/2`: an inbound message by its idempotency key, or an outbound message by the provider message id of its delivery. A reaction, edit or delete whose target cannot be resolved (sent before Converger saw the conversation) is stored as an `event` with its metadata, never dropped. A reply whose target cannot be resolved is a plain `message`; the provider id stays in `metadata.reply_to`.
+
+### Delivery to channels
+
+Adapters declare the types they deliver natively ([capabilities](../channels/writing-an-adapter.md#capabilities-and-downgrade)). For other types the channel config key `unsupported_activities` decides: `downgrade` (default) sends a `message` with a text rendering, `skip` sends nothing.
+
+| Type | Downgraded text |
+| --- | --- |
+| `messageReaction` | `"<sender> reacted with <emoji>"`; a removed reaction is skipped |
+| `messageUpdate` | `"(edited) <text>"` |
+| `messageDelete` | `"<sender> deleted a message"` |
+| `event`, `endOfConversation`, `conversationUpdate` | the activity `text`; skipped when it has none |
+| `typing` | skipped |
+
+`deliveryReceipt` is never delivered to channels. WebSocket clients receive every type through the broadcast.
+
 ## Client versus system fields
 
 Activities are created from untrusted input (REST bodies, WebSocket payloads, parsed inbound webhooks), so the schema has two changesets ([ADR-0005](../adr/0005-separate-client-and-system-changesets.md), issue [#5](https://github.com/AimTune/converger/issues/5)):
 
 | Changeset | Casts | Used for |
 | --- | --- | --- |
-| `client_changeset/2` | `type`, `text`, `attachments`, `metadata` (`Activity.client_fields/0`) | Everything a client may set. Validates type and sizes. |
+| `client_changeset/3` | `type`, `text`, `attachments`, `metadata`, `reply_to_id` (`Activity.client_fields/0`) | Everything a client may set. Validates type (client types only, unless `internal: true`), sizes, attachments and per-type rules. |
 | `system_changeset/2` | `tenant_id`, `conversation_id`, `sender`, `idempotency_key` | Server-controlled fields. Never fed raw client input. |
-| `changeset/2` | both | Trusted internal callers. |
+| `changeset/3` | both | Trusted internal callers. |
 
 `Activities.create_client_activity(client_params, system_attrs)` takes **only** the client keys from `client_params`, then merges `system_attrs` built by the controller or socket. Fields such as `inserted_at`, `seq`, `id`, `tenant_id` or `idempotency_key` in a request body are ignored. `seq` is never cast at all. It is added after validation.
 
@@ -170,6 +233,9 @@ If enqueueing the delivery jobs fails, the transaction rolls back and the caller
   "metadata": {},
   "idempotency_key": "hello-1",
   "seq": 1,
+  "reply_to_id": null,
+  "edited_at": null,
+  "deleted_at": null,
   "conversation_id": "5b0c8f2e-3c1d-4a8e-9f3a-1d2e3f4a5b6c",
   "tenant_id": "3f2a1b0c-9d8e-4f7a-b6c5-d4e3f2a1b0c9",
   "inserted_at": "2026-10-09T10:15:02.481230Z"
@@ -190,6 +256,9 @@ The client API (`/api/v1/converger` REST and the `/socket/converger` frames) use
 | `attachments` | `attachments` |
 | `conversationId` | `conversation_id` |
 | `channelData` | `metadata` |
+| `replyToId` | `reply_to_id` |
+| `editedAt` | `edited_at` |
+| `deletedAt` | `deleted_at` |
 
 ```json
 {
@@ -200,7 +269,10 @@ The client API (`/api/v1/converger` REST and the `/socket/converger` frames) use
   "timestamp": "2026-10-09T10:15:02.481230Z",
   "attachments": [],
   "conversationId": "5b0c8f2e-3c1d-4a8e-9f3a-1d2e3f4a5b6c",
-  "channelData": {}
+  "channelData": {},
+  "replyToId": null,
+  "editedAt": null,
+  "deletedAt": null
 }
 ```
 

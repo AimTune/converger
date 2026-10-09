@@ -193,7 +193,7 @@ The server sends one event, `activitySet`:
 | `activities` | Activities in `seq` order. Live frames carry exactly one. |
 | `activities[].from.id` | The activity's `sender` (`"system"` for lifecycle events, `"bot"` for echo replies). |
 | `activities[].channelData` | The activity's `metadata`. |
-| `activities[].type` | `message`, `event`, `typing`, `conversationUpdate` or `endOfConversation`. |
+| `activities[].type` | `message`, `event`, `typing`, `messageReaction`, `messageUpdate`, `messageDelete`, `conversationUpdate` or `endOfConversation`. Activities also carry `replyToId`, `editedAt` and `deletedAt` ([references](concepts/activities.md#references-replies-reactions-edits-and-deletes)). |
 | `watermark` | Opaque position after the last activity in this frame. Store it. |
 | `has_more` | `true` only on a replay frame that hit the replay limit. |
 
@@ -270,7 +270,8 @@ channel.push("postActivity", {
   type: "message",               // default "message"
   text: "Hello!",
   channelData: { locale: "en" }, // optional, stored as the activity's metadata
-  attachments: [],               // optional
+  attachments: [],               // optional, each needs a contentType
+  replyToId: "0e7d...",          // optional; required for messageReaction / messageUpdate / messageDelete
   clientId: "c-17"               // optional, see below
 })
   .receive("ok", ({ id, seq, watermark }) => { /* stored */ })
@@ -286,8 +287,8 @@ to every joined socket, including yours, as an `activitySet`. The reply's `id` a
   after a reconnect, returns the stored activity instead of a duplicate, and the reply then carries
   `duplicate: true`. Keep it across retries; use a new one per message. It is stored as `ws:<sender>:<clientId>`,
   so it never collides with REST `x-idempotency-key`s or other senders.
-- **Errors** (`reason`): `invalid_activity` (with `errors` per field, e.g. `{"type": ["is invalid"]}` or
-  `{"clientId": [...]}`), `conversation_closed`, `rate_limited` (with `retry_after_ms`; the tenant's
+- **Errors** (`reason`): `invalid_activity` (with `errors` per field, e.g. `{"type": ["is invalid"]}`,
+  `{"reply_to_id": ["does not exist in this conversation"]}` or `{"clientId": [...]}`), `conversation_closed`, `rate_limited` (with `retry_after_ms`; the tenant's
   `activity_create` bucket, shared with REST).
   On a `websocket` channel also `inbound_not_supported` (the channel is `outbound` only) and, on a channel topic,
   `unauthorized` or `not_found`.
@@ -601,6 +602,9 @@ Join `conversation:<conversation_id>`, optionally with the id of the last activi
   "metadata": {},
   "idempotency_key": null,
   "seq": 43,
+  "reply_to_id": null,
+  "edited_at": null,
+  "deleted_at": null,
   "conversation_id": "6f1c0e7e-1f0b-4a5e-9a39-2b7c6f0d9a11",
   "tenant_id": "3a0d5e1c-8a7b-4b8e-9b1f-1c2d3e4f5a6b",
   "inserted_at": "2026-10-09T12:00:00.123456Z"
@@ -630,7 +634,7 @@ Join `conversation:<conversation_id>`, optionally with the id of the last activi
 
 ### Client to server
 
-Push `new_activity` with client fields only (`type`, `text`, `attachments`, `metadata`) and an optional `idempotency_key`; anything else, such as `sender` or `inserted_at`, is ignored. The sender is the token's `sub`.
+Push `new_activity` with client fields only (`type`, `text`, `attachments`, `metadata`, `reply_to_id`) and an optional `idempotency_key`; anything else, such as `sender` or `inserted_at`, is ignored. The sender is the token's `sub`.
 
 ```json
 { "type": "message", "text": "Hello!", "metadata": { "locale": "en" } }

@@ -22,6 +22,9 @@ defmodule Converger.Activities.Serializer do
     :metadata,
     :idempotency_key,
     :seq,
+    :reply_to_id,
+    :edited_at,
+    :deleted_at,
     :conversation_id,
     :tenant_id,
     :inserted_at
@@ -41,6 +44,9 @@ defmodule Converger.Activities.Serializer do
       metadata: activity.metadata || %{},
       idempotency_key: activity.idempotency_key,
       seq: activity.seq,
+      reply_to_id: activity.reply_to_id,
+      edited_at: activity.edited_at,
+      deleted_at: activity.deleted_at,
       conversation_id: activity.conversation_id,
       tenant_id: activity.tenant_id,
       inserted_at: activity.inserted_at

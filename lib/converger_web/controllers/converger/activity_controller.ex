@@ -29,7 +29,8 @@ defmodule ConvergerWeb.ConvergerAPI.ActivityController do
         "type" => params["type"] || "message",
         "text" => params["text"],
         "attachments" => params["attachments"] || [],
-        "metadata" => params["channelData"] || params["metadata"] || %{}
+        "metadata" => params["channelData"] || params["metadata"] || %{},
+        "reply_to_id" => params["replyToId"]
       }
 
       system_attrs = %{

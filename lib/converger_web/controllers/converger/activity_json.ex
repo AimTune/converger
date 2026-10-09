@@ -39,7 +39,10 @@ defmodule ConvergerWeb.ConvergerAPI.ActivityJSON do
       timestamp: canonical.inserted_at,
       attachments: canonical.attachments,
       conversationId: canonical.conversation_id,
-      channelData: canonical.metadata
+      channelData: canonical.metadata,
+      replyToId: Map.get(canonical, :reply_to_id),
+      editedAt: Map.get(canonical, :edited_at),
+      deletedAt: Map.get(canonical, :deleted_at)
     }
   end
 end

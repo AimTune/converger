@@ -122,8 +122,10 @@ defmodule Converger.Channels.Adapters.WhatsAppInfobipTest do
       assert [
                %{
                  "contentType" => "image/*",
-                 "provider" => "whatsapp_infobip",
-                 "providerMediaUrl" => "https://api.infobip.com/whatsapp/1/media/abc"
+                 "channelData" => %{
+                   "provider" => "whatsapp_infobip",
+                   "providerMediaUrl" => "https://api.infobip.com/whatsapp/1/media/abc"
+                 }
                }
              ] = message["attachments"]
     end

@@ -52,7 +52,7 @@ The behaviour lives in [`lib/converger/channels/adapter.ex`](https://github.com/
 | `parse_status_update/2` | no | `{:ok, [update]}`, `:ignore` or `{:error, term}` | Extracts delivery and read receipts. Missing callback means `:ignore`. |
 | `verify_inbound_signature/3` | no | `:ok`, `:legacy`, `:missing` or `{:error, reason}` | Provider-native signature check. Missing callback means the generic `x-converger-signature` scheme. |
 | `retry_policy/0` | no | `map` | Adapter defaults merged over the global retry policy and under the channel's `retry_policy`. |
-| `capabilities/0` | no | `[atom]` | What the adapter can do. The pipeline delivers only to channels whose adapter has `:outbound`. Missing callback means `[:inbound, :outbound]`. |
+| `capabilities/0` | no | list of atoms and `activity_types: [String.t()]` | What the adapter can do. The pipeline delivers only to channels whose adapter has `:outbound`. An `activity_types: [...]` entry names the activity types it delivers natively; other types are downgraded to text or skipped per channel ([capabilities and downgrade](writing-an-adapter.md#capabilities-and-downgrade)). Missing callback means `[:inbound, :outbound]`; a missing `activity_types` entry means every client type. |
 | `send_typing/2` | no | `:ok` or `{:error, term}` | Shows a WebSocket participant's typing indicator to the channel's participant. Missing callback means the channel gets no typing. |
 | `send_read_receipt/2` | no | `:ok` or `{:error, term}` | Marks the channel participant's messages as read when a WebSocket participant reads them. Missing callback means no read receipts are sent. |
 
@@ -83,7 +83,8 @@ Providers batch several messages into one webhook call, so the callback returns 
 | Key | Required | Meaning |
 | --- | --- | --- |
 | `sender` | yes | Sender identifier stored on the activity (`activity.sender`). |
-| `text`, `type`, `attachments`, `metadata` | no | Activity client fields. `type` defaults to `message`. |
+| `text`, `type`, `attachments`, `metadata`, `reply_to_id` | no | Activity client fields. `type` defaults to `message`; attachments are validated ([attachment schema](../concepts/activities.md#attachments)), so put provider fields in an attachment's `channelData`. |
+| `reply_to_provider_id` | no | The provider id of the message this one replies or reacts to (a WhatsApp `context.id` or `reaction.message_id`). The controller resolves it to `reply_to_id`; an unresolvable `messageReaction`, `messageUpdate` or `messageDelete` is stored as an `event`. |
 | `idempotency_key` | no | A stable provider message id (a WhatsApp `wamid`, an Infobip `messageId`). A re-delivered webhook carrying the same id never creates a second activity. |
 | `participant` | no | `%{"external_id" => ..., "display_name" => ...}`. When present (and the request has no `conversation_id`), the message joins the participant's active conversation on the channel. See [ADR-0016](../adr/0016-participant-based-conversation-resolution.md). |
 
@@ -106,20 +107,21 @@ Status progression is monotonic (`pending` < `sent` < `delivered` < `read`): a `
 
 ## Capability matrix
 
-| Type | Modes | Outbound delivery | Inbound webhook | Status receipts | Inbound signature | Batches | Typing / read receipts out |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `webhook` | inbound, outbound, duplex | Canonical activity JSON to the configured URL, signed with `x-converger-signature` | One message per request | Yes: `delivery_id` or `provider_message_id` plus `status` | Generic `x-converger-signature` | No (one message per request) | No |
-| `whatsapp_meta` | inbound, outbound, duplex | Text messages through the Graph API | Yes (Cloud API webhook) | Yes (`statuses`) | Meta `X-Hub-Signature-256` keyed with `app_secret` | Yes: every `entry` / `changes` / `messages` / `statuses` item | Yes: typing indicator and mark as read |
-| `whatsapp_infobip` | inbound, outbound, duplex | Text messages through the Infobip API | Yes (`results`) | Yes (delivery reports in `results`) | Generic `x-converger-signature` (no Infobip-native check) | Yes: every item of `results` | No |
-| `echo` | outbound | Creates a reply activity from `bot` in the same conversation | No | No | Not applicable | Not applicable | No |
-| `websocket` | inbound, outbound, duplex | Broadcast to the channel's connected sockets; `pending` until a client is connected, replays or acks ([WebSocket](websocket.md)) | No (clients send over the socket, through the same inbound path) | Client `ack` over the socket | Not applicable (socket token) | Not applicable | Not applicable (clients get `typing` and `deliveryStatus` frames) |
+| Type | Modes | Outbound delivery | Native activity types | Inbound webhook | Status receipts | Inbound signature | Batches | Typing / read receipts out |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `webhook` | inbound, outbound, duplex | Canonical activity JSON to the configured URL, signed with `x-converger-signature` | all | One message per request | Yes: `delivery_id` or `provider_message_id` plus `status` | Generic `x-converger-signature` | No (one message per request) | No |
+| `whatsapp_meta` | inbound, outbound, duplex | Text messages through the Graph API | `message` | Yes (Cloud API webhook) | Yes (`statuses`) | Meta `X-Hub-Signature-256` keyed with `app_secret` | Yes: every `entry` / `changes` / `messages` / `statuses` item | Yes: typing indicator and mark as read |
+| `whatsapp_infobip` | inbound, outbound, duplex | Text messages through the Infobip API | `message` | Yes (`results`) | Yes (delivery reports in `results`) | Generic `x-converger-signature` (no Infobip-native check) | Yes: every item of `results` | No |
+| `echo` | outbound | Creates a reply activity from `bot` in the same conversation | `message` | No | No | Not applicable | Not applicable | No |
+| `websocket` | inbound, outbound, duplex | Broadcast to the channel's connected sockets; `pending` until a client is connected, replays or acks ([WebSocket](websocket.md)) | all | No (clients send over the socket, through the same inbound path) | Client `ack` over the socket | Not applicable (socket token) | Not applicable | Not applicable (clients get `typing` and `deliveryStatus` frames) |
 
 Notes:
 
 - The pipeline calls the adapter of every channel whose adapter has the `:outbound` capability (`Adapter.capability?/2`, used by `resolve_delivery_channels/1` in [`lib/converger/pipeline.ex`](https://github.com/AimTune/converger/blob/main/lib/converger/pipeline.ex)): all five types today.
 - Conversation lifecycle events (close, reopen) are delivered only to `webhook` and `websocket` channels.
+- Activity types outside an adapter's native types (the `activity_types:` entry of `capabilities/0`) are downgraded to a text `message` (for example `messageReaction` becomes `"user reacted with 👍"`) or skipped, as set by the channel config key `unsupported_activities` (`downgrade`, the default, or `skip`). `typing` and the internal `deliveryReceipt` never reach messaging adapters. See [activities](../concepts/activities.md#delivery-to-channels).
 - An inbound message from the conversation's participant is never delivered back to that participant's own channel, unless it is a `websocket` channel (its other sockets need it).
-- Outbound WhatsApp media, templates and interactive messages are planned ([#37](https://github.com/AimTune/converger/issues/37)). `capabilities/0` currently only drives pipeline delivery; the rest of adapter behaviour v2 (config schema, registry, capability-driven health checks and admin forms) is planned ([#36](https://github.com/AimTune/converger/issues/36)).
+- Outbound WhatsApp media, templates and interactive messages are planned ([#37](https://github.com/AimTune/converger/issues/37)). `capabilities/0` drives pipeline delivery (`:outbound`) and, with its `activity_types:` entry, the downgrade of unsupported activity types ([#28](https://github.com/AimTune/converger/issues/28)); the rest of adapter behaviour v2 (config schema, registry, capability-driven health checks and admin forms) is planned ([#36](https://github.com/AimTune/converger/issues/36)).
 
 ## Inbound endpoints
 

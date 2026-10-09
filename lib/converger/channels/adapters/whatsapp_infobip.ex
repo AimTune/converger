@@ -11,6 +11,12 @@ defmodule Converger.Channels.Adapters.WhatsAppInfobip do
   @impl true
   def supported_modes, do: ~w(inbound outbound duplex)
 
+  # Outbound messages are sent as WhatsApp text. Native outbound reactions,
+  # media and interactive messages are planned (#37); other activity types are
+  # downgraded to text or skipped (Converger.Activities.Downgrade).
+  @impl true
+  def capabilities, do: [:inbound, :outbound, activity_types: ~w(message)]
+
   @impl true
   def validate_config(config) do
     required = ["base_url", "api_key", "sender"]
@@ -146,6 +152,8 @@ defmodule Converger.Channels.Adapters.WhatsAppInfobip do
       "attachments" => attachments,
       "metadata" => metadata,
       "idempotency_key" => result["messageId"],
+      # Resolved to `reply_to_id` by the inbound controller.
+      "reply_to_provider_id" => get_in(message, ["context", "id"]),
       "participant" => %{
         "external_id" => result["from"],
         "display_name" => metadata["profile_name"]
@@ -171,9 +179,12 @@ defmodule Converger.Channels.Adapters.WhatsAppInfobip do
       reject_nil_values(%{
         "contentType" => message["mimeType"] || Map.fetch!(@media_types, type),
         "name" => message["filename"] || message["fileName"],
-        "provider" => "whatsapp_infobip",
-        "providerMediaId" => message["id"],
-        "providerMediaUrl" => message["url"]
+        "channelData" =>
+          reject_nil_values(%{
+            "provider" => "whatsapp_infobip",
+            "providerMediaId" => message["id"],
+            "providerMediaUrl" => message["url"]
+          })
       })
 
     {"message", message["caption"] || "", [attachment], %{}}

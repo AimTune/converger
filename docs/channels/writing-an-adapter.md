@@ -9,7 +9,7 @@ This guide walks through adding a new channel type. The running example is a fic
 Before you start, read [Channels and adapters](overview.md) for the behaviour, the inbound endpoint and the signature policy. The smallest complete adapter in the code base is [echo](echo.md); the most complete ones are [`whatsapp_meta.ex`](https://github.com/AimTune/converger/blob/main/lib/converger/channels/adapters/whatsapp_meta.ex) and [`webhook.ex`](https://github.com/AimTune/converger/blob/main/lib/converger/channels/adapters/webhook.ex).
 
 :::info
-Adding an adapter currently means touching several files outside the adapter module (the steps below list all of them). Adapter behaviour v2, with `capabilities/0`, `config_schema/0`, a config-driven adapter registry and generated admin forms, is Planned ([#36](https://github.com/AimTune/converger/issues/36)). Until it lands, follow this checklist.
+Adding an adapter currently means touching several files outside the adapter module (the steps below list all of them). Adapter behaviour v2, with a richer `capabilities/0`, `config_schema/0`, a config-driven adapter registry and generated admin forms, is Planned ([#36](https://github.com/AimTune/converger/issues/36)). Until it lands, follow this checklist.
 :::
 
 ## 1. Implement the behaviour
@@ -186,7 +186,7 @@ Callback checklist:
 | `parse_status_update/2` | no | `{:ok, [update]}` or `:ignore`. |
 | `verify_inbound_signature/3` | no | Implement when the provider signs webhooks natively. Without it, the generic `x-converger-signature` scheme keyed with the channel `secret` applies. |
 | `retry_policy/0` | no | Adapter defaults (`max_attempts`, `backoff`, `base_ms`, `max_ms`, `timeout_ms`) between the global config and the channel's own `retry_policy`. |
-| `capabilities/0` | no | Defaults to `[:inbound, :outbound]`. Leave `:outbound` out for an adapter that never delivers; the pipeline then creates no deliveries for its channels. |
+| `capabilities/0` | no | Defaults to `[:inbound, :outbound]`. Leave `:outbound` out for an adapter that never delivers; the pipeline then creates no deliveries for its channels. Add `activity_types: [...]` to name the activity types it renders natively ([capabilities and downgrade](#capabilities-and-downgrade)). |
 | `send_typing/2` | no | Show (or clear) a typing indicator to the channel's participant when a WebSocket participant types. Return `:ok` or `{:error, reason}`. |
 | `send_read_receipt/2` | no | Tell the provider the participant's messages were read when a WebSocket participant sends `read`. Return `:ok` or `{:error, reason}`. |
 
@@ -240,9 +240,21 @@ Channel types are plain strings, never atoms created from input: `adapter_for/1`
 - **Set `idempotency_key`** to a stable provider message id. The controller checks it across all conversations of the channel before creating an activity, so a re-delivered webhook produces duplicates, not new activities. Use an id that is unique per channel; prefixing it (`"acme:" <> id`) is optional but makes the origin obvious. Never derive it from a timestamp or from the body hash of a whole batch.
 - **Set `participant.external_id`** to the sender's address (phone number, chat id) so messages from the same party share their active conversation and replies can find the recipient through `Participants.recipient_for/2` ([ADR-0016](../adr/0016-participant-based-conversation-resolution.md)).
 - **Keep unknown message types** as activities (empty text, `metadata` with the provider type) rather than dropping them.
-- Map media to attachment stubs (`contentType`, `provider`, `providerMediaId`); do not download media in the request.
-- Only client fields of the parsed message (`type`, `text`, `attachments`, `metadata`) end up on the activity; `sender` and `idempotency_key` are passed by the controller as server-controlled attributes.
+- Map media to attachment stubs: `contentType` (required, a MIME type; use a wildcard such as `image/*` when the provider does not say) plus provider fields under `channelData` (`provider`, `providerMediaId`). Attachments are validated, so keys outside the [attachment schema](../concepts/activities.md#attachments) are dropped. Do not download media in the request.
+- Map reactions to `messageReaction` (`text` is the emoji) and replies to `message`, and set `reply_to_provider_id` to the provider id of the referenced message; the controller resolves it to `reply_to_id` and keeps an unresolvable reaction as an `event`.
+- Only client fields of the parsed message (`type`, `text`, `attachments`, `metadata`, `reply_to_id`) end up on the activity; `sender` and `idempotency_key` are passed by the controller as server-controlled attributes.
 - Receipts: normalize `status` to one of `sent`, `delivered`, `read`, `failed`. Any other value is silently ignored by `Deliveries.advance_status/2` (it has no rank), so map unknown provider states explicitly, as both WhatsApp adapters map them to `sent`.
+
+### Capabilities and downgrade
+
+Declare the [activity types](../concepts/activities.md#types) the adapter can deliver as such:
+
+```elixir
+@impl true
+def capabilities, do: [:inbound, :outbound, activity_types: ~w(message)]
+```
+
+The pipeline (`Converger.Activities.Downgrade`) hands the adapter only those types. Any other type is turned into a `message` with a text rendering (`"user reacted with 👍"`, `"(edited) new text"`, `"user deleted a message"`), or skipped when it has no text (typing, a removed reaction, an event without text), or skipped altogether when the channel config sets `"unsupported_activities": "skip"`. Skipped activities get no delivery row. An adapter without an `activity_types` entry receives every client type, as before [#28](https://github.com/AimTune/converger/issues/28). List a type only when `deliver_activity/2` really renders it (WhatsApp would need the target's `wamid` to send a native reaction).
 
 ## 6. Delivery errors
 
@@ -306,6 +318,7 @@ Every pull request updates the docs it affects ([ADR-0025](../adr/0025-docusauru
 - [ ] secret config keys named so they are redacted
 - [ ] user-supplied URLs go through `UrlGuard`
 - [ ] every message of a batch parsed, each with a stable `idempotency_key`
+- [ ] `capabilities/0` lists only the activity types `deliver_activity/2` renders
 - [ ] failures returned as `DeliveryError`
 - [ ] unit, delivery and controller tests
 - [ ] docs page, capability matrix row, ADR if needed

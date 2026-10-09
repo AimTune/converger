@@ -9,8 +9,11 @@ description: Typed message payloads compatible with chativa and mekik/1, and how
 > **Status: draft for review (#68).** This page specifies the message types that travel as
 > persistent message frames of [Converger Protocol v1](./v1.md): their names, `data` shapes,
 > limits, the escape hatches, and how each channel adapter downgrades what it cannot render.
-> Storage, validation and the adapters are **Planned (#28 for the activity model, #68 for the
-> adapters)**. Today an activity is `text` plus `attachments` (section 7).
+> The activity model underneath (a closed set of activity types, validated attachments, reactions,
+> edits, deletes and replies) is **Implemented (#28)**, see
+> [activities](../concepts/activities.md) and [ADR-0036](../adr/0036-rich-activity-model.md).
+> Storing the typed message payloads of this page and the per-channel rendering are **Planned (#68)**
+> (section 7).
 
 The schemas are in
 [`priv/protocol/v1/messages/`](https://github.com/AimTune/converger/tree/main/priv/protocol/v1/messages);
@@ -181,9 +184,12 @@ Approve and Cancel.
 
 `skill` (mekik/1 section 12.5) is adopted the same way.
 
-## 4. Storage: **Planned (#28)**
+## 4. Storage: **Planned (#68)**
 
-- `activities.type` is the message type (or the mekik frame type).
+- `activities.type` stays Converger's closed activity vocabulary (#28): an unknown activity type is
+  rejected with `422`. A message frame of any message type is stored as a `message` activity; the
+  message type and its typed payload are stored alongside it (an `application/vnd.converger.card.*`
+  attachment is the interim representation of a card). Mekik-native frames get their mapping with #64.
 - The typed payload is stored losslessly. For message frames that is `data` plus the frame-level
   `actions`; for mekik-native frames it is every top-level field except `type` and `seq` (`genui`
   keeps `streamId`, `done` and `chunk` at the top level). Re-serialising a stored frame MUST give
@@ -195,7 +201,9 @@ Approve and Cancel.
 
 ## 5. Per-channel downgrade matrix: **Planned (#68, adapters)**
 
-Each adapter declares what it renders natively through `capabilities/0` (#36). The pipeline hands
+Each adapter declares what it renders natively through `capabilities/0`: activity types since #28
+(an `activity_types: [...]` entry, unsupported types downgraded to text or skipped per channel), message
+types with #68 and #36. The pipeline hands
 the adapter the typed message; the adapter renders natively or downgrades as below, keeping enough
 state to map the user's answer back (section 6).
 
@@ -256,11 +264,14 @@ WhatsApp, Telegram and email.
 
 ## 7. Today and migration
 
-**Implemented**: activities have a `type` (`message`, `event`, `typing`, `conversationUpdate`,
-`endOfConversation`), `text`, `attachments` (at most 10, 4 KiB each) and `metadata` (16 KiB). The
-Converger API shows them as
-`{id, type, from, text, timestamp, attachments, conversationId, channelData}`. WhatsApp inbound buttons arrive as `message` activities with the button payload in
-`metadata`, reactions as `event`.
+**Implemented** (#28): activities have a `type` (`message`, `event`, `typing`, `messageReaction`,
+`messageUpdate`, `messageDelete`, `conversationUpdate`, `endOfConversation`, internal `deliveryReceipt`),
+`text`, validated `attachments` (at most 10, 4 KiB each, `contentType` required), `metadata` (16 KiB)
+and `replyToId` / `editedAt` / `deletedAt`. The Converger API shows them as
+`{id, type, from, text, timestamp, attachments, conversationId, channelData, replyToId, editedAt, deletedAt}`
+([`activity.schema.json`](https://github.com/AimTune/converger/blob/main/priv/protocol/v1/activity.schema.json)).
+WhatsApp inbound buttons arrive as `message` activities with the button payload in `metadata`,
+reactions as `messageReaction` referencing the reacted-to activity.
 
 With #28 the activity model gains typed payloads. Existing `message` activities are presented as
 `text` frames carrying their attachments ([v1.md section 5.4](./v1.md#54-activities-as-frames)); new
