@@ -11,6 +11,8 @@ defmodule ConvergerWeb.Endpoint do
     same_site: "Lax"
   ]
 
+  # Deprecated (#23): the pre-v1 legacy socket. Use /socket/converger, the
+  # single WebSocket entry point. See ConvergerWeb.Deprecation.
   socket "/socket", ConvergerWeb.UserSocket,
     websocket: true,
     longpoll: false

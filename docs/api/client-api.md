@@ -6,9 +6,9 @@ sidebar_position: 3
 
 The Converger client API lives under `/api/v1/converger`. End-user clients such as web chat widgets and mobile
 apps use it. It is modelled on Bot Framework Direct Line: your backend exchanges a channel secret for a short-lived
-token, the client starts a conversation with that token, then posts activities over REST and receives them over the
-WebSocket at `streamUrl` (or by polling the activities endpoint with a watermark). Shared conventions (errors, rate
-limits, pagination, idempotency, CORS) are in the [overview](overview.md).
+token, the client starts a conversation with that token, then posts activities over REST (or over the socket with
+`postActivity`) and receives them over the WebSocket at `streamUrl` (or by polling the activities endpoint with a
+watermark). Shared conventions (errors, rate limits, pagination, idempotency, CORS) are in the [overview](overview.md).
 
 Controllers live in [`lib/converger_web/controllers/converger/`](https://github.com/AimTune/converger/tree/main/lib/converger_web/controllers/converger)
 (module prefix `ConvergerWeb.ConvergerAPI`). Field names in this API are camelCase (`conversationId`, `channelData`),
@@ -288,6 +288,10 @@ curl -s -X POST "$CONVERGER/api/v1/converger/conversations/$CONV/activities" \
 ```
 
 The full activity arrives on the socket and in the activities list.
+
+The same activity can also be sent over the socket with the `postActivity` event, which shares the
+`activity_create` bucket and replies with `id`, `seq` and `watermark`; see
+[WebSocket](../websocket.md#6-send-activities-over-the-socket).
 
 | Status | Body | Cause |
 | --- | --- | --- |

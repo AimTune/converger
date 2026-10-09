@@ -3,7 +3,7 @@ defmodule ConvergerWeb.ConvergerChannel do
 
   require Logger
 
-  alias Converger.{Activities, Channels, Conversations, Receipts}
+  alias Converger.{Activities, Channels, Conversations, RateLimit, Receipts}
   alias Converger.Channels.Signals
   alias Converger.ConvergerAPI.Watermark
   alias Converger.Pagination
@@ -50,11 +50,54 @@ defmodule ConvergerWeb.ConvergerChannel do
 
   def join(_, _, _), do: {:error, %{reason: "invalid_topic"}}
 
+  # `clientId` syntax of Protocol v1 (docs/protocol/v1.md, section 7).
+  @client_id_format ~r/\A[A-Za-z0-9._:~-]{1,128}\z/
+
+  # `postActivity`: send an activity over the socket, the WebSocket
+  # equivalent of `POST /api/v1/converger/conversations/:id/activities`.
+  #
+  # The payload is a Direct Line-style activity (`type`, `text`,
+  # `attachments`, `channelData`, `from.id`). The sender is the token's
+  # verified `user_id` when it has one (a client-asserted `from.id` cannot
+  # override it), otherwise `from.id`, otherwise `"user"`.
+  #
+  # An optional `clientId` makes a re-send safe: the activity is stored once
+  # and a re-send with the same `clientId` (also after a reconnect) is
+  # answered with the stored activity. The key is namespaced by sender
+  # (`ws:<sender>:<clientId>`), so it cannot collide with REST
+  # `X-Idempotency-Key`s or other senders.
+  #
+  # The reply carries the activity's `id`, `seq` and `watermark`, so the
+  # client can match its send to the `activitySet` that follows.
+  @impl true
+  def handle_in("postActivity", payload, socket) when is_map(payload) do
+    claims = socket.assigns.converger_claims
+    sender = sender(claims, payload)
+
+    with {:ok, client_id} <- client_id(payload),
+         :ok <- rate_limit(claims["tenant_id"]) do
+      payload
+      |> client_params()
+      |> Activities.create_client_activity(%{
+        tenant_id: claims["tenant_id"],
+        conversation_id: socket.assigns.conversation_id,
+        sender: sender,
+        idempotency_key: client_id && "ws:#{sender}:#{client_id}"
+      })
+      |> reply_to_post(socket)
+    else
+      {:error, reply} -> {:reply, {:error, reply}, socket}
+    end
+  end
+
+  def handle_in("postActivity", _payload, socket) do
+    {:reply, {:error, %{reason: "invalid_activity"}}, socket}
+  end
+
   # --- Client frames ---
 
   # `typing {isTyping}`: relayed to the conversation's other connections and,
   # when the adapter supports it, to the external channel. Never stored.
-  @impl true
   def handle_in("typing", %{"isTyping" => is_typing}, socket) when is_boolean(is_typing) do
     now = System.monotonic_time(:millisecond)
 
@@ -156,6 +199,79 @@ defmodule ConvergerWeb.ConvergerChannel do
         Signals.forward_typing(conversation_id, participant.id, true)
         assign(socket, :typing_forwarded_at, now)
     end
+  end
+
+  defp sender(%{"user_id" => user_id}, _payload) when is_binary(user_id) and user_id != "",
+    do: user_id
+
+  defp sender(_claims, %{"from" => %{"id" => id}}) when is_binary(id) and id != "", do: id
+  defp sender(_claims, _payload), do: "user"
+
+  # Same mapping as the REST endpoint (ConvergerAPI.ActivityController).
+  defp client_params(payload) do
+    %{
+      "type" => payload["type"] || "message",
+      "text" => payload["text"],
+      "attachments" => payload["attachments"] || [],
+      "metadata" => payload["channelData"] || %{}
+    }
+  end
+
+  defp client_id(payload) do
+    case Map.get(payload, "clientId") do
+      nil ->
+        {:ok, nil}
+
+      id when is_binary(id) ->
+        if Regex.match?(@client_id_format, id),
+          do: {:ok, id},
+          else: client_id_error()
+
+      _ ->
+        client_id_error()
+    end
+  end
+
+  defp client_id_error do
+    {:error,
+     %{
+       reason: "invalid_activity",
+       errors: %{clientId: ["must be 1 to 128 characters of A-Z a-z 0-9 . _ : ~ -"]}
+     }}
+  end
+
+  # Shares the tenant's `activity_create` bucket with the REST endpoints.
+  defp rate_limit(tenant_id) do
+    case RateLimit.check(:activity_create, "tenant:#{tenant_id}", tenant: tenant_id) do
+      {:allow, _count} ->
+        :ok
+
+      {:deny, retry_after_ms, _spec} ->
+        {:error, %{reason: "rate_limited", retry_after_ms: retry_after_ms}}
+    end
+  end
+
+  defp reply_to_post({:ok, activity}, socket) do
+    {:reply,
+     {:ok, %{id: activity.id, seq: activity.seq, watermark: Watermark.encode(activity.seq)}},
+     socket}
+  end
+
+  defp reply_to_post({:error, :conversation_closed}, socket),
+    do: {:reply, {:error, %{reason: "conversation_closed"}}, socket}
+
+  defp reply_to_post({:error, %Ecto.Changeset{} = changeset}, socket),
+    do: {:reply, {:error, %{reason: "invalid_activity", errors: errors(changeset)}}, socket}
+
+  defp reply_to_post({:error, _reason}, socket),
+    do: {:reply, {:error, %{reason: "invalid_activity"}}, socket}
+
+  defp errors(changeset) do
+    Ecto.Changeset.traverse_errors(changeset, fn {msg, opts} ->
+      Enum.reduce(opts, msg, fn {key, value}, acc ->
+        String.replace(acc, "%{#{key}}", fn _ -> to_string(value) end)
+      end)
+    end)
   end
 
   # --- Server pushes ---

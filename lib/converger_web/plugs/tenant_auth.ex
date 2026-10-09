@@ -1,7 +1,9 @@
 defmodule ConvergerWeb.Plugs.TenantAuth do
   @moduledoc """
   Authenticates tenant API requests via the `x-api-key` header or a channel
-  token in `x-channel-token`.
+  token in `x-channel-token`. Only channel tokens are accepted there (end-user
+  tokens share the signer); channel tokens are deprecated (#23) and each use
+  is logged by `ConvergerWeb.Deprecation`.
   """
 
   import Plug.Conn
@@ -45,7 +47,9 @@ defmodule ConvergerWeb.Plugs.TenantAuth do
          {:ok, channel_id, tenant_id} <- Token.channel_token_claims(claims),
          {:ok, _channel} <- Channels.get_active_channel(channel_id, tenant_id),
          %Tenants.Tenant{status: "active"} = tenant <- Tenants.get_tenant(tenant_id) do
-      assign(conn, :tenant, tenant)
+      conn
+      |> assign(:tenant, tenant)
+      |> ConvergerWeb.Deprecation.mark(:channel_token, tenant_id: tenant.id)
     else
       %Tenants.Tenant{} -> unauthorized(conn, "Tenant is not active")
       {:error, :channel_inactive} -> unauthorized(conn, "Channel is not active")

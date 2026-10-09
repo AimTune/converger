@@ -7,15 +7,15 @@ sidebar_position: 8
 This page is the client-facing reference for Converger's **current** WebSocket interface: what to connect to, how to authenticate, which topics to join, which frames you send and receive, and how to resume after a disconnect without losing activities. For the server-side design see [Real-time](architecture/realtime.md).
 
 :::info Protocol v1 is being specified
-Today's WebSocket interface is Phoenix Channels framing with Converger-specific events. Converger Protocol v1 (spec in progress, [#21](https://github.com/AimTune/converger/issues/21), [#63](https://github.com/AimTune/converger/issues/63)) will replace it with a documented, versioned wire protocol. Also planned: a raw WebSocket endpoint without Phoenix framing ([#26](https://github.com/AimTune/converger/issues/26)), client message ids with server acks ([#24](https://github.com/AimTune/converger/issues/24)), and one unified socket stack ([#23](https://github.com/AimTune/converger/issues/23)). Expect the interface below to change; build new integrations on the Converger API socket.
+Today's WebSocket interface is Phoenix Channels framing with Converger-specific events. Converger Protocol v1 (spec in progress, [#21](https://github.com/AimTune/converger/issues/21), [#63](https://github.com/AimTune/converger/issues/63)) will replace it with a documented, versioned wire protocol. Also planned: a raw WebSocket endpoint without Phoenix framing ([#26](https://github.com/AimTune/converger/issues/26)), and client message ids with server acks ([#24](https://github.com/AimTune/converger/issues/24)). Expect the interface below to change. The Converger API socket is the single client stack ([#23](https://github.com/AimTune/converger/issues/23)); the legacy socket is deprecated.
 :::
 
 ## Endpoints
 
 | Path | Socket module | Topic | Use |
 | --- | --- | --- | --- |
-| `/socket/converger/websocket` | `ConvergerWeb.ConvergerSocket` | `converger:conversation:<conversation_id>` | **Recommended.** Converger client API (Direct Line-inspired): `activitySet` frames with watermarks, `deliveryStatus`, `typing` and `presence` frames. Sends activities over REST; sends `typing` and `read` over the socket. |
-| `/socket/websocket` | `ConvergerWeb.UserSocket` | `conversation:<conversation_id>` | Legacy. Canonical `new_activity` frames, send over the socket, `delivery_status` frames. Will be deprecated ([#23](https://github.com/AimTune/converger/issues/23)). |
+| `/socket/converger/websocket` | `ConvergerWeb.ConvergerSocket` | `converger:conversation:<conversation_id>` | **The client socket.** Converger client API (Direct Line-inspired): `activitySet` frames with watermarks, `deliveryStatus`, `typing` and `presence` frames; send with `postActivity` or over REST, and `typing` and `read` over the socket. |
+| `/socket/websocket` | `ConvergerWeb.UserSocket` | `conversation:<conversation_id>` | **Deprecated** ([#23](https://github.com/AimTune/converger/issues/23)). Canonical `new_activity` frames, send over the socket, `delivery_status` frames. Every connection logs a deprecation warning; see [migrating from the legacy API](api/migrating-from-legacy.md). |
 
 Both are Phoenix sockets (declared in [endpoint.ex](https://github.com/AimTune/converger/blob/main/lib/converger_web/endpoint.ex) as `/socket/converger` and `/socket`; the WebSocket transport is mounted under `/websocket`). Long-polling is disabled. Messages use the Phoenix V2 JSON serializer (`vsn=2.0.0`, the default of the `phoenix` JavaScript client).
 
@@ -194,9 +194,38 @@ Push these events on the conversation topic:
 
 Typing is no longer something to persist: the `typing` event is transient. Activities with `"type": "typing"` posted over REST are still stored and broadcast for existing clients, but new clients should use the event.
 
-### 6. Send activities (REST)
+### 6. Send activities over the socket
 
-Activities are sent over REST with the same token (the socket only accepts the `typing` and `read` events above):
+Push `postActivity` on the joined topic:
+
+```js
+channel.push("postActivity", {
+  type: "message",               // default "message"
+  text: "Hello!",
+  channelData: { locale: "en" }, // optional, stored as the activity's metadata
+  attachments: [],               // optional
+  clientId: "c-17"               // optional, see below
+})
+  .receive("ok", ({ id, seq, watermark }) => { /* stored */ })
+  .receive("error", ({ reason, errors, retry_after_ms }) => { /* not stored */ });
+```
+
+The activity is stored and routed exactly like a REST send (middleware, routing rules, deliveries), and comes back
+to every joined socket, including yours, as an `activitySet`. The reply's `id` and `watermark` match that frame.
+
+- **Sender**: the token's `user_id`. A token without one takes `from.id` from the payload, else `"user"`. Any
+  other field (`sender`, `seq`, timestamps) is ignored.
+- **`clientId`** (1 to 128 characters of `A-Z a-z 0-9 . _ : ~ -`): re-sending with the same `clientId`, also
+  after a reconnect, returns the stored activity instead of a duplicate. Keep it across retries; use a new one per
+  message. It is stored as `ws:<sender>:<clientId>`, so it never collides with REST `x-idempotency-key`s or other
+  senders.
+- **Errors** (`reason`): `invalid_activity` (with `errors` per field, e.g. `{"type": ["is invalid"]}` or
+  `{"clientId": [...]}`), `conversation_closed`, `rate_limited` (with `retry_after_ms`; the tenant's
+  `activity_create` bucket, shared with REST).
+
+### 7. Send activities (REST)
+
+You can also send over REST with the same token:
 
 ```http
 POST /api/v1/converger/conversations/6f1c0e7e-1f0b-4a5e-9a39-2b7c6f0d9a11/activities
@@ -319,30 +348,30 @@ export async function connect(userToken, onActivity) {
     if (res.ok) currentToken = (await res.json()).token;
   }, 25 * 60 * 1000);
 
-  async function send(text) {
-    const res = await fetch(`${BASE}/api/v1/converger/conversations/${conversationId}/activities`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${currentToken}`,
-        "Content-Type": "application/json",
-        "x-idempotency-key": crypto.randomUUID(),
-      },
-      body: JSON.stringify({ type: "message", text }),
+  // Pass the same clientId again to retry a send safely.
+  function send(text, clientId = crypto.randomUUID()) {
+    return new Promise((resolve, reject) => {
+      channel
+        .push("postActivity", { type: "message", text, clientId })
+        .receive("ok", resolve) // { id, seq, watermark }
+        .receive("error", reject) // { reason, ... }
+        .receive("timeout", () => reject({ reason: "timeout", clientId }));
     });
-    if (res.status === 409) throw new Error("conversation_closed");
-    if (!res.ok) throw new Error(`send failed: ${res.status}`);
-    return res.json(); // { id }
   }
 
   return { socket, channel, send };
 }
 ```
 
-To retry a send safely, reuse the same `x-idempotency-key` for the retry instead of generating a new one.
+To retry a send safely (after a `timeout` or a reconnect), call `send` again with the same `clientId` instead of generating a new one.
 
 ## Legacy socket
 
-The legacy stack predates the Converger client API. It is still supported and is what the bundled `converger_js` demo uses.
+:::warning Deprecated
+The legacy socket, conversation tokens and channel tokens are deprecated ([#23](https://github.com/AimTune/converger/issues/23)) and will be removed no earlier than two minor releases and 6 months after the deprecation. Every connection logs a warning. Move to the Converger API socket above; see [migrating from the legacy API](api/migrating-from-legacy.md).
+:::
+
+The legacy stack predates the Converger client API. It keeps working unchanged until it is removed.
 
 ### Tokens
 
@@ -430,7 +459,7 @@ Join `conversation:<conversation_id>`, optionally with the id of the last activi
 
 ### Client to server
 
-Push `new_activity` with client fields only (`type`, `text`, `attachments`, `metadata`); anything else, such as `sender`, `inserted_at` or `idempotency_key`, is ignored. The sender is the token's `sub`.
+Push `new_activity` with client fields only (`type`, `text`, `attachments`, `metadata`) and an optional `idempotency_key`; anything else, such as `sender` or `inserted_at`, is ignored. The sender is the token's `sub`.
 
 ```json
 { "type": "message", "text": "Hello!", "metadata": { "locale": "en" } }
@@ -438,12 +467,12 @@ Push `new_activity` with client fields only (`type`, `text`, `attachments`, `met
 
 | Reply | Meaning |
 | --- | --- |
-| `{"status": "ok", "response": {}}` | Stored; it will also arrive as `new_activity`. |
+| `{"status": "ok", "response": {"id": "...", "seq": 18}}` | Stored; it will also arrive as `new_activity`. |
 | `{"status": "error", "response": {"reason": "conversation_closed"}}` | The conversation is closed. |
 | `{"status": "error", "response": {"reason": "invalid_activity", "errors": {"text": ["should be at most 65536 byte(s)"]}}}` | Validation failed; `errors` is keyed by field. |
 | `{"status": "error", "response": {"reason": "invalid_activity"}}` | Any other failure (for example the delivery jobs could not be enqueued); retry. |
 
-Socket pushes carry no idempotency key, so retrying a push whose reply was lost can create a duplicate. Use the REST endpoint with `x-idempotency-key` when that matters; server acks with client ids are planned ([#24](https://github.com/AimTune/converger/issues/24)).
+A re-push with the same `idempotency_key` (a non-empty string of at most 255 bytes) returns the stored activity instead of a duplicate, also after a reconnect. It is stored as `ws:<sender>:<key>`.
 
 ### Resume
 
@@ -464,9 +493,9 @@ The `phoenix` client reconnects automatically with backoff and rejoins its chann
 
 ## The converger_js demo
 
-The repository contains [`converger_js/`](https://github.com/AimTune/converger/tree/main/converger_js), a minimal demo for the **legacy** socket, not a published SDK:
+The repository contains [`converger_js/`](https://github.com/AimTune/converger/tree/main/converger_js), a minimal client for the Converger API socket, not a published SDK:
 
-- `src/converger-client.js` exports `ConvergerClient` with `connect(token)`, `joinConversation(conversationId)` (joins `conversation:<id>` and forwards `new_activity` to the `onActivity(callback)` handler) and `sendMessage(text)` (pushes `new_activity`). It does not resume (`last_activity_id`) or handle `delivery_status`.
-- `index.html` is a demo page: paste a channel token, it creates a conversation (`POST /api/v1/conversations`), requests a conversation token (`POST /api/v1/tokens`) and connects to `ws://localhost:4000/socket`. It loads `phoenix` from jsDelivr through an import map; `package.json` depends on `phoenix` `^1.8.15`.
+- `src/converger-client.js` exports `ConvergerClient` with `connect(token)`, `joinConversation(conversationId, {watermark})` (joins `converger:conversation:<id>`, forwards each activity of every `activitySet` to the `onActivity(callback)` handler, and rejoins with the latest watermark) and `sendMessage(text, {clientId})` (pushes `postActivity` and returns a promise of `{id, seq, watermark}`; a random `clientId` by default).
+- `index.html` is a demo page: paste a user token from `POST /api/v1/converger/tokens/generate`, it creates a conversation (`POST /api/v1/converger/conversations`) and connects to `ws://localhost:4000/socket/converger`. It loads `phoenix` from jsDelivr through an import map; `package.json` depends on `phoenix` `^1.8.15`.
 
 Serve the folder on port 5500 (for example with a "Live Server" editor extension): the default `cors_origins` in `config/config.exs` allow `http://127.0.0.1:5500` and `http://localhost:5500`. An SDK for Converger Protocol v1 will follow the protocol specification.

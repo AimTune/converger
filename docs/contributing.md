@@ -102,6 +102,14 @@ AZURITE_ENDPOINT=http://127.0.0.1:10000/devstoreaccount1 \
   mix test test/converger/uploads/storage_integration_test.exs --only minio --only azurite
 ```
 
+### Asynchronous assertions
+
+`test/test_helper.exs` raises ExUnit's `assert_receive_timeout` to 1 s, so `assert_receive`,
+`assert_reply` and `assert_push` tolerate a busy CI runner; they still return as soon as the message
+arrives. Don't pass short explicit timeouts to them, and use `refute_receive` (100 ms default) for
+negative checks. Tests that need wall-clock windows (rate limits, lockouts) must not depend on landing
+inside one; see `start_in_fresh_window/2` in `test/converger_web/controllers/rate_limiting_test.exs`.
+
 ## Line endings and Windows
 
 `.gitattributes` sets `* text=auto eol=lf`: files are stored and checked out with LF on every platform (only
