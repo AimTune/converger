@@ -32,15 +32,16 @@ All paths below are relative to the base URL. Every API path is versioned under 
 
 | Path prefix | Family | Authentication |
 | --- | --- | --- |
-| `/api/v1/tokens`, `/api/v1/conversations...`, `/api/v1/routing_rules...` | Tenant API | `x-api-key` (tenant API key) or `x-channel-token` (channel token) |
+| `/api/v1/tokens`, `/api/v1/conversations...`, `/api/v1/routing_rules...` | Tenant API | `x-api-key` (tenant API key) or `x-channel-token` (channel token, deprecated, see [migrating from the legacy surfaces](migrating-from-legacy.md)) |
 | `/api/v1/channels/:channel_id/inbound`, `/api/v1/channels/:channel_id/status` | Inbound webhooks | Per-channel request signature, see [inbound](inbound.md) |
 | `/api/v1/converger/tokens/generate` | Client API | `Authorization: Bearer <channel secret>` |
 | `/api/v1/converger/...` (everything else) | Client API | `Authorization: Bearer <converger token>` |
 
-Two WebSocket endpoints complement the REST API: `/socket/websocket` (legacy conversation channel, joined with a
-conversation token from `POST /api/v1/tokens`) and `/socket/converger/websocket` (the Converger client socket,
-joined with a converger token; its URL is returned as `streamUrl`). See [WebSocket](../websocket.md). The wire
-protocol for the client socket is Converger Protocol v1 (spec in progress,
+Two WebSocket endpoints complement the REST API: `/socket/converger/websocket` (the Converger client socket,
+joined with a converger token; its URL is returned as `streamUrl`; clients can also send activities on it with
+`postActivity`) and `/socket/websocket` (legacy conversation channel, joined with a conversation token from
+`POST /api/v1/tokens`; **deprecated**, see [migrating from the legacy surfaces](migrating-from-legacy.md)). See
+[WebSocket](../websocket.md). The wire protocol for the client socket is Converger Protocol v1 (spec in progress,
 [#21](https://github.com/AimTune/converger/issues/21), [#63](https://github.com/AimTune/converger/issues/63)).
 
 Requests and responses are JSON (`content-type: application/json`), except the multipart upload endpoint and the
@@ -54,10 +55,15 @@ with an `Accept` header that excludes JSON is rejected with `406`.
 | Credential | Where it comes from | Sent as | Used by |
 | --- | --- | --- | --- |
 | Tenant API key | Created with the tenant (admin panel); format `cvg_live_` + 43 URL-safe Base64 chars | `x-api-key: <key>` | Tenant API |
-| Channel token | Shown (and copyable) per channel in the admin panel, Channels page | `x-channel-token: <jwt>` | Tenant API: create conversation, issue conversation token, and accepted by every tenant-authenticated route |
-| Conversation token | `POST /api/v1/tokens` | `token` param of the legacy socket `/socket/websocket` | Legacy WebSocket channel `conversation:<id>` |
+| Channel token (deprecated) | Shown (and copyable) per channel in the admin panel, Channels page | `x-channel-token: <jwt>` | Tenant API: create conversation, issue conversation token, and accepted by every tenant-authenticated route |
+| Conversation token (deprecated) | `POST /api/v1/tokens` | `token` param of the legacy socket `/socket/websocket` | Legacy WebSocket channel `conversation:<id>` |
 | Channel secret | Generated per channel (admin panel) | `Authorization: Bearer <secret>` | `POST /api/v1/converger/tokens/generate` only |
 | Converger token | `POST /api/v1/converger/tokens/generate`, `/tokens/refresh`, `/conversations` | `Authorization: Bearer <jwt>` | Client API and `/socket/converger/websocket` |
+
+Channel tokens, conversation tokens, `POST /api/v1/tokens` and the legacy socket are deprecated
+([#23](https://github.com/AimTune/converger/issues/23)) and will be removed no earlier than two minor releases and
+six months after it. They keep working unchanged until then.
+The tenant API key is not deprecated. See [migrating from the legacy surfaces](migrating-from-legacy.md).
 
 API keys and channel secrets are stored hashed (and the channel secret also encrypted) and looked up by hash; see
 [ADR-0012](../adr/0012-secrets-at-rest-and-audit-redaction.md). Rotating a tenant API key keeps the previous key
@@ -191,6 +197,10 @@ and [`ConvergerWeb.ErrorJSON`](https://github.com/AimTune/converger/blob/main/li
 Every response carries an `x-request-id` header (`Plug.RequestId`), which is also attached to the server log lines of
 that request. Quote it when reporting a problem.
 
+Responses to deprecated requests (`POST /api/v1/tokens` and any request authenticated with `x-channel-token`) also
+carry the RFC 9745 header `Deprecation: @<unix time>` and
+`Link: <https://converger.aimtune.dev/api/migrating-from-legacy>; rel="deprecation"`.
+
 ## Rate limiting
 
 Hot paths are guarded by [`ConvergerWeb.Plugs.RateLimit`](https://github.com/AimTune/converger/blob/main/lib/converger_web/plugs/rate_limit.ex)
@@ -199,7 +209,7 @@ and aligned to wall-clock time.
 
 | Bucket | Applies to | Counted per | Default |
 | --- | --- | --- | --- |
-| `activity_create` | `POST /api/v1/conversations/:id/activities`, `POST /api/v1/converger/conversations/:id/activities` | tenant (shared by both APIs) | 100 per 1 s |
+| `activity_create` | `POST /api/v1/conversations/:id/activities`, `POST /api/v1/converger/conversations/:id/activities` | tenant (shared by both APIs and the socket `postActivity` event) | 100 per 1 s |
 | `upload` | `POST /api/v1/converger/conversations/:id/upload` | tenant | 10 per 1 s |
 | `inbound` | `POST /api/v1/channels/:channel_id/inbound` and `/status` | channel (path parameter, checked before the channel is loaded) | 500 per 1 s |
 | `token_generate` | `POST /api/v1/converger/tokens/generate`, `POST /api/v1/converger/tokens/refresh` | channel | 10 per 60 s |
