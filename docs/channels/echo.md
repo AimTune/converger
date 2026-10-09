@@ -17,7 +17,7 @@ The `echo` channel type ([`lib/converger/channels/adapters/echo.ex`](https://git
 | --- | --- |
 | `type` | `echo` |
 | `mode` | `outbound` only (other modes fail validation with `echo channels only support modes: outbound`) |
-| `config` | none; `validate_config/1` accepts any map |
+| `config` | none; its `config_schema/0` is empty, so any map is accepted |
 | `require_signature` | irrelevant, the channel has no inbound webhook |
 
 Note that the channel's default mode is `duplex`, so set `mode: "outbound"` explicitly when you create an echo channel.

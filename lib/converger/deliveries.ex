@@ -110,14 +110,12 @@ defmodule Converger.Deliveries do
 
   @doc """
   Mark a delivery as sent (message left our system successfully).
-  Extracts provider_message_id from response metadata for future receipt correlation.
+  Extracts provider_message_id from response metadata for future receipt
+  correlation: the generic `provider_message_id` key, or the legacy
+  `whatsapp_message_id` / `infobip_message_id` keys.
   """
   def mark_sent(delivery, response_metadata \\ %{}) do
-    provider_msg_id =
-      response_metadata[:whatsapp_message_id] ||
-        response_metadata[:infobip_message_id] ||
-        response_metadata["whatsapp_message_id"] ||
-        response_metadata["infobip_message_id"]
+    provider_msg_id = provider_message_id(response_metadata)
 
     attrs = %{
       status: "sent",
@@ -140,6 +138,18 @@ defmodule Converger.Deliveries do
         error
     end
   end
+
+  @provider_message_id_keys [
+    :provider_message_id,
+    "provider_message_id",
+    :whatsapp_message_id,
+    "whatsapp_message_id",
+    :infobip_message_id,
+    "infobip_message_id"
+  ]
+
+  defp provider_message_id(response_metadata),
+    do: Enum.find_value(@provider_message_id_keys, &response_metadata[&1])
 
   @doc """
   Record a hand-off whose receipt is not confirmed yet (an adapter returned

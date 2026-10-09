@@ -423,6 +423,8 @@ PgBouncer transaction pooling). See [Migrations and maintenance windows](migrati
 | `:pagination` | see [Pagination](#pagination) | Page size defaults and caps. |
 | `:dead_letters` | `bulk_retry_limit: 10_000`, `export_limit: 10_000` | Max deliveries replayed by one bulk retry call, and max rows in one Deliveries CSV export. See [Replaying dead letters](../delivery.md#replaying-dead-letters). |
 | `:circuit_breaker` | `failure_threshold: 5`, `cooldown_ms: 30_000`, `park_seconds: 600`, `replay_dead_letters_on_close: false`, `replay_window_ms: 3_600_000` | Per-channel delivery circuit breaker and opt-in dead-letter replay on close. See [Circuit breaker](../delivery.md#circuit-breaker). |
+| `:adapters` | `[]` | Channel adapter modules registered after the built-in ones (`echo`, `webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip`). One with a built-in type replaces it. Checked at boot. See [Writing an adapter](../channels/writing-an-adapter.md#2-register-the-type). |
+| `:channel_health` | `probe_idle_channels: true`; `false` in test | Call the adapter's `health_probe/1` for channels without deliveries in the health window. See [Health probes](../channels/overview.md#health-probes). |
 | `:metrics` | `[]` (dev: `allowed_ips` with loopback and private ranges) | `token:` and `allowed_ips:` for `GET /metrics`; see `METRICS_TOKEN`. |
 | `:prometheus_port` | unset | Port of the optional unauthenticated metrics listener (`PROMETHEUS_PORT`). |
 | `Converger.Health` | `db_timeout_ms: 1000` | Readiness database timeout. |

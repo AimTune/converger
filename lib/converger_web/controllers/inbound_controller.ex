@@ -14,11 +14,6 @@ defmodule ConvergerWeb.InboundController do
 
   action_fallback ConvergerWeb.FallbackController
 
-  # Channel types whose provider retries any non-200 response (for days, in
-  # Meta's case). They always get 200 once the request has been handled,
-  # including for messages rejected permanently (retrying cannot fix those).
-  @provider_ack_types ~w(whatsapp_meta whatsapp_infobip)
-
   @doc """
   Inbound webhook. A request may carry several messages and status updates
   (providers batch them, and WhatsApp sends both to the same endpoint).
@@ -74,26 +69,15 @@ defmodule ConvergerWeb.InboundController do
     end
   end
 
-  # Meta's webhook handshake requires echoing `hub.challenge` verbatim once the
-  # verify token matches.
+  # The adapter answers the provider's webhook handshake (Meta echoes
+  # `hub.challenge` verbatim once the verify token matches); adapters without
+  # one answer `200 ok`.
   # sobelow_skip ["XSS.SendResp"]
   def verify(conn, %{"channel_id" => channel_id} = params) do
     with {:ok, channel} <- Channels.get_active_channel(channel_id) do
-      case channel.type do
-        "whatsapp_meta" ->
-          verify_token = channel.config["verify_token"]
-
-          provided = params["hub.verify_token"]
-
-          if is_binary(verify_token) and is_binary(provided) and
-               Plug.Crypto.secure_compare(provided, verify_token) do
-            send_resp(conn, 200, params["hub.challenge"] || "")
-          else
-            send_resp(conn, 403, "Verification failed")
-          end
-
-        _ ->
-          send_resp(conn, 200, "ok")
+      case Adapter.verify_subscription(channel, params) do
+        {:ok, body} -> send_resp(conn, 200, body)
+        :error -> send_resp(conn, 403, "Verification failed")
       end
     end
   end
@@ -168,7 +152,10 @@ defmodule ConvergerWeb.InboundController do
     created = Enum.count(results, &match?({:created, _}, &1))
     rejected = for {:rejected, changeset} <- results, do: changeset
 
-    provider_ack? = channel.type in @provider_ack_types
+    # Providers that retry any non-200 response (for days, in Meta's case)
+    # always get 200 once the request has been handled, including for
+    # messages rejected permanently (retrying cannot fix those).
+    provider_ack? = Adapter.capability?(channel.type, :provider_ack)
 
     if accepted == [] and not provider_ack? do
       # A generic webhook client sent an invalid message: tell it why.

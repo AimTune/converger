@@ -30,14 +30,7 @@ defmodule ConvergerWeb.Admin.DashboardLive do
 
     delivery_stats = Deliveries.count_by_status()
 
-    channels =
-      from(c in Channel,
-        where:
-          c.status == "active" and c.type in ["webhook", "whatsapp_meta", "whatsapp_infobip"],
-        preload: [:tenant]
-      )
-      |> Repo.all()
-
+    channels = Health.list_monitored_channels()
     channel_ids = Enum.map(channels, & &1.id)
     health_map = Health.get_latest_health_map(channel_ids)
 

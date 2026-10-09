@@ -62,6 +62,7 @@ supersedes the old one and both are linked. Read
 | [0032](0032-transient-conversation-signals.md) | Transient conversation signals: receipts, typing and presence over dedicated topics, stored read watermarks, optional adapter callbacks | Accepted | [#25](https://github.com/AimTune/converger/issues/25) |
 | [0033](0033-websocket-channel-adapter-delivery.md) | The `websocket` channel is a delivering adapter with pending receipts | Accepted | [#22](https://github.com/AimTune/converger/issues/22) / [#119](https://github.com/AimTune/converger/pull/119) |
 | [0035](0035-native-transports-share-signals-limits-and-draining.md) | Native transports share the signals core, the client WebSocket limits and draining | Accepted | [#26](https://github.com/AimTune/converger/issues/26), [#25](https://github.com/AimTune/converger/issues/25), [#27](https://github.com/AimTune/converger/issues/27) / [#123](https://github.com/AimTune/converger/pull/123) |
+| [0038](0038-adapter-behaviour-v2-and-config-driven-registry.md) | Adapter behaviour v2: declared capabilities and config schemas, a registry from built-ins plus `config :converger, :adapters` | Accepted | [#36](https://github.com/AimTune/converger/issues/36) / [#130](https://github.com/AimTune/converger/pull/130) |
 
 ### Security
 

@@ -13,7 +13,7 @@ Both support the modes `inbound`, `outbound` and `duplex`, send **text** message
 
 ## Configuration
 
-The `config` map is encrypted at rest (see [ADR-0012](../adr/0012-secrets-at-rest-and-audit-redaction.md)). Keys named `access_token`, `api_key`, `verify_token` and `app_secret` are also redacted in audit logs and masked in the admin UI.
+The `config` map is encrypted at rest (see [ADR-0012](../adr/0012-secrets-at-rest-and-audit-redaction.md)). Keys named `access_token`, `api_key`, `verify_token` and `app_secret` are also redacted in audit logs and masked in the admin UI. The keys below are the adapters' `config_schema/0`, which validates the config and generates the admin form ([ADR-0038](../adr/0038-adapter-behaviour-v2-and-config-driven-registry.md)).
 
 ### `whatsapp_meta`
 
@@ -40,6 +40,10 @@ Example:
 }
 ```
 
+### Health probe (`whatsapp_meta`)
+
+Every five minutes, a `whatsapp_meta` channel without deliveries in the last hour is probed with `GET https://graph.facebook.com/<version>/<phone_number_id>?fields=id` and its access token. A `200` stores `healthy`; anything else stores `degraded`, so an expired or revoked token shows up on the dashboard (and in a tenant health alert) before the next message fails. See [health probes](overview.md#health-probes).
+
 ### `whatsapp_infobip`
 
 | Key | Required | Description |
@@ -50,7 +54,7 @@ Example:
 | `conversation_idle_timeout_seconds` | no | Same as for Meta. |
 | `unsupported_activities` | no | Same as for Meta. |
 
-A missing key fails with `whatsapp_infobip config missing: ...`.
+A missing key fails with `whatsapp_infobip config missing: ...`; a `base_url` that is not an `http`/`https` URL fails with `whatsapp_infobip config 'base_url' must be a valid HTTP/HTTPS URL`, and one the SSRF guard blocks with `whatsapp_infobip config base_url is not allowed: ...`.
 
 ## Graph API version
 
@@ -462,4 +466,4 @@ WhatsApp shows the indicator for up to 25 seconds or until the next message is s
 ## Planned
 
 - Outbound media, templates (HSM), interactive messages, location and contacts; inbound media download; 24-hour window errors: Planned ([#37](https://github.com/AimTune/converger/issues/37)).
-- Adapter-declared capabilities and config schemas: Planned ([#36](https://github.com/AimTune/converger/issues/36)).
+- Infobip health probe (`health_probe/1`), so idle Infobip channels report a status like Meta ones do.
