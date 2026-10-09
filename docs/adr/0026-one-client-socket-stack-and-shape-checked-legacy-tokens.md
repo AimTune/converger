@@ -9,7 +9,7 @@ description: The Converger API socket becomes the only implementation of the cli
 | **Status** | Accepted |
 | **Date** | 2026-10-09 |
 | **Issue** | [#23](https://github.com/AimTune/converger/issues/23) |
-| **Pull request** | to be filled at merge |
+| **Pull request** | [#115](https://github.com/AimTune/converger/pull/115) |
 | **Related** | [ADR-0003](0003-pipeline-is-the-only-delivery-path.md), [ADR-0006](0006-per-conversation-seq-and-opaque-watermarks.md), [ADR-0020](0020-per-subject-socket-ids-and-presence.md), [ADR-0024](0024-converger-protocol-v1-as-superset-of-mekik-1.md) |
 
 ## Context and problem statement
