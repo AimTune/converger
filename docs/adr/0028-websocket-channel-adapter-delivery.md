@@ -9,7 +9,7 @@ description: A websocket channel is delivered to like any other channel, through
 | **Status** | Accepted |
 | **Date** | 2026-10-10 |
 | **Issue** | [#22](https://github.com/AimTune/converger/issues/22) |
-| **Pull request** | to be added on merge |
+| **Pull request** | [#119](https://github.com/AimTune/converger/pull/119) |
 | **Related** | [ADR-0001](0001-transactional-outbox-with-oban.md), [ADR-0003](0003-pipeline-is-the-only-delivery-path.md), [ADR-0006](0006-per-conversation-seq-and-opaque-watermarks.md), [ADR-0008](0008-middleware-receives-channel-and-crashes-are-contained.md), [ADR-0020](0020-per-subject-socket-ids-and-presence.md), [ADR-0024](0024-converger-protocol-v1-as-superset-of-mekik-1.md) |
 
 ## Context and problem statement
