@@ -9,7 +9,7 @@ description: Each channel has a database-backed delivery circuit breaker whose p
 | **Status** | Accepted |
 | **Date** | 2026-10-10 |
 | **Issue** | [#31](https://github.com/AimTune/converger/issues/31) |
-| **Pull request** | to be added on merge |
+| **Pull request** | [#120](https://github.com/AimTune/converger/pull/120) |
 | **Related** | [ADR-0019](0019-per-channel-retry-policy-delivery-error-and-lifeline.md), [ADR-0013](0013-cluster-wide-rate-limiting-with-hammer-and-pubsub.md), [ADR-0001](0001-transactional-outbox-with-oban.md) |
 
 ## Context and problem statement
