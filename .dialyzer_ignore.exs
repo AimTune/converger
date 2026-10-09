@@ -9,6 +9,7 @@
   # not fail the run).
   {"lib/converger/accounts.ex", :call_without_opaque},
   {"lib/converger/channels.ex", :call_without_opaque},
+  {"lib/converger/conversations.ex", :call_without_opaque},
   {"lib/converger/routing_rules.ex", :call_without_opaque},
   {"lib/converger/tenants.ex", :call_without_opaque}
 ]

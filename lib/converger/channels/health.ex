@@ -145,14 +145,13 @@ defmodule Converger.Channels.Health do
   end
 
   @doc """
-  Delete health checks older than the given number of days.
+  Delete health checks older than the given number of days (default: the
+  `:health_check_days` window of `Converger.Retention`), in batches. Runs
+  daily from `Converger.Workers.PruneWorker`.
   """
-  def prune_old_checks(days \\ 7) do
+  def prune_old_checks(days \\ Converger.Retention.health_check_days()) do
     cutoff = DateTime.utc_now() |> DateTime.add(-days, :day)
-
-    {count, _} =
-      from(h in HealthCheck, where: h.checked_at < ^cutoff)
-      |> Repo.delete_all()
+    count = Converger.Retention.prune_older_than("channel_health_checks", "checked_at", cutoff)
 
     Logger.info("Pruned #{count} old channel health checks")
     {:ok, count}

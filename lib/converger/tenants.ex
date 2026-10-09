@@ -148,28 +148,40 @@ defmodule Converger.Tenants do
     end
   end
 
+  @doc """
+  Deletes a tenant. Its channels, conversations and other configuration go
+  with the row (`ON DELETE CASCADE`); its activities and deliveries live in
+  partitioned tables without foreign keys and are removed in batches by
+  `Converger.Workers.PurgeWorker`, enqueued in the same transaction
+  (ADR-0034), so the delete never holds locks for the duration of a
+  full-table cascade.
+  """
   def delete_tenant(%Tenant{} = tenant, actor \\ nil) do
-    if actor do
-      Multi.new()
-      |> Multi.insert(:audit_log, fn _ ->
-        AuditLogs.build_audit_log_entry(%{
-          actor_type: actor.type,
-          actor_id: actor.id,
-          action: "delete",
-          resource_type: "tenant",
-          resource_id: tenant.id,
-          changes: Changes.for_delete(tenant)
-        })
-      end)
-      |> Multi.delete(:tenant, tenant)
-      |> Repo.transaction()
-      |> case do
-        {:ok, %{tenant: tenant}} -> {:ok, tenant}
-        {:error, :tenant, changeset, _} -> {:error, changeset}
-      end
-    else
-      Repo.delete(tenant)
+    Multi.new()
+    |> maybe_audit_delete(tenant, actor)
+    |> Multi.delete(:tenant, tenant)
+    |> Oban.insert(:purge, Converger.Workers.PurgeWorker.new(%{tenant_id: tenant.id}))
+    |> Repo.transaction()
+    |> case do
+      {:ok, %{tenant: tenant}} -> {:ok, tenant}
+      {:error, :tenant, changeset, _} -> {:error, changeset}
+      {:error, _step, reason, _} -> {:error, reason}
     end
+  end
+
+  defp maybe_audit_delete(multi, _tenant, nil), do: multi
+
+  defp maybe_audit_delete(multi, tenant, actor) do
+    Multi.insert(multi, :audit_log, fn _ ->
+      AuditLogs.build_audit_log_entry(%{
+        actor_type: actor.type,
+        actor_id: actor.id,
+        action: "delete",
+        resource_type: "tenant",
+        resource_id: tenant.id,
+        changes: Changes.for_delete(tenant)
+      })
+    end)
   end
 
   @doc """

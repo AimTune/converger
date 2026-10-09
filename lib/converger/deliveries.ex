@@ -9,6 +9,7 @@ defmodule Converger.Deliveries do
   import Ecto.Query, warn: false
   require Logger
   alias Converger.Repo
+  alias Converger.Activities.Activity
   alias Converger.Deliveries.Delivery
   alias Converger.Pipeline.RetryPolicy
 
@@ -37,23 +38,74 @@ defmodule Converger.Deliveries do
     Repo.get_by(Delivery, activity_id: activity_id, channel_id: channel_id)
   end
 
-  def get_or_create_delivery(activity_id, channel_id) do
+  @doc """
+  The delivery of `activity` (struct or id) to `channel_id`, created when
+  missing. Pass the activity struct when you have it: it saves the lookup of
+  the activity's tenant and partition key.
+  """
+  def get_or_create_delivery(%Activity{id: activity_id} = activity, channel_id) do
     case get_delivery_for_activity_and_channel(activity_id, channel_id) do
       %Delivery{} = delivery ->
         delivery
 
       nil ->
         {:ok, delivery} =
-          create_delivery(%{activity_id: activity_id, channel_id: channel_id})
+          create_delivery(%{activity_id: activity_id, channel_id: channel_id}, activity)
 
         delivery
     end
   end
 
-  def create_delivery(attrs) do
-    %Delivery{}
-    |> Delivery.changeset(attrs)
-    |> Repo.insert()
+  def get_or_create_delivery(activity_id, channel_id) do
+    case get_delivery_for_activity_and_channel(activity_id, channel_id) do
+      %Delivery{} = delivery -> delivery
+      nil -> get_or_create_delivery(Repo.get!(Activity, activity_id), channel_id)
+    end
+  end
+
+  @doc """
+  Creates a delivery. `tenant_id` and `activity_inserted_at` (the partition
+  key) are always copied from the activity, given as `activity` or looked up
+  by `attrs.activity_id`. There is no foreign key on the partitioned
+  `deliveries` table (ADR-0034), so a missing activity is a changeset error.
+  """
+  def create_delivery(attrs, activity \\ nil) do
+    changeset = Delivery.changeset(%Delivery{}, attrs)
+    activity_id = Ecto.Changeset.get_field(changeset, :activity_id)
+
+    keys =
+      case activity do
+        %{tenant_id: t, inserted_at: at} when not is_nil(t) and not is_nil(at) -> activity
+        _ -> activity_id && activity_keys(activity_id)
+      end
+
+    case keys do
+      %{tenant_id: tenant_id, inserted_at: inserted_at} ->
+        changeset
+        |> Ecto.Changeset.put_change(:tenant_id, tenant_id)
+        |> Ecto.Changeset.put_change(:activity_inserted_at, inserted_at)
+        |> Repo.insert()
+
+      _ ->
+        changeset
+        |> Ecto.Changeset.add_error(:activity_id, "does not exist")
+        |> Ecto.Changeset.apply_action(:insert)
+    end
+  end
+
+  defp activity_keys(activity_id) do
+    case Ecto.UUID.cast(activity_id) do
+      {:ok, id} ->
+        Repo.one(
+          from(a in Activity,
+            where: a.id == ^id,
+            select: %{tenant_id: a.tenant_id, inserted_at: a.inserted_at}
+          )
+        )
+
+      :error ->
+        nil
+    end
   end
 
   @doc """
@@ -120,7 +172,9 @@ defmodule Converger.Deliveries do
 
     {count, deliveries} =
       from(d in Delivery,
-        join: a in assoc(d, :activity),
+        # The partition key lets PostgreSQL prune activities partitions (ADR-0034).
+        join: a in Activity,
+        on: a.id == d.activity_id and a.inserted_at == d.activity_inserted_at,
         where:
           d.channel_id == ^channel_id and d.status == "pending" and d.attempts > 0 and
             a.conversation_id == ^conversation_id and a.seq <= ^seq,

@@ -250,19 +250,27 @@ defmodule Converger.Activities do
             Converger.Pipeline.after_commit(activity)
             {:ok, activity}
 
+          # Lost an idempotency race to an activity in another monthly partition
+          # (see insert_with_seq/2): return the winner, like the unique-index path.
+          {:error, {:duplicate, %Activity{} = existing}} ->
+            {:ok, existing}
+
           {:error, reason} when reason in [:delivery_enqueue_failed, :conversation_closed] ->
             {:error, reason}
 
           {:error, changeset} ->
-            if has_idempotency_error?(changeset) do
-              case fetch_existing_activity(attrs) do
-                %Activity{} = activity -> {:ok, activity}
-                nil -> {:error, changeset}
-              end
-            else
-              {:error, changeset}
-            end
+            recover_idempotency_race(changeset, attrs)
         end
+    end
+  end
+
+  # The unique index rejected a concurrent duplicate: return the winner.
+  defp recover_idempotency_race(changeset, attrs) do
+    with true <- has_idempotency_error?(changeset),
+         %Activity{} = activity <- fetch_existing_activity(attrs) do
+      {:ok, activity}
+    else
+      _ -> {:error, changeset}
     end
   end
 
@@ -281,7 +289,10 @@ defmodule Converger.Activities do
 
       case next_seq(conversation_id, Keyword.get(opts, :allow_closed, false)) do
         {:ok, seq} ->
-          changeset |> Ecto.Changeset.put_change(:seq, seq) |> Repo.insert()
+          case existing_under_lock(changeset) do
+            nil -> changeset |> Ecto.Changeset.put_change(:seq, seq) |> Repo.insert()
+            %Activity{} = existing -> {:error, {:duplicate, existing}}
+          end
 
         {:error, :conversation_closed} ->
           {:error, :conversation_closed}
@@ -291,6 +302,28 @@ defmodule Converger.Activities do
           |> Ecto.Changeset.add_error(:conversation_id, "does not exist")
           |> Ecto.Changeset.apply_action(:insert)
       end
+    end
+  end
+
+  # `activities` is partitioned by month and the unique index on
+  # (conversation_id, idempotency_key) exists per partition only (ADR-0034),
+  # so it cannot see a duplicate that was committed in the previous month's
+  # partition. This lookup closes that gap: it runs after next_seq/2 took the
+  # conversation row lock, which every insert into the conversation takes
+  # first, so a concurrent insert with the same key has either committed (and
+  # is visible here, READ COMMITTED) or is waiting for us. It searches every
+  # partition; the per-partition unique index still catches the common
+  # same-month race at the database level.
+  defp existing_under_lock(changeset) do
+    case Ecto.Changeset.get_field(changeset, :idempotency_key) do
+      nil ->
+        nil
+
+      key ->
+        Repo.get_by(Activity,
+          conversation_id: Ecto.Changeset.get_field(changeset, :conversation_id),
+          idempotency_key: key
+        )
     end
   end
 
@@ -355,8 +388,22 @@ defmodule Converger.Activities do
     |> Repo.update()
   end
 
+  @doc """
+  Deletes an activity and its deliveries. The partitioned tables have no
+  foreign keys (ADR-0034), so the deliveries are removed here rather than by
+  `ON DELETE CASCADE`.
+  """
   def delete_activity(%Activity{} = activity) do
-    Repo.delete(activity)
+    Repo.transaction(fn ->
+      Repo.delete_all(
+        from(d in Converger.Deliveries.Delivery, where: d.activity_id == ^activity.id)
+      )
+
+      case Repo.delete(activity) do
+        {:ok, deleted} -> deleted
+        {:error, changeset} -> Repo.rollback(changeset)
+      end
+    end)
   end
 
   def change_activity(%Activity{} = activity, attrs \\ %{}) do

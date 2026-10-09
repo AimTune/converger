@@ -86,8 +86,9 @@ erDiagram
     }
     activities {
         uuid id PK
-        uuid tenant_id FK
-        uuid conversation_id FK
+        timestamp inserted_at PK "partition key"
+        uuid tenant_id
+        uuid conversation_id
         bigint seq
         text type
         text sender
@@ -98,8 +99,10 @@ erDiagram
     }
     deliveries {
         uuid id PK
-        uuid activity_id FK
-        uuid channel_id FK
+        timestamp activity_inserted_at PK "partition key"
+        uuid activity_id
+        uuid channel_id
+        uuid tenant_id
         text status
         integer attempts
         text last_error
@@ -174,6 +177,7 @@ The top-level isolation unit. Every domain row carries a `tenant_id` and every A
 | `limits` | jsonb, not null, default `{}` | Per-tenant rate-limit overrides, e.g. `{"activity_create": {"limit": 200, "scale_ms": 1000}}`. |
 | `tier` | text, not null, default `"default"` | Delivery queue tier (`high`, `default`, `bulk`), see [tenant tiers](../delivery.md#tenant-tiers-fair-queueing). |
 | `allowed_upload_types` | text[] | Per-tenant MIME allowlist; `NULL` uses the global default. |
+| `retention_days` | integer, not null, default `365`, `CHECK > 0` | Activities and deliveries older than this are archived and removed ([Data retention](../operations/retention.md)); at least `RETENTION_MIN_DAYS` (30). |
 
 ### channels
 
@@ -224,9 +228,11 @@ Columns: `tenant_id`, `conversation_id` (both cascade on delete), `reader_id` (t
 
 ### activities
 
+Partitioned by month on `inserted_at` (see [Partitioning and retention](#partitioning-and-retention)); primary key `(id, inserted_at)`.
+
 | Column | Type | Notes |
 | --- | --- | --- |
-| `tenant_id`, `conversation_id` | uuid, not null | Cascade on delete. |
+| `tenant_id`, `conversation_id` | uuid, not null | No foreign keys; removed by `PurgeWorker` when the tenant or conversation is deleted. |
 | `seq` | bigint, not null | Per-conversation sequence number, strictly increasing and gap-free, assigned by the server ([ADR-0006](../adr/0006-per-conversation-seq-and-opaque-watermarks.md)). |
 | `type` | text | `message`, `event`, `typing`, `conversationUpdate`, `endOfConversation` (validated in the changeset). |
 | `sender` | text, not null | Set by the server from the authenticated principal or the provider payload. |
@@ -239,19 +245,21 @@ Indexes and constraints:
 
 | Index | Purpose |
 | --- | --- |
-| unique `(conversation_id, seq)` | Ordering, watermark resume and activity keyset pagination (`WHERE conversation_id = $1 AND seq > $2 ORDER BY seq`). A second guard against duplicate `seq` values. |
-| unique `(conversation_id, idempotency_key) WHERE idempotency_key IS NOT NULL` | Idempotent creates within a conversation; the race loser rolls back and gets the winner's row. |
+| unique `(conversation_id, seq)`, per partition | Ordering, watermark resume and activity keyset pagination (`WHERE conversation_id = $1 AND seq > $2 ORDER BY seq`). A second guard against duplicate `seq` values within a month; across months `seq` is unique by the `last_seq` counter. |
+| unique `(conversation_id, idempotency_key) WHERE idempotency_key IS NOT NULL`, per partition | Idempotent creates within a conversation; the race loser rolls back and gets the winner's row. Across months the create path re-checks the key under the conversation lock. |
 | `(idempotency_key) WHERE idempotency_key IS NOT NULL` | Lookup of a re-delivered provider message across a channel's conversations before a conversation is resolved ([ADR-0015](../adr/0015-per-message-idempotent-inbound-batches.md)). |
 | `(conversation_id, inserted_at)` | Historical ordering (before `seq`). |
-| `(tenant_id)` | Tenant scoping. |
+| `(tenant_id, id)` | Tenant scoping, per-tenant purge and archive export (also lists a partition's tenants with a loose index scan). |
 
 ### deliveries
 
-One row per activity and target channel; the source of truth for delivery state ([Delivery and retries](../delivery.md)).
+One row per activity and target channel; the source of truth for delivery state ([Delivery and retries](../delivery.md)). Partitioned by month on `activity_inserted_at`, so a delivery lives in its activity's month; primary key `(id, activity_inserted_at)`.
 
 | Column | Type | Notes |
 | --- | --- | --- |
-| `activity_id`, `channel_id` | uuid, not null | Cascade on delete. |
+| `activity_id`, `channel_id` | uuid, not null | No foreign keys; removed with the activity, channel or tenant by `PurgeWorker` / `Activities.delete_activity/1`. |
+| `tenant_id` | uuid, not null | Copied from the activity on create. |
+| `activity_inserted_at` | timestamp, not null | The activity's `inserted_at`, copied on create; the partition key. |
 | `status` | text, not null, default `"pending"` | `pending`, `paused` (parked by the circuit breaker or a manual pause), `sent`, `delivered`, `read`, `failed` (dead letter). |
 | `attempts` | integer, default `0` | Attempts made; drives the retry policy. |
 | `last_error` | text | Last failure message. |
@@ -261,7 +269,7 @@ One row per activity and target channel; the source of truth for delivery state 
 | `retry_count` | integer, not null, default `0` | Manual replays of the dead letter. |
 | `retried_by`, `retried_at` | text, timestamp | Who replayed it last (`"<actor type>:<actor id>"`) and when. |
 
-Indexes: unique `(activity_id, channel_id)`, `(activity_id)`, `(channel_id)`, `(status)`, partial `(provider_message_id)` and `(channel_id, provider_message_id)` `WHERE provider_message_id IS NOT NULL`, and the keyset indexes `(inserted_at, id)`, `(status, updated_at, id)` and `(channel_id, status, updated_at, id)` (the last two for the dead-letter lists).
+Indexes: unique `(activity_id, channel_id, activity_inserted_at)` (equivalent to unique `(activity_id, channel_id)`, also serves lookups by activity), `(channel_id)`, `(tenant_id, id)`, `(status)`, partial `(provider_message_id)` and `(channel_id, provider_message_id)` `WHERE provider_message_id IS NOT NULL`, and the keyset indexes `(inserted_at, id)`, `(status, updated_at, id)` and `(channel_id, status, updated_at, id)` (the last two for the dead-letter lists).
 
 ### routing_rules
 
@@ -273,11 +281,15 @@ Uploaded files ([storage](../storage.md)). Columns: `tenant_id` (not null), `con
 
 ### audit_logs
 
-Append-only (`updated_at` disabled) trail of administrative changes. Columns: `tenant_id` (nullable, `ON DELETE SET NULL` so the trail outlives the tenant), `actor_type`, `actor_id`, `action`, `resource_type`, `resource_id`, `changes` (jsonb, with secrets redacted, [ADR-0012](../adr/0012-secrets-at-rest-and-audit-redaction.md)). Actions: `create`, `update`, `delete`, `toggle_status`, `toggle_enabled`, `rotate_api_key`, `retry` (dead-letter replay). Resource types: `tenant`, `channel`, `routing_rule`, `admin_user`, `tenant_user`, `delivery`. Indexes: `(tenant_id)`, `(resource_type, resource_id)`, `(actor_type, actor_id)`, `(action)`, `(inserted_at)`, `(inserted_at, id)`.
+Append-only (`updated_at` disabled) trail of administrative changes. Columns: `tenant_id` (nullable, `ON DELETE SET NULL` so the trail outlives the tenant), `actor_type`, `actor_id`, `action`, `resource_type`, `resource_id`, `changes` (jsonb, with secrets redacted, [ADR-0012](../adr/0012-secrets-at-rest-and-audit-redaction.md)). Actions: `create`, `update`, `delete`, `toggle_status`, `toggle_enabled`, `rotate_api_key`, `retry` (dead-letter replay). Resource types: `tenant`, `channel`, `routing_rule`, `admin_user`, `tenant_user`, `delivery`. Indexes: `(tenant_id)`, `(resource_type, resource_id)`, `(actor_type, actor_id)`, `(action)`, `(inserted_at)`, `(inserted_at, id)`. Rows older than 365 days (`AUDIT_LOG_RETENTION_DAYS`, `0` keeps them forever) are pruned daily by `PruneWorker`.
 
 ### channel_health_checks
 
-Written by `ChannelHealthWorker` every 5 minutes per active `webhook`, `whatsapp_meta` and `whatsapp_infobip` channel: `status` (`healthy`, `degraded`, `unhealthy`, `unknown`), `total_deliveries`, `failed_deliveries`, `failure_rate`, `checked_at`. Rows older than 7 days are pruned. Indexes: `(channel_id)`, `(channel_id, checked_at)`, `(checked_at)`.
+Written by `ChannelHealthWorker` every 5 minutes per active `webhook`, `whatsapp_meta` and `whatsapp_infobip` channel: `status` (`healthy`, `degraded`, `unhealthy`, `unknown`), `total_deliveries`, `failed_deliveries`, `failure_rate`, `checked_at`. Rows older than 7 days (`HEALTH_CHECK_RETENTION_DAYS`) are pruned daily by `PruneWorker`. Indexes: `(channel_id)`, `(channel_id, checked_at)`, `(checked_at)`.
+
+### archive_parts
+
+Manifest of the retention archive ([Data retention](../operations/retention.md)): one row per uploaded JSONL.gz object. Columns: `tenant_id` (no foreign key, the manifest outlives the tenant), `table_name` (`activities` or `deliveries`), `month` (date, first day), `part` (1, 2, ...), `mode` (`detached`: exported from a detached month partition; `deleted`: exported and deleted from a live partition), `object_key` (unique), `row_count`, `byte_size`, `sha256`, `last_id` (export cursor), `verified_at`. Unique `(table_name, tenant_id, month, part)`.
 
 ### admin_users and tenant_users
 
@@ -307,9 +319,19 @@ Every list query is bounded ([ADR-0018](../adr/0018-keyset-pagination.md)):
 - **Conversations, deliveries, audit logs, tenant users** use keyset pagination on `(inserted_at, id)`, served by the composite indexes added in `20261009180000_add_keyset_pagination_indexes.exs` (built `CONCURRENTLY`, so large tables stay writable during the migration).
 - **Dead letters** page on `(updated_at, id)` filtered by `status = 'failed'` (served by the `status` index).
 
-## Planned
+## Partitioning and retention
 
-- Table partitioning and retention for `activities` and `deliveries`, with archival to object storage: Planned ([#30](https://github.com/AimTune/converger/issues/30)).
+`activities` and `deliveries` are range partitioned by month ([ADR-0034](../adr/0034-monthly-partitioning-and-per-tenant-retention.md), [#30](https://github.com/AimTune/converger/issues/30)):
+
+| Table | Partition key | Primary key | Partitions |
+| --- | --- | --- | --- |
+| `activities` | `inserted_at` | `(id, inserted_at)` | `activities_pYYYY_MM` |
+| `deliveries` | `activity_inserted_at` | `(id, activity_inserted_at)` | `deliveries_pYYYY_MM` |
+
+- Unique indexes that do not contain the partition key exist **per partition**: `(conversation_id, seq)` and `(conversation_id, idempotency_key)`. Across partitions, `seq` is unique because it comes from the `conversations.last_seq` counter under the row lock, and the create path re-checks the idempotency key in every partition after taking that lock.
+- `deliveries (activity_id, channel_id, activity_inserted_at)` is a real unique index on the parent: an activity has one `inserted_at`, so it is equivalent to the old `(activity_id, channel_id)`.
+- **No foreign keys** from or to the partitioned tables (the diagram above shows logical relationships). Deleting a tenant, channel or conversation enqueues `Converger.Workers.PurgeWorker`, which deletes the matching activities and deliveries in batches; `attachments.activity_id` is no longer a foreign key either.
+- Partitions are created three months ahead (migration, boot, daily job). Expired months are archived to object storage and dropped by the monthly retention job; see [Data retention, partitions and archive](../operations/retention.md).
 
 ## Related
 

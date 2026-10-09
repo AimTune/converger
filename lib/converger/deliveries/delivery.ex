@@ -30,6 +30,11 @@ defmodule Converger.Deliveries.Delivery do
     field :retry_count, :integer, default: 0
     field :retried_by, :string
     field :retried_at, :utc_datetime_usec
+    # Copied from the activity when the delivery is created (never cast).
+    # `activity_inserted_at` is the partition key: a delivery lives in the
+    # same monthly partition as its activity (ADR-0034).
+    field :tenant_id, :binary_id
+    field :activity_inserted_at, :utc_datetime_usec
 
     belongs_to :activity, Converger.Activities.Activity
     belongs_to :channel, Converger.Channels.Channel
@@ -57,6 +62,10 @@ defmodule Converger.Deliveries.Delivery do
     ])
     |> validate_required([:activity_id, :channel_id])
     |> validate_inclusion(:status, @statuses)
-    |> unique_constraint([:activity_id, :channel_id])
+    # Partition-level name: deliveries_pYYYY_MM_activity_id_channel_id_index.
+    |> unique_constraint([:activity_id, :channel_id],
+      name: "_activity_id_channel_id_index",
+      match: :suffix
+    )
   end
 end

@@ -32,8 +32,6 @@ defmodule Converger.Workers.ChannelHealthWorker do
       if health_check.status == "unhealthy", do: Circuit.trip(channel, :unhealthy)
     end)
 
-    Health.prune_old_checks()
-
     :ok
   end
 end
