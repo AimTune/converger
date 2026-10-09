@@ -134,9 +134,9 @@ Converger has two kinds of human accounts, both with bcrypt-hashed passwords (mi
 
 Role effects in the current UI:
 
-- Admin: only a `super_admin` manages admin users. A `viewer` cannot change tenant users and has read-only access to the Oban dashboard (`/admin/oban`). `super_admin` and `admin` have full access.
-- Portal: `owner`, `admin` and `member` can toggle channel status and edit routing rules. `owner` and `admin` manage the tenant's users. `viewer` is read-only. Portal users cannot create channels or rotate API keys.
+- Admin: only a `super_admin` manages admin users. A `viewer` cannot change tenant users and has read-only access to the Oban dashboard (`/admin/oban`), and can browse and export the Deliveries page but not replay dead letters. `super_admin` and `admin` have full access.
+- Portal: `owner`, `admin` and `member` can toggle channel status, edit routing rules and replay the tenant's dead letters on the Deliveries page (`/portal/deliveries`). `owner` and `admin` manage the tenant's users. `viewer` is read-only. Portal users cannot create channels or rotate API keys.
 
 The first admin created without `ADMIN_PASSWORD` gets a generated password and `must_change_password: true`. It is redirected to `/admin/password` until the password is changed. Login attempts are throttled per IP and per account (5 failures per minute each). See [Getting started](../getting-started.md#4-create-the-first-admin-account) and [security](../security.md).
 
-Create, update, delete, status-toggle and key-rotation operations made through the admin panel (and routing rule changes made through the tenant API) write an audit log entry. Sensitive values are redacted ([ADR-0012](../adr/0012-secrets-at-rest-and-audit-redaction.md)).
+Create, update, delete, status-toggle and key-rotation operations made through the admin panel (and routing rule changes made through the tenant API), and every dead-letter replay (admin panel, portal or tenant API), write an audit log entry. Sensitive values are redacted ([ADR-0012](../adr/0012-secrets-at-rest-and-audit-redaction.md)).

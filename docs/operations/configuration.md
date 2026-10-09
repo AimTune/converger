@@ -328,6 +328,7 @@ PgBouncer transaction pooling). See [Migrations and maintenance windows](migrati
 | `:trusted_proxies` | `[]` | See `TRUSTED_PROXIES`. |
 | `:inbound_signature_tolerance_seconds` | `300` | Allowed clock skew for `x-converger-signature` timestamps. |
 | `:pagination` | see [Pagination](#pagination) | Page size defaults and caps. |
+| `:dead_letters` | `bulk_retry_limit: 10_000`, `export_limit: 10_000` | Max deliveries replayed by one bulk retry call, and max rows in one Deliveries CSV export. See [Replaying dead letters](../delivery.md#replaying-dead-letters). |
 | `:prometheus_port` | `9568`; `false` in test | `false` disables the metrics listener. |
 | `:force_ssl` | unset outside prod | Keyword list of `Plug.SSL` options, built from the TLS variables in prod; `false` disables. |
 | `:webhook` | `[]` | `allowed_targets`, `allow_private_targets`, `resolver` (SSRF guard), and installation defaults for `connect_timeout` (5000 ms), `receive_timeout` (10000 ms), `max_response_bytes` (1 MiB). |

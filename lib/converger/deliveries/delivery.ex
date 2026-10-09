@@ -25,6 +25,11 @@ defmodule Converger.Deliveries.Delivery do
     field :read_at, :utc_datetime_usec
     field :provider_message_id, :string
     field :metadata, :map, default: %{}
+    # Manual replays of a dead letter (`Converger.Deliveries.retry_delivery/2`).
+    # Set by the server only, never cast from input.
+    field :retry_count, :integer, default: 0
+    field :retried_by, :string
+    field :retried_at, :utc_datetime_usec
 
     belongs_to :activity, Converger.Activities.Activity
     belongs_to :channel, Converger.Channels.Channel

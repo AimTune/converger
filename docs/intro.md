@@ -88,7 +88,7 @@ Broadway (`Converger.Pipeline.Broadway`) and inline (`Converger.Pipeline.Inline`
 - **Not a bot framework or AI agent runtime.** It carries messages to and from bots. It does not decide what to answer. The `echo` channel is a test helper, not a bot.
 - **Not a chat UI.** The admin and portal show transcripts for operators. End-user widgets connect over the WebSocket or REST client API.
 - **Not a general-purpose message broker.** Activities are conversation-scoped and stored in Postgres. Kafka and RabbitMQ appear only as optional Broadway producers. Broker channels are Planned ([#42](https://github.com/AimTune/converger/issues/42)).
-- **Not finished.** Conditional routing ([#43](https://github.com/AimTune/converger/issues/43)), a dead-letter replay UI ([#32](https://github.com/AimTune/converger/issues/32)), a management API ([#51](https://github.com/AimTune/converger/issues/51)) and the SDKs ([#46](https://github.com/AimTune/converger/issues/46)) are on the [roadmap](roadmap.md).
+- **Not finished.** Conditional routing ([#43](https://github.com/AimTune/converger/issues/43)), a management API ([#51](https://github.com/AimTune/converger/issues/51)) and the SDKs ([#46](https://github.com/AimTune/converger/issues/46)) are on the [roadmap](roadmap.md).
 
 ## Where to go next
 
