@@ -24,6 +24,7 @@ Table `tenants`:
 | `alert_webhook_url` | string | Optional `http`/`https` URL for channel health alerts. |
 | `limits` | map, default `{}` | Per-tenant rate-limit overrides (see below). |
 | `allowed_upload_types` | text array | Optional MIME allowlist for uploads. `NULL` or empty means the global default ([storage](../storage.md)). |
+| `retention_days` | integer, default `365` | Days activities and deliveries are kept before they are archived to object storage and removed. At least `RETENTION_MIN_DAYS` (default 30). Set in the admin tenant form. See [Data retention](../operations/retention.md). |
 | `inserted_at`, `updated_at` | utc_datetime_usec | |
 
 `api_key` also exists as a **virtual**, redacted field. It holds the plaintext key only on the struct returned right after creation or rotation, so it can be shown once. It is never persisted.
@@ -115,6 +116,25 @@ When `alert_webhook_url` is set, the channel health worker (`Converger.Workers.C
 ```
 
 The request is fire-and-forget (a `Task`, 10 s receive timeout). It is not retried, and only the outcome is logged. Durable, signed platform event webhooks are Planned ([#49](https://github.com/AimTune/converger/issues/49)).
+
+## Data retention
+
+Each tenant's activities and deliveries are kept for `retention_days`. Once the whole month they belong to is older
+than that, the monthly retention job archives them to object storage (`archive/<tenant_id>/<YYYY-MM>/`, gzip JSON
+Lines, verified by checksum) and removes them from the database. Archived months can be re-imported with
+`mix converger.archive.import --tenant <id> --month YYYY-MM`. Details:
+[Data retention, partitions and archive](../operations/retention.md).
+
+## Deleting a tenant
+
+`Converger.Tenants.delete_tenant/2` (the **Delete** button on **Admin, Tenants**) deletes the tenant row; its
+channels, conversations, participants, routing rules, attachments rows and tenant users go with it
+(`ON DELETE CASCADE`), and audit log entries keep a `NULL` tenant. Activities and deliveries live in partitioned
+tables without foreign keys ([ADR-0026](../adr/0026-monthly-partitioning-and-per-tenant-retention.md)): in the same
+transaction a `Converger.Workers.PurgeWorker` job is enqueued that deletes them in batches of 5,000 rows, so a
+large tenant no longer means one statement holding locks for hours. Until the job has finished the rows still exist
+but are unreachable (no tenant, no API key). Deleting a channel or a conversation works the same way. Deleting
+rows with raw SQL bypasses the purge; retention archives such orphans eventually.
 
 ## Admin users and tenant users
 

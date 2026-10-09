@@ -71,3 +71,10 @@ config :converger, :webhook,
 
 # Deterministic encryption key for tests only.
 config :converger, Converger.Vault, key: Base.encode64("converger-tst-cloak-key-32bytes!")
+
+# The SQL sandbox wraps every test in a transaction, and
+# DETACH PARTITION ... CONCURRENTLY cannot run inside one. Partitions are not
+# created on boot either: test/test_helper.exs creates them outside the sandbox.
+config :converger, Converger.Partitions,
+  detach_concurrently: false,
+  ensure_on_boot: false

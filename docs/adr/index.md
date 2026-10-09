@@ -42,6 +42,7 @@ supersedes the old one and both are linked. Read
 | [0017](0017-conversation-lifecycle-enforced-under-the-seq-lock.md) | Conversation lifecycle enforced under the seq lock | Accepted | [#17](https://github.com/AimTune/converger/issues/17) / [#84](https://github.com/AimTune/converger/pull/84) |
 | [0018](0018-keyset-pagination.md) | Keyset pagination for every list query | Accepted | [#18](https://github.com/AimTune/converger/issues/18) / [#89](https://github.com/AimTune/converger/pull/89) |
 | [0019](0019-per-channel-retry-policy-delivery-error-and-lifeline.md) | Per-channel retry policy, `DeliveryError` and Oban Lifeline | Accepted | [#19](https://github.com/AimTune/converger/issues/19) / [#85](https://github.com/AimTune/converger/pull/85) |
+| [0026](0026-monthly-partitioning-and-per-tenant-retention.md) | Monthly partitioning of activities and deliveries, per-tenant retention and verified archives | Accepted | [#30](https://github.com/AimTune/converger/issues/30) / [#114](https://github.com/AimTune/converger/pull/114) |
 
 ### Channels, middleware and real time
 

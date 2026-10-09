@@ -26,8 +26,6 @@ defmodule Converger.Workers.ChannelHealthWorker do
       Health.send_alert_webhook(channel, health_check, previous_status)
     end)
 
-    Health.prune_old_checks()
-
     :ok
   end
 end

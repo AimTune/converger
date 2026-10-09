@@ -98,10 +98,38 @@ config :converger, Oban,
     {Oban.Plugins.Cron,
      crontab: [
        {"0 * * * *", Converger.Workers.ConversationExpirationWorker},
-       {"*/5 * * * *", Converger.Workers.ChannelHealthWorker}
+       {"*/5 * * * *", Converger.Workers.ChannelHealthWorker},
+       # Data lifecycle (issue #30, docs/operations/retention.md): create the
+       # next months' partitions daily, prune health checks and audit logs
+       # daily, archive and drop expired activities/deliveries monthly.
+       {"15 0 * * *", Converger.Workers.PartitionMaintenanceWorker},
+       {"30 1 * * *", Converger.Workers.PruneWorker},
+       {"0 2 1 * *", Converger.Workers.RetentionWorker}
      ]}
   ],
-  queues: [default: 10, deliveries: 20]
+  queues: [default: 10, deliveries: 20, maintenance: 1]
+
+# Monthly partitions of activities and deliveries (Converger.Partitions).
+config :converger, Converger.Partitions,
+  months_ahead: 3,
+  detach_concurrently: true,
+  lock_timeout_ms: 5_000
+
+# Retention windows (Converger.Retention). Per-tenant retention of
+# activities/deliveries is tenants.retention_days (default 365).
+config :converger, Converger.Retention,
+  min_retention_days: 30,
+  health_check_days: 7,
+  audit_log_days: 365,
+  prune_batch_size: 10_000
+
+# Archive of expired rows (Converger.Archive). storage: nil uses the
+# attachment storage (Converger.Uploads).
+config :converger, Converger.Archive,
+  storage: nil,
+  storage_opts: [],
+  prefix: "archive",
+  part_rows: 50_000
 
 # Rate limiting (Hammer 7, see Converger.RateLimit).
 #   backend: :local   - per-node ETS counters (single node)

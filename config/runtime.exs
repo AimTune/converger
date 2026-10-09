@@ -262,6 +262,63 @@ if config_env() != :test and System.get_env("UPLOAD_STORAGE") do
     signed_url_ttl: String.to_integer(env.("UPLOAD_SIGNED_URL_TTL") || "300"),
     allowed_content_types: allowed,
     cdn: cdn
+
+  # Archive of expired activities/deliveries (docs/operations/retention.md).
+  # Same backend and credentials as attachments; ARCHIVE_BUCKET (S3, MinIO,
+  # R2, GCS), ARCHIVE_CONTAINER (Azure) or ARCHIVE_DIR (local) put it in a
+  # separate bucket/container/directory.
+  archive_override =
+    case storage do
+      Converger.Uploads.AzureBlobStorage -> {:container, blank_to_nil.(env.("ARCHIVE_CONTAINER"))}
+      Converger.Uploads.LocalStorage -> {:dir, blank_to_nil.(env.("ARCHIVE_DIR"))}
+      _ -> {:bucket, blank_to_nil.(env.("ARCHIVE_BUCKET"))}
+    end
+
+  case archive_override do
+    {_key, nil} ->
+      :ok
+
+    {key, value} ->
+      config :converger, Converger.Archive,
+        storage: storage,
+        storage_opts:
+          storage_opts |> Enum.reject(fn {_k, v} -> is_nil(v) end) |> Keyword.put(key, value)
+  end
+end
+
+# Retention and archive tuning (defaults in config/config.exs).
+retention_env = [
+  min_retention_days: "RETENTION_MIN_DAYS",
+  health_check_days: "HEALTH_CHECK_RETENTION_DAYS",
+  audit_log_days: "AUDIT_LOG_RETENTION_DAYS"
+]
+
+retention_overrides =
+  for {key, var} <- retention_env, value = System.get_env(var), value not in [nil, ""] do
+    {key, String.to_integer(value)}
+  end
+
+if retention_overrides != [] do
+  config :converger, Converger.Retention, retention_overrides
+end
+
+archive_overrides =
+  [
+    prefix: System.get_env("ARCHIVE_PREFIX"),
+    part_rows:
+      case System.get_env("ARCHIVE_PART_ROWS") do
+        value when value in [nil, ""] -> nil
+        value -> String.to_integer(value)
+      end
+  ]
+  |> Enum.reject(fn {_k, v} -> v in [nil, ""] end)
+
+if archive_overrides != [] do
+  config :converger, Converger.Archive, archive_overrides
+end
+
+if months_ahead = System.get_env("PARTITION_MONTHS_AHEAD") do
+  config :converger, Converger.Partitions, months_ahead: String.to_integer(months_ahead)
 end
 
 if config_env() == :prod do

@@ -87,7 +87,13 @@ defmodule Converger.Activities.Activity do
     |> validate_required([:sender, :tenant_id, :conversation_id])
     |> foreign_key_constraint(:tenant_id)
     |> foreign_key_constraint(:conversation_id)
-    |> unique_constraint([:conversation_id, :idempotency_key])
+    # Unique per monthly partition (`activities_pYYYY_MM_conversation_id_idempotency_key_index`,
+    # ADR-0026); create_activity/2 also re-checks under the conversation lock,
+    # which makes the key unique across partitions.
+    |> unique_constraint([:conversation_id, :idempotency_key],
+      name: "_conversation_id_idempotency_key_index",
+      match: :suffix
+    )
   end
 
   defp validate_attachments(field, attachments, max_bytes) do

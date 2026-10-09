@@ -24,6 +24,9 @@ defmodule Converger.Tenants.Tenant do
     # Rate-limit overrides, see Converger.RateLimit and limits_changeset/2.
     field :limits, :map, default: %{}
     field :allowed_upload_types, {:array, :string}
+    # Activities and deliveries older than this many days are archived to
+    # object storage and removed (Converger.Retention, ADR-0026).
+    field :retention_days, :integer, default: 365
 
     timestamps(type: :utc_datetime_usec)
   end
@@ -34,8 +37,11 @@ defmodule Converger.Tenants.Tenant do
   @doc false
   def changeset(tenant, attrs) do
     tenant
-    |> cast(attrs, [:name, :status, :alert_webhook_url, :allowed_upload_types])
-    |> validate_required([:name])
+    |> cast(attrs, [:name, :status, :alert_webhook_url, :allowed_upload_types, :retention_days])
+    |> validate_required([:name, :retention_days])
+    |> validate_number(:retention_days,
+      greater_than_or_equal_to: Converger.Retention.min_retention_days()
+    )
     |> ensure_api_key()
     |> validate_required([:api_key_hash, :status])
     |> validate_url(:alert_webhook_url)

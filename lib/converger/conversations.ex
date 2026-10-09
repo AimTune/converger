@@ -279,8 +279,24 @@ defmodule Converger.Conversations do
   defp event_name(@closed), do: "closed"
   defp event_name(@open), do: "reopened"
 
+  @doc """
+  Deletes a conversation. Its activities and their deliveries (partitioned
+  tables without foreign keys, ADR-0026) are purged by a
+  `Converger.Workers.PurgeWorker` job enqueued in the same transaction.
+  """
   def delete_conversation(%Conversation{} = conversation) do
-    Repo.delete(conversation)
+    Ecto.Multi.new()
+    |> Ecto.Multi.delete(:conversation, conversation)
+    |> Oban.insert(
+      :purge,
+      Converger.Workers.PurgeWorker.new(%{conversation_ids: [conversation.id]})
+    )
+    |> Repo.transaction()
+    |> case do
+      {:ok, %{conversation: deleted}} -> {:ok, deleted}
+      {:error, :conversation, changeset, _} -> {:error, changeset}
+      {:error, _step, reason, _} -> {:error, reason}
+    end
   end
 
   def change_conversation(%Conversation{} = conversation, attrs \\ %{}) do

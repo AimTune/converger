@@ -354,10 +354,13 @@ maintenance page), run `bin/migrate`, then start the new release:
 | `20261008150000_add_seq_to_activities` | In one transaction it adds `activities.seq`, backfills **every** activity row with `row_number()`, sets `NOT NULL` and builds a non-concurrent unique index. `activities` is locked (`ACCESS EXCLUSIVE`) for the whole run, the table is fully rewritten (expect WAL roughly the table size and dead tuples; run `VACUUM ANALYZE activities` afterwards), and old code that inserts activities without `seq` fails once it commits. Time it on a restored copy of production first. |
 | `20261008100000_encrypt_channel_secrets` (issue #12) | Rewrites every `channels` row with encrypted `secret`/`config` and drops the plaintext columns; old code cannot read the new values. Needs `CLOAK_KEY` at migration time. The table is small, so the window is short. |
 | `20261008100001_hash_tenant_api_keys` (issue #12) | Replaces stored tenant API keys with hashes; old code can no longer authenticate tenants. |
+| `20261010300100_partition_activities_and_deliveries` (issue #30) | Converts `activities` and `deliveries` to monthly partitioned tables and swaps them in under `ACCESS EXCLUSIVE`; old releases cannot write the new `deliveries` columns. Small installations (up to `PARTITION_MAX_INLINE_ROWS`, default 1,000,000 activities) convert inside `bin/migrate`; larger ones first run the online copy `bin/converger eval "Converger.Release.prepare_partitioning()"` while the old release still serves traffic, so the window only covers the swap. Runbook: [Migrations](operations/migrations.md#partitioning-activities-and-deliveries-20261010300100). |
 
-`20261008120000_add_require_signature_to_channels` and
-`20261009550000_add_must_change_password_to_admin_users` only add columns with
-constant defaults (metadata-only on Postgres 11+) and are rolling-deploy safe.
+`20261008120000_add_require_signature_to_channels`,
+`20261009550000_add_must_change_password_to_admin_users` and
+`20261010300000_add_retention_and_archive_parts` only add columns with
+constant defaults (metadata-only on Postgres 11+) or new tables and are
+rolling-deploy safe.
 
 ## Initial admin account
 
@@ -385,6 +388,11 @@ What to back up:
    key. Store it in your secret manager, separately from the database backups.
 3. `SECRET_KEY_BASE` (losing it only logs everyone out and invalidates issued
    tokens, but keep it to avoid that).
+4. **The retention archive** (`archive/` in the attachment bucket, or
+   `ARCHIVE_BUCKET`). Once retention has archived and dropped a month, the
+   archive is the only copy of those activities and deliveries: enable
+   versioning or object lock and replicate it like a backup. See
+   [Data retention](operations/retention.md).
 
 ### Logical backups (pg_dump)
 

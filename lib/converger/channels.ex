@@ -108,29 +108,51 @@ defmodule Converger.Channels do
     result
   end
 
+  # The channel's conversations cascade with the row. Their activities, and
+  # deliveries to this channel, are in partitioned tables without foreign keys
+  # (ADR-0026) and are purged in batches by PurgeWorker jobs enqueued in the
+  # same transaction (the conversation ids are captured before the cascade).
   defp do_delete_channel(channel, actor) do
-    if actor do
-      Multi.new()
-      |> Multi.insert(:audit_log, fn _ ->
-        AuditLogs.build_audit_log_entry(%{
-          tenant_id: channel.tenant_id,
-          actor_type: actor.type,
-          actor_id: actor.id,
-          action: "delete",
-          resource_type: "channel",
-          resource_id: channel.id,
-          changes: Changes.for_delete(channel)
-        })
-      end)
-      |> Multi.delete(:channel, channel)
-      |> Repo.transaction()
-      |> case do
-        {:ok, %{channel: channel}} -> {:ok, channel}
-        {:error, :channel, changeset, _} -> {:error, changeset}
-      end
-    else
-      Repo.delete(channel)
+    alias Converger.Workers.PurgeWorker
+
+    Multi.new()
+    |> maybe_audit_delete(channel, actor)
+    |> Multi.run(:conversation_ids, fn repo, _ ->
+      {:ok,
+       repo.all(
+         from(c in Converger.Conversations.Conversation,
+           where: c.channel_id == ^channel.id,
+           select: c.id
+         )
+       )}
+    end)
+    |> Oban.insert_all(:purge_conversations, fn %{conversation_ids: ids} ->
+      PurgeWorker.conversation_jobs(ids)
+    end)
+    |> Oban.insert(:purge_deliveries, PurgeWorker.new(%{channel_id: channel.id}))
+    |> Multi.delete(:channel, channel)
+    |> Repo.transaction()
+    |> case do
+      {:ok, %{channel: channel}} -> {:ok, channel}
+      {:error, :channel, changeset, _} -> {:error, changeset}
+      {:error, _step, reason, _} -> {:error, reason}
     end
+  end
+
+  defp maybe_audit_delete(multi, _channel, nil), do: multi
+
+  defp maybe_audit_delete(multi, channel, actor) do
+    Multi.insert(multi, :audit_log, fn _ ->
+      AuditLogs.build_audit_log_entry(%{
+        tenant_id: channel.tenant_id,
+        actor_type: actor.type,
+        actor_id: actor.id,
+        action: "delete",
+        resource_type: "channel",
+        resource_id: channel.id,
+        changes: Changes.for_delete(channel)
+      })
+    end)
   end
 
   def change_channel(%Channel{} = channel, attrs \\ %{}) do

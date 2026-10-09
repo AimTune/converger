@@ -9,6 +9,8 @@ defmodule Converger.Uploads.StorageIntegrationTest do
   """
   use Converger.DataCase, async: false
 
+  import Converger.ActivitiesFixtures
+
   alias Converger.Uploads.{AzureBlobStorage, S3Storage}
   alias Converger.Uploads.Signers.{Azure, SigV4}
 
@@ -107,6 +109,76 @@ defmodule Converger.Uploads.StorageIntegrationTest do
 
       assert Req.put!(url, body: @payload, headers: headers, retry: false).status == 200
       assert {:ok, @payload} = S3Storage.get(config, key)
+    end
+  end
+
+  describe "retention archive against MinIO (issue #30)" do
+    @describetag :minio
+
+    setup do
+      config = [
+        endpoint: System.get_env("MINIO_ENDPOINT", "http://localhost:9000"),
+        path_style: true,
+        region: "us-east-1",
+        bucket: "converger-archive-test",
+        access_key_id: System.get_env("MINIO_ACCESS_KEY", "minioadmin"),
+        secret_access_key: System.get_env("MINIO_SECRET_KEY", "minioadmin")
+      ]
+
+      ensure_bucket(config)
+      original = Application.get_env(:converger, Converger.Archive)
+
+      Application.put_env(:converger, Converger.Archive,
+        storage: S3Storage,
+        storage_opts: config,
+        prefix: "archive-it-#{System.unique_integer([:positive])}",
+        part_rows: 2
+      )
+
+      on_exit(fn -> Application.put_env(:converger, Converger.Archive, original) end)
+      {:ok, config: config}
+    end
+
+    test "a month is archived to the bucket, verified, dropped and re-imported", %{config: config} do
+      month = ~D[2025-01-01]
+      {:ok, tenant} = Converger.Tenants.create_tenant(%{name: "archive-it"})
+
+      {:ok, channel} =
+        Converger.Channels.create_channel(%{
+          name: "it",
+          type: "websocket",
+          mode: "outbound",
+          status: "active",
+          tenant_id: tenant.id
+        })
+
+      {:ok, conversation} =
+        Converger.Conversations.create_conversation(%{
+          tenant_id: tenant.id,
+          channel_id: channel.id,
+          status: "active"
+        })
+
+      ids =
+        for i <- 1..3 do
+          activity_fixture(tenant, conversation, %{
+            text: "archived #{i}",
+            inserted_at: DateTime.add(~U[2025-01-05 00:00:00.000000Z], i, :hour)
+          }).id
+        end
+
+      assert {:ok, [%{action: :partition_dropped, rows: %{"activities" => 3}}]} =
+               Converger.Retention.run(today: ~D[2026-03-01], months: [month])
+
+      refute Converger.Repo.get(Converger.Activities.Activity, hd(ids))
+
+      key = Converger.Archive.object_key(tenant.id, month, "activities", 1)
+      assert {:ok, <<0x1F, 0x8B, _::binary>>} = S3Storage.get(config, key)
+
+      assert {:ok, %{"activities" => %{parts: 2, inserted: 3}}} =
+               Converger.Archive.import_tenant_month(tenant.id, month)
+
+      assert Converger.Repo.get!(Converger.Activities.Activity, hd(ids)).text == "archived 1"
     end
   end
 
