@@ -21,7 +21,9 @@ defmodule ConvergerWeb.ConvergerChannelSignalsTest do
 
   setup do
     tenant = tenant_fixture()
-    channel = channel_fixture(tenant)
+    # Inbound-only: the tests drive its deliveries by hand, so the pipeline
+    # must not create (and report) a websocket delivery of its own.
+    channel = channel_fixture(tenant, %{mode: "inbound"})
     conversation = conversation_fixture(tenant, channel)
     %{tenant: tenant, channel: channel, conversation: conversation}
   end

@@ -12,12 +12,12 @@ Two socket stacks exist today, for historical reasons. The Converger client API 
 | --- | --- | --- |
 | Socket path | `/socket` | `/socket/converger` |
 | Socket module | [`ConvergerWeb.UserSocket`](https://github.com/AimTune/converger/blob/main/lib/converger_web/channels/user_socket.ex) | [`ConvergerWeb.ConvergerSocket`](https://github.com/AimTune/converger/blob/main/lib/converger_web/channels/converger_socket.ex) |
-| Channel topic | `conversation:<conversation_id>` | `converger:conversation:<conversation_id>` |
+| Channel topic | `conversation:<conversation_id>` | `converger:conversation:<conversation_id>`, `converger:channel:<channel_id>` |
 | Channel module | [`ConvergerWeb.ConversationChannel`](https://github.com/AimTune/converger/blob/main/lib/converger_web/channels/conversation_channel.ex) | [`ConvergerWeb.ConvergerChannel`](https://github.com/AimTune/converger/blob/main/lib/converger_web/channels/converger_channel.ex) |
 | Token | `Converger.Auth.Token` (from `POST /api/v1/tokens`) | `Converger.Auth.ConvergerToken` (from `POST /api/v1/converger/tokens/generate` or `/conversations`) |
 | Activity frame | `new_activity` (canonical map) | `activitySet` (`{activities, watermark, has_more}`) |
 | Resume | `last_activity_id` in the join payload | opaque `watermark` in the join payload |
-| Client sends | `new_activity` push | `postActivity` push, or REST; `typing` and `read` events |
+| Client sends | `new_activity` push | `postActivity` push (through `Converger.Inbound` on a `websocket` channel) or REST; `ack`, `typing` and `read` events |
 | Delivery status | `delivery_status` pushed | `deliveryStatus` frames, plus read receipts |
 | Typing, presence | no (typing is a persisted activity) | `typing` and `presence` frames |
 
@@ -51,9 +51,34 @@ sequenceDiagram
 
 - `Converger.Pipeline.broadcast/1` publishes `"new_activity"` on `conversation:<conversation_id>` with the canonical activity map ([ADR-0004](../adr/0004-single-canonical-activity-serializer.md)) **after** the activity's transaction committed ([Activity flow](activity-flow.md)).
 - A `ConversationChannel` process is joined to exactly that topic, so Phoenix forwards the broadcast to the client as-is (no `intercept`).
-- A `ConvergerChannel` process is joined to `converger:conversation:<id>` and additionally calls `ConvergerWeb.Endpoint.subscribe("conversation:<id>")` in `join/3`. Its `handle_info/2` turns each `new_activity` broadcast into an `activitySet` frame with one activity (formatted by `ConvergerWeb.ConvergerAPI.ActivityJSON.activity_data/1`, the same function the REST API uses) and the watermark of that activity's `seq`. `delivery_status` broadcasts become `deliveryStatus` frames (see [Receipts, typing and presence](#receipts-typing-and-presence)).
+- A `ConvergerChannel` process joined to `converger:conversation:<id>` additionally calls `ConvergerWeb.Endpoint.subscribe("conversation:<id>")` in `join/3`. For a conversation that belongs to the token's channel (**owned**), its `handle_info/2` turns each `new_activity` broadcast into an `activitySet` frame with one activity (formatted by `ConvergerWeb.ConvergerAPI.ActivityJSON.activity_data/1`, the same function the REST API uses) and the watermark of that activity's `seq`. `delivery_status` broadcasts become `deliveryStatus` frames (see [Receipts, typing and presence](#receipts-typing-and-presence)).
 
 PubSub is cluster-wide, so a client connected to node B receives activities created on node A.
+
+### Through the websocket channel adapter
+
+Activities delivered to a `websocket` channel by the pipeline (the conversation's own channel or a routing rule target) are also broadcast by the adapter, after the channel's middleware ([WebSocket channel type](../channels/websocket.md), [ADR-0033](../adr/0033-websocket-channel-adapter-delivery.md)):
+
+```mermaid
+sequenceDiagram
+    participant P as Pipeline (delivery job)
+    participant WS as WebSocket adapter
+    participant PS as PubSub
+    participant RC as ConvergerChannel (routed conversation)
+    participant CH as ConvergerChannel (channel topic)
+
+    P->>WS: deliver_activity(channel, transformed)
+    WS->>PS: "new_activity" on channel:<channel_id>
+    WS->>PS: "new_activity" on channel:<channel_id>:conversation:<id>
+    PS->>CH: push "activitySet" with conversation_id
+    PS->>RC: push "activitySet" (seq-checked)
+    WS-->>P: {:ok, %{connected_clients: n}} or {:pending, ...}
+```
+
+- A `ConvergerChannel` joined to `converger:conversation:<id>` of a conversation **routed** to its `websocket` channel subscribes to `channel:<channel_id>:conversation:<id>` instead of `conversation:<id>`, so it sees activities as delivered to its channel.
+- A `ConvergerChannel` joined to `converger:channel:<channel_id>` subscribes to `channel:<channel_id>` and pushes every delivery with its `conversation_id`.
+
+On a conversation topic the channel process keeps `last_seq`, starting from the conversation's head read in `join/3` before subscribing. A frame with `seq <= last_seq` is dropped (replay overlap, the same activity broadcast twice); a frame with `seq > last_seq + 1` makes it read the missing range from the database and push that instead (lost cross-node broadcast, concurrent delivery jobs, an activity halted by middleware).
 
 ## PubSub topics
 
@@ -65,8 +90,10 @@ PubSub is cluster-wide, so a client connected to node B receives activities crea
 | `conversation:<conversation_id>:signals` | `read` | `up_to_seq`, `by` (participant), `at` | `ConvergerChannel`, when a `read` frame moved the stored watermark |
 | `conversation:<conversation_id>:presence` | presence diffs | participant id with meta `role`, `online_at` | `ConvergerWeb.ConversationPresence` |
 | `channel_health` | `health_changed` | `channel_id`, `channel_name`, `tenant_id`, `previous_status`, `status`, `failure_rate`, `total_deliveries`, `failed_deliveries`, `checked_at` | `Converger.Channels.Health` (from `ChannelHealthWorker`) |
-| `sockets:channel:<channel_id>` | presence diffs | socket id with meta `tenant_id`, `conversation_id` | `ConvergerWeb.SocketPresence` |
-| `converger_socket:<tenant_id>:user:<user_id>`, `converger_socket:<tenant_id>:conversation:<conversation_id>`, `user_socket:<tenant_id>:<sub>` | `disconnect` | `{}` | `ConvergerWeb.Sockets` |
+| `channel:<channel_id>` | `new_activity` | canonical activity, after the channel's middleware | `Converger.Channels.Adapters.WebSocket` |
+| `channel:<channel_id>:conversation:<conversation_id>` | `new_activity` | canonical activity, after the channel's middleware | `Converger.Channels.Adapters.WebSocket` |
+| `sockets:channel:<channel_id>` | presence diffs | socket id with meta `tenant_id` and `conversation_id`, or `scope: "channel"` | `ConvergerWeb.SocketPresence` |
+| `converger_socket:<tenant_id>:user:<user_id>`, `converger_socket:<tenant_id>:channel:<channel_id>`, `converger_socket:<tenant_id>:conversation:<conversation_id>`, `user_socket:<tenant_id>:<sub>` | `disconnect` | `{}` | `ConvergerWeb.Sockets` |
 
 Conversation lifecycle changes are not a separate event: closing or reopening a conversation creates a `conversationUpdate` activity (sender `"system"`, metadata `event`, `status`, `reason`), which flows through `new_activity` / `activitySet` like any other activity.
 
@@ -88,9 +115,14 @@ Both sockets authenticate once, in `connect/3`, from the `token` connect paramet
 
 `ConvergerSocket.connect/3` verifies the token with `Converger.Auth.ConvergerToken.verify_token/1` (which also requires `"type": "converger"`) **and** checks that the token's channel is active (`Channels.get_active_channel/2`). A token for a deactivated channel cannot connect even before it expires.
 
-Converger tokens carry `type`, `channel_id`, `tenant_id`, `sub` (`converger_<channel_id>`), an expiry (1800 s by default), and optionally `conversation_id` and `user_id`. `ConvergerChannel.join/3` for `converger:conversation:<id>` authorizes only when the token has a `conversation_id` claim equal to `<id>`. A channel-level token (no `conversation_id`) cannot join: it must create or resume a conversation first (`POST`/`GET /api/v1/converger/conversations`), which returns a conversation token ([#114](https://github.com/AimTune/converger/pull/114)). Channel-wide agent sockets come with an explicit `scope` claim ([#64](https://github.com/AimTune/converger/issues/64)).
+Converger tokens carry `type`, `channel_id`, `tenant_id`, `sub` (`converger_<channel_id>`), an expiry (1800 s by default), and optionally `conversation_id`, `user_id` and `scope` (`channel`). Both joins require the token's channel to be active. `ConvergerChannel.join/3` for `converger:conversation:<id>` authorizes:
 
-Any other topic is rejected with `{"reason": "invalid_topic"}`; a failed authorization with `{"reason": "unauthorized"}`.
+- a token with a `conversation_id` claim equal to `<id>`;
+- a `scope: "channel"` token (an agent console, role `agent`) when the conversation is in the token's tenant and belongs to the token's channel (owned) or, for a `websocket` channel, to a channel that an enabled routing rule routes to it (`Converger.RoutingRules.routes_to?/3`, routed).
+
+An unscoped channel-level token (no `conversation_id`, no `scope`) cannot join: it must create or resume a conversation first (`POST`/`GET /api/v1/converger/conversations`), which returns a conversation token ([#114](https://github.com/AimTune/converger/pull/114)).
+
+`converger:channel:<channel_id>` requires `scope: "channel"`, `channel_id` equal to the token's, and a `websocket` channel. Any other topic is rejected with `{"reason": "invalid_topic"}`; a failed authorization with `{"reason": "unauthorized"}`.
 
 `ConvergerChannel.handle_in("postActivity", ...)` sends over the socket: it rate-limits with the tenant's `activity_create` bucket, maps the Direct Line-style payload to client fields (`channelData` becomes `metadata`) and calls `Activities.create_client_activity/2`, so the activity takes the same pipeline path as a REST send ([ADR-0003](../adr/0003-pipeline-is-the-only-delivery-path.md)). The sender is the token's `user_id`, else the payload's `from.id`, else `"user"`; an optional `clientId` becomes the idempotency key `ws:<sender>:<clientId>`. The reply is `{id, seq, watermark}`; the activity then arrives as an `activitySet` like any other. See [WebSocket](../websocket.md#6-send-activities-over-the-socket).
 
@@ -101,8 +133,9 @@ Phoenix lets a socket declare an `id/1`; broadcasting `"disconnect"` to that id 
 | Socket | Id | Derived from |
 | --- | --- | --- |
 | `ConvergerSocket` with `user_id` claim | `converger_socket:<tenant_id>:user:<user_id>` | `user.id` passed to `tokens/generate` |
+| `ConvergerSocket` with `scope: "channel"` but no `user_id` | `converger_socket:<tenant_id>:channel:<channel_id>` | channel-scoped token (agent console) |
 | `ConvergerSocket` with `conversation_id` but no `user_id` | `converger_socket:<tenant_id>:conversation:<conversation_id>` | conversation token |
-| `ConvergerSocket` with neither | `nil` (anonymous socket) | channel-level token |
+| `ConvergerSocket` with none of them | `nil` (anonymous socket) | channel-level token |
 | `UserSocket` | `user_socket:<tenant_id>:<sub>` | legacy token |
 
 Ids are tenant-scoped, so the same user id in two tenants is two different subjects. Before [#81](https://github.com/AimTune/converger/pull/81) the Converger socket id was per channel, so disconnecting one user dropped every client of that channel.
@@ -115,6 +148,7 @@ Ids are tenant-scoped, so the same user id in two tenants is two different subje
 | `disconnect_conversation(tenant_id, conversation_id)` | Disconnects Converger sockets identified by that conversation. |
 | `disconnect_channel(channel_id)` | Disconnects every tracked socket that joined a conversation of the channel. |
 | `count(channel_id)` | Number of distinct tracked sockets on the channel. |
+| `count_connections(channel_id, conversation_id)` | Joined channel processes of the channel that receive the conversation's activities (joined to it, or following the whole channel). The `websocket` adapter's `connected_clients`. |
 
 ## Presence and channel-wide disconnects
 
@@ -165,7 +199,7 @@ Without `last_activity_id` / `watermark` neither channel replays; the client sta
 
 Watermarks encode the per-conversation `seq` (`Converger.ConvergerAPI.Watermark`: URL-safe Base64 of `seq:<n>`), so resuming needs no lookup and is exact ([ADR-0006](../adr/0006-per-conversation-seq-and-opaque-watermarks.md)). Legacy watermarks (Base64 activity ids) are still accepted.
 
-`ConvergerChannel` subscribes to the PubSub topic in `join/3` and queries the replay afterwards, so a live frame can arrive before or overlap with the replay frame. Clients must de-duplicate by activity `id`.
+`ConvergerChannel` queues the replay, then subscribes to the PubSub topic in `join/3`, so every live frame is handled after the replay and dropped when the replay already covered it (`last_seq`, see above). After a replay, it marks the replayed activities' pending deliveries to a `websocket` channel `sent` unless the channel has `require_ack: true` (`Converger.Deliveries.acknowledge/3`). A routed socket's replay runs the activities through its channel's middleware. Clients that also page over REST de-duplicate by activity `id`.
 
 ## Native Protocol v1 transports
 

@@ -173,6 +173,8 @@ defmodule Converger.Channels.Circuit do
   """
   def record(channel, :ok), do: record_success(channel)
   def record(channel, {:ok, _}), do: record_success(channel)
+  # Handed off, receipt pending (websocket): the endpoint worked.
+  def record(channel, {:pending, _}), do: record_success(channel)
   def record(_channel, {:error, %DeliveryError{retryable?: false}}), do: :ok
   def record(channel, {:error, _}), do: record_failure(channel)
 

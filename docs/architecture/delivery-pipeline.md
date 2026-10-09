@@ -159,11 +159,11 @@ Because `Converger.Pipeline` reads the backend on every call, and `child_specs/0
 
 `Pipeline.resolve_delivery_channels/1` decides which channels receive an activity:
 
-1. The conversation's own channel, if its type is one of `echo`, `webhook`, `whatsapp_meta`, `whatsapp_infobip` and its mode is `outbound` or `duplex`. (`websocket` channels are served by the PubSub broadcast; `inbound`-only channels never receive deliveries.) The primary channel's `status` is not checked at this step, unlike routing targets.
-2. The target channels of the tenant's **enabled** routing rules whose source is that channel (`RoutingRules.resolve_target_channels/2`), keeping only channels that exist, are `active`, have a deliverable type and an `outbound` or `duplex` mode.
+1. The conversation's own channel, if it is deliverable and its mode is `outbound` or `duplex`. A channel is deliverable when its adapter has the `:outbound` capability (`Converger.Channels.Adapter.capability?/2`); all five types have it today. `inbound`-only channels never receive deliveries. The primary channel's `status` is not checked at this step, unlike routing targets.
+2. The target channels of the tenant's **enabled** routing rules whose source is that channel (`RoutingRules.resolve_target_channels/2`), keeping only channels that exist, are `active`, are deliverable and have an `outbound` or `duplex` mode.
 3. Duplicates are removed.
-4. The participant's own channel is removed when the activity's `sender` equals the participant's `external_id`, so an inbound WhatsApp message is not sent back to the person who wrote it.
-5. Lifecycle events (`conversationUpdate` from `"system"`) are only delivered to `webhook` channels; messaging adapters would otherwise send an empty message into a closed conversation.
+4. The participant's own channel is removed when the activity's `sender` equals the participant's `external_id`, so an inbound WhatsApp message is not sent back to the person who wrote it. This does not apply when that channel is a `websocket` channel: it serves many sockets (the participant's other tabs, an agent console), and the sending socket drops the frame by `seq`.
+5. Lifecycle events (`conversationUpdate` from `"system"`) are only delivered to `webhook` and `websocket` channels; messaging adapters would otherwise send an empty message into a closed conversation.
 
 See [routing rules](../concepts/routing-rules.md).
 
@@ -194,12 +194,14 @@ After middleware, `Converger.Channels.Adapter.deliver_activity/2` dispatches by 
 | `webhook` | `Converger.Channels.Adapters.Webhook` | yes |
 | `whatsapp_meta` | `Converger.Channels.Adapters.WhatsAppMeta` | yes |
 | `whatsapp_infobip` | `Converger.Channels.Adapters.WhatsAppInfobip` | yes |
-| `websocket` | `Converger.Channels.Adapters.WebSocket` | no (PubSub broadcast) |
+| `websocket` | `Converger.Channels.Adapters.WebSocket` | yes |
 
-An adapter returns `:ok`, `{:ok, response_meta}` or `{:error, reason}`, where `reason` may be a `%Converger.Channels.DeliveryError{}` that says whether the failure is retryable and carries a provider `Retry-After`. Adapters can also supply retry policy defaults through the optional `retry_policy/0` callback (the webhook adapter sets `timeout_ms: 10_000`). See [Delivery and retries](../delivery.md) and [writing an adapter](../channels/writing-an-adapter.md).
+The `websocket` adapter broadcasts the activity (after the channel's middleware) on the PubSub topics `channel:<channel_id>` and `channel:<channel_id>:conversation:<conversation_id>`, which the channel's agent-console and routed sockets follow, and counts the connected clients (`ConvergerWeb.Sockets.count_connections/2`). It returns `{:ok, %{connected_clients: n}}` when at least one client is connected, and `{:pending, %{connected_clients: n}}` when none is, or when the channel's config has `require_ack: true` ([ADR-0033](../adr/0033-websocket-channel-adapter-delivery.md), [WebSocket channel](../channels/websocket.md)).
+
+An adapter returns `:ok`, `{:ok, response_meta}`, `{:pending, response_meta}` or `{:error, reason}`. `{:pending, _}` means handed off without a confirmed receipt: the delivery stays `pending` with `attempts` incremented (`Deliveries.mark_handed_off/2`), is not retried, and is marked `sent` by `Deliveries.acknowledge/3` when a client acknowledges it or it is replayed to a client. For `{:error, reason}`, `reason` may be a `%Converger.Channels.DeliveryError{}` that says whether the failure is retryable and carries a provider `Retry-After`. Adapters can also supply retry policy defaults through the optional `retry_policy/0` callback (the webhook adapter sets `timeout_ms: 10_000`) and declare what they can do through the optional `capabilities/0` callback (default `[:inbound, :outbound]`). See [Delivery and retries](../delivery.md) and [writing an adapter](../channels/writing-an-adapter.md).
 
 ## Related
 
 - [Activity flow](activity-flow.md)
 - [Delivery and retries](../delivery.md)
-- [ADR-0001](../adr/0001-transactional-outbox-with-oban.md), [ADR-0002](../adr/0002-broadway-for-throughput-oban-for-retries.md), [ADR-0003](../adr/0003-pipeline-is-the-only-delivery-path.md), [ADR-0008](../adr/0008-middleware-receives-channel-and-crashes-are-contained.md), [ADR-0019](../adr/0019-per-channel-retry-policy-delivery-error-and-lifeline.md)
+- [ADR-0001](../adr/0001-transactional-outbox-with-oban.md), [ADR-0002](../adr/0002-broadway-for-throughput-oban-for-retries.md), [ADR-0003](../adr/0003-pipeline-is-the-only-delivery-path.md), [ADR-0008](../adr/0008-middleware-receives-channel-and-crashes-are-contained.md), [ADR-0019](../adr/0019-per-channel-retry-policy-delivery-error-and-lifeline.md), [ADR-0033](../adr/0033-websocket-channel-adapter-delivery.md)
