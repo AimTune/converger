@@ -11,7 +11,7 @@ The repository ships two ways to run Converger on Kubernetes:
 
 Both run a [clustered](clustering.md) Deployment whose pods only receive traffic once
 [`GET /health/ready`](observability.md#health-endpoints) passes. The design is recorded in
-[ADR-0035](../adr/0035-libcluster-clustering-health-endpoints-and-metrics-on-the-main-port.md).
+[ADR-0036](../adr/0036-libcluster-clustering-health-endpoints-and-metrics-on-the-main-port.md).
 
 ## What `deploy/k8s` contains
 
@@ -83,10 +83,10 @@ The probes hit the pod IP over plain HTTP. `/health/*` is served before `ForceSS
 Shutdown: Kubernetes removes a terminating pod from the Service endpoints and runs the `preStop` hook
 (`sleep 5`, time for kube-proxy and the ingress to stop routing to it) before sending SIGTERM. The release then
 marks itself draining (`ConvergerWeb.Drain`: readiness answers `503 draining` and new sockets are refused), waits
-`WS_DRAIN_DELAY_MS` (5 s), then closes its WebSockets in batches (up to `WS_DRAIN_SHUTDOWN_MS`, 30 s) and lets Oban
-finish running jobs; see [WebSocket limits and draining](websocket-limits.md#draining-on-shutdown).
-`terminationGracePeriodSeconds: 60` covers the preStop sleep plus that sequence; raise it together with the drain
-settings. A job that is still running when the pod is killed
+`WS_DRAIN_DELAY_MS` (5 s), then closes its native and Phoenix WebSockets in batches and lets Oban finish running
+jobs; see [WebSocket limits and draining](websocket-limits.md#draining-on-shutdown), which budgets 60 s with the
+defaults and up to 90 s for nodes holding many of both socket kinds. `terminationGracePeriodSeconds: 95` covers the
+preStop sleep plus that budget; raise it together with the drain settings. A job that is still running when the pod is killed
 is rescued by Oban's Lifeline plugin ([chaos testing](../chaos.md)).
 
 ## Clustering

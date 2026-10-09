@@ -1,6 +1,6 @@
 ---
-title: "ADR-0035: libcluster clustering, health endpoints and metrics on the main port"
-sidebar_label: "0035 Clustering and health"
+title: "ADR-0036: libcluster clustering, health endpoints and metrics on the main port"
+sidebar_label: "0036 Clustering and health"
 description: Nodes discover each other with libcluster strategies chosen at runtime, readiness is an unauthenticated JSON probe that gates traffic on database, Oban, draining and migrations, Prometheus metrics move to the main port behind a token, and a two-node :peer suite verifies the cluster in CI.
 ---
 
@@ -130,7 +130,8 @@ probe never waits on the migration advisory lock; cached once true). It answers 
 only logged. The `draining` check reads `ConvergerWeb.Drain.draining?/0`, the single source of truth for the
 shutdown state introduced by [ADR-0027](0027-websocket-limits-backpressure-and-draining.md): `ConvergerWeb.Drain`,
 the last child of the application supervisor, flips it on SIGTERM and waits `WS_DRAIN_DELAY_MS` before the endpoint
-drains its sockets. A first draft of this change had its own drain flag and shutdown child; it was dropped in favour
+drains its sockets (the native transports of [ADR-0035](0035-native-transports-share-signals-limits-and-draining.md)
+honour the same flag). A first draft of this change had its own drain flag and shutdown child; it was dropped in favour
 of ADR-0027's, so there is one flag and one delay. The `status` field keeps ADR-0027's values (`ready`,
 `draining`) and adds `unavailable` for the other checks.
 
@@ -180,10 +181,6 @@ pre-install/pre-upgrade hook, `deploy/fly/fly.toml`, and `docker-compose.cluster
 
 ### Follow-ups
 
-- The native `/socket/converger/v1` WebSocket and the SSE event stream ([#26](https://github.com/AimTune/converger/issues/26), [ADR-0030](0030-native-websocket-endpoint-and-fallback-transports.md)) do not consult
-  `ConvergerWeb.Drain` when accepting connections; readiness still turns `503 draining`, so load balancers stop
-  routing new requests, but a client that reaches a draining node directly is accepted. Align them with
-  `ConvergerWeb.SocketGuard`.
 - [#33](https://github.com/AimTune/converger/issues/33): delivery and pipeline metrics, dashboards and alert rules
   (scrape configuration now uses the main port).
 - A `kind`-based CI job that applies `deploy/k8s` to a throwaway cluster.

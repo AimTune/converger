@@ -53,7 +53,7 @@ resources:
   limits:
     memory: 1Gi
 
-terminationGracePeriodSeconds: 60
+terminationGracePeriodSeconds: 95
 preStopSleepSeconds: 5
 
 nodeSelector: {}

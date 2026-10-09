@@ -71,7 +71,7 @@ request.
 | `GET /health/ready` | `200 {"status": "ready", "checks": {...}}`; `503 {"status": "draining", ...}` once the node has started shutting down (`"unavailable"` when another check fails). |
 
 Readiness also checks the database, Oban and pending migrations; see [Observability](observability.md#health-endpoints)
-([ADR-0035](../adr/0035-libcluster-clustering-health-endpoints-and-metrics-on-the-main-port.md)).
+([ADR-0036](../adr/0036-libcluster-clustering-health-endpoints-and-metrics-on-the-main-port.md)).
 
 ## Draining on shutdown
 

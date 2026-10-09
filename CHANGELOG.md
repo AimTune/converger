@@ -157,7 +157,7 @@
 - Two-node test suite (`test/cluster`, `mix test --only cluster`, own CI job):
   cross-node WebSocket broadcast, shared rate limits, exactly-once deliveries.
 - `deploy/k8s` (kustomize), a Helm chart skeleton, `deploy/fly/fly.toml` and
-  `docker-compose.cluster.yml`. ADR-0035.
+  `docker-compose.cluster.yml`. ADR-0036.
 
 ### Converger Protocol v1 specification (#21, refs #63 #68)
 

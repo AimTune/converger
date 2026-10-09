@@ -27,9 +27,10 @@ spec:
     spec:
       serviceAccountName: converger
       automountServiceAccountToken: false
-      # preStop sleep (5 s) + WS_DRAIN_DELAY_MS (5 s) + socket drain
-      # (WS_DRAIN_SHUTDOWN_MS, up to 30 s) + Oban shutdown.
-      terminationGracePeriodSeconds: 60
+      # preStop sleep (5 s) + the drain budget of docs/operations/
+      # websocket-limits.md (60 s with the defaults, up to 90 s with many
+      # native and Phoenix sockets).
+      terminationGracePeriodSeconds: 95
       securityContext:
         runAsNonRoot: true
         runAsUser: 65534
