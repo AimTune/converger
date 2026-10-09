@@ -30,6 +30,31 @@ defmodule Converger.Workers.ChannelHealthWorkerTest do
       assert :ok = ChannelHealthWorker.perform(%Oban.Job{})
     end
 
+    test "turning unhealthy opens the delivery circuit breaker", %{
+      tenant: tenant,
+      channel: channel
+    } do
+      Converger.HealthCheckFixtures.health_check_fixture(channel, %{
+        checked_at: DateTime.add(DateTime.utc_now(), -300, :second)
+      })
+
+      conversation = Converger.ConversationsFixtures.conversation_fixture(tenant, channel)
+
+      for _ <- 1..3, do: Converger.ActivitiesFixtures.activity_fixture(tenant, conversation)
+
+      import Ecto.Query
+
+      Converger.Repo.update_all(
+        from(d in Converger.Deliveries.Delivery, where: d.channel_id == ^channel.id),
+        set: [status: "failed"]
+      )
+
+      assert :ok = ChannelHealthWorker.perform(%Oban.Job{})
+
+      assert %{circuit_state: "open"} =
+               Converger.Repo.get!(Converger.Channels.Channel, channel.id)
+    end
+
     test "creates records on each run", %{channel: channel} do
       assert :ok = ChannelHealthWorker.perform(%Oban.Job{})
       assert :ok = ChannelHealthWorker.perform(%Oban.Job{})

@@ -38,6 +38,7 @@ erDiagram
         text api_key_prefix
         binary previous_api_key_hash
         jsonb limits
+        text tier
         text_array allowed_upload_types
     }
     channels {
@@ -53,6 +54,10 @@ erDiagram
         boolean require_signature
         jsonb transformations
         jsonb retry_policy
+        text rate_limit
+        text circuit_state
+        timestamptz circuit_changed_at
+        integer consecutive_failures
     }
     conversations {
         uuid id PK
@@ -167,6 +172,7 @@ The top-level isolation unit. Every domain row carries a `tenant_id` and every A
 | `previous_api_key_hash`, `previous_api_key_expires_at` | binary, timestamp | Grace period for the previous key after a rotation (indexed). |
 | `alert_webhook_url` | string | Receives `channel_health_changed` alerts. |
 | `limits` | jsonb, not null, default `{}` | Per-tenant rate-limit overrides, e.g. `{"activity_create": {"limit": 200, "scale_ms": 1000}}`. |
+| `tier` | text, not null, default `"default"` | Delivery queue tier (`high`, `default`, `bulk`), see [tenant tiers](../delivery.md#tenant-tiers-fair-queueing). |
 | `allowed_upload_types` | text[] | Per-tenant MIME allowlist; `NULL` uses the global default. |
 
 ### channels
@@ -184,6 +190,10 @@ A connection to one messaging surface (a webhook, a WhatsApp number, a WebSocket
 | `require_signature` | boolean, not null | Whether unsigned inbound webhooks are rejected. Default `true` for new channels; channels that existed before the column was added were backfilled with `false`. |
 | `transformations` | jsonb, not null, default `[]` | Ordered middleware chain. |
 | `retry_policy` | jsonb, not null, default `{}` | Per-channel retry overrides, see [Delivery and retries](../delivery.md). |
+| `rate_limit` | text | Outbound rate limit, e.g. `"80/s"`. `NULL` uses the adapter default. |
+| `circuit_state` | text, not null, default `"closed"` | Delivery circuit breaker: `closed`, `open`, `half_open`, `paused`. See [circuit breaker](../delivery.md#circuit-breaker). |
+| `circuit_changed_at` | utc_datetime_usec | Time of the last breaker transition. |
+| `consecutive_failures` | integer, not null, default `0` | Transient delivery failures since the last success. |
 
 Indexes: unique `(tenant_id, name)`, `(mode)`, `(tenant_id, mode, status)`, unique `(secret_hash)`.
 
@@ -242,7 +252,7 @@ One row per activity and target channel; the source of truth for delivery state 
 | Column | Type | Notes |
 | --- | --- | --- |
 | `activity_id`, `channel_id` | uuid, not null | Cascade on delete. |
-| `status` | text, not null, default `"pending"` | `pending`, `sent`, `delivered`, `read`, `failed` (dead letter). |
+| `status` | text, not null, default `"pending"` | `pending`, `paused` (parked by the circuit breaker or a manual pause), `sent`, `delivered`, `read`, `failed` (dead letter). |
 | `attempts` | integer, default `0` | Attempts made; drives the retry policy. |
 | `last_error` | text | Last failure message. |
 | `sent_at`, `delivered_at`, `read_at` | timestamps | Set on send and on provider receipts. |

@@ -4,7 +4,7 @@ description: A delivery records one activity being sent to one channel - statuse
 sidebar_position: 7
 ---
 
-A delivery is the record of one [activity](activities.md) being sent to one [channel](channels.md) through its adapter. There is at most one delivery per `(activity, channel)` pair. It tracks the outcome (`pending`, `sent`, `delivered`, `read`, `failed`), the number of attempts, the last error, and the provider's message id, so that later delivery and read receipts can be matched to it.
+A delivery is the record of one [activity](activities.md) being sent to one [channel](channels.md) through its adapter. There is at most one delivery per `(activity, channel)` pair. It tracks the outcome (`pending`, `paused`, `sent`, `delivered`, `read`, `failed`), the number of attempts, the last error, and the provider's message id, so that later delivery and read receipts can be matched to it.
 
 This page describes the record. The [delivery pipeline](../delivery.md) page covers the job mechanics (Oban, backends, Lifeline) in depth.
 
@@ -19,7 +19,7 @@ Table `deliveries`:
 | `id` | uuid | | Primary key. Webhook requests send it as `x-converger-delivery-id`, which stays stable across retries. |
 | `activity_id` | uuid | | The activity. Unique together with `channel_id`. |
 | `channel_id` | uuid | | The target channel. |
-| `status` | text | `"pending"` | `pending`, `sent`, `delivered`, `read`, `failed`. |
+| `status` | text | `"pending"` | `pending`, `paused`, `sent`, `delivered`, `read`, `failed`. `paused` means parked by an open [circuit breaker](../delivery.md#circuit-breaker) or a manual pause. |
 | `attempts` | integer | `0` | Attempts made, successful or not. Drives the retry policy. |
 | `last_error` | text | | Message of the last failure, or the provider's error for a `failed` receipt. |
 | `sent_at` | utc_datetime_usec | | When the adapter accepted the message (or the provider's `sent` receipt time). |
@@ -55,6 +55,8 @@ When an activity is created, `Converger.Pipeline.resolve_delivery_channels/1` pi
 stateDiagram-v2
   [*] --> pending : job runs, row created
   pending --> pending : attempt failed, retries left
+  pending --> paused : breaker open / channel paused
+  paused --> pending : breaker closed / channel resumed
   pending --> sent : adapter accepted
   pending --> failed : retries exhausted / permanent error / middleware halt
   sent --> delivered : provider receipt
@@ -67,7 +69,7 @@ stateDiagram-v2
   pending --> read : early receipt
 ```
 
-Status ranks are `pending` 0, `sent` 1, `delivered` 2, `read` 3, and `failed` -1. Receipts only move a delivery **forward** (`Deliveries.advance_status/2`):
+Status ranks are `pending` 0, `paused` 0, `sent` 1, `delivered` 2, `read` 3, and `failed` -1. Receipts only move a delivery **forward** (`Deliveries.advance_status/2`):
 
 - a receipt with a higher rank than the current status is applied, and a stale one (for example `delivered` after `read`) is ignored;
 - `failed` is applied from any status except `read`;

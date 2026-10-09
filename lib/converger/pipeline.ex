@@ -226,7 +226,10 @@ defmodule Converger.Pipeline do
         {:error, {:halted, reason}}
 
       {:ok, transformed_activity} ->
-        case Adapter.deliver_activity(channel, transformed_activity) do
+        result = Adapter.deliver_activity(channel, transformed_activity)
+        Converger.Channels.Circuit.record(channel, result)
+
+        case result do
           :ok ->
             Deliveries.mark_sent(delivery)
             :ok
@@ -270,7 +273,10 @@ defmodule Converger.Pipeline do
     delay_ms = retry_delay_ms(policy, attempt, Keyword.get(opts, :error))
 
     %{activity_id: activity_id, channel_id: channel_id}
-    |> Converger.Workers.ActivityDeliveryWorker.new(schedule_in: max(div(delay_ms, 1000), 1))
+    |> Converger.Workers.ActivityDeliveryWorker.new(
+      schedule_in: max(div(delay_ms, 1000), 1),
+      queue: Converger.Pipeline.Oban.queue_for_channel(channel_id)
+    )
     |> Oban.insert()
   end
 

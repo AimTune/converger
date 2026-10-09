@@ -71,6 +71,12 @@ defmodule Converger.Channels.Adapter do
   """
   @callback retry_policy() :: map()
 
+  @doc """
+  Default outbound rate limit of the provider (e.g. `"80/s"`), used when the
+  channel sets no `rate_limit`. See `Converger.Channels.Circuit`.
+  """
+  @callback rate_limit() :: String.t() | nil
+
   @typedoc """
   A transient conversation signal forwarded to an external channel (see
   `Converger.Channels.Signals`):
@@ -108,6 +114,7 @@ defmodule Converger.Channels.Adapter do
     parse_status_update: 2,
     verify_inbound_signature: 3,
     retry_policy: 0,
+    rate_limit: 0,
     send_typing: 2,
     send_read_receipt: 2
   ]
@@ -237,6 +244,16 @@ defmodule Converger.Channels.Adapter do
       mod.retry_policy()
     else
       _ -> %{}
+    end
+  end
+
+  @doc "Default outbound rate limit of the adapter for `type` (`nil` when it defines none)."
+  def rate_limit(type) do
+    with {:ok, mod} <- adapter_for(type),
+         true <- Code.ensure_loaded?(mod) and function_exported?(mod, :rate_limit, 0) do
+      mod.rate_limit()
+    else
+      _ -> nil
     end
   end
 

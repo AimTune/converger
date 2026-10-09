@@ -25,6 +25,9 @@ Table `channels`:
 | `transformations` | jsonb array | `[]` | [Middleware](middleware.md) chain applied before delivery to this channel. |
 | `require_signature` | boolean | `true` | Reject unsigned inbound webhooks. |
 | `retry_policy` | map | `{}` | Per-channel delivery retry overrides. |
+| `rate_limit` | string | `nil` | Outbound rate limit (`"80/s"`, `"1000/m"`, `"5000/h"`); `nil` uses the adapter default (WhatsApp Meta: `80/s`). See [flow control](../delivery.md#rate-limits). |
+| `circuit_state` | string | `"closed"` | Delivery circuit breaker: `closed`, `open`, `half_open` or `paused`. Managed by `Converger.Channels.Circuit`, never set through the changeset. |
+| `circuit_changed_at`, `consecutive_failures` | datetime, integer | `nil`, `0` | Breaker bookkeeping. |
 | `status` | text | `"active"` | The admin panel and portal toggle between `active` and `inactive`. |
 | `inserted_at`, `updated_at` | utc_datetime_usec | | |
 
@@ -144,4 +147,4 @@ Deleting a channel also disconnects its sockets, and cascades to its conversatio
 | `unhealthy` | 50% or more |
 | `unknown` | no deliveries in the window |
 
-When the status differs from the previous check, the worker logs the change, broadcasts `health_changed` on the `channel_health` PubSub topic (the admin channel list shows a health dot), and POSTs to the tenant's [alert webhook](tenants.md#alert-webhook). Checks older than 7 days are pruned on every run. Per-channel circuit breakers are Planned ([#31](https://github.com/AimTune/converger/issues/31)).
+When the status differs from the previous check, the worker logs the change, broadcasts `health_changed` on the `channel_health` PubSub topic (the admin channel list shows a health dot), and POSTs to the tenant's [alert webhook](tenants.md#alert-webhook). Checks older than 7 days are pruned on every run. A channel turning `unhealthy` opens its delivery circuit breaker (see [Delivery: circuit breaker](../delivery.md#circuit-breaker)).

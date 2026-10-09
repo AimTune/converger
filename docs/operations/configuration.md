@@ -249,13 +249,13 @@ config :converger, Oban,
        {"*/5 * * * *", Converger.Workers.ChannelHealthWorker}
      ]}
   ],
-  queues: [default: 10, deliveries: 20]
+  queues: [default: 10, deliveries_high: 10, deliveries: 20, deliveries_bulk: 5]
 ```
 
 | Setting | Value | Notes |
 | --- | --- | --- |
 | Queue `default` | 10 concurrent jobs per node | Conversation expiration (hourly) and channel health checks (every 5 minutes). |
-| Queue `deliveries` | 20 concurrent jobs per node | `Converger.Workers.ActivityDeliveryWorker` (unique per activity and channel). |
+| Queues `deliveries_high`, `deliveries`, `deliveries_bulk` | 10 / 20 / 5 concurrent jobs per node | `Converger.Workers.ActivityDeliveryWorker` (unique per activity and channel), one queue per tenant tier (`tenants.tier`: `high`, `default`, `bulk`); see [flow control](../delivery.md#tenant-tiers-fair-queueing). |
 | `Pruner` | completed/discarded jobs older than 24 h | Keeps `oban_jobs` small. |
 | `Lifeline` | rescues jobs stuck in `executing` after 30 min | Recovers deliveries from a crashed node. |
 | Test | `testing: :inline` | Jobs run synchronously in tests. |

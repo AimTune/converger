@@ -97,6 +97,11 @@ Telemetry metric names are converted to Prometheus names by replacing `.` with `
 | `oban.job.exception.duration` | last value (ms) | | Failed Oban job executions |
 | `converger.activities.create.count` | counter | | Every created activity |
 | `converger.rate_limit.exceeded.count` | counter | `bucket` | Rejected rate-limited requests and login lockouts |
+| `converger.channel.circuit_opened.count` | counter | `channel_type`, `reason` | Delivery circuit breaker opened (`failures`, `unhealthy`, `probe_failed`); see [circuit breaker](../delivery.md#circuit-breaker) |
+| `converger.channel.circuit_closed.count` | counter | `channel_type` | Breaker closed by a successful probe |
+| `converger.channel.paused.count`, `converger.channel.resumed.count` | counter | `channel_type` | Manual pause / resume of a channel's deliveries |
+| `converger.deliveries.parked.count` | counter | `channel_type`, `reason` | Delivery jobs parked (`open`, `paused`) |
+| `converger.deliveries.rate_limited.count` | counter | `channel_type` | Deliveries snoozed by the channel's outbound rate limit |
 | `converger.socket.limit.count` | counter | `reason` | WebSocket limit hits: `rate_limited`, `payload_too_large`, `frame_too_large`, `too_many_joins`, `slow_consumer`, `ephemeral_dropped`, `draining` (see [WebSocket limits](websocket-limits.md)) |
 
 Most timings are `last_value` gauges, which show the latest sample rather than a distribution. Use them for
@@ -238,6 +243,8 @@ With the current metrics, reasonable starting alerts are:
 - `rate(converger_socket_limit_count{reason="slow_consumer"}[5m])` (clients on slow networks, or a node too busy to
   write to its sockets) and the other `reason`s (abusive clients, or WebSocket limits set too low);
 - channel health transitions to `unhealthy` (from the alert webhook or the logs);
+- `increase(converger_channel_circuit_opened_count[5m]) > 0`, or the `channel.circuit_opened` alert webhook (a channel stopped receiving deliveries);
+- `converger_deliveries_parked_count` growing for a channel that stays open (the endpoint is still down);
 - `Delivery dead-lettered` warnings in the logs.
 
 Delivery and pipeline telemetry (success rate, latency histograms, pipeline lag, queue depth, dead-letter size,

@@ -43,6 +43,7 @@ supersedes the old one and both are linked. Read
 | [0018](0018-keyset-pagination.md) | Keyset pagination for every list query | Accepted | [#18](https://github.com/AimTune/converger/issues/18) / [#89](https://github.com/AimTune/converger/pull/89) |
 | [0019](0019-per-channel-retry-policy-delivery-error-and-lifeline.md) | Per-channel retry policy, `DeliveryError` and Oban Lifeline | Accepted | [#19](https://github.com/AimTune/converger/issues/19) / [#85](https://github.com/AimTune/converger/pull/85) |
 | [0028](0028-dead-letter-replay-in-place-through-oban.md) | Dead-letter replay resets the delivery in place and always goes through Oban | Accepted | [#32](https://github.com/AimTune/converger/issues/32) / [#121](https://github.com/AimTune/converger/pull/121) |
+| [0031](0031-per-channel-circuit-breaker-rate-limit-and-tier-queues.md) | Per-channel circuit breaker on the channel row, priority-based parking, Hammer rate limits and tier queues | Accepted | [#31](https://github.com/AimTune/converger/issues/31) / [#120](https://github.com/AimTune/converger/pull/120) |
 
 ### Channels, middleware and real time
 

@@ -47,13 +47,16 @@ Controllers: [`ConvergerWeb.TokenController`](https://github.com/AimTune/converg
 | `GET` | `/api/v1/deliveries` | `x-api-key` only | List deliveries, e.g. the dead-letter queue (keyset-paginated, filterable) |
 | `POST` | `/api/v1/deliveries/:id/retry` | `x-api-key` only | Replay one dead letter |
 | `POST` | `/api/v1/channels/:channel_id/deliveries/retry` | `x-api-key` only | Replay a channel's dead letters |
+| `GET` | `/api/v1/channels/:channel_id/delivery` | `x-api-key` or `x-channel-token` | Channel delivery state (circuit breaker, rate limit) |
+| `POST` | `/api/v1/channels/:channel_id/pause` | `x-api-key` or `x-channel-token` | Pause outbound deliveries of a channel |
+| `POST` | `/api/v1/channels/:channel_id/resume` | `x-api-key` or `x-channel-token` | Resume deliveries (also closes an open breaker) |
 
 On the routes marked `x-api-key` or `x-channel-token`, only the `x-channel-token` option is deprecated.
 
 The inbound webhook routes `/api/v1/channels/:channel_id/inbound` and `/status` share the `/api/v1` scope but are
 called by providers, not by tenants; see [inbound webhooks](inbound.md).
 
-Every resource is tenant-scoped. A conversation or routing rule that belongs to another tenant is reported as `404`,
+Every resource is tenant-scoped. A conversation, routing rule or channel that belongs to another tenant is reported as `404`,
 exactly like one that does not exist. A malformed UUID in the path returns `400 {"errors": {"detail": "Bad Request"}}`.
 
 The examples use these shell variables:
@@ -643,7 +646,7 @@ The tenant's deliveries (through their channel), most recently changed first, ke
 
 | Param | Meaning |
 | --- | --- |
-| `status` | `pending`, `sent`, `delivered`, `read` or `failed`. Use `failed` for the dead-letter queue. |
+| `status` | `pending`, `paused`, `sent`, `delivered`, `read` or `failed`. Use `failed` for the dead-letter queue, `paused` for deliveries parked by a [circuit breaker or pause](#channel-delivery-state). |
 | `channel_id` | Only this channel's deliveries. |
 | `activity_id` | Only this activity's deliveries. |
 | `from`, `to` | Bounds on `updated_at` (the time of the last status change, so the failure time of a dead letter), inclusive. ISO 8601 datetimes, or dates: `from=2026-10-01` starts at 00:00 UTC, `to=2026-10-01` ends at 23:59:59.999999 UTC. |
@@ -707,6 +710,54 @@ curl -s -X POST "$CONVERGER/api/v1/channels/0d2f4b6a-8c0e-4a2c-9e4b-6d8f0a2c4e6b
 
 `has_more: true` means the limit was reached and more dead letters match: call again. `400 Channel is inactive`
 for a disabled channel, `404` for an unknown or foreign channel.
+
+## Channel delivery state
+
+Each channel has a delivery circuit breaker, can be paused by hand, and may have an outbound rate limit. The full
+behaviour is described in [Delivery: flow control](../delivery.md#flow-control-circuit-breaker-rate-limits-and-tenant-fairness).
+
+### Get the delivery state
+
+`GET /api/v1/channels/:channel_id/delivery`
+
+```bash
+curl -s "$CONVERGER/api/v1/channels/$CHANNEL_ID/delivery" -H "x-api-key: $API_KEY"
+```
+
+```json
+{
+  "data": {
+    "channel_id": "5f0c...",
+    "circuit_state": "open",
+    "circuit_changed_at": "2026-10-09T12:05:00.000000Z",
+    "consecutive_failures": 7,
+    "rate_limit": {"limit": 80, "scale_ms": 1000},
+    "parked_deliveries": 1423
+  }
+}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `circuit_state` | `closed` (flowing), `open` (breaker open, deliveries parked), `half_open` (one probe in flight) or `paused` (manually paused) |
+| `circuit_changed_at` | Time of the last transition, `null` if the breaker never changed |
+| `consecutive_failures` | Transient failures since the last success |
+| `rate_limit` | Effective limit (the channel's `rate_limit` or the adapter default), `null` when unlimited |
+| `parked_deliveries` | Delivery jobs currently parked for this channel |
+
+### Pause and resume deliveries
+
+`POST /api/v1/channels/:channel_id/pause` parks new and pending deliveries of the channel (`status: "paused"`) until
+it is resumed. Inbound webhooks and WebSocket traffic are not affected. `POST /api/v1/channels/:channel_id/resume`
+closes the breaker, whether it was paused or open, and releases every parked delivery right away.
+
+```bash
+curl -s -X POST "$CONVERGER/api/v1/channels/$CHANNEL_ID/pause" -H "x-api-key: $API_KEY"
+curl -s -X POST "$CONVERGER/api/v1/channels/$CHANNEL_ID/resume" -H "x-api-key: $API_KEY"
+```
+
+Both return `200 OK` with the delivery state above, are idempotent, and are written to the audit log as
+`pause_deliveries` / `resume_deliveries` (actor `tenant_api`). An unknown or foreign channel returns `404`.
 
 ## Related
 
