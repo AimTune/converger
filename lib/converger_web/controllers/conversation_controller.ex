@@ -10,7 +10,7 @@ defmodule ConvergerWeb.ConversationController do
   def create(conn, conversation_params) do
     with [token] <- get_req_header(conn, "x-channel-token"),
          {:ok, %{"channel_id" => channel_id, "tenant_id" => tenant_id}} <-
-           Converger.Auth.Token.verify_token(token),
+           Converger.Auth.Token.verify_channel_token(token),
          {:ok, _channel} <- Channels.get_active_channel(channel_id, tenant_id),
          {:ok, %Conversations.Conversation{} = conversation} <-
            Conversations.create_conversation(

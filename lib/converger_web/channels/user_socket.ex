@@ -8,7 +8,7 @@ defmodule ConvergerWeb.UserSocket do
 
   @impl true
   def connect(%{"token" => token}, socket, _connect_info) do
-    case Token.verify_token(token) do
+    case Token.verify_conversation_token(token) do
       {:ok, claims} ->
         {:ok, assign(socket, :claims, claims)}
 

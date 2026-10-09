@@ -15,6 +15,10 @@
 - Delivery status updates by `delivery_id` are scoped to the reporting channel.
 - The SSRF guard now also covers the tenant `alert_webhook_url` and the WhatsApp Infobip
   `base_url`, at save time and at request time.
+- `POST /api/v1/tokens` and `POST /api/v1/conversations` also accept only channel tokens (#23):
+  an end user's token could mint legacy conversation tokens for other conversations of its
+  channel under any user id. The legacy socket accepts only conversation tokens, and legacy
+  verifiers reject Converger client tokens.
 
 ### Converger Protocol v1 specification (#21, refs #63 #68)
 

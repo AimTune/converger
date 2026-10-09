@@ -85,4 +85,56 @@ defmodule ConvergerWeb.AuthenticationTest do
       assert json_response(conn, 403)["errors"]["detail"] == "Forbidden"
     end
   end
+
+  # All tokens share one signer; only the channel token may act as the tenant.
+  describe "end-user tokens as x-channel-token" do
+    setup %{tenant: tenant, channel: channel, conversation: conversation} do
+      {:ok, conversation_token, _} = Token.generate_token(conversation, tenant, "user-1")
+
+      {:ok, converger_token, _} =
+        Converger.Auth.ConvergerToken.generate_conversation_token(channel, conversation.id,
+          user_id: "user-1"
+        )
+
+      %{end_user_tokens: [conversation_token, converger_token]}
+    end
+
+    test "are rejected by tenant-authenticated routes", %{
+      conn: conn,
+      conversation: conversation,
+      end_user_tokens: tokens
+    } do
+      for token <- tokens do
+        conn = put_req_header(conn, "x-channel-token", token)
+
+        assert json_response(get(conn, ~p"/api/v1/routing_rules"), 401)["error"] ==
+                 "Unauthorized: Invalid token"
+
+        assert json_response(get(conn, ~p"/api/v1/conversations/#{conversation.id}"), 401)
+      end
+    end
+
+    test "cannot mint conversation tokens or create conversations", %{
+      conn: conn,
+      tenant: tenant,
+      channel: channel,
+      end_user_tokens: tokens
+    } do
+      other_conversation = conversation_fixture(tenant, channel)
+
+      for token <- tokens do
+        conn = put_req_header(conn, "x-channel-token", token)
+
+        assert json_response(
+                 post(conn, ~p"/api/v1/tokens", %{
+                   "conversation_id" => other_conversation.id,
+                   "user_id" => "someone-else"
+                 }),
+                 401
+               )
+
+        assert json_response(post(conn, ~p"/api/v1/conversations", %{}), 401)
+      end
+    end
+  end
 end

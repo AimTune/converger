@@ -18,7 +18,7 @@ defmodule ConvergerWeb.TokenController do
          conversation = Converger.Repo.preload(conversation, :tenant),
          true <- conversation.tenant.status == "active",
          [token] <- get_req_header(conn, "x-channel-token"),
-         {:ok, %{"channel_id" => channel_id}} <- Token.verify_token(token),
+         {:ok, %{"channel_id" => channel_id}} <- Token.verify_channel_token(token),
          true <- channel_id == conversation.channel_id,
          {:ok, token, _claims} <- Token.generate_token(conversation, conversation.tenant, user_id) do
       conn
