@@ -26,7 +26,7 @@ Both are Phoenix sockets using the standard Phoenix V2 JSON serializer; `/socket
 Next to them, the **native Protocol v1 transports** speak [Converger Protocol v1](../protocol/v1.md) frames without Phoenix framing ([ADR-0030](../adr/0030-native-websocket-endpoint-and-fallback-transports.md)); see [Native Protocol v1 transports](#native-protocol-v1-transports) below.
 
 :::info Planned
-Converger Protocol v1 ([spec](../protocol/v1.md)) is implemented on the Converger client API socket ([#22](https://github.com/AimTune/converger/issues/22)); the legacy stack is removed after its deprecation window (protocol v1, section 13.3). The native endpoint without Phoenix framing exists next to it (#26, below). Also planned: client message ids with server acks on the Phoenix binding ([#24](https://github.com/AimTune/converger/issues/24)), and receipts, typing and presence on the native endpoint.
+Converger Protocol v1 ([spec](../protocol/v1.md)) is implemented on the Converger client API socket ([#22](https://github.com/AimTune/converger/issues/22)); the legacy stack is removed after its deprecation window (protocol v1, section 13.3). The native endpoint without Phoenix framing exists next to it (#26, below). Also planned: client message ids with server acks on the Phoenix binding ([#24](https://github.com/AimTune/converger/issues/24)).
 :::
 
 ## How an activity reaches a socket
@@ -216,6 +216,14 @@ Both transports share one core ([`lib/converger_web/protocol/`](https://github.c
 - `Feed` keeps the highest `seq` delivered on the connection. The process subscribes to `conversation:<id>` **before** reading the head and the replay, so frames committed meanwhile wait in the mailbox and are dropped as duplicates (`seq <= last`). A live frame with `seq > last + 1` (PubSub is at-most-once across nodes) makes it read the missing range from the database first. Turns sent on the connection are recorded and never echoed back to it. Replay is read in `ws_replay_limit` batches up to `replay_max` (default 10 000), then `replayTruncated`.
 
 The WebSocket process also persists sends (`Activities.create_client_activity/2`, so middleware, routing and deliveries apply as for REST) with the `clientId` as idempotency key, sends heartbeats after `heartbeat_interval_ms` of outbound silence, closes after `idle_timeout_ms` without inbound data (4408), and closes at token expiry (4401) unless refreshed with `auth`. Both transports track themselves in `SocketPresence` and subscribe to their socket id, so channel deactivation and per-user disconnects reach them (4403 on the WebSocket, an `error` event on SSE). Settings: `config :converger, ConvergerWeb.Protocol` ([configuration](../operations/configuration.md#protocol-v1-transports)).
+
+Receipts, typing and presence work as on the Phoenix binding: all three transports call
+[`ConvergerWeb.ConversationSignals`](https://github.com/AimTune/converger/blob/main/lib/converger_web/conversation_signals.ex)
+(participant identity, the signals and presence topics, typing throttling and forwarding, read receipts, which
+broadcasts a connection sees) and push the frames of `ConvergerWeb.ConvergerFrames`. The native transports apply
+the client WebSocket limits of `ConvergerWeb.SocketGuard` themselves (they are not Phoenix sockets) and register in
+`ConvergerWeb.ProtocolConnections`, a node-local `Registry` that `ConvergerWeb.Drain` uses to close them in paced
+batches on shutdown, before Phoenix drains its own sockets ([ADR-0035](../adr/0035-native-transports-share-signals-limits-and-draining.md)).
 
 ## Related
 

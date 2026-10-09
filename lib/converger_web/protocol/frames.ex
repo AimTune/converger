@@ -193,9 +193,9 @@ defmodule ConvergerWeb.Protocol.Frames do
         "expiresAt" => fields.expires_at,
         "capabilities" => %{
           "acks" => true,
-          "receipts" => false,
-          "presence" => false,
-          "typing" => false,
+          "receipts" => true,
+          "presence" => Map.get(fields, :presence, false),
+          "typing" => true,
           "regenerate" => false,
           "edit" => false
         },

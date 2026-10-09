@@ -4,7 +4,8 @@ description: Per-socket frame size, message rate and join limits, slow-consumer 
 sidebar_position: 6
 ---
 
-Every client WebSocket (`/socket/converger/websocket` and `/socket/websocket`) is bounded, so one client cannot
+Every client WebSocket (`/socket/converger/websocket`, `/socket/websocket` and the native Protocol v1 endpoint
+`/socket/converger/v1`) is bounded, so one client cannot
 exhaust a node, and a node that shuts down hands its clients over to the other nodes gradually instead of dropping
 them all at once. The design is recorded in
 [ADR-0027](../adr/0027-websocket-limits-backpressure-and-draining.md); the client-facing view is in
@@ -14,7 +15,10 @@ them all at once. The design is recorded in
 
 The limits are enforced in the socket process by
 [`ConvergerWeb.SocketGuard`](https://github.com/AimTune/converger/blob/main/lib/converger_web/socket_guard.ex),
-before a frame reaches a channel, so they apply equally to every channel on both sockets.
+before a frame reaches a channel, so they apply equally to every channel on both sockets. The native endpoint
+(`ConvergerWeb.ProtocolSocket`) applies the same settings itself, answering with Protocol v1 `error` frames
+(`payload_too_large`, `rate_limited` with `retryAfterMs`) instead of Phoenix error replies; it has no joins. The
+Server-Sent Events stream drops `typing` and `presence` for a lagging client the same way.
 
 | Limit | Default | On violation |
 | --- | --- | --- |
@@ -77,7 +81,10 @@ the last child, so it stops first, while the endpoint still serves every socket:
 1. **Readiness flips.** `GET /health/ready` answers 503 and new WebSocket connections are refused with HTTP 503 and
    a `Retry-After` header, for `drain_delay_ms` (5 s). The load balancer takes the node out of rotation, and
    reconnecting clients land on other nodes. Existing sockets keep working.
-2. **Sockets are drained in batches.** The endpoint stops, and Phoenix's socket drainer closes the sockets that
+2. **Sockets are drained in batches.** The native Protocol v1 connections (WebSocket and SSE, registered in
+   `ConvergerWeb.ProtocolConnections`), which Phoenix's drainer does not know, are drained first, with the same
+   batch size and pacing: a native socket is closed with **1012** and the reason below, an SSE stream ends with an
+   `error` frame `unavailable` carrying `retryAfterMs`. Then the endpoint stops, and Phoenix's socket drainer closes the sockets that
    have joined a channel, `drain_batch_size` (500) every `drain_batch_interval_ms` (1 s), for at most
    `drain_shutdown_ms` (30 s). Each socket is closed with **1012** and the reason
    `{"reason": "unavailable", "retryAfterMs": N}`, where `N` is `reconnect_base_ms` plus a random jitter of up to
@@ -96,11 +103,14 @@ The orchestrator must wait for the whole sequence before it kills the process. I
 `terminationGracePeriodSeconds` to at least:
 
 ```text
-drain_delay_ms + min(sockets per node / drain_batch_size * drain_batch_interval_ms, drain_shutdown_ms)
+drain_delay_ms
+  + min(native v1 connections per node / drain_batch_size * drain_batch_interval_ms, drain_shutdown_ms)
+  + min(Phoenix sockets per node / drain_batch_size * drain_batch_interval_ms, drain_shutdown_ms)
   + Oban and pipeline shutdown + margin
 ```
 
-That is 60 s with the defaults. Point the readiness probe at `/health/ready` with a period shorter than
+That is 60 s with the defaults when most clients use one kind of socket (the native phase takes no time
+without native connections), and up to 90 s when a node holds many of both. Point the readiness probe at `/health/ready` with a period shorter than
 `drain_delay_ms`, or raise `WS_DRAIN_DELAY_MS` to cover your load balancer's deregistration delay.
 
 ## Configuration

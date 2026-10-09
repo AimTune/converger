@@ -13,10 +13,21 @@ defmodule ConvergerWeb.ProtocolSocketController do
 
   use ConvergerWeb, :controller
 
-  alias ConvergerWeb.Protocol
+  alias ConvergerWeb.{Drain, SocketGuard}
   alias ConvergerWeb.Protocol.Codec
 
+  # While the node drains (shutdown), new connections are refused with 503 and
+  # Retry-After, as on the Phoenix sockets.
   def upgrade(conn, params) do
+    if Drain.draining?() do
+      SocketGuard.emit(:draining, ConvergerWeb.ProtocolSocket)
+      SocketGuard.handle_error(conn, :draining)
+    else
+      do_upgrade(conn, params)
+    end
+  end
+
+  defp do_upgrade(conn, params) do
     case Codec.negotiate(get_req_header(conn, "sec-websocket-protocol")) do
       {:ok, subprotocol, encoding} ->
         conn
@@ -27,8 +38,8 @@ defmodule ConvergerWeb.ProtocolSocketController do
           # The handler enforces the protocol's own idle timeout (close 4408).
           timeout: :infinity,
           # Frames above maxFrameBytes get `payload_too_large`; above this hard
-          # cap the server closes with 1009.
-          max_frame_size: Protocol.config(:max_frame_hard_bytes),
+          # cap (shared with the Phoenix sockets) the server closes with 1009.
+          max_frame_size: Application.fetch_env!(:converger, :websocket_max_frame_size),
           compress: true
         )
         |> halt()

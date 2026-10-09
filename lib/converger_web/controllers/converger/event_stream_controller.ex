@@ -14,8 +14,12 @@ defmodule ConvergerWeb.ConvergerAPI.EventStreamController do
 
   The stream replays `seq > watermark` (bounded, see
   `ConvergerWeb.Protocol.Feed`), then pushes live frames, with a `heartbeat`
-  frame every `heartbeatIntervalMs`. It ends with an `error` frame when the
-  token expires (`token_expired`) or the channel is deactivated.
+  frame every `heartbeatIntervalMs`. Receipts, typing and presence
+  (`ConvergerWeb.ConversationSignals`) are pushed as on the WebSocket, and the
+  stream counts as an online connection for presence. It ends with an `error`
+  frame when the token expires (`token_expired`), the channel is deactivated
+  (`channel_inactive`) or the node drains (`unavailable`); while the node
+  drains, new streams are refused with 503 and `Retry-After`.
 
   Authentication: `Authorization: Bearer` or `?token=` (EventSource cannot
   set headers). An absent watermark replays the whole conversation, as on the
@@ -27,7 +31,7 @@ defmodule ConvergerWeb.ConvergerAPI.EventStreamController do
   import ConvergerWeb.Helpers.Authorization, only: [authorize_conversation: 2]
 
   alias Converger.{Channels, Conversations}
-  alias ConvergerWeb.Protocol
+  alias ConvergerWeb.{ConversationSignals, Drain, Protocol, ProtocolConnections, SocketGuard}
   alias ConvergerWeb.Protocol.{Feed, Frames}
 
   # Refusals are JSON (the pipeline has no `accepts`: EventSource asks for
@@ -36,7 +40,16 @@ defmodule ConvergerWeb.ConvergerAPI.EventStreamController do
 
   action_fallback ConvergerWeb.FallbackController
 
-  def stream(conn, %{"conversation_id" => conversation_id} = params) do
+  def stream(conn, params) do
+    if Drain.draining?() do
+      SocketGuard.emit(:draining, __MODULE__)
+      SocketGuard.handle_error(conn, :draining)
+    else
+      authorize_and_start(conn, params)
+    end
+  end
+
+  defp authorize_and_start(conn, %{"conversation_id" => conversation_id} = params) do
     claims = conn.assigns.converger_claims
     channel_id = claims["channel_id"]
 
@@ -66,12 +79,22 @@ defmodule ConvergerWeb.ConvergerAPI.EventStreamController do
     # Subscribe before reading the head and the replay (see Feed).
     Phoenix.PubSub.subscribe(Converger.PubSub, topic)
     socket_id = track(claims, conversation_id)
+    participant = ConversationSignals.participant(claims)
+    presence? = ConversationSignals.presence?(claims)
+    ConversationSignals.subscribe(conversation_id, presence?)
+    if presence?, do: ConversationSignals.track_presence(conversation_id, participant)
+    ProtocolConnections.register()
     {:ok, heartbeat} = :timer.send_interval(Protocol.config(:heartbeat_interval_ms), :heartbeat)
     expiry = schedule_expiry(claims)
 
     try do
-      stream(conn, claims, conversation_id, params)
+      stream(conn, claims, conversation_id, params, %{
+        participant: participant,
+        presence?: presence?
+      })
     after
+      ProtocolConnections.unregister()
+      ConversationSignals.unsubscribe(conversation_id, participant)
       :timer.cancel(heartbeat)
       if expiry, do: Process.cancel_timer(expiry)
       Phoenix.PubSub.unsubscribe(Converger.PubSub, topic)
@@ -90,12 +113,13 @@ defmodule ConvergerWeb.ConvergerAPI.EventStreamController do
       %Phoenix.Socket.Broadcast{} -> flush()
       :heartbeat -> flush()
       :token_expired -> flush()
+      :socket_drain -> flush()
     after
       0 -> :ok
     end
   end
 
-  defp stream(conn, claims, conversation_id, params) do
+  defp stream(conn, claims, conversation_id, params, signals) do
     head = Conversations.get_conversation(conversation_id).last_seq
     user_id = claims["user_id"] || string(params["userId"])
     feed = Feed.new(conversation_id, user_id)
@@ -110,6 +134,11 @@ defmodule ConvergerWeb.ConvergerAPI.EventStreamController do
           Feed.replay(feed, position, head)
       end
 
+    presence =
+      if signals.presence?,
+        do: ConversationSignals.presence_snapshot(conversation_id, signals.participant),
+        else: []
+
     conn =
       conn
       |> put_resp_content_type("text/event-stream")
@@ -118,9 +147,19 @@ defmodule ConvergerWeb.ConvergerAPI.EventStreamController do
       |> put_resp_header("x-accel-buffering", "no")
       |> send_chunked(200)
 
-    case chunk(conn, ["retry: 3000\n\n" | Enum.map(frames, &event/1)]) do
-      {:ok, conn} -> loop(conn, %{feed: feed, claims: claims})
-      {:error, _closed} -> conn
+    case chunk(conn, ["retry: 3000\n\n" | Enum.map(frames ++ presence, &event/1)]) do
+      {:ok, conn} ->
+        state = %{
+          feed: feed,
+          claims: claims,
+          conversation_id: conversation_id,
+          participant: signals.participant
+        }
+
+        loop(conn, state)
+
+      {:error, _closed} ->
+        conn
     end
   end
 
@@ -130,8 +169,25 @@ defmodule ConvergerWeb.ConvergerAPI.EventStreamController do
         {frames, feed} = Feed.live(state.feed, activity)
         send_frames(conn, frames, %{state | feed: feed})
 
+      %Phoenix.Socket.Broadcast{event: event, payload: payload}
+      when event in ~w(delivery_status typing read presence_diff) ->
+        frames =
+          event
+          |> ConversationSignals.frames(payload, state.conversation_id, state.participant)
+          |> Enum.flat_map(fn
+            {:reliable, frame} -> [frame]
+            {:ephemeral, frame} -> ephemeral(frame)
+          end)
+
+        send_frames(conn, frames, state)
+
       %Phoenix.Socket.Broadcast{event: "disconnect"} ->
         finish(conn, disconnect_frames(state.claims))
+
+      :socket_drain ->
+        message = "the server is restarting, reconnect"
+        retry_after_ms = SocketGuard.retry_after_ms()
+        finish(conn, [Frames.error("unavailable", message, retry_after_ms: retry_after_ms)])
 
       :heartbeat ->
         send_frames(conn, [Frames.heartbeat(state.feed.last_seq)], state)
@@ -141,6 +197,16 @@ defmodule ConvergerWeb.ConvergerAPI.EventStreamController do
 
       _other ->
         loop(conn, state)
+    end
+  end
+
+  # Typing and presence are dropped while the client is not keeping up.
+  defp ephemeral(frame) do
+    if SocketGuard.queue_len(self()) > SocketGuard.config(:ephemeral_drop_queue_len) do
+      SocketGuard.emit(:ephemeral_dropped, __MODULE__)
+      []
+    else
+      [frame]
     end
   end
 
@@ -168,10 +234,12 @@ defmodule ConvergerWeb.ConvergerAPI.EventStreamController do
   end
 
   # One SSE event per frame. Jason never emits raw newlines, so the frame is
-  # a single `data:` line.
-  defp event(%{"type" => type} = frame) do
-    id =
-      if is_integer(frame["seq"]), do: ["id: ", Integer.to_string(frame["seq"]), "\n"], else: []
+  # a single `data:` line. Frames are string-keyed (Protocol.Frames) or
+  # atom-keyed (ConvergerFrames: receipts, typing, presence, which have no seq).
+  defp event(frame) do
+    type = Map.get(frame, "type") || Map.get(frame, :type)
+    seq = Map.get(frame, "seq")
+    id = if is_integer(seq), do: ["id: ", Integer.to_string(seq), "\n"], else: []
 
     [id, "event: ", type, "\n", "data: ", Jason.encode_to_iodata!(frame), "\n\n"]
   end

@@ -14,11 +14,11 @@ defmodule ConvergerWeb.Protocol do
       config :converger, ConvergerWeb.Protocol,
         heartbeat_interval_ms: 30_000,
         idle_timeout_ms: 60_000,
-        max_frame_bytes: 131_072,
-        max_frame_hard_bytes: 1_048_576,
         replay_max: 10_000
 
   The replay batch size is the existing `:ws_replay_limit` pagination setting.
+  Frame size, message rate, backpressure and draining are the shared client
+  WebSocket limits of `config :converger, :websocket` (`ConvergerWeb.SocketGuard`).
   """
 
   alias Converger.ConvergerAPI.Watermark
@@ -29,8 +29,6 @@ defmodule ConvergerWeb.Protocol do
   @defaults [
     heartbeat_interval_ms: 30_000,
     idle_timeout_ms: 60_000,
-    max_frame_bytes: 131_072,
-    max_frame_hard_bytes: 1_048_576,
     replay_max: 10_000
   ]
 
@@ -52,7 +50,7 @@ defmodule ConvergerWeb.Protocol do
     activity_limits = Converger.Activities.Activity.limits()
 
     %{
-      "maxFrameBytes" => config(:max_frame_bytes),
+      "maxFrameBytes" => ConvergerWeb.SocketGuard.config(:max_frame_bytes),
       "maxTextBytes" => activity_limits[:max_text_bytes],
       "maxMetadataBytes" => activity_limits[:max_metadata_bytes],
       # Sends are processed one at a time per connection, so at most one is

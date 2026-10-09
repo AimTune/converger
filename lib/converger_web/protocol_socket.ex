@@ -14,13 +14,24 @@ defmodule ConvergerWeb.ProtocolSocket do
       client -> sync {watermark}     server -> replay
       client -> ping                 server -> heartbeat
       client -> auth {token}         server -> tokenRefreshed
+      client -> typing {isTyping}    others -> typing
+      client -> read {watermark}     others -> deliveryStatus {upToSeq, status: read}
+      server -> deliveryStatus, presence
 
   Ordering, de-duplication, gap filling and the echo rule are
-  `ConvergerWeb.Protocol.Feed`; frames are `ConvergerWeb.Protocol.Frames`.
+  `ConvergerWeb.Protocol.Feed`; frames are `ConvergerWeb.Protocol.Frames`;
+  receipts, typing and presence are `ConvergerWeb.ConversationSignals`, shared
+  with the Phoenix channel binding.
+
+  Limits are the client WebSocket limits of `config :converger, :websocket`
+  (`ConvergerWeb.SocketGuard`): frame size, inbound frames per window,
+  ephemeral frames dropped and a 4503 close for a client that does not keep
+  up. On shutdown the socket is closed with 1012 (`ConvergerWeb.ProtocolConnections`).
 
   Close codes (section 12.3): 4400 unsupported protocol, 4401 unauthorized or
   token expired, 4403 channel deactivated or forced disconnect, 4408 idle
-  timeout, 1008 when the conversation cannot be resolved.
+  timeout, 4503 slow consumer, 1012 node draining, 1008 when the conversation
+  cannot be resolved.
   """
 
   @behaviour WebSock
@@ -29,15 +40,11 @@ defmodule ConvergerWeb.ProtocolSocket do
 
   alias Converger.{Activities, Channels, Conversations, Inbound, RateLimit}
   alias Converger.Auth.ConvergerToken
-  alias ConvergerWeb.Protocol
+  alias ConvergerWeb.{ConversationSignals, Protocol, SocketGuard}
   alias ConvergerWeb.Protocol.{Codec, Feed, Frames}
 
   # Frames a client sends that need a bot channel (mekik relay, #64).
   @bot_frames ~w(resume genui_event client_tools client_skills abort survey regenerate edit)
-
-  # Client frames specified by v1 whose server side ships with #25: accepted
-  # and ignored until then, so clients can already send them.
-  @ignored_frames ~w(typing read)
 
   # Reserved frame types that are not client frames (section 5.5).
   @reserved ~w(welcome resume genui_event client_tools client_skills abort tool_call skill
@@ -62,16 +69,19 @@ defmodule ConvergerWeb.ProtocolSocket do
       connection_id: Protocol.random_id("conn"),
       heartbeat_ms: Protocol.config(:heartbeat_interval_ms),
       idle_ms: Protocol.config(:idle_timeout_ms),
-      max_frame_bytes: Protocol.config(:max_frame_bytes),
+      max_frame_bytes: SocketGuard.config(:max_frame_bytes),
       last_in: now,
       last_out: now,
       claims: nil,
       conversation_id: nil,
       user_id: nil,
       feed: nil,
-      expiry_timer: nil
+      expiry_timer: nil,
+      participant: nil,
+      typing: ConversationSignals.new_typing()
     }
 
+    ConvergerWeb.ProtocolConnections.register()
     schedule_tick(state)
     {:ok, state}
   end
@@ -80,16 +90,22 @@ defmodule ConvergerWeb.ProtocolSocket do
   def handle_in({data, opcode: opcode}, state) do
     state = %{state | last_in: now()}
 
-    if byte_size(data) > state.max_frame_bytes do
-      reply(
-        [Frames.error("payload_too_large", "frame exceeds #{state.max_frame_bytes} bytes")],
-        state
-      )
-    else
-      case Codec.decode(data, opcode, state.encoding) do
-        {:ok, frame} -> handle_frame(frame, state)
-        {:error, message} -> reply([Frames.error("bad_request", message)], state)
-      end
+    cond do
+      (retry_after = SocketGuard.rate_limited()) != nil ->
+        SocketGuard.emit(:rate_limited, __MODULE__)
+        frame = error("rate_limited", "too many frames", retry_after_ms: retry_after)
+        reply([frame], state)
+
+      byte_size(data) > state.max_frame_bytes ->
+        SocketGuard.emit(:payload_too_large, __MODULE__)
+        message = "frame exceeds #{state.max_frame_bytes} bytes"
+        reply([error("payload_too_large", message)], state)
+
+      true ->
+        case Codec.decode(data, opcode, state.encoding) do
+          {:ok, frame} -> handle_frame(frame, state)
+          {:error, message} -> reply([Frames.error("bad_request", message)], state)
+        end
     end
   end
 
@@ -99,8 +115,31 @@ defmodule ConvergerWeb.ProtocolSocket do
   @impl WebSock
   def handle_info(%Phoenix.Socket.Broadcast{event: "new_activity", payload: activity}, state)
       when state.phase == :ready do
-    {frames, feed} = Feed.live(state.feed, activity)
-    reply(frames, %{state | feed: feed})
+    if slow_consumer?() do
+      SocketGuard.emit(:slow_consumer, __MODULE__)
+      {:stop, :normal, SocketGuard.close_detail(4503, "slow_consumer"), state}
+    else
+      {frames, feed} = Feed.live(state.feed, activity)
+      reply(frames, %{state | feed: feed})
+    end
+  end
+
+  # Receipts, typing and presence (ConversationSignals decides what this
+  # connection sees). Typing and presence are dropped for a lagging client.
+  def handle_info(%Phoenix.Socket.Broadcast{event: event, payload: payload}, state)
+      when state.phase == :ready and event in ~w(delivery_status typing read presence_diff) do
+    event
+    |> ConversationSignals.frames(payload, state.conversation_id, state.participant)
+    |> Enum.flat_map(fn
+      {:reliable, frame} -> [frame]
+      {:ephemeral, frame} -> ephemeral(frame)
+    end)
+    |> reply(state)
+  end
+
+  # Node draining (ConvergerWeb.ProtocolConnections.drain/0): reconnect elsewhere.
+  def handle_info(:socket_drain, state) do
+    {:stop, :normal, SocketGuard.close_detail(1012, "unavailable"), state}
   end
 
   def handle_info(%Phoenix.Socket.Broadcast{event: "disconnect"}, state) do
@@ -136,7 +175,29 @@ defmodule ConvergerWeb.ProtocolSocket do
   def handle_info(_message, state), do: {:ok, state}
 
   @impl WebSock
-  def terminate(_reason, _state), do: :ok
+  def terminate(reason, %{phase: :ready} = state) do
+    ConversationSignals.stop_typing(state.typing, state.conversation_id, state.participant)
+    terminated(reason)
+  end
+
+  def terminate(reason, _state), do: terminated(reason)
+
+  defp terminated({:error, :max_frame_size_exceeded}),
+    do: SocketGuard.emit(:frame_too_large, __MODULE__)
+
+  defp terminated(_reason), do: :ok
+
+  defp slow_consumer?,
+    do: SocketGuard.queue_len(self()) > SocketGuard.config(:slow_consumer_queue_len)
+
+  defp ephemeral(frame) do
+    if SocketGuard.queue_len(self()) > SocketGuard.config(:ephemeral_drop_queue_len) do
+      SocketGuard.emit(:ephemeral_dropped, __MODULE__)
+      []
+    else
+      [frame]
+    end
+  end
 
   ## Frames
 
@@ -160,7 +221,43 @@ defmodule ConvergerWeb.ProtocolSocket do
 
   defp handle_frame(%{"type" => "sync"} = frame, state), do: sync(frame, state)
   defp handle_frame(%{"type" => "auth"} = frame, state), do: refresh_token(frame, state)
-  defp handle_frame(%{"type" => type}, state) when type in @ignored_frames, do: {:ok, state}
+
+  defp handle_frame(%{"type" => "typing", "isTyping" => is_typing}, state)
+       when is_boolean(is_typing) do
+    typing =
+      ConversationSignals.typing(
+        state.typing,
+        state.conversation_id,
+        state.participant,
+        is_typing
+      )
+
+    {:ok, %{state | typing: typing}}
+  end
+
+  defp handle_frame(%{"type" => "typing"}, state),
+    do:
+      reply(
+        [error("bad_request", "typing needs a boolean isTyping", frame_type: "typing")],
+        state
+      )
+
+  defp handle_frame(%{"type" => "read"} = frame, state) do
+    case ConversationSignals.read(state.conversation_id, state.participant, frame["watermark"]) do
+      {:ok, _read_seq} ->
+        {:ok, state}
+
+      {:error, :invalid_watermark} ->
+        message = "read needs a watermark of at least 1"
+        reply([error("invalid_watermark", message, frame_type: "read")], state)
+
+      {:error, :not_found} ->
+        reply(
+          [error("conversation_not_found", "conversation not found", frame_type: "read")],
+          state
+        )
+    end
+  end
 
   defp handle_frame(%{"type" => type}, state) when type in @bot_frames do
     message = "this conversation has no bot channel"
@@ -308,6 +405,11 @@ defmodule ConvergerWeb.ProtocolSocket do
     Phoenix.PubSub.subscribe(Converger.PubSub, "conversation:#{conversation_id}")
     track(claims, conversation_id)
 
+    participant = ConversationSignals.participant(claims)
+    presence? = ConversationSignals.presence?(claims)
+    ConversationSignals.subscribe(conversation_id, presence?)
+    if presence?, do: ConversationSignals.track_presence(conversation_id, participant)
+
     head = Conversations.get_conversation(conversation_id).last_seq
 
     # A client whose asserted conversation was replaced resets to 0.
@@ -322,6 +424,7 @@ defmodule ConvergerWeb.ProtocolSocket do
         claims: claims,
         conversation_id: conversation_id,
         user_id: user_id,
+        participant: participant,
         feed: Feed.new(conversation_id, user_id)
     }
 
@@ -333,18 +436,25 @@ defmodule ConvergerWeb.ProtocolSocket do
         user_id: user_id,
         connection_id: state.connection_id,
         watermark: head,
-        expires_at: claims["exp"] * 1000
+        expires_at: claims["exp"] * 1000,
+        presence: presence?
       })
+
+    # Who is already online, after the replay.
+    presence =
+      if presence?,
+        do: ConversationSignals.presence_snapshot(conversation_id, participant),
+        else: []
 
     case position do
       {:seq, seq} when seq > head ->
         message = "watermark #{seq} is above the head #{head}"
         feed = Feed.seek(state.feed, head)
-        reply([welcome, error("invalid_watermark", message)], %{state | feed: feed})
+        reply([welcome, error("invalid_watermark", message) | presence], %{state | feed: feed})
 
       position ->
         {frames, feed} = Feed.replay(state.feed, position, head)
-        reply([welcome | frames], %{state | feed: feed})
+        reply([welcome | frames] ++ presence, %{state | feed: feed})
     end
   end
 

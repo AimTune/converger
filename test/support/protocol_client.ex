@@ -160,11 +160,22 @@ defmodule ConvergerWeb.ProtocolClient do
     end
   end
 
-  @doc "Assert that no frame arrives within `timeout`."
-  def refute_frame(client, timeout \\ 200) do
+  @doc """
+  Assert that no frame arrives within `timeout`. Frames whose type is in
+  `ignore` (for example `["deliveryStatus"]`) are skipped.
+  """
+  def refute_frame(client, timeout \\ 200, ignore \\ []) do
     case recv(client, timeout) do
-      {:timeout, client} -> client
-      {frame, _client} -> flunk("unexpected frame #{inspect(frame)}")
+      {:timeout, client} ->
+        client
+
+      {%{"type" => type} = frame, client} when is_binary(type) ->
+        if type in ignore,
+          do: refute_frame(client, timeout, ignore),
+          else: flunk("unexpected frame #{inspect(frame)}")
+
+      {frame, _client} ->
+        flunk("unexpected frame #{inspect(frame)}")
     end
   end
 
