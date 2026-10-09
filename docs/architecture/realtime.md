@@ -26,7 +26,7 @@ Both are Phoenix sockets using the standard Phoenix V2 JSON serializer; `/socket
 Next to them, the **native Protocol v1 transports** speak [Converger Protocol v1](../protocol/v1.md) frames without Phoenix framing ([ADR-0030](../adr/0030-native-websocket-endpoint-and-fallback-transports.md)); see [Native Protocol v1 transports](#native-protocol-v1-transports) below.
 
 :::info Planned
-Converger Protocol v1 ([spec](../protocol/v1.md)) is implemented on the Converger client API socket ([#22](https://github.com/AimTune/converger/issues/22)); the legacy stack is removed after its deprecation window (protocol v1, section 13.3). The native endpoint without Phoenix framing exists next to it (#26, below). Also planned: client message ids with server acks on the Phoenix binding ([#24](https://github.com/AimTune/converger/issues/24)).
+Converger Protocol v1 ([spec](../protocol/v1.md)) is implemented on the Converger client API socket ([#22](https://github.com/AimTune/converger/issues/22)); the legacy stack is removed after its deprecation window (protocol v1, section 13.3). The native endpoint without Phoenix framing exists next to it (#26, below). Client message ids with v1 `ack` frames work on both bindings (native endpoint #26; Phoenix binding [#24](https://github.com/AimTune/converger/issues/24), event `frame`, [ADR-0029](../adr/0029-websocket-sends-acked-on-the-phoenix-binding.md)).
 :::
 
 ## How an activity reaches a socket
