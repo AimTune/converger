@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+### Native Protocol v1 WebSocket, MessagePack, SSE and long-poll fallbacks (#26)
+
+- `GET /socket/converger/v1`: the native Converger Protocol v1 endpoint (`ConvergerWeb.ProtocolSocket`, a
+  `WebSock` handler). Raw frames, no Phoenix framing: `hello`/`welcome`, replay after an integer `seq`
+  watermark (legacy opaque watermarks accepted), `text` sends with `clientId`, `ack` (`duplicate: true` on
+  retransmission), `sync`, `ping`/`heartbeat`, in-band token refresh with `auth`/`tokenRefreshed`, error
+  frames with stable codes, close codes 4400/4401/4403/4408/1008, idle timeout and frame size limits. Works
+  with unmodified mekik/1 clients (no subprotocol, `id` used as `clientId`).
+- Encodings by subprotocol: `converger.v1` / `converger.v1+json` (JSON) and `converger.v1+msgpack`
+  (MessagePack, binary messages). Adds `msgpax` as a dependency and `mint_web_socket` as a test-only one.
+- `GET /api/v1/converger/conversations/:id/events`: Server-Sent Events fallback with the same v1 frames; the
+  `seq` is the event `id`, so `EventSource` resumes through `Last-Event-ID`. Accepts `?token=`.
+- Long-polling enabled on `/socket/converger` as the last-resort fallback for the Phoenix binding.
+- `GET /api/v1/converger/conversations/:id/activities` also accepts the integer `seq` as `?watermark=`.
+- New config `config :converger, ConvergerWeb.Protocol` (heartbeat, idle timeout, frame caps,
+  `replay_max`); `token` and `secret` query parameters are filtered from request logs.
+- `examples/python/converger_ws.py`: a client using only the `websockets` library.
+- ADR-0026; `docs/protocol/v1.md` statuses updated; `docs/websocket.md`, `docs/api/client-api.md`,
+  `docs/architecture/realtime.md` and `docs/operations/configuration.md` document the new transports.
+
 ### Converger Protocol v1 specification (#21, refs #63 #68)
 
 Documentation and schemas only; no server behaviour changes.

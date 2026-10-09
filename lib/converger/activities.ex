@@ -153,6 +153,17 @@ defmodule Converger.Activities do
   end
 
   @doc """
+  The activity of `conversation_id` stored with `idempotency_key`, or nil.
+  Lets a sender tell a retransmitted send apart from a new one (the
+  WebSocket `ack` reports `duplicate: true`).
+  """
+  def get_activity_by_idempotency_key(_conversation_id, nil), do: nil
+
+  def get_activity_by_idempotency_key(conversation_id, idempotency_key) do
+    Repo.get_by(Activity, conversation_id: conversation_id, idempotency_key: idempotency_key)
+  end
+
+  @doc """
   Create an activity from untrusted client input.
 
   Only `Activity.client_fields/0` are taken from `client_params` (REST body,

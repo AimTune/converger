@@ -12,7 +12,7 @@ defmodule ConvergerWeb.Plugs.ConvergerAuth do
   def call(conn, opts) do
     mode = Keyword.get(opts, :mode, :token)
 
-    case extract_bearer(conn) do
+    case extract_bearer(conn) || query_token(conn, opts) do
       nil -> unauthorized(conn, "Missing or malformed Authorization header")
       bearer -> authenticate(conn, bearer, mode)
     end
@@ -22,6 +22,17 @@ defmodule ConvergerWeb.Plugs.ConvergerAuth do
     case get_req_header(conn, "authorization") do
       ["Bearer " <> token | _] -> String.trim(token)
       _ -> nil
+    end
+  end
+
+  # `query_token: true` also accepts `?token=` (Server-Sent Events: a browser
+  # EventSource cannot set an Authorization header).
+  defp query_token(conn, opts) do
+    if Keyword.get(opts, :query_token, false) do
+      case Plug.Conn.fetch_query_params(conn).query_params do
+        %{"token" => token} when is_binary(token) and token != "" -> token
+        _ -> nil
+      end
     end
   end
 

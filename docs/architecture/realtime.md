@@ -20,10 +20,12 @@ Two socket stacks exist today, for historical reasons:
 | Client sends | `new_activity` push | REST only (the channel handles no client events) |
 | Delivery status | `delivery_status` pushed | not pushed |
 
-Both are Phoenix sockets with `websocket: true` and `longpoll: false`, using the standard Phoenix V2 JSON serializer. A third socket, `/live`, serves LiveView for the admin and tenant UIs.
+Both are Phoenix sockets using the standard Phoenix V2 JSON serializer; `/socket/converger` also has the long-poll transport as a fallback (`longpoll: true`), the legacy `/socket` does not. A third socket, `/live`, serves LiveView for the admin and tenant UIs.
+
+Next to them, the **native Protocol v1 transports** speak [Converger Protocol v1](../protocol/v1.md) frames without Phoenix framing ([ADR-0026](../adr/0026-native-websocket-endpoint-and-fallback-transports.md)); see [Native Protocol v1 transports](#native-protocol-v1-transports) below.
 
 :::info Planned
-The two stacks will be unified into one implementation of Converger Protocol v1 (spec in progress, [#21](https://github.com/AimTune/converger/issues/21), [#63](https://github.com/AimTune/converger/issues/63)); the legacy stack and its token family will be deprecated ([#23](https://github.com/AimTune/converger/issues/23)). Also planned: a raw WebSocket endpoint without Phoenix framing ([#26](https://github.com/AimTune/converger/issues/26)), client message ids with server acks ([#24](https://github.com/AimTune/converger/issues/24)), and receipts, typing and presence pushed to clients ([#25](https://github.com/AimTune/converger/issues/25)).
+The Phoenix stacks will be unified into one implementation of Converger Protocol v1 ([#22](https://github.com/AimTune/converger/issues/22)); the legacy stack and its token family will be deprecated ([#23](https://github.com/AimTune/converger/issues/23)). Also planned: acks on the Phoenix binding ([#24](https://github.com/AimTune/converger/issues/24)), and receipts, typing and presence pushed to clients ([#25](https://github.com/AimTune/converger/issues/25)).
 :::
 
 ## How an activity reaches a socket
@@ -135,6 +137,22 @@ Without `last_activity_id` / `watermark` neither channel replays; the client sta
 Watermarks encode the per-conversation `seq` (`Converger.ConvergerAPI.Watermark`: URL-safe Base64 of `seq:<n>`), so resuming needs no lookup and is exact ([ADR-0006](../adr/0006-per-conversation-seq-and-opaque-watermarks.md)). Legacy watermarks (Base64 activity ids) are still accepted.
 
 `ConvergerChannel` subscribes to the PubSub topic in `join/3` and queries the replay afterwards, so a live frame can arrive before or overlap with the replay frame. Clients must de-duplicate by activity `id`.
+
+## Native Protocol v1 transports
+
+| Transport | Route | Process |
+| --- | --- | --- |
+| WebSocket | `GET /socket/converger/v1` ([`ProtocolSocketController`](https://github.com/AimTune/converger/blob/main/lib/converger_web/controllers/protocol_socket_controller.ex) upgrades) | [`ConvergerWeb.ProtocolSocket`](https://github.com/AimTune/converger/blob/main/lib/converger_web/protocol_socket.ex), a `WebSock` handler run by Bandit, one per connection |
+| Server-Sent Events | `GET /api/v1/converger/conversations/:id/events` | the request process of [`EventStreamController`](https://github.com/AimTune/converger/blob/main/lib/converger_web/controllers/converger/event_stream_controller.ex), looping on its mailbox |
+
+These are routed by `ConvergerWeb.Router`, not declared with the endpoint `socket` macro, so the controller controls the subprotocol negotiation (`ConvergerWeb.Protocol.Codec`: `converger.v1`, `converger.v1+json`, `converger.v1+msgpack`; only unsupported offers get HTTP 400) and the credential sources. There is no origin check: authentication is a bearer token, never a cookie.
+
+Both transports share one core ([`lib/converger_web/protocol/`](https://github.com/AimTune/converger/tree/main/lib/converger_web/protocol)):
+
+- `Frames` maps the canonical activity (the same `new_activity` broadcast payload as above) to v1 frames: `message` becomes `text`, lifecycle activities `conversationUpdate`; `from` and `sender.role` are relative to the connection's end user.
+- `Feed` keeps the highest `seq` delivered on the connection. The process subscribes to `conversation:<id>` **before** reading the head and the replay, so frames committed meanwhile wait in the mailbox and are dropped as duplicates (`seq <= last`). A live frame with `seq > last + 1` (PubSub is at-most-once across nodes) makes it read the missing range from the database first. Turns sent on the connection are recorded and never echoed back to it. Replay is read in `ws_replay_limit` batches up to `replay_max` (default 10 000), then `replayTruncated`.
+
+The WebSocket process also persists sends (`Activities.create_client_activity/2`, so middleware, routing and deliveries apply as for REST) with the `clientId` as idempotency key, sends heartbeats after `heartbeat_interval_ms` of outbound silence, closes after `idle_timeout_ms` without inbound data (4408), and closes at token expiry (4401) unless refreshed with `auth`. Both transports track themselves in `SocketPresence` and subscribe to their socket id, so channel deactivation and per-user disconnects reach them (4403 on the WebSocket, an `error` event on SSE). Settings: `config :converger, ConvergerWeb.Protocol` ([configuration](../operations/configuration.md#protocol-v1-transports)).
 
 ## Related
 

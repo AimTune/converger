@@ -15,9 +15,13 @@ defmodule ConvergerWeb.Endpoint do
     websocket: true,
     longpoll: false
 
+  # Long-polling is the last-resort fallback for networks that block
+  # WebSockets (the `phoenix` JS client falls back to it automatically). The
+  # native v1 endpoint (/socket/converger/v1) and the SSE stream are routed
+  # in ConvergerWeb.Router.
   socket "/socket/converger", ConvergerWeb.ConvergerSocket,
     websocket: true,
-    longpoll: false
+    longpoll: true
 
   socket "/live", Phoenix.LiveView.Socket,
     websocket: [connect_info: [:peer_data, session: @session_options]],
