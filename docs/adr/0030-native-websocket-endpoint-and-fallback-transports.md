@@ -9,7 +9,7 @@ description: Protocol v1 gets a raw WebSocket endpoint implemented directly on W
 | **Status** | Accepted |
 | **Date** | 2026-10-09 |
 | **Issue** | [#26](https://github.com/AimTune/converger/issues/26) |
-| **Pull request** | to be linked on merge |
+| **Pull request** | [#122](https://github.com/AimTune/converger/pull/122) |
 | **Related** | [ADR-0024](0024-converger-protocol-v1-as-superset-of-mekik-1.md), [ADR-0006](0006-per-conversation-seq-and-opaque-watermarks.md), [ADR-0020](0020-per-subject-socket-ids-and-presence.md), [ADR-0013](0013-cluster-wide-rate-limiting-with-hammer-and-pubsub.md), [ADR-0026](0026-one-client-socket-stack-and-shape-checked-legacy-tokens.md), [ADR-0027](0027-websocket-limits-backpressure-and-draining.md), [ADR-0032](0032-transient-conversation-signals.md) |
 
 ## Context and problem statement
