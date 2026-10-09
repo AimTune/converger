@@ -14,7 +14,8 @@ defmodule Converger.PartitionsTest do
 
   setup do
     tenant = tenant_fixture()
-    channel = channel_fixture(tenant)
+    # Inbound only: the pipeline creates no deliveries, the tests create them.
+    channel = channel_fixture(tenant, %{mode: "inbound"})
     conversation = conversation_fixture(tenant, channel)
     %{tenant: tenant, channel: channel, conversation: conversation}
   end

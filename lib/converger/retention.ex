@@ -1,6 +1,6 @@
 defmodule Converger.Retention do
   @moduledoc """
-  Data retention (issue #30, ADR-0033).
+  Data retention (issue #30, ADR-0034).
 
   ## Activities and deliveries
 

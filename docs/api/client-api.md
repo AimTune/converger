@@ -18,7 +18,7 @@ unlike the snake_case tenant API.
 
 | Method | Path | Auth | Purpose |
 | --- | --- | --- | --- |
-| `POST` | `/api/v1/converger/tokens/generate` | Bearer channel secret | Issue an unscoped converger token (backend only) |
+| `POST` | `/api/v1/converger/tokens/generate` | Bearer channel secret | Issue an unscoped or channel-scoped converger token (backend only) |
 | `POST` | `/api/v1/converger/tokens/refresh` | Bearer converger token | Exchange a valid token for a fresh one |
 | `POST` | `/api/v1/converger/conversations` | Bearer converger token | Start a conversation; returns a conversation-bound token and `streamUrl` |
 | `GET` | `/api/v1/converger/conversations/:id` | Bearer converger token | Reconnect: new token and `streamUrl` for an existing conversation |
@@ -58,7 +58,8 @@ sequenceDiagram
 
 | Token | Issued by | Can do |
 | --- | --- | --- |
-| Unscoped (no `conversation_id` claim) | `tokens/generate`, `tokens/refresh` of an unscoped token | Create conversations. Accepted for any conversation id of the tenant. |
+| Unscoped (no `conversation_id` claim) | `tokens/generate`, `tokens/refresh` of an unscoped token | Create conversations. Accepted for the conversations of its own channel (other channels' conversations get `404`). Cannot join a conversation topic on the WebSocket. |
+| Channel-scoped (`scope: "channel"`, no `conversation_id`) | `tokens/generate` with `"scope": "channel"`, `tokens/refresh` of a channel-scoped token | Everything an unscoped token can do, plus, on the WebSocket (role `agent`), joining `converger:channel:<channel_id>` of a `websocket` channel to follow every delivery to it, and joining the conversations owned by or routed to its channel (agent console). See [WebSocket](../websocket.md). |
 | Conversation-bound | `POST /conversations`, `GET /conversations/:id`, `tokens/refresh` of a bound token | Only its own conversation: other conversation ids get `403`, attachments of other conversations `404`. |
 
 :::tip
@@ -92,6 +93,7 @@ Called by **your backend** with the channel secret. Never call it from a browser
 | Body field | Type | Notes |
 | --- | --- | --- |
 | `user.id` | string | Optional end-user id, stored as the `user_id` claim and carried through refreshes and conversation tokens. Used for the per-user socket id, so one user can be disconnected individually. |
+| `scope` | string | Optional. The only accepted value is `"channel"`: the token gets the `scope: "channel"` claim and may join `converger:channel:<channel_id>` on the client socket (agent console). Conversation tokens minted from it (`POST /conversations`) do not carry the scope. |
 
 ```bash
 curl -s -X POST "$CONVERGER/api/v1/converger/tokens/generate" \
@@ -109,6 +111,7 @@ curl -s -X POST "$CONVERGER/api/v1/converger/tokens/generate" \
 | Status | Body | Cause |
 | --- | --- | --- |
 | `400` | `{"error": "Token generation requires channel secret, not a token"}` | A converger token was sent instead of the secret |
+| `400` | `{"error": "scope must be one of: channel"}` | Unknown `scope` value |
 | `401` | `{"error": {"code": "Unauthorized", "message": "Missing or malformed Authorization header"}}` | No `Bearer` header |
 | `401` | `{"error": {"code": "Unauthorized", "message": "Invalid or expired token"}}` | Unknown secret, or the channel is inactive |
 | `429` | rate limit body | Channel's `token_generate` limit exceeded |
@@ -117,8 +120,8 @@ curl -s -X POST "$CONVERGER/api/v1/converger/tokens/generate" \
 
 `POST /api/v1/converger/tokens/refresh`
 
-Exchanges a still-valid token for a new one with a fresh 1800 s expiry, keeping its `conversation_id` (if any) and
-`user_id`. No body.
+Exchanges a still-valid token for a new one with a fresh 1800 s expiry, keeping its `conversation_id` (if any),
+`user_id` and `scope`. No body.
 
 ```bash
 curl -s -X POST "$CONVERGER/api/v1/converger/tokens/refresh" \

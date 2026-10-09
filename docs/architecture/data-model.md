@@ -321,7 +321,7 @@ Every list query is bounded ([ADR-0018](../adr/0018-keyset-pagination.md)):
 
 ## Partitioning and retention
 
-`activities` and `deliveries` are range partitioned by month ([ADR-0033](../adr/0033-monthly-partitioning-and-per-tenant-retention.md), [#30](https://github.com/AimTune/converger/issues/30)):
+`activities` and `deliveries` are range partitioned by month ([ADR-0034](../adr/0034-monthly-partitioning-and-per-tenant-retention.md), [#30](https://github.com/AimTune/converger/issues/30)):
 
 | Table | Partition key | Primary key | Partitions |
 | --- | --- | --- | --- |

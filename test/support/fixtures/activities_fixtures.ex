@@ -30,6 +30,10 @@ defmodule Converger.ActivitiesFixtures do
       from(a in Converger.Activities.Activity, where: a.id == ^activity.id)
       |> Converger.Repo.update_all(set: [inserted_at: inserted_at])
 
+      # Deliveries the pipeline already created follow their activity's partition.
+      from(d in Converger.Deliveries.Delivery, where: d.activity_id == ^activity.id)
+      |> Converger.Repo.update_all(set: [activity_inserted_at: inserted_at])
+
       Converger.Repo.reload!(activity)
     else
       activity

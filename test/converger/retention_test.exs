@@ -49,7 +49,8 @@ defmodule Converger.RetentionTest do
 
   # `n` activities of a tenant in @month, each with one delivery.
   defp seed(tenant, n) do
-    channel = channel_fixture(tenant)
+    # Inbound only: the pipeline creates no deliveries, seed/2 creates them.
+    channel = channel_fixture(tenant, %{mode: "inbound"})
     conversation = conversation_fixture(tenant, channel)
 
     activities =

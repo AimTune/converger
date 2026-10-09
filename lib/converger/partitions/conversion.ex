@@ -3,7 +3,7 @@ defmodule Converger.Partitions.Conversion do
   Converts the plain (pre-#30) `activities` and `deliveries` tables into
   monthly partitioned tables: create partitioned shadow tables, copy in
   batches, swap. See docs/operations/migrations.md ("Partitioning
-  activities and deliveries") and ADR-0033.
+  activities and deliveries") and ADR-0034.
 
   Three phases, each idempotent and resumable:
 
@@ -563,7 +563,7 @@ defmodule Converger.Partitions.Conversion do
 
   # Foreign keys from or to the legacy tables (activities -> tenants and
   # conversations, deliveries -> activities and channels, attachments ->
-  # activities). The partitioned tables have none, see ADR-0033.
+  # activities). The partitioned tables have none, see ADR-0034.
   defp drop_legacy_foreign_keys(repo) do
     %{rows: rows} =
       repo.query!("""

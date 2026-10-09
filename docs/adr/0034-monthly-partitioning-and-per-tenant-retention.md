@@ -1,6 +1,6 @@
 ---
-title: "ADR-0033: Monthly partitioning of activities and deliveries, per-tenant retention and verified archives"
-sidebar_label: "0033 Partitioning and retention"
+title: "ADR-0034: Monthly partitioning of activities and deliveries, per-tenant retention and verified archives"
+sidebar_label: "0034 Partitioning and retention"
 description: activities is range partitioned by inserted_at and deliveries by their activity's inserted_at; per-partition unique indexes plus the conversation row lock keep seq and idempotency keys unique; there are no foreign keys on the partitioned tables; expired data is archived as verified JSONL.gz before a month is detached and dropped or a tenant's rows are deleted.
 ---
 

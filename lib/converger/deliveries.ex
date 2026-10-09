@@ -67,7 +67,7 @@ defmodule Converger.Deliveries do
   Creates a delivery. `tenant_id` and `activity_inserted_at` (the partition
   key) are always copied from the activity, given as `activity` or looked up
   by `attrs.activity_id`. There is no foreign key on the partitioned
-  `deliveries` table (ADR-0033), so a missing activity is a changeset error.
+  `deliveries` table (ADR-0034), so a missing activity is a changeset error.
   """
   def create_delivery(attrs, activity \\ nil) do
     changeset = Delivery.changeset(%Delivery{}, attrs)
@@ -139,6 +139,51 @@ defmodule Converger.Deliveries do
       error ->
         error
     end
+  end
+
+  @doc """
+  Record a hand-off whose receipt is not confirmed yet (an adapter returned
+  `{:pending, meta}`, e.g. a WebSocket channel with no connected client).
+  The delivery stays `pending`; `attempts > 0` marks it as handed off, which
+  is what `acknowledge/3` looks for.
+  """
+  def mark_handed_off(delivery, response_metadata \\ %{}) do
+    delivery
+    |> Delivery.changeset(%{
+      status: "pending",
+      attempts: delivery.attempts + 1,
+      last_error: nil,
+      metadata: Map.merge(delivery.metadata || %{}, response_metadata)
+    })
+    |> Repo.update()
+  end
+
+  @doc """
+  Mark the handed-off deliveries to `channel_id` of every activity of
+  `conversation_id` up to and including `seq` as `sent`: a client of the
+  channel has received them (it acknowledged them or they were replayed to
+  it). Deliveries not handed off yet (`attempts == 0`) are left alone, so the
+  pipeline still broadcasts them to the channel's other sockets.
+
+  Returns the number of deliveries marked.
+  """
+  def acknowledge(channel_id, conversation_id, seq) when is_integer(seq) do
+    now = DateTime.utc_now()
+
+    {count, deliveries} =
+      from(d in Delivery,
+        # The partition key lets PostgreSQL prune activities partitions (ADR-0034).
+        join: a in Activity,
+        on: a.id == d.activity_id and a.inserted_at == d.activity_inserted_at,
+        where:
+          d.channel_id == ^channel_id and d.status == "pending" and d.attempts > 0 and
+            a.conversation_id == ^conversation_id and a.seq <= ^seq,
+        select: d
+      )
+      |> Repo.update_all(set: [status: "sent", sent_at: now, updated_at: now])
+
+    Enum.each(deliveries, &broadcast_status_update/1)
+    count
   end
 
   @doc deprecated: "Use mark_sent/2 instead"

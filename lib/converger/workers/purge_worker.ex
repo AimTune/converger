@@ -4,7 +4,7 @@ defmodule Converger.Workers.PurgeWorker do
   a channel or a conversation, in batches.
 
   The partitioned `activities` and `deliveries` tables have no foreign keys
-  (ADR-0033), so there is no `ON DELETE CASCADE` into them. Deleting a
+  (ADR-0034), so there is no `ON DELETE CASCADE` into them. Deleting a
   tenant used to cascade into every activity and delivery in one statement,
   holding locks and generating WAL for hours on a large tenant; now the
   tenant row (with its channels and conversations) is deleted at once and

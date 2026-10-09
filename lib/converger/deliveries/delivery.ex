@@ -32,7 +32,7 @@ defmodule Converger.Deliveries.Delivery do
     field :retried_at, :utc_datetime_usec
     # Copied from the activity when the delivery is created (never cast).
     # `activity_inserted_at` is the partition key: a delivery lives in the
-    # same monthly partition as its activity (ADR-0033).
+    # same monthly partition as its activity (ADR-0034).
     field :tenant_id, :binary_id
     field :activity_inserted_at, :utc_datetime_usec
 

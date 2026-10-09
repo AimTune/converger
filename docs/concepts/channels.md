@@ -35,23 +35,23 @@ All fields go through `Channel.changeset/2`, which validates the type, the mode 
 
 ## Types and adapters
 
-Each type maps to a module implementing the `Converger.Channels.Adapter` behaviour: `deliver_activity/2`, `parse_inbound/2`, `validate_config/1`, `supported_modes/0`, and optionally `parse_status_update/2`, `verify_inbound_signature/3` and `retry_policy/0`.
+Each type maps to a module implementing the `Converger.Channels.Adapter` behaviour: `deliver_activity/2`, `parse_inbound/2`, `validate_config/1`, `supported_modes/0`, and optionally `parse_status_update/2`, `verify_inbound_signature/3`, `retry_policy/0` and `capabilities/0` (default `[:inbound, :outbound]`; the pipeline delivers only to types with `:outbound`).
 
 | Type | Modes | Required config | Delivery | Page |
 | --- | --- | --- | --- | --- |
 | `webhook` | `inbound`, `outbound`, `duplex` | `url`. Optional: `method` (`POST`, `PUT`, `PATCH`), `headers`, `connect_timeout`, `receive_timeout`, `max_response_bytes` | HTTP request with the canonical activity, signed with `x-converger-signature` | [Webhooks](../webhooks.md) |
-| `websocket` | `outbound` | none | Not through an adapter: clients get the PubSub broadcast. A duplex adapter is Planned ([#22](https://github.com/AimTune/converger/issues/22)). | [WebSocket channel](../channels/websocket.md) |
+| `websocket` | `inbound`, `outbound`, `duplex` | none. Optional: `require_ack` (`true`/`false`, default `false`) | Broadcast to the channel's connected sockets; the delivery stays `pending` while no client is connected (or until a client acks, with `require_ack`). Clients send messages over the socket ([ADR-0033](../adr/0033-websocket-channel-adapter-delivery.md)). | [WebSocket channel](../channels/websocket.md) |
 | `whatsapp_meta` | `inbound`, `outbound`, `duplex` | `phone_number_id`, `access_token`, `verify_token`, plus `app_secret` when `require_signature` is true | WhatsApp Cloud API (Graph) | [WhatsApp](../channels/whatsapp.md) |
 | `whatsapp_infobip` | `inbound`, `outbound`, `duplex` | `base_url`, `api_key`, `sender` | Infobip WhatsApp API | [WhatsApp](../channels/whatsapp.md) |
 | `echo` | `outbound` | none | Writes a reply activity from `"bot"` into the same conversation (testing) | [Echo](../channels/echo.md) |
 
-See the [channels overview](../channels/overview.md) for provider setup, and [writing an adapter](../channels/writing-an-adapter.md) to add a type. Adapter behaviour v2 (capabilities, config schemas) is Planned ([#36](https://github.com/AimTune/converger/issues/36)).
+See the [channels overview](../channels/overview.md) for provider setup, and [writing an adapter](../channels/writing-an-adapter.md) to add a type. The rest of adapter behaviour v2 (config schemas, beyond the `capabilities/0` callback) is Planned ([#36](https://github.com/AimTune/converger/issues/36)).
 
 One config key is read for every inbound-capable type: `conversation_idle_timeout_seconds` (positive integer). It starts a new conversation for a participant whose active conversation has been idle longer than this ([participants](participants.md)).
 
 ## Modes
 
-The mode is the channel's direction. It was introduced by migration [`20260227160000_add_mode_to_channels`](https://github.com/AimTune/converger/blob/main/priv/repo/migrations/20260227160000_add_mode_to_channels.exs), which defaulted existing channels to `duplex` and set `echo` and `websocket` channels to `outbound`.
+The mode is the channel's direction. It was introduced by migration [`20260227160000_add_mode_to_channels`](https://github.com/AimTune/converger/blob/main/priv/repo/migrations/20260227160000_add_mode_to_channels.exs), which defaulted existing channels to `duplex` and set `echo` and `websocket` channels to `outbound`. Migration [`20261010200000_make_websocket_channels_duplex`](https://github.com/AimTune/converger/blob/main/priv/repo/migrations/20261010200000_make_websocket_channels_duplex.exs) later moved existing `websocket` channels from `outbound` to `duplex`, when the type gained inbound support ([#22](https://github.com/AimTune/converger/issues/22)).
 
 | Mode | Accepts inbound webhooks | Receives deliveries | Can be a routing rule source | Can be a routing rule target |
 | --- | --- | --- | --- | --- |
@@ -61,7 +61,7 @@ The mode is the channel's direction. It was introduced by migration [`2026022716
 
 Concretely:
 
-- `POST /api/v1/channels/:id/inbound` with messages on an `outbound` channel returns `400 {"error": "Channel does not accept inbound messages"}`. If the same request also carried status updates, they are applied, and the messages are dropped with a warning.
+- `POST /api/v1/channels/:id/inbound` with messages on an `outbound` channel returns `400 {"error": "Channel does not accept inbound messages"}`. If the same request also carried status updates, they are applied, and the messages are dropped with a warning. A `new_activity` sent over the client API socket of an `outbound` channel is answered with the error `inbound_not_supported`.
 - The pipeline delivers only to channels whose mode is `outbound` or `duplex`, both for the conversation's own channel and for routing targets.
 - `RoutingRules` rejects an `outbound` source ("source channel is outbound-only and cannot receive inbound messages") and `inbound` targets.
 - `Channel.changeset/2` rejects a mode the adapter does not support, for example `echo channels only support modes: outbound`.

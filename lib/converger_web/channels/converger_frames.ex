@@ -79,8 +79,9 @@ defmodule ConvergerWeb.ConvergerFrames do
     }
   end
 
-  @doc ~s(mekik/1 `from`: `"user"` for the end user, `"bot"` for every other party.)
+  @doc ~s(mekik/1 `from`: `"user"` for the end user, `"agent"` for an agent console, `"bot"` for every other party.)
   def from(%{role: "user"}), do: "user"
+  def from(%{role: "agent"}), do: "agent"
   def from(_participant), do: "bot"
 
   defp status_time("read", payload), do: payload.read_at || payload.updated_at

@@ -44,7 +44,7 @@ supersedes the old one and both are linked. Read
 | [0019](0019-per-channel-retry-policy-delivery-error-and-lifeline.md) | Per-channel retry policy, `DeliveryError` and Oban Lifeline | Accepted | [#19](https://github.com/AimTune/converger/issues/19) / [#85](https://github.com/AimTune/converger/pull/85) |
 | [0028](0028-dead-letter-replay-in-place-through-oban.md) | Dead-letter replay resets the delivery in place and always goes through Oban | Accepted | [#32](https://github.com/AimTune/converger/issues/32) / [#121](https://github.com/AimTune/converger/pull/121) |
 | [0031](0031-per-channel-circuit-breaker-rate-limit-and-tier-queues.md) | Per-channel circuit breaker on the channel row, priority-based parking, Hammer rate limits and tier queues | Accepted | [#31](https://github.com/AimTune/converger/issues/31) / [#120](https://github.com/AimTune/converger/pull/120) |
-| [0033](0033-monthly-partitioning-and-per-tenant-retention.md) | Monthly partitioning of activities and deliveries, per-tenant retention and verified archives | Accepted | [#30](https://github.com/AimTune/converger/issues/30) / [#124](https://github.com/AimTune/converger/pull/124) |
+| [0034](0034-monthly-partitioning-and-per-tenant-retention.md) | Monthly partitioning of activities and deliveries, per-tenant retention and verified archives | Accepted | [#30](https://github.com/AimTune/converger/issues/30) / [#124](https://github.com/AimTune/converger/pull/124) |
 
 ### Channels, middleware and real time
 
@@ -58,6 +58,7 @@ supersedes the old one and both are linked. Read
 | [0027](0027-websocket-limits-backpressure-and-draining.md) | WebSocket limits in the socket transport, mailbox backpressure and readiness-gated draining | Accepted | [#27](https://github.com/AimTune/converger/issues/27) / [#117](https://github.com/AimTune/converger/pull/117) |
 | [0030](0030-native-websocket-endpoint-and-fallback-transports.md) | Native v1 WebSocket on WebSock, MessagePack by subprotocol, SSE and long-poll fallbacks | Accepted | [#26](https://github.com/AimTune/converger/issues/26) / [#122](https://github.com/AimTune/converger/pull/122) |
 | [0032](0032-transient-conversation-signals.md) | Transient conversation signals: receipts, typing and presence over dedicated topics, stored read watermarks, optional adapter callbacks | Accepted | [#25](https://github.com/AimTune/converger/issues/25) |
+| [0033](0033-websocket-channel-adapter-delivery.md) | The `websocket` channel is a delivering adapter with pending receipts | Accepted | [#22](https://github.com/AimTune/converger/issues/22) / [#119](https://github.com/AimTune/converger/pull/119) |
 
 ### Security
 

@@ -176,6 +176,15 @@ defmodule Converger.RoutingRules do
     |> Enum.uniq()
   end
 
+  @doc """
+  Whether an enabled routing rule of `tenant_id` delivers from
+  `source_channel_id` to `target_channel_id`. A `websocket` channel's sockets
+  may follow the conversations routed to it this way.
+  """
+  def routes_to?(source_channel_id, target_channel_id, tenant_id) do
+    target_channel_id in resolve_target_channels(source_channel_id, tenant_id)
+  end
+
   # --- Validations ---
 
   defp validate_channel_modes(changeset) do

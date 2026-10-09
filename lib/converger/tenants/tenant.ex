@@ -28,7 +28,7 @@ defmodule Converger.Tenants.Tenant do
     field :limits, :map, default: %{}
     field :allowed_upload_types, {:array, :string}
     # Activities and deliveries older than this many days are archived to
-    # object storage and removed (Converger.Retention, ADR-0033).
+    # object storage and removed (Converger.Retention, ADR-0034).
     field :retention_days, :integer, default: 365
 
     timestamps(type: :utc_datetime_usec)

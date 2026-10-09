@@ -110,7 +110,7 @@ defmodule Converger.Channels do
 
   # The channel's conversations cascade with the row. Their activities, and
   # deliveries to this channel, are in partitioned tables without foreign keys
-  # (ADR-0033) and are purged in batches by PurgeWorker jobs enqueued in the
+  # (ADR-0034) and are purged in batches by PurgeWorker jobs enqueued in the
   # same transaction (the conversation ids are captured before the cascade).
   defp do_delete_channel(channel, actor) do
     alias Converger.Workers.PurgeWorker

@@ -306,7 +306,7 @@ defmodule Converger.Activities do
   end
 
   # `activities` is partitioned by month and the unique index on
-  # (conversation_id, idempotency_key) exists per partition only (ADR-0033),
+  # (conversation_id, idempotency_key) exists per partition only (ADR-0034),
   # so it cannot see a duplicate that was committed in the previous month's
   # partition. This lookup closes that gap: it runs after next_seq/2 took the
   # conversation row lock, which every insert into the conversation takes
@@ -390,7 +390,7 @@ defmodule Converger.Activities do
 
   @doc """
   Deletes an activity and its deliveries. The partitioned tables have no
-  foreign keys (ADR-0033), so the deliveries are removed here rather than by
+  foreign keys (ADR-0034), so the deliveries are removed here rather than by
   `ON DELETE CASCADE`.
   """
   def delete_activity(%Activity{} = activity) do

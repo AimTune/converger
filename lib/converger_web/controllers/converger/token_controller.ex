@@ -13,16 +13,25 @@ defmodule ConvergerWeb.ConvergerAPI.TokenController do
   def generate(conn, params) do
     case conn.assigns do
       %{auth_mode: :secret, channel: channel} ->
-        {:ok, token, _claims} =
-          ConvergerToken.generate_token(channel, user_id: get_in(params, ["user", "id"]))
+        scope = params["scope"]
 
-        conn
-        |> put_status(:ok)
-        |> json(%{
-          conversationId: nil,
-          token: token,
-          expires_in: ConvergerToken.default_expiry()
-        })
+        if is_nil(scope) or scope in ConvergerToken.scopes() do
+          {:ok, token, _claims} =
+            ConvergerToken.generate_token(channel,
+              user_id: get_in(params, ["user", "id"]),
+              scope: scope
+            )
+
+          conn
+          |> put_status(:ok)
+          |> json(%{
+            conversationId: nil,
+            token: token,
+            expires_in: ConvergerToken.default_expiry()
+          })
+        else
+          {:error, "scope must be one of: #{Enum.join(ConvergerToken.scopes(), ", ")}"}
+        end
 
       %{auth_mode: :token} ->
         {:error, "Token generation requires channel secret, not a token"}
@@ -40,7 +49,8 @@ defmodule ConvergerWeb.ConvergerAPI.TokenController do
         {:ok, token, _claims} =
           ConvergerToken.generate_token(channel,
             conversation_id: claims["conversation_id"],
-            user_id: claims["user_id"]
+            user_id: claims["user_id"],
+            scope: claims["scope"]
           )
 
         conn

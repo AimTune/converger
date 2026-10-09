@@ -1,7 +1,7 @@
 defmodule Converger.Repo.Migrations.PartitionActivitiesAndDeliveries do
   use Ecto.Migration
 
-  # Issue #30, ADR-0033. Converts activities and deliveries into monthly range
+  # Issue #30, ADR-0034. Converts activities and deliveries into monthly range
   # partitioned tables (create partitioned shadow tables, copy in batches,
   # swap); see Converger.Partitions.Conversion.
   #

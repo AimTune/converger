@@ -119,21 +119,19 @@ defmodule Converger.Pipeline do
     :ok
   end
 
-  # Channel types delivered through an adapter. `websocket` is excluded: its
-  # clients are reached by the PubSub broadcast.
-  @delivery_types ~w(echo webhook whatsapp_meta whatsapp_infobip)
-
   @doc """
   Resolve all channels that should receive a delivery for this activity.
   Returns a list of Channel structs (may be empty).
   Includes: primary channel (if deliverable) + routing rule targets (if deliverable and active).
+  A channel is deliverable when its adapter has the `:outbound` capability
+  (`Converger.Channels.Adapter.capabilities/1`).
   """
   def resolve_delivery_channels(activity) do
     conversation = Converger.Conversations.get_conversation!(activity.conversation_id)
     primary_channel = Converger.Channels.get_channel!(conversation.channel_id)
 
     primary =
-      if primary_channel.type in @delivery_types and
+      if deliverable?(primary_channel) and
            primary_channel.mode in ["outbound", "duplex"],
          do: [primary_channel],
          else: []
@@ -156,7 +154,7 @@ defmodule Converger.Pipeline do
         end
       end)
       |> Enum.reject(&is_nil/1)
-      |> Enum.filter(&(&1.type in @delivery_types))
+      |> Enum.filter(&deliverable?/1)
       |> Enum.filter(&(&1.status == "active"))
       |> Enum.filter(&(&1.mode in ["outbound", "duplex"]))
 
@@ -168,14 +166,20 @@ defmodule Converger.Pipeline do
     |> Enum.filter(&accepts_activity?(&1, activity))
   end
 
+  defp deliverable?(channel), do: Converger.Channels.Adapter.capability?(channel.type, :outbound)
+
   # An inbound message from the conversation's participant (e.g. a WhatsApp
   # user) is never delivered back to that participant on their own channel.
-  # Returns that channel's id, or nil.
+  # Returns that channel's id, or nil. A websocket channel is exempt: it is a
+  # hub of many sockets (the participant's other tabs, an agent console on
+  # the same channel), and the sending socket drops the frame by `seq`.
   defp participant_echo_channel_id(activity, conversation) do
     case conversation.participant_id &&
            Converger.Participants.get_participant(conversation.participant_id) do
       %{external_id: external_id, channel_id: channel_id} when external_id == activity.sender ->
-        channel_id
+        if Converger.Channels.get_channel!(channel_id).type == "websocket",
+          do: nil,
+          else: channel_id
 
       _ ->
         nil
@@ -183,11 +187,12 @@ defmodule Converger.Pipeline do
   end
 
   # Conversation lifecycle events (close/reopen) carry no message content:
-  # only generic webhooks receive them. WebSocket clients get them through the
-  # PubSub broadcast; messaging adapters (WhatsApp, echo) would otherwise send
-  # an empty message or reply into a closed conversation.
+  # only generic webhooks and WebSocket clients receive them. Messaging
+  # adapters (WhatsApp, echo) would otherwise send an empty message or reply
+  # into a closed conversation.
   defp accepts_activity?(channel, activity) do
-    not Converger.Conversations.lifecycle_event?(activity) or channel.type == "webhook"
+    not Converger.Conversations.lifecycle_event?(activity) or
+      channel.type in ["webhook", "websocket"]
   end
 
   @doc """
@@ -198,7 +203,8 @@ defmodule Converger.Pipeline do
 
   Returns:
 
-    * `:ok` - delivered (or already delivered earlier, nothing re-sent)
+    * `:ok` - delivered (or already delivered earlier, nothing re-sent), or
+      handed off to a WebSocket channel whose receipt is pending
     * `{:error, {:halted, reason}}` - halted by middleware, dead-lettered, do not retry
     * `{:error, {:dead_lettered, reason}}` - failed and out of retries, do not retry
     * `{:error, reason}` - failed, retry according to `Converger.Pipeline.RetryPolicy`
@@ -228,28 +234,39 @@ defmodule Converger.Pipeline do
       {:ok, transformed_activity} ->
         result = Adapter.deliver_activity(channel, transformed_activity)
         Converger.Channels.Circuit.record(channel, result)
+        record_result(result, delivery, channel)
+    end
+  end
 
-        case result do
-          :ok ->
-            Deliveries.mark_sent(delivery)
-            :ok
+  defp record_result(result, delivery, channel) do
+    alias Converger.Deliveries
 
-          {:ok, response_meta} ->
-            Deliveries.mark_sent(delivery, response_meta)
-            :ok
+    case result do
+      :ok ->
+        Deliveries.mark_sent(delivery)
+        :ok
 
-          # Permanent provider error (e.g. 400 invalid recipient): no retries.
-          {:error, %DeliveryError{retryable?: false} = error} ->
-            Deliveries.mark_dead(delivery, DeliveryError.message(error))
-            {:error, {:dead_lettered, error}}
+      {:ok, response_meta} ->
+        Deliveries.mark_sent(delivery, response_meta)
+        :ok
 
-          {:error, reason} ->
-            policy = RetryPolicy.for_channel(channel)
+      # Handed off, receipt not confirmed yet (WebSocket): stays pending,
+      # no retry. Deliveries.acknowledge/3 marks it sent later.
+      {:pending, response_meta} ->
+        Deliveries.mark_handed_off(delivery, response_meta)
+        :ok
 
-            case Deliveries.mark_attempt_failed(delivery, error_message(reason), policy) do
-              {:ok, %{status: "failed"}} -> {:error, {:dead_lettered, reason}}
-              _ -> {:error, reason}
-            end
+      # Permanent provider error (e.g. 400 invalid recipient): no retries.
+      {:error, %DeliveryError{retryable?: false} = error} ->
+        Deliveries.mark_dead(delivery, DeliveryError.message(error))
+        {:error, {:dead_lettered, error}}
+
+      {:error, reason} ->
+        policy = RetryPolicy.for_channel(channel)
+
+        case Deliveries.mark_attempt_failed(delivery, error_message(reason), policy) do
+          {:ok, %{status: "failed"}} -> {:error, {:dead_lettered, reason}}
+          _ -> {:error, reason}
         end
     end
   end

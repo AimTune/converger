@@ -6,7 +6,7 @@ sidebar_position: 6
 
 Every activity that must reach an external channel (a webhook, WhatsApp via Meta or Infobip, the echo bot) gets one **delivery** per target channel. A delivery is attempted by the [delivery pipeline](architecture/delivery-pipeline.md), retried with backoff on transient failures, and **dead-lettered** when it cannot succeed. This page describes the rules, where they live in the code and how to operate them. The design is recorded in [ADR-0019](adr/0019-per-channel-retry-policy-delivery-error-and-lifeline.md) and [ADR-0002](adr/0002-broadway-for-throughput-oban-for-retries.md).
 
-`websocket` channels have no deliveries: their clients receive activities through the PubSub broadcast (see [Real-time](architecture/realtime.md)).
+`websocket` channels get deliveries too. Their adapter pushes the activity to the channel's connected sockets. With no connected client (or with `require_ack: true` in the channel config) it returns `{:pending, meta}`, and the delivery stays `pending` without retries until a client acknowledges or replays it (`Deliveries.acknowledge/3`). See [Deliveries](concepts/deliveries.md#websocket-deliveries), [Real-time](architecture/realtime.md) and [ADR-0033](adr/0033-websocket-channel-adapter-delivery.md).
 
 ## Delivery records
 
@@ -14,9 +14,9 @@ Every activity that must reach an external channel (a webhook, WhatsApp via Meta
 
 | Status | Meaning | Set by |
 | --- | --- | --- |
-| `pending` | Not delivered yet; eligible for (re)tries. | first attempt, every failed attempt with retries left |
+| `pending` | Not delivered yet; eligible for (re)tries. For `websocket`, also handed off with no confirmed receipt (not retried). | first attempt, every failed attempt with retries left, `Deliveries.mark_handed_off/2` |
 | `paused` | Parked: the channel's circuit breaker is open or its deliveries are paused. No attempt is made; it goes back to `pending` when the channel recovers or is resumed. Ranks like `pending`. | [flow control](#flow-control-circuit-breaker-rate-limits-and-tenant-fairness) |
-| `sent` | The provider accepted the request. `sent_at`, `provider_message_id` and response metadata are stored. | `Deliveries.mark_sent/2` |
+| `sent` | The provider accepted the request. `sent_at`, `provider_message_id` and response metadata are stored. | `Deliveries.mark_sent/2`, `Deliveries.acknowledge/3` (`websocket`) |
 | `delivered` | The provider reported delivery to the device. | provider receipt (`POST /api/v1/channels/:channel_id/status`) |
 | `read` | The provider reported that the recipient read it. | provider receipt |
 | `failed` | **Dead letter.** No further automatic attempts. `last_error` says why. | permanent error, middleware halt, exhausted retries, or a `failed` provider receipt |
@@ -140,6 +140,7 @@ In the Oban worker, `backoff/1` recovers the `DeliveryError` from the job's erro
 | `Pipeline.deliver/2` result | Delivery record | Job returns | Oban does |
 | --- | --- | --- | --- |
 | `:ok` (sent now, or already `sent` / `delivered` / `read`) | `sent` (unchanged if already further) | `:ok` | completes the job |
+| `:ok` after the adapter returned `{:pending, meta}` (`websocket`) | `pending`, `attempts + 1` (handed off) | `:ok` | completes the job |
 | `{:error, reason}`, transient, retries left | `pending`, `attempts + 1`, `last_error` | `{:error, reason}` | schedules the next attempt after `backoff/1` |
 | transient, `attempts` reaches `max_attempts` | `failed` | `{:cancel, reason}` | cancels the job |
 | permanent `DeliveryError` | `failed` | `{:cancel, reason}` | cancels the job |

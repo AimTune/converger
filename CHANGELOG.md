@@ -5,7 +5,7 @@
 ### Partitioning, retention and archive for activities and deliveries (#30)
 
 **Maintenance window** on existing installations (migration `20261010300100`); see
-`docs/operations/migrations.md`. Design: `docs/adr/0033-monthly-partitioning-and-per-tenant-retention.md`.
+`docs/operations/migrations.md`. Design: `docs/adr/0034-monthly-partitioning-and-per-tenant-retention.md`.
 
 - `activities` (by `inserted_at`) and `deliveries` (by the new `activity_inserted_at`) are monthly range
   partitioned tables, with no foreign keys. `deliveries` gains `tenant_id`. Partitions are created three months
@@ -23,6 +23,30 @@
   (`PurgeWorker`) instead of one cascading delete.
 - Idempotency keys are now also honoured when the first copy is in an older month.
 - Benchmark `test/load/partition_drop_benchmark_test.exs` (`--include benchmark`).
+
+### `websocket` is a first-class duplex channel adapter (#22)
+
+- The `websocket` adapter delivers: it broadcasts each activity (after the channel's
+  middleware) to the channel's sockets and records a delivery. With no connected client,
+  or with `require_ack: true` in the channel config, the delivery stays `pending` (new
+  adapter result `{:pending, meta}`, not retried) until a client replays or sends
+  `ack {watermark}`.
+- `websocket` channels can be routing rule targets: e.g. WhatsApp to an agent console.
+  The hardcoded `@delivery_types` list is replaced by an optional adapter
+  `capabilities/0` callback (`:outbound`).
+- `/socket/converger`: on a `websocket` channel, `postActivity` goes through the new
+  `Converger.Inbound` context (the same path as inbound webhooks; requires mode `inbound`
+  or `duplex`). New `ack {watermark}` event. Tokens issued with `{"scope": "channel"}`
+  (role `agent`) join `converger:channel:<id>` (every delivery to the channel, with
+  `conversation_id`; `postActivity` and `ack` name it) and the conversations owned by or
+  routed to their channel. Conversation topics drop duplicate frames and fill `seq` gaps
+  from the database. The native endpoint (`/socket/converger/v1`, #26) also receives sends on a
+  `websocket` channel through `Converger.Inbound`.
+- `websocket` channels support all three modes; existing ones (necessarily `outbound`)
+  become `duplex` (migration `20261010200000_make_websocket_channels_duplex`).
+- Lifecycle events are delivered to `websocket` channels too, and the participant echo
+  rule does not apply to them.
+- `docs/adr/0033-websocket-channel-adapter-delivery.md` records the design.
 
 ### Native Protocol v1 WebSocket, MessagePack, SSE and long-poll fallbacks (#26)
 

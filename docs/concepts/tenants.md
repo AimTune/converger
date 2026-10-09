@@ -133,7 +133,7 @@ Lines, verified by checksum) and removes them from the database. Archived months
 `Converger.Tenants.delete_tenant/2` (the **Delete** button on **Admin, Tenants**) deletes the tenant row; its
 channels, conversations, participants, routing rules, attachments rows and tenant users go with it
 (`ON DELETE CASCADE`), and audit log entries keep a `NULL` tenant. Activities and deliveries live in partitioned
-tables without foreign keys ([ADR-0033](../adr/0033-monthly-partitioning-and-per-tenant-retention.md)): in the same
+tables without foreign keys ([ADR-0034](../adr/0034-monthly-partitioning-and-per-tenant-retention.md)): in the same
 transaction a `Converger.Workers.PurgeWorker` job is enqueued that deletes them in batches of 5,000 rows, so a
 large tenant no longer means one statement holding locks for hours. Until the job has finished the rows still exist
 but are unreachable (no tenant, no API key). Deleting a channel or a conversation works the same way. Deleting
