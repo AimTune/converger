@@ -1,0 +1,49 @@
+{{- if .Values.migrations.enabled }}
+# Runs before the Deployment is installed or upgraded. The ConfigMap is not
+# installed yet at pre-install time, so the hook only uses the Secret
+# (DATABASE_URL, SECRET_KEY_BASE, CLOAK_KEY).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "converger.fullname" . }}-migrate
+  labels:
+    {{- include "converger.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migrate
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ .Chart.Name }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: migrate
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- include "converger.podSecurityContext" . | nindent 8 }}
+      containers:
+        - name: migrate
+          image: {{ include "converger.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/app/bin/migrate"]
+          envFrom:
+            - secretRef:
+                name: {{ required "existingSecret is required" .Values.existingSecret }}
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+          securityContext:
+            {{- include "converger.containerSecurityContext" . | nindent 12 }}
+{{- end }}

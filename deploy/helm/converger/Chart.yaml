@@ -1,0 +1,10 @@
+apiVersion: v2
+name: converger
+description: Converger channel hub, clustered with libcluster (Kubernetes DNS), with readiness-gated rollouts and a migration hook.
+type: application
+# Chart skeleton (issue #29). Versioned independently of the app.
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://converger.aimtune.dev
+sources:
+  - https://github.com/AimTune/converger

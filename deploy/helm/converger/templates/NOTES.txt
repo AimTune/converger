@@ -1,0 +1,10 @@
+Converger {{ .Chart.AppVersion }} is deployed as {{ include "converger.fullname" . }}.
+
+- Pods only receive traffic once GET /health/ready answers 200 (database,
+  Oban, migrations, not draining).
+- Clustering: {{ .Values.cluster.strategy }} via {{ include "converger.fullname" . }}-headless.
+  Check with: kubectl exec deploy/{{ include "converger.fullname" . }} -- /app/bin/converger rpc 'IO.inspect(Node.list())'
+- Metrics: GET /metrics with "Authorization: Bearer $METRICS_TOKEN" (from the
+  {{ .Values.existingSecret }} Secret) or from METRICS_ALLOWED_IPS.
+
+Docs: https://converger.aimtune.dev/operations/kubernetes

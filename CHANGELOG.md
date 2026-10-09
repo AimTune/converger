@@ -140,6 +140,24 @@
   an end user's token could mint legacy conversation tokens for other conversations of its
   channel under any user id. The legacy socket accepts only conversation tokens, and legacy
   verifiers reject Converger client tokens.
+### Multi-node clustering, health endpoints, metrics on the main port (#29)
+
+- Clustering with `libcluster` (replaces `dns_cluster`): `CLUSTER_STRATEGY` =
+  `kubernetes_dns` | `dns` | `gossip` | `epmd` | `none`. `rel/env.sh.eex` names
+  nodes `converger@<ip>` and **requires `RELEASE_COOKIE`** when clustering.
+  `DNS_CLUSTER_QUERY` still works (implies `dns`).
+- `GET /health/ready` now checks the database, Oban, migrations and the
+  draining state of `ConvergerWeb.Drain` (#27); 503 with `reasons` and a
+  per-check `checks` map (`status` stays `ready` / `draining`, plus `unavailable`).
+- **Breaking:** Prometheus metrics moved to `GET /metrics` on the main port,
+  behind `METRICS_TOKEN` (bearer) or `METRICS_ALLOWED_IPS`; 404 when neither
+  is set. The unauthenticated listener on 9568 only starts when
+  `PROMETHEUS_PORT` is set. `plug_cowboy`/`cowboy`/`cowlib` are gone (and the
+  two acknowledged `cowlib` advisories with them).
+- Two-node test suite (`test/cluster`, `mix test --only cluster`, own CI job):
+  cross-node WebSocket broadcast, shared rate limits, exactly-once deliveries.
+- `deploy/k8s` (kustomize), a Helm chart skeleton, `deploy/fly/fly.toml` and
+  `docker-compose.cluster.yml`. ADR-0035.
 
 ### Converger Protocol v1 specification (#21, refs #63 #68)
 

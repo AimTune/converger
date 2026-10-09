@@ -88,7 +88,8 @@ Start-up order:
 | Service | URL / port |
 | --- | --- |
 | Converger (API, `/admin`, `/portal`, WebSockets) | `http://localhost:4000` |
-| Prometheus metrics exporter of the app | `http://localhost:9568/metrics` |
+| Prometheus metrics of the app (needs `METRICS_TOKEN` in `.env`, sent as a bearer token) | `http://localhost:4000/metrics` |
+| Health probes | `http://localhost:4000/health/live`, `http://localhost:4000/health/ready` |
 | Prometheus | `http://localhost:9090` |
 | Grafana (user `admin`, password `GF_SECURITY_ADMIN_PASSWORD`) | `http://localhost:3000` |
 | Jaeger UI (traces) | `http://localhost:16686` |

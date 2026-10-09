@@ -50,6 +50,11 @@ defmodule ConvergerWeb.Endpoint do
   # this plug accepted.
   plug ConvergerWeb.Plugs.TrustedProxies
 
+  # GET /metrics (Prometheus), behind METRICS_TOKEN / METRICS_ALLOWED_IPS.
+  # After TrustedProxies (the IP allowlist needs the real client IP) and
+  # before ForceSSL, so in-cluster scrapes over plain HTTP work.
+  plug ConvergerWeb.Plugs.Metrics
+
   # HTTP -> HTTPS redirect + HSTS, configured at runtime (FORCE_SSL, HSTS_*).
   # Runs before Plug.Static so assets are covered too. WebSocket upgrades are
   # dispatched by Phoenix before these plugs; see docs/deployment.md.

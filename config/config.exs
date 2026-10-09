@@ -198,7 +198,7 @@ config :converger, Converger.Archive,
 #            :cluster - ETS counters replicated between nodes over PubSub
 #   limits:  overrides of the built-in defaults, e.g. %{inbound: {1_000, 1_000}}
 # config/runtime.exs sets the backend from RATE_LIMIT_BACKEND (defaulting to
-# :cluster when DNS_CLUSTER_QUERY is set).
+# :cluster when CLUSTER_STRATEGY enables clustering).
 config :converger, Converger.RateLimit,
   backend: :local,
   sync_interval_ms: 100,

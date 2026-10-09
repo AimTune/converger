@@ -20,18 +20,130 @@ if System.get_env("PHX_SERVER") do
   config :converger, ConvergerWeb.Endpoint, server: true
 end
 
-# Prometheus metrics listener. Not started in test (see config/test.exs), so
-# concurrent test runs on one machine don't fight over the port; set
-# PROMETHEUS_PORT to force one anyway.
-cond do
-  port = System.get_env("PROMETHEUS_PORT") ->
-    config :converger, :prometheus_port, String.to_integer(port)
+# Prometheus metrics are served on the main port at GET /metrics
+# (ConvergerWeb.Plugs.Metrics). Access needs METRICS_TOKEN (sent as
+# `Authorization: Bearer <token>`) or a client IP in METRICS_ALLOWED_IPS
+# (comma-separated IPs/CIDRs); with neither set, /metrics answers 404.
+metrics_config =
+  [
+    token:
+      case System.get_env("METRICS_TOKEN") do
+        nil -> nil
+        token -> if String.trim(token) == "", do: nil, else: String.trim(token)
+      end,
+    allowed_ips:
+      (System.get_env("METRICS_ALLOWED_IPS") || "")
+      |> String.split(",", trim: true)
+      |> Enum.map(&String.trim/1)
+      |> Enum.reject(&(&1 == ""))
+  ]
+  |> Enum.reject(fn {_key, value} -> value in [nil, []] end)
 
-  config_env() != :test ->
-    config :converger, :prometheus_port, 9568
+if metrics_config != [] do
+  config :converger, :metrics, metrics_config
+end
 
-  true ->
-    :ok
+# Legacy separate metrics listener: only started when PROMETHEUS_PORT is set.
+# It is unauthenticated, so it must only be reachable from the scraper.
+if port = System.get_env("PROMETHEUS_PORT") do
+  config :converger, :prometheus_port, String.to_integer(port)
+end
+
+# Clustering (libcluster, see Converger.Cluster and
+# docs/operations/clustering.md). CLUSTER_STRATEGY selects how nodes find each
+# other: none (default), kubernetes_dns, dns, gossip or epmd. The Erlang
+# distribution itself (node name, cookie) is set up by rel/env.sh.eex from
+# RELEASE_NODE / RELEASE_DISTRIBUTION / RELEASE_COOKIE.
+# DNS_CLUSTER_QUERY (the former dns_cluster setting) still works and implies
+# CLUSTER_STRATEGY=dns.
+cluster_env = fn var ->
+  case System.get_env(var) do
+    nil -> nil
+    value -> if String.trim(value) == "", do: nil, else: String.trim(value)
+  end
+end
+
+cluster_int = fn var ->
+  if value = cluster_env.(var), do: String.to_integer(value)
+end
+
+cluster_strategy =
+  case cluster_env.("CLUSTER_STRATEGY") do
+    nil ->
+      if cluster_env.("DNS_CLUSTER_QUERY"), do: :dns, else: :none
+
+    "none" ->
+      :none
+
+    "kubernetes_dns" ->
+      :kubernetes_dns
+
+    "dns" ->
+      :dns
+
+    "gossip" ->
+      :gossip
+
+    "epmd" ->
+      :epmd
+
+    other ->
+      raise "CLUSTER_STRATEGY must be none, kubernetes_dns, dns, gossip or epmd, got: #{inspect(other)}"
+  end
+
+cluster_basename = cluster_env.("CLUSTER_NODE_BASENAME") || "converger"
+
+cluster_options =
+  case cluster_strategy do
+    :none ->
+      []
+
+    :kubernetes_dns ->
+      [
+        service:
+          cluster_env.("CLUSTER_SERVICE") ||
+            raise(
+              "CLUSTER_STRATEGY=kubernetes_dns requires CLUSTER_SERVICE (the headless service)"
+            ),
+        application_name: cluster_basename,
+        polling_interval: cluster_int.("CLUSTER_POLL_INTERVAL_MS")
+      ]
+
+    :dns ->
+      [
+        query:
+          cluster_env.("CLUSTER_DNS_QUERY") || cluster_env.("DNS_CLUSTER_QUERY") ||
+            raise("CLUSTER_STRATEGY=dns requires CLUSTER_DNS_QUERY"),
+        node_basename: cluster_basename,
+        polling_interval: cluster_int.("CLUSTER_POLL_INTERVAL_MS")
+      ]
+
+    :gossip ->
+      [
+        port: cluster_int.("CLUSTER_GOSSIP_PORT"),
+        if_addr: cluster_env.("CLUSTER_GOSSIP_IF_ADDR"),
+        multicast_addr: cluster_env.("CLUSTER_GOSSIP_MULTICAST_ADDR"),
+        multicast_if: cluster_env.("CLUSTER_GOSSIP_MULTICAST_IF"),
+        broadcast_only: cluster_env.("CLUSTER_GOSSIP_BROADCAST_ONLY") in ~w(true 1),
+        secret: cluster_env.("CLUSTER_GOSSIP_SECRET")
+      ]
+
+    :epmd ->
+      [
+        # Node names are operator configuration, not user input.
+        hosts:
+          (cluster_env.("CLUSTER_HOSTS") || "")
+          |> String.split(",", trim: true)
+          |> Enum.map(&String.trim/1)
+          |> Enum.reject(&(&1 == ""))
+          |> Enum.map(&String.to_atom/1)
+      ]
+  end
+
+if config_env() != :test do
+  config :converger, Converger.Cluster,
+    strategy: cluster_strategy,
+    options: Enum.reject(cluster_options, fn {_key, value} -> is_nil(value) end)
 end
 
 # Configurable CORS origins and admin IP whitelist.
@@ -145,10 +257,10 @@ end
 
 # Rate-limit backend: "local" (per-node counters) or "cluster" (counters
 # replicated between nodes over PubSub). Defaults to "cluster" when node
-# discovery is configured through DNS_CLUSTER_QUERY, otherwise "local".
+# discovery is configured (CLUSTER_STRATEGY other than none), otherwise "local".
 rate_limit_backend =
   case System.get_env("RATE_LIMIT_BACKEND") do
-    nil -> if System.get_env("DNS_CLUSTER_QUERY") in [nil, ""], do: nil, else: :cluster
+    nil -> if cluster_strategy == :none, do: nil, else: :cluster
     "local" -> :local
     "cluster" -> :cluster
     other -> raise "RATE_LIMIT_BACKEND must be \"local\" or \"cluster\", got: #{inspect(other)}"
@@ -424,8 +536,6 @@ if config_env() == :prod do
 
   host = System.get_env("PHX_HOST") || "example.com"
   port = String.to_integer(System.get_env("PORT") || "4000")
-
-  config :converger, :dns_cluster_query, System.get_env("DNS_CLUSTER_QUERY")
 
   config :converger, ConvergerWeb.Endpoint,
     url: [host: host, port: 443, scheme: "https"],

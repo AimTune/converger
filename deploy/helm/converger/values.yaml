@@ -1,0 +1,61 @@
+# Default values for the Converger chart (a skeleton: it mirrors deploy/k8s).
+# See docs/operations/kubernetes.md.
+
+image:
+  repository: ghcr.io/aimtune/converger
+  # Defaults to the chart's appVersion. Pin a version or a digest.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+# Name of an existing Secret with DATABASE_URL, SECRET_KEY_BASE, CLOAK_KEY,
+# RELEASE_COOKIE and (optionally) METRICS_TOKEN. The chart never creates it.
+existingSecret: converger-env
+
+# Non-secret environment (docs/operations/configuration.md).
+env:
+  PHX_HOST: converger.example.com
+  TRUSTED_PROXIES: 10.0.0.0/8
+  FORCE_SSL: "true"
+  POOL_SIZE: "10"
+  METRICS_ALLOWED_IPS: ""
+
+cluster:
+  # libcluster strategy: kubernetes_dns (headless Service) or none.
+  strategy: kubernetes_dns
+  nodeBasename: converger
+
+replicaCount: 2
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# Runs /app/bin/migrate as a pre-install/pre-upgrade hook.
+migrations:
+  enabled: true
+
+service:
+  type: ClusterIP
+  port: 80
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    memory: 1Gi
+
+terminationGracePeriodSeconds: 60
+preStopSleepSeconds: 5
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
