@@ -13,6 +13,8 @@ defmodule ConvergerWeb.TokenController do
   action_fallback ConvergerWeb.FallbackController
 
   def create(conn, %{"conversation_id" => conversation_id, "user_id" => user_id}) do
+    conn = ConvergerWeb.Deprecation.mark(conn, :token_endpoint)
+
     with %Conversations.Conversation{} = conversation <-
            Conversations.get_conversation(conversation_id),
          conversation = Converger.Repo.preload(conversation, :tenant),

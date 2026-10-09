@@ -8,6 +8,8 @@ defmodule ConvergerWeb.ConversationController do
   action_fallback ConvergerWeb.FallbackController
 
   def create(conn, conversation_params) do
+    conn = ConvergerWeb.Deprecation.mark(conn, :channel_token)
+
     with [token] <- get_req_header(conn, "x-channel-token"),
          {:ok, %{"channel_id" => channel_id, "tenant_id" => tenant_id}} <-
            Converger.Auth.Token.verify_channel_token(token),

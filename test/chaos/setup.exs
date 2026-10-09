@@ -4,7 +4,7 @@
 #
 # Not a test file: ExUnit only loads *_test.exs.
 
-alias Converger.Auth.Token
+alias Converger.Auth.ConvergerToken
 alias Converger.{Channels, Conversations, Tenants}
 
 suffix = Base.encode16(:crypto.strong_rand_bytes(4), case: :lower)
@@ -38,7 +38,12 @@ rest_conversations = for _ <- 1..rest//1, do: new_conversation.().id
 ws_conversations =
   for i <- 1..ws//1 do
     conversation = new_conversation.()
-    {:ok, token, _claims} = Token.generate_token(conversation, tenant, "chaos-ws-#{i}")
+
+    {:ok, token, _claims} =
+      ConvergerToken.generate_conversation_token(channel, conversation.id,
+        user_id: "chaos-ws-#{i}"
+      )
+
     %{id: conversation.id, token: token}
   end
 

@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+### One client socket stack; legacy socket and tokens deprecated (#23)
+
+- The Converger API socket (`/socket/converger`, topic
+  `converger:conversation:<id>`) now accepts sends: push `postActivity` with an
+  activity (`type`, `text`, `attachments`, `channelData`, optional `clientId`);
+  the reply carries `id`, `seq` and `watermark`. The sender is the token's
+  `user_id` (else `from.id`, else `"user"`), a repeated `clientId` returns the
+  stored activity, and sends share the tenant's `activity_create` rate limit
+  with REST. It is the single implementation of the client protocol.
+- **Deprecated**, removed no earlier than two minor releases and 6 months from
+  now: the legacy socket `/socket` (`UserSocket`, `conversation:<id>`,
+  `new_activity`, `last_activity_id`), `POST /api/v1/tokens`, and channel tokens
+  in `x-channel-token` (`POST /api/v1/conversations` and the tenant API). The
+  tenant API with `x-api-key` is not deprecated. Every use logs a warning
+  (per connection or per request), emits `[:converger, :deprecated, :use]`, and
+  HTTP responses carry `Deprecation` (RFC 9745) and
+  `Link: <...>; rel="deprecation"` headers. Migration guide:
+  `docs/api/migrating-from-legacy.md`; decision: ADR-0026.
+- `converger_js` and the chaos harness use the Converger API socket.
+
 ### Security fixes
 
 - Tenant API (`x-channel-token`) accepts only channel tokens (`typ: "channel"`, or the legacy
