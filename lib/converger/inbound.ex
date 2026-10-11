@@ -13,7 +13,7 @@ defmodule Converger.Inbound do
 
   require Logger
 
-  alias Converger.{Activities, Conversations, Participants}
+  alias Converger.{Activities, Conversations, Deliveries, Participants}
   alias Converger.Channels.Channel
 
   @type message :: map()
@@ -34,6 +34,11 @@ defmodule Converger.Inbound do
   `"idempotency_key"` (a stable provider or client message id; a message with
   a known key never creates a second activity) and a `"participant"`
   (`%{"external_id" => ...}`) used to find the conversation.
+
+  Threaded channels add `"thread_refs"` (provider message ids) and
+  `"thread_activity_ids"` (activity ids) of the messages the message replies
+  to; the active conversation of the first one that went through this
+  channel is used before the participant's.
 
   ## Options
 
@@ -152,9 +157,11 @@ defmodule Converger.Inbound do
 
   # Conversation for an inbound message, in order of precedence:
   #   1. an explicit conversation id (tenant-scoped);
-  #   2. the participant's active conversation on this channel, or a new one
+  #   2. the active conversation of the message it replies to (see
+  #      `thread_conversation/2`);
+  #   3. the participant's active conversation on this channel, or a new one
   #      for the participant (see Converger.Participants);
-  #   3. a new, participant-less conversation (adapters without an external id).
+  #   4. a new, participant-less conversation (adapters without an external id).
   defp resolve_or_create_conversation(channel, conversation_id, message) do
     cond do
       conversation_id ->
@@ -162,6 +169,13 @@ defmodule Converger.Inbound do
           %Conversations.Conversation{} = conv -> {:ok, conv}
           nil -> {:error, :not_found}
         end
+
+      conversation = thread_conversation(channel, message) ->
+        # The sender becomes a participant of this channel even though the
+        # conversation belongs to another one, so the pipeline never sends
+        # their message back to them here.
+        if attrs = participant_attrs(message), do: Participants.upsert_participant(channel, attrs)
+        {:ok, conversation}
 
       participant = participant_attrs(message) ->
         Participants.resolve_conversation(channel, participant)
@@ -174,6 +188,51 @@ defmodule Converger.Inbound do
         })
     end
   end
+
+  # Threaded channels (email) name the messages a message replies to:
+  #
+  #   * "thread_refs" - provider message ids, most recent first: an inbound
+  #     message of this channel (idempotency key) or an outbound one (its
+  #     delivery's provider message id on this channel);
+  #   * "thread_activity_ids" - ids of activities delivered on this channel
+  #     (decoded from the Message-ID Converger gave them).
+  #
+  # The first one found whose conversation is active wins, whatever channel
+  # the conversation started on: a reply lands where the conversation lives.
+  # Only messages that went through this channel count, so a forged header
+  # cannot reach a conversation the sender was never part of.
+  defp thread_conversation(channel, message) do
+    refs = string_list(message["thread_refs"])
+    activity_ids = string_list(message["thread_activity_ids"])
+
+    conversation_ids =
+      Stream.concat(
+        Stream.map(refs, fn ref ->
+          case Activities.get_activity_by_provider_message_id(channel.id, ref) do
+            %Activities.Activity{conversation_id: id} -> id
+            nil -> nil
+          end
+        end),
+        Stream.map(activity_ids, &Deliveries.delivered_conversation_id(channel.id, &1))
+      )
+
+    Enum.find_value(conversation_ids, fn
+      nil ->
+        nil
+
+      id ->
+        case Conversations.get_conversation(id, channel.tenant_id) do
+          %Conversations.Conversation{status: status} = conversation ->
+            if status == Conversations.open_status(), do: conversation
+
+          nil ->
+            nil
+        end
+    end)
+  end
+
+  defp string_list(list) when is_list(list), do: Enum.filter(list, &(is_binary(&1) and &1 != ""))
+  defp string_list(_), do: []
 
   defp participant_attrs(%{"participant" => %{"external_id" => external_id} = participant})
        when is_binary(external_id) and external_id != "",

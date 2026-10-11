@@ -17,7 +17,7 @@ Table `channels`:
 | `id` | uuid | | Primary key. |
 | `tenant_id` | uuid | | Owner. `(tenant_id, name)` is unique. |
 | `name` | text | | Required. |
-| `type` | string | `"webhook"` | Adapter: `echo`, `webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram`. |
+| `type` | string | `"webhook"` | Adapter: `echo`, `webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram`, `email`. |
 | `mode` | text | `"duplex"` | `inbound`, `outbound` or `duplex`. Must be supported by the type. |
 | `secret` | encrypted binary | generated | Encrypted at rest. Generated (32 random bytes, Base64) when not given. |
 | `secret_hash` | binary | | SHA-256 of `secret`, unique, used for lookups. |
@@ -45,6 +45,7 @@ Each type maps to a module implementing the `Converger.Channels.Adapter` behavio
 | `whatsapp_infobip` | `inbound`, `outbound`, `duplex` | `base_url`, `api_key`, `sender` | Infobip WhatsApp API | [WhatsApp](../channels/whatsapp.md) |
 | `slack` | `inbound`, `outbound`, `duplex` | `bot_token`, `signing_secret`. Optional: `channel`, `app_id`, `conversation_scope` (`thread`, `channel`, `user`), `download_files` | Slack Web API (`chat.postMessage`, `chat.update`, `chat.delete`, file uploads); Events API inbound | [Slack](../channels/slack.md) |
 | `telegram` | `inbound`, `outbound`, `duplex` | `bot_token`, plus `secret_token` when `require_signature` is true. Optional: `parse_mode`, `allowed_updates` | Telegram Bot API (`sendMessage`, `sendPhoto`, `sendDocument`) | [Telegram](../channels/telegram.md) |
+| `email` | `inbound`, `outbound`, `duplex` | `provider` (`smtp`, `ses`, `sendgrid`, `mailgun`, `postmark`), `from`, the provider credentials, plus `ses_topic_arn` or `mailgun_signing_secret` for those inbound providers | Email through Swoosh, threaded with `Message-ID` / `In-Reply-To` | [Email](../channels/email.md) |
 | `echo` | `outbound` | none | Writes a reply activity from `"bot"` into the same conversation (testing) | [Echo](../channels/echo.md) |
 
 See the [channels overview](../channels/overview.md) for provider setup, and [writing an adapter](../channels/writing-an-adapter.md) to add a type. Each type is one adapter module: the type list, the config validation above and the admin form all come from the adapters' `capabilities/0` and `config_schema/0` ([ADR-0038](../adr/0038-adapter-behaviour-v2-and-config-driven-registry.md)).
@@ -140,7 +141,7 @@ Deleting a channel also disconnects its sockets, and cascades to its conversatio
 
 ## Health checks
 
-`Converger.Workers.ChannelHealthWorker` runs every 5 minutes (Oban cron). For each **active** channel of type `webhook`, `whatsapp_meta`, `whatsapp_infobip`, `slack` or `telegram`, it computes the delivery failure rate over the last 60 minutes and stores a row in `channel_health_checks`:
+`Converger.Workers.ChannelHealthWorker` runs every 5 minutes (Oban cron). For each **active** channel of type `webhook`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram` or `email`, it computes the delivery failure rate over the last 60 minutes and stores a row in `channel_health_checks`:
 
 | Status | Failure rate (failed / total deliveries in window) |
 | --- | --- |

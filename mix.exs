@@ -73,6 +73,8 @@ defmodule Converger.MixProject do
       {:ecto_sql, "~> 3.13"},
       {:postgrex, ">= 0.0.0"},
       {:swoosh, "~> 1.16"},
+      {:gen_smtp, "~> 1.3"},
+      {:mail, "~> 0.5.2"},
       {:req, "~> 0.7"},
       {:telemetry_metrics, "~> 1.0"},
       {:telemetry_poller, "~> 1.0"},

@@ -34,6 +34,10 @@ config :converger, Converger.Mailer, adapter: Swoosh.Adapters.Test
 # Disable swoosh api client as it is only required for production adapters
 config :swoosh, :api_client, false
 
+# Email channels send through Swoosh.Adapters.Test (sent mails go to the
+# test process), whatever their provider.
+config :converger, :email_swoosh_adapter, Swoosh.Adapters.Test
+
 # Print only warnings and errors during test
 config :logger, level: :warning
 
