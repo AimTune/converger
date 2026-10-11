@@ -122,7 +122,7 @@ Turn the adapter layer into a real plugin system and ship the channels integrato
 | [#36](https://github.com/AimTune/converger/issues/36) | Adapter behaviour v2: `capabilities/0`, `config_schema/0`, provider signature verification, typing, health probe | Open |
 | [#43](https://github.com/AimTune/converger/issues/43) | Conditional routing rules: filters, priority, reply-back routing, per-rule transformations, dry-run | Open |
 | [#37](https://github.com/AimTune/converger/issues/37) | WhatsApp: media messages, template (HSM) messages, interactive messages and inbound media download | Open |
-| [#38](https://github.com/AimTune/converger/issues/38) | Telegram Bot adapter (duplex) | Open |
+| [#38](https://github.com/AimTune/converger/issues/38) | Telegram Bot adapter (duplex) | Done ([Telegram](channels/telegram.md), [ADR-0041](adr/0041-telegram-adapter-chat-scoped-ids-and-stored-media.md)) |
 | [#39](https://github.com/AimTune/converger/issues/39) | Slack adapter (Events API inbound, Web API outbound, signing secret verification) | Done ([Slack](channels/slack.md), [ADR-0040](adr/0040-slack-adapter-message-refs-conversation-scopes-and-in-band-challenge.md)) |
 | [#40](https://github.com/AimTune/converger/issues/40) | Email adapter (outbound via Swoosh, inbound via provider parse webhooks) | Done ([Email](channels/email.md), [ADR-0042](adr/0042-email-adapter-threading-by-message-id-and-provider-webhooks.md)) |
 | [#41](https://github.com/AimTune/converger/issues/41) | SMS adapters (Twilio, Vonage) with delivery receipts | Open |
