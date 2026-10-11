@@ -171,6 +171,10 @@ defmodule Converger.Inbound do
         end
 
       conversation = thread_conversation(channel, message) ->
+        # The sender becomes a participant of this channel even though the
+        # conversation belongs to another one, so the pipeline never sends
+        # their message back to them here.
+        if attrs = participant_attrs(message), do: Participants.upsert_participant(channel, attrs)
         {:ok, conversation}
 
       participant = participant_attrs(message) ->

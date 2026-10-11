@@ -44,7 +44,7 @@ When an activity is created, `Converger.Pipeline.resolve_delivery_channels/1` pi
 
 - the conversation's own channel, if its adapter has the `:outbound` capability (every type today: `echo`, `webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `email`) and its mode is `outbound` or `duplex`;
 - plus the targets of enabled [routing rules](routing-rules.md) whose source is that channel, if they are active, deliverable and `outbound`/`duplex`;
-- minus the participant's own channel when the activity was sent by that participant (no echo back to the author), unless that channel is a `websocket` channel;
+- minus the participant's own channel when the activity was sent by that participant, and every target channel on which the sender is a participant (no echo back to the author), unless that channel is a `websocket` channel;
 - minus every channel other than `webhook` and `websocket` for `conversationUpdate` lifecycle events.
 
 ### WebSocket deliveries

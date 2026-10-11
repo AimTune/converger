@@ -22,7 +22,7 @@ defmodule ConvergerWeb.EmailInboundTest do
     tenant = tenant_fixture()
     web = channel_fixture(tenant)
     conversation = conversation_fixture(tenant, web)
-    %{tenant: tenant, conversation: conversation}
+    %{tenant: tenant, web: web, conversation: conversation}
   end
 
   defp email_channel(tenant, config) do
@@ -106,6 +106,31 @@ defmodule ConvergerWeb.EmailInboundTest do
 
       # The next outbound email continues the thread.
       send_outbound(ctx.tenant, ctx.conversation, ctx.channel, "Calling the fire brigade")
+    end
+
+    test "a reply routed to the email channel is not sent back to its author", ctx do
+      {activity, _} = send_outbound(ctx.tenant, ctx.conversation, ctx.channel)
+
+      {:ok, _rule} =
+        Converger.RoutingRules.create_routing_rule(%{
+          "name" => "web to email",
+          "tenant_id" => ctx.tenant.id,
+          "source_channel_id" => ctx.web.id,
+          "target_channel_ids" => [ctx.channel.id]
+        })
+
+      raw = reply_mime(in_reply_to: "converger.#{activity.id}@acme.test")
+
+      conn = ctx.conn |> basic_auth() |> post_raw(ctx.channel, raw)
+      assert %{"activity_ids" => [id]} = json_response(conn, 200)
+
+      assert Activities.get_activity!(id).conversation_id == ctx.conversation.id
+      assert Deliveries.get_delivery_for_activity_and_channel(id, ctx.channel.id) == nil
+      refute_received {:email, _}
+
+      # An agent's answer in the same conversation still goes out by email.
+      agent = activity_fixture(ctx.tenant, ctx.conversation, %{sender: "agent", text: "Hi Jane"})
+      assert Deliveries.get_delivery_for_activity_and_channel(agent.id, ctx.channel.id)
     end
 
     test "a reply matched through a provider-rewritten Message-ID", ctx do

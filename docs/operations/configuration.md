@@ -431,7 +431,8 @@ PgBouncer transaction pooling). See [Migrations and maintenance windows](migrati
 | `:force_ssl` | unset outside prod | Keyword list of `Plug.SSL` options, built from the TLS variables in prod; `false` disables. |
 | `:webhook` | `[]` | `allowed_targets`, `allow_private_targets`, `resolver` (SSRF guard), and installation defaults for `connect_timeout` (5000 ms), `receive_timeout` (10000 ms), `max_response_bytes` (1 MiB). |
 | `:channel_signals_async` | `true`; `false` in test | Forward typing indicators and read receipts to external channels (`Converger.Channels.Signals`) in a task under `Converger.TaskSupervisor`. `false` runs them inline in the WebSocket channel process. |
-| `:webhook_req_options`, `:whatsapp_req_options`, `:slack_req_options` | `[]` | Extra `Req` options merged into adapter requests (tests use them for `Req.Test` plugs). |
+| `:webhook_req_options`, `:whatsapp_req_options`, `:slack_req_options`, `:email_req_options` | `[]` | Extra `Req` options merged into adapter requests (tests use them for `Req.Test` plugs). `:email_req_options` applies to the SNS certificate and subscription requests of `email` channels. |
+| `:email_swoosh_adapter` | `nil` | A Swoosh adapter module used instead of the provider adapter of every `email` channel. The test config sets `Swoosh.Adapters.Test`. See [Email](../channels/email.md). |
 | `Converger.Channels.Adapters.WhatsappMeta`, `graph_api_version:` | `"v26.0"` | Default Graph API version when the channel config has none. |
 | `:activity_limits` | `max_text_bytes: 65_536`, `max_attachments: 10`, `max_attachment_bytes: 4_096`, `max_metadata_bytes: 16_384` | Activity size limits (attachment and metadata sizes measured as JSON). |
 | `:conversation_inactivity_hours` | `24` | Open conversations idle longer than this are closed by the hourly expiration job. |
