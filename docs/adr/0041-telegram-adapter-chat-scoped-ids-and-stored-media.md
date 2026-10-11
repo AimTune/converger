@@ -9,7 +9,7 @@ description: Telegram messages are named "<chat_id>:<message_id>", a configured 
 | **Status** | Accepted |
 | **Date** | 2026-10-11 |
 | **Issue** | [#38](https://github.com/AimTune/converger/issues/38) |
-| **Pull request** | to be linked |
+| **Pull request** | [#132](https://github.com/AimTune/converger/pull/132) |
 | **Related** | [ADR-0007](0007-attachment-storage-with-hand-written-signing.md), [ADR-0009](0009-inbound-signature-scheme-and-per-channel-enforcement.md), [ADR-0015](0015-per-message-idempotent-inbound-batches.md), [ADR-0016](0016-participant-based-conversation-resolution.md), [ADR-0036](0036-rich-activity-model.md), [ADR-0038](0038-adapter-behaviour-v2-and-config-driven-registry.md) |
 
 ## Context and problem statement
