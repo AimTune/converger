@@ -9,7 +9,7 @@ description: Delivery attempts are timed around the adapter call with outcome ta
 | **Status** | Accepted |
 | **Date** | 2026-10-10 |
 | **Issue** | [#33](https://github.com/AimTune/converger/issues/33) |
-| **Pull request** | to be added |
+| **Pull request** | [#135](https://github.com/AimTune/converger/pull/135) |
 | **Related** | [ADR-0010](0010-runtime-cors-and-opentelemetry-configuration.md), [ADR-0019](0019-per-channel-retry-policy-delivery-error-and-lifeline.md), [ADR-0020](0020-per-subject-socket-ids-and-presence.md), [ADR-0027](0027-websocket-limits-backpressure-and-draining.md), [ADR-0031](0031-per-channel-circuit-breaker-rate-limit-and-tier-queues.md) |
 
 ## Context and problem statement
