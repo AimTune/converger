@@ -33,6 +33,7 @@ Which channel types accept which requests:
 | `whatsapp_meta` | yes (modes `inbound`, `duplex`) | `x-hub-signature-256` (Meta app secret) |
 | `whatsapp_infobip` | yes (modes `inbound`, `duplex`) | `x-converger-signature` |
 | `slack` | yes (modes `inbound`, `duplex`); `url_verification` is answered with its `challenge` | `x-slack-signature` (signing secret, 5 minute window) |
+| `telegram` | yes (modes `inbound`, `duplex`) | `x-telegram-bot-api-secret-token` (equal to the channel's `secret_token`; a missing or wrong header is `401` once one is set) |
 | `echo`, `websocket` | no: `400` with the adapter's message | `x-converger-signature` |
 
 A channel in `outbound` mode answers messages with `400 {"error": "Channel does not accept inbound messages"}`.
@@ -221,7 +222,7 @@ Status codes:
 | Status | When |
 | --- | --- |
 | `201 Created` | Generic channel types, at least one new activity created |
-| `200 OK` | Generic channel types with only duplicates; `whatsapp_meta`, `whatsapp_infobip` and `slack` always, once the request has been handled (also when messages were rejected), because those providers retry any non-200 response |
+| `200 OK` | Generic channel types with only duplicates; `whatsapp_meta`, `whatsapp_infobip`, `slack` and `telegram` always, once the request has been handled (also when messages were rejected), because those providers retry any non-200 response |
 | `200 OK` with only `status` and `receipts_processed` | Status-only request |
 | `422` | Generic channel types where every message was rejected: the first rejection's changeset errors, for example `{"errors": {"type": ["is invalid"]}}`; or the empty-message error above |
 | `503` | A transient failure (delivery jobs could not be enqueued): `{"error": "Activity could not be accepted, please retry"}`. The provider should re-deliver. |
@@ -293,6 +294,7 @@ Idempotency keys:
 | `whatsapp_meta` | The message `id` (`wamid...`) |
 | `whatsapp_infobip` | `messageId` |
 | `slack` | `"<channel>:<ts>"` for messages (so a `message` and an `app_mention` of the same message are one activity); edits, deletes and reactions have their own keys, see [Slack](../channels/slack.md#message-mapping) |
+| `telegram` | `"<chat_id>:<message_id>"` for messages; edits, button presses and reactions have their own keys, see [Telegram](../channels/telegram.md#update-mapping) |
 | `webhook` | The optional `idempotency_key` body field. Without it, a re-delivered request creates a second activity. |
 
 Re-sending the same generic message with the same `idempotency_key` returns `200` (instead of `201`) with
