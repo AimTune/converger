@@ -205,7 +205,7 @@ Under steady REST load (2 conversations, one sender each), the script:
 
 Each wait times out after `CHAOS_ALERT_TIMEOUT_S` (240 s) and fails the run. The time each step took is written to
 `test/chaos/.run/out/timings.txt` and the final alert state to `alerts.json`. Other tunables:
-`CHAOS_REST_CONVERSATIONS` (2), `CHAOS_APP_PORT` (14100), `CHAOS_PROMETHEUS_PORT` (19090), `CHAOS_PROJECT`
+`CHAOS_REST_CONVERSATIONS` (2), `CHAOS_APP_PORT` (14300), `CHAOS_PROMETHEUS_PORT` (19300), `CHAOS_PROJECT`
 (`converger-chaos-alerts`), `CHAOS_SKIP_BUILD`, `CHAOS_KEEP`.
 
 Step 2 is needed because the [circuit breaker](delivery.md#circuit-breaker) contains a dead endpoint after 5

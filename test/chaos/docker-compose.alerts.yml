@@ -9,7 +9,7 @@ services:
     volumes: !override
       - ./test/chaos/.run/prometheus:/etc/prometheus:ro
     ports: !override
-      - "127.0.0.1:${CHAOS_PROMETHEUS_PORT:-19090}:9090"
+      - "127.0.0.1:${CHAOS_PROMETHEUS_PORT:-19300}:9090"
 
   app:
     environment:
