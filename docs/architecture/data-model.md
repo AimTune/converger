@@ -188,7 +188,7 @@ A connection to one messaging surface (a webhook, a WhatsApp number, a WebSocket
 
 | Column | Type | Notes |
 | --- | --- | --- |
-| `type` | string, default `"webhook"` | `echo`, `webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip`. |
+| `type` | string, default `"webhook"` | `echo`, `webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip`, `slack`. |
 | `mode` | text, default `"duplex"` | `inbound`, `outbound` or `duplex`. Only `outbound` and `duplex` channels receive deliveries. |
 | `status` | text | `"active"` or not. Deactivating disconnects the channel's sockets. |
 | `secret` | binary, not null, **encrypted** | Channel secret (Converger API `Bearer` secret, inbound signature key). Cloak `Converger.Encrypted.Binary`. |
@@ -291,7 +291,7 @@ Append-only (`updated_at` disabled) trail of administrative changes. Columns: `t
 
 ### channel_health_checks
 
-Written by `ChannelHealthWorker` every 5 minutes per active `webhook`, `whatsapp_meta` and `whatsapp_infobip` channel: `status` (`healthy`, `degraded`, `unhealthy`, `unknown`), `total_deliveries`, `failed_deliveries`, `failure_rate`, `checked_at`. Rows older than 7 days (`HEALTH_CHECK_RETENTION_DAYS`) are pruned daily by `PruneWorker`. Indexes: `(channel_id)`, `(channel_id, checked_at)`, `(checked_at)`.
+Written by `ChannelHealthWorker` every 5 minutes per active `webhook`, `whatsapp_meta`, `whatsapp_infobip` and `slack` channel: `status` (`healthy`, `degraded`, `unhealthy`, `unknown`), `total_deliveries`, `failed_deliveries`, `failure_rate`, `checked_at`. Rows older than 7 days (`HEALTH_CHECK_RETENTION_DAYS`) are pruned daily by `PruneWorker`. Indexes: `(channel_id)`, `(channel_id, checked_at)`, `(checked_at)`.
 
 ### archive_parts
 
