@@ -671,6 +671,28 @@ defmodule Converger.Deliveries do
   end
 
   @doc """
+  The conversation of activity `activity_id` when it has a delivery on
+  `channel_id`, or nil. Lets a threaded inbound message (an email reply)
+  find the conversation of the message it answers.
+  """
+  def delivered_conversation_id(channel_id, activity_id) do
+    case Ecto.UUID.cast(activity_id) do
+      {:ok, activity_id} ->
+        from(d in Delivery,
+          join: a in Converger.Activities.Activity,
+          on: a.id == d.activity_id,
+          where: d.channel_id == ^channel_id and d.activity_id == ^activity_id,
+          select: a.conversation_id,
+          limit: 1
+        )
+        |> Repo.one()
+
+      :error ->
+        nil
+    end
+  end
+
+  @doc """
   Advance a delivery's status following monotonic progression rules.
   Ignores stale updates (e.g., "delivered" arriving after "read").
   Broadcasts the update via PubSub.

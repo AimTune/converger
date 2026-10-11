@@ -64,6 +64,7 @@ supersedes the old one and both are linked. Read
 | [0035](0035-native-transports-share-signals-limits-and-draining.md) | Native transports share the signals core, the client WebSocket limits and draining | Accepted | [#26](https://github.com/AimTune/converger/issues/26), [#25](https://github.com/AimTune/converger/issues/25), [#27](https://github.com/AimTune/converger/issues/27) / [#123](https://github.com/AimTune/converger/pull/123) |
 | [0038](0038-adapter-behaviour-v2-and-config-driven-registry.md) | Adapter behaviour v2: declared capabilities and config schemas, a registry from built-ins plus `config :converger, :adapters` | Accepted | [#36](https://github.com/AimTune/converger/issues/36) / [#130](https://github.com/AimTune/converger/pull/130) |
 | [0040](0040-slack-adapter-message-refs-conversation-scopes-and-in-band-challenge.md) | Slack adapter: `<channel>:<ts>` message refs, `conversation_scope` thread / channel / user, an in-band `inbound_challenge/2` callback | Accepted | [#39](https://github.com/AimTune/converger/issues/39) / [#131](https://github.com/AimTune/converger/pull/131) |
+| [0042](0042-email-adapter-threading-by-message-id-and-provider-webhooks.md) | Email adapter: deterministic `Message-ID` per activity, thread-first conversation resolution (`thread_refs`), provider webhooks with per-provider authentication (SNS signature and topic, Mailgun HMAC, basic auth) | Accepted | [#40](https://github.com/AimTune/converger/issues/40) / [#133](https://github.com/AimTune/converger/pull/133) |
 
 ### Security
 

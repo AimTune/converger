@@ -62,8 +62,9 @@ config :phoenix, :stacktrace_depth, 20
 # Initialize plugs at runtime for faster development compilation
 config :phoenix, :plug_init_mode, :runtime
 
-# Disable swoosh api client as it is only required for production adapters.
-config :swoosh, :api_client, false
+# Email channels (the `email` adapter) send through the Swoosh API adapters,
+# which need an HTTP client.
+config :swoosh, :api_client, Swoosh.ApiClient.Req
 
 # Let development webhooks target local services. The SSRF guard blocks
 # private, loopback and link-local targets everywhere else.

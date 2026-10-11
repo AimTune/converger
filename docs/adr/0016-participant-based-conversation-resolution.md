@@ -10,7 +10,7 @@ description: Inbound messages without a conversation_id join the active conversa
 | **Date** | 2026-10-08 |
 | **Issue** | [#16](https://github.com/AimTune/converger/issues/16) |
 | **Pull request** | [#88](https://github.com/AimTune/converger/pull/88) |
-| **Related** | [ADR-0003](0003-pipeline-is-the-only-delivery-path.md), [ADR-0006](0006-per-conversation-seq-and-opaque-watermarks.md), [ADR-0015](0015-per-message-idempotent-inbound-batches.md), [ADR-0017](0017-conversation-lifecycle-enforced-under-the-seq-lock.md), [ADR-0018](0018-keyset-pagination.md) |
+| **Related** | [ADR-0003](0003-pipeline-is-the-only-delivery-path.md), [ADR-0006](0006-per-conversation-seq-and-opaque-watermarks.md), [ADR-0015](0015-per-message-idempotent-inbound-batches.md), [ADR-0017](0017-conversation-lifecycle-enforced-under-the-seq-lock.md), [ADR-0018](0018-keyset-pagination.md), [ADR-0042](0042-email-adapter-threading-by-message-id-and-provider-webhooks.md) (a thread step before the participant) |
 
 A Converger conversation groups the activities exchanged with one external party. Providers such as WhatsApp identify that party by a phone number and never send a Converger conversation id. This ADR records how inbound messages are attached to the right conversation, how concurrent messages from one sender are kept in one conversation, and how a bot reply finds its way back to the sender without extra metadata.
 

@@ -12,6 +12,10 @@ defmodule ConvergerWeb.InboundController do
        [bucket: :inbound, scope: :channel]
        when action in [:create, :status]
 
+  # Providers that post a body Plug.Parsers leaves unread: Amazon SNS
+  # (`text/plain` JSON) and raw mail (`message/rfc822`).
+  plug :read_unparsed_body when action in [:create, :status]
+
   action_fallback ConvergerWeb.FallbackController
 
   @doc """
@@ -90,6 +94,65 @@ defmodule ConvergerWeb.InboundController do
         {:ok, body} -> send_resp(conn, 200, body)
         :error -> send_resp(conn, 403, "Verification failed")
       end
+    end
+  end
+
+  # Reads a body no parser handled into `conn.assigns.raw_body` (for
+  # signature checks) and the `"_body"` param (for the adapter). Bounded like
+  # multipart requests: the upload size limit plus 1 MB.
+  defp read_unparsed_body(conn, _opts) do
+    if is_nil(conn.assigns[:raw_body]) and unparsed_content_type?(conn) do
+      max = Converger.Uploads.max_file_size() + 1_000_000
+
+      case read_full_body(conn, max, "") do
+        {:ok, "", conn} ->
+          conn
+
+        {:ok, body, conn} ->
+          conn
+          |> assign(:raw_body, body)
+          |> Map.update!(:params, &Map.put(&1, "_body", body))
+
+        {:error, :too_large, conn} ->
+          conn |> send_resp(413, "Request body too large") |> halt()
+
+        {:error, _reason, conn} ->
+          conn |> send_resp(400, "Could not read request body") |> halt()
+      end
+    else
+      conn
+    end
+  end
+
+  defp unparsed_content_type?(conn) do
+    case get_req_header(conn, "content-type") do
+      [type | _] ->
+        not String.starts_with?(String.downcase(type), [
+          "application/json",
+          "application/x-www-form-urlencoded",
+          "multipart/"
+        ])
+
+      [] ->
+        true
+    end
+  end
+
+  defp read_full_body(conn, max, acc) do
+    case Plug.Conn.read_body(conn, length: min(max, 1_000_000)) do
+      {:ok, chunk, conn} ->
+        body = acc <> chunk
+        if byte_size(body) > max, do: {:error, :too_large, conn}, else: {:ok, body, conn}
+
+      {:more, chunk, conn} ->
+        body = acc <> chunk
+
+        if byte_size(body) > max,
+          do: {:error, :too_large, conn},
+          else: read_full_body(conn, max, body)
+
+      {:error, reason} ->
+        {:error, reason, conn}
     end
   end
 

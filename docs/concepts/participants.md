@@ -84,7 +84,7 @@ Before resolution, the controller looks up the message's `idempotency_key` acros
 
 Outbound adapters find the recipient with `Participants.recipient_for(activity, channel_id)`. It returns the `external_id` of the conversation's participant **when that participant belongs to the target channel** (for example, the WhatsApp number to reply to), and `nil` otherwise. The WhatsApp adapters first look at the activity's `metadata["recipient_phone"]` or `metadata["to"]`, then fall back to the participant. With no recipient at all, the delivery fails permanently: it is dead-lettered without retries.
 
-The pipeline never delivers an inbound message back to its author. When the activity's `sender` equals the conversation participant's `external_id`, the participant's own channel is removed from the delivery targets. Routing rule targets still receive it. See [routing rules](routing-rules.md).
+The pipeline never delivers an inbound message back to its author. When the activity's `sender` equals the conversation participant's `external_id`, the participant's own channel is removed from the delivery targets. So is any target channel on which the sender is a participant (an email reply resolved into another channel's conversation records its sender as a participant of the email channel, see [Email](../channels/email.md#reply-resolution)). Other routing rule targets still receive it. See [routing rules](routing-rules.md).
 
 ## Querying by participant
 

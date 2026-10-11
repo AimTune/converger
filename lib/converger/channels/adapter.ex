@@ -369,7 +369,8 @@ defmodule Converger.Channels.Adapter do
     Converger.Channels.Adapters.WebSocket,
     Converger.Channels.Adapters.WhatsAppMeta,
     Converger.Channels.Adapters.WhatsAppInfobip,
-    Converger.Channels.Adapters.Slack
+    Converger.Channels.Adapters.Slack,
+    Converger.Channels.Adapters.Email
   ]
 
   @required_functions [type: 0, supported_modes: 0, deliver_activity: 2, parse_inbound: 2]
