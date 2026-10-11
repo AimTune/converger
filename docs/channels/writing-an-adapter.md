@@ -240,6 +240,7 @@ Callback checklist:
 | `parse_status_update/2` | no | `{:ok, [update]}` or `:ignore`. |
 | `verify_inbound_signature/3` | no | Implement when the provider signs webhooks natively. Without it, the generic `x-converger-signature` scheme keyed with the channel `secret` applies. |
 | `verify_subscription/2` | no | The provider's `GET` webhook handshake (Meta's `hub.challenge`): return `{:ok, body}` (sent with `200`) or `:error` (`403`). Without it, `GET .../inbound` answers `200 ok`. |
+| `inbound_challenge/2` | no | A handshake that arrives as an ordinary signed `POST` to `.../inbound` (Slack's `url_verification`): return `{:ok, map}` to answer it with that JSON and `200`, or `:none` to process the request as usual. Called after the signature check, before parsing. |
 | `retry_policy/0` | no | Adapter defaults (`max_attempts`, `backoff`, `base_ms`, `max_ms`, `timeout_ms`) between the global config and the channel's own `retry_policy`. |
 | `normalize_error/1` | no (default `DeliveryError.normalize/1`) | Classifies an `{:error, reason}` from `deliver_activity/2`; see [delivery errors](#6-delivery-errors). |
 | `rate_limit/0` | no | The provider's default outbound rate (`"80/s"`) when the channel sets none. |
@@ -291,7 +292,7 @@ Add the module to the registry with one config line, in `config/config.exs` of y
 config :converger, :adapters, [Converger.Channels.Adapters.AcmeSms]
 ```
 
-The registry (`Converger.Channels.Adapter.adapters/0`) is the built-in adapters (`echo`, `webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip`) followed by this list, in order. An adapter whose `type/0` equals a built-in type replaces the built-in, so a fork can swap an implementation without patching core. A built-in adapter that ships with Converger itself is added to `@builtin_adapters` in `adapter.ex` instead.
+The registry (`Converger.Channels.Adapter.adapters/0`) is the built-in adapters (`echo`, `webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip`, `slack`) followed by this list, in order. An adapter whose `type/0` equals a built-in type replaces the built-in, so a fork can swap an implementation without patching core. A built-in adapter that ships with Converger itself is added to `@builtin_adapters` in `adapter.ex` instead.
 
 That is all. From the registry and the adapter's declarations:
 
@@ -305,7 +306,8 @@ That is all. From the registry and the adapter's declarations:
 | Health checks and dashboard health | `:external_delivery` |
 | Lifecycle events | `:lifecycle_events` |
 | `200` for handled inbound requests | `:provider_ack` |
-| Webhook verification handshake | `verify_subscription/2` |
+| Webhook verification handshake (`GET`) | `verify_subscription/2` |
+| In-band handshake (`POST`) | `inbound_challenge/2` |
 | Receipt correlation | the `provider_message_id` key returned by `deliver_activity/2` |
 
 `Converger.Application` calls `Adapter.validate_registry!/0` at boot: a configured module that does not exist, does not implement `type/0`, `supported_modes/0`, `deliver_activity/2` and `parse_inbound/2`, or returns an empty type string stops the boot with an `ArgumentError` naming it.
@@ -398,7 +400,7 @@ The example above checks `base_url` but, for brevity, does not pin the connectio
 - Verify over `raw_body` (the exact bytes; `CacheBodyReader` caches them for `/api/v1/channels/*`), never over re-encoded params. Compare with `Plug.Crypto.secure_compare/2`.
 - If the provider cannot sign at all, do not implement the callback: senders then use the generic `x-converger-signature` header with the channel `secret`, or the channel must be created with `require_signature: false`.
 - If the provider's scheme needs a secret, declare it with `required: :with_signature` in `config_schema/0`, as `whatsapp_meta` does for `app_secret`: channels with `require_signature: true` cannot be saved without it.
-- If the provider verifies the webhook URL with a `GET` handshake, implement `verify_subscription/2`.
+- If the provider verifies the webhook URL with a `GET` handshake, implement `verify_subscription/2`. If it posts the handshake to the webhook URL itself, implement `inbound_challenge/2` (see `slack.ex`).
 
 ## 9. Tests
 
