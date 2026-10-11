@@ -9,7 +9,7 @@ description: The email channel sends through Swoosh with a deterministic Message
 | **Status** | Accepted |
 | **Date** | 2026-10-12 |
 | **Issue** | [#40](https://github.com/AimTune/converger/issues/40) |
-| **Pull request** | |
+| **Pull request** | [#133](https://github.com/AimTune/converger/pull/133) |
 | **Related** | [ADR-0014](0014-webhook-ssrf-guard-and-outbound-signing.md), [ADR-0015](0015-per-message-idempotent-inbound-batches.md), [ADR-0016](0016-participant-based-conversation-resolution.md), [ADR-0038](0038-adapter-behaviour-v2-and-config-driven-registry.md), [ADR-0040](0040-slack-adapter-message-refs-conversation-scopes-and-in-band-challenge.md) |
 
 ## Context and problem statement
