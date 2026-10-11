@@ -144,6 +144,23 @@ defmodule Converger.Participants do
   end
 
   @doc """
+  The ids of the channels among `channel_ids` that have a participant with
+  `external_id` (e.g. the channels an inbound message must not be echoed
+  back to).
+  """
+  def channels_with_participant([], _external_id), do: []
+
+  def channels_with_participant(channel_ids, external_id) when is_binary(external_id) do
+    from(p in Participant,
+      where: p.channel_id in ^channel_ids and p.external_id == ^external_id,
+      select: p.channel_id
+    )
+    |> Repo.all()
+  end
+
+  def channels_with_participant(_channel_ids, _external_id), do: []
+
+  @doc """
   The `external_id` of the participant of the activity's conversation, when
   that participant belongs to `channel_id` (e.g. the phone number to reply
   to), or nil.

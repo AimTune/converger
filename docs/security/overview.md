@@ -232,7 +232,7 @@ body, which `ConvergerWeb.CacheBodyReader` keeps before JSON parsing:
   the channel secret. The timestamp must be within 300 seconds of the server clock
   (`config :converger, :inbound_signature_tolerance_seconds`). Several `v1` values are accepted, for secret
   rotation.
-- Adapters with a native scheme (WhatsApp Meta `X-Hub-Signature-256` with `app_secret`) verify that instead.
+- Adapters with a native scheme (WhatsApp Meta `X-Hub-Signature-256` with `app_secret`, Slack `X-Slack-Signature` with `signing_secret` and a 5 minute timestamp window) verify that instead.
 - A signature that is present but invalid is always rejected with `401`.
 - `channels.require_signature` (default `true` for new channels) also rejects missing and legacy
   `sha256=<hex>` signatures. Channels that existed before the column was added were backfilled with `false`; they

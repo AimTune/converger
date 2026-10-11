@@ -17,7 +17,7 @@ Table `channels`:
 | `id` | uuid | | Primary key. |
 | `tenant_id` | uuid | | Owner. `(tenant_id, name)` is unique. |
 | `name` | text | | Required. |
-| `type` | string | `"webhook"` | Adapter: `echo`, `webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip`. |
+| `type` | string | `"webhook"` | Adapter: `echo`, `webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `email`. |
 | `mode` | text | `"duplex"` | `inbound`, `outbound` or `duplex`. Must be supported by the type. |
 | `secret` | encrypted binary | generated | Encrypted at rest. Generated (32 random bytes, Base64) when not given. |
 | `secret_hash` | binary | | SHA-256 of `secret`, unique, used for lookups. |
@@ -43,6 +43,8 @@ Each type maps to a module implementing the `Converger.Channels.Adapter` behavio
 | `websocket` | `inbound`, `outbound`, `duplex` | none. Optional: `require_ack` (`true`/`false`, default `false`) | Broadcast to the channel's connected sockets; the delivery stays `pending` while no client is connected (or until a client acks, with `require_ack`). Clients send messages over the socket ([ADR-0033](../adr/0033-websocket-channel-adapter-delivery.md)). | [WebSocket channel](../channels/websocket.md) |
 | `whatsapp_meta` | `inbound`, `outbound`, `duplex` | `phone_number_id`, `access_token`, `verify_token`, plus `app_secret` when `require_signature` is true | WhatsApp Cloud API (Graph) | [WhatsApp](../channels/whatsapp.md) |
 | `whatsapp_infobip` | `inbound`, `outbound`, `duplex` | `base_url`, `api_key`, `sender` | Infobip WhatsApp API | [WhatsApp](../channels/whatsapp.md) |
+| `slack` | `inbound`, `outbound`, `duplex` | `bot_token`, `signing_secret`. Optional: `channel`, `app_id`, `conversation_scope` (`thread`, `channel`, `user`), `download_files` | Slack Web API (`chat.postMessage`, `chat.update`, `chat.delete`, file uploads); Events API inbound | [Slack](../channels/slack.md) |
+| `email` | `inbound`, `outbound`, `duplex` | `provider` (`smtp`, `ses`, `sendgrid`, `mailgun`, `postmark`), `from`, the provider credentials, plus `ses_topic_arn` or `mailgun_signing_secret` for those inbound providers | Email through Swoosh, threaded with `Message-ID` / `In-Reply-To` | [Email](../channels/email.md) |
 | `echo` | `outbound` | none | Writes a reply activity from `"bot"` into the same conversation (testing) | [Echo](../channels/echo.md) |
 
 See the [channels overview](../channels/overview.md) for provider setup, and [writing an adapter](../channels/writing-an-adapter.md) to add a type. Each type is one adapter module: the type list, the config validation above and the admin form all come from the adapters' `capabilities/0` and `config_schema/0` ([ADR-0038](../adr/0038-adapter-behaviour-v2-and-config-driven-registry.md)).
@@ -104,7 +106,7 @@ The chain is validated on save (unknown types and bad options are rejected). It 
 | No signature | `401` | accepted, deprecation warning logged |
 | Invalid signature | `401` | `401` |
 
-New channels default to `true`. Migration [`20261008120000_add_require_signature_to_channels`](https://github.com/AimTune/converger/blob/main/priv/repo/migrations/20261008120000_add_require_signature_to_channels.exs) backfilled existing channels with `false`, so old integrations kept working. `whatsapp_meta` verifies Meta's `X-Hub-Signature-256` with `config["app_secret"]`, and cannot require signatures without it. Timestamped signatures must be within `config :converger, :inbound_signature_tolerance_seconds` (default 300) of the server clock. Toggle the flag in the channel table ("Signature: required/optional"). Details: [webhooks](../webhooks.md).
+New channels default to `true`. Migration [`20261008120000_add_require_signature_to_channels`](https://github.com/AimTune/converger/blob/main/priv/repo/migrations/20261008120000_add_require_signature_to_channels.exs) backfilled existing channels with `false`, so old integrations kept working. `whatsapp_meta` verifies Meta's `X-Hub-Signature-256` with `config["app_secret"]`, and cannot require signatures without it. `slack` verifies `X-Slack-Signature` with `config["signing_secret"]`. Timestamped signatures must be within `config :converger, :inbound_signature_tolerance_seconds` (default 300) of the server clock. Toggle the flag in the channel table ("Signature: required/optional"). Details: [webhooks](../webhooks.md).
 
 ## Retry policy
 
@@ -138,7 +140,7 @@ Deleting a channel also disconnects its sockets, and cascades to its conversatio
 
 ## Health checks
 
-`Converger.Workers.ChannelHealthWorker` runs every 5 minutes (Oban cron). For each **active** channel of type `webhook`, `whatsapp_meta` or `whatsapp_infobip`, it computes the delivery failure rate over the last 60 minutes and stores a row in `channel_health_checks`:
+`Converger.Workers.ChannelHealthWorker` runs every 5 minutes (Oban cron). For each **active** channel of type `webhook`, `whatsapp_meta`, `whatsapp_infobip`, `slack` or `email`, it computes the delivery failure rate over the last 60 minutes and stores a row in `channel_health_checks`:
 
 | Status | Failure rate (failed / total deliveries in window) |
 | --- | --- |

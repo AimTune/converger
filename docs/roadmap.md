@@ -123,8 +123,8 @@ Turn the adapter layer into a real plugin system and ship the channels integrato
 | [#43](https://github.com/AimTune/converger/issues/43) | Conditional routing rules: filters, priority, reply-back routing, per-rule transformations, dry-run | Open |
 | [#37](https://github.com/AimTune/converger/issues/37) | WhatsApp: media messages, template (HSM) messages, interactive messages and inbound media download | Open |
 | [#38](https://github.com/AimTune/converger/issues/38) | Telegram Bot adapter (duplex) | Open |
-| [#39](https://github.com/AimTune/converger/issues/39) | Slack adapter (Events API inbound, Web API outbound, signing secret verification) | Open |
-| [#40](https://github.com/AimTune/converger/issues/40) | Email adapter (outbound via Swoosh, inbound via provider parse webhooks) | Open |
+| [#39](https://github.com/AimTune/converger/issues/39) | Slack adapter (Events API inbound, Web API outbound, signing secret verification) | Done ([Slack](channels/slack.md), [ADR-0040](adr/0040-slack-adapter-message-refs-conversation-scopes-and-in-band-challenge.md)) |
+| [#40](https://github.com/AimTune/converger/issues/40) | Email adapter (outbound via Swoosh, inbound via provider parse webhooks) | Done ([Email](channels/email.md), [ADR-0042](adr/0042-email-adapter-threading-by-message-id-and-provider-webhooks.md)) |
 | [#41](https://github.com/AimTune/converger/issues/41) | SMS adapters (Twilio, Vonage) with delivery receipts | Open |
 | [#42](https://github.com/AimTune/converger/issues/42) | Message broker channel adapters: Kafka, RabbitMQ, NATS, Redis Streams as first-class channels | Open |
 | [#44](https://github.com/AimTune/converger/issues/44) | Backlog of additional adapters: Discord, Microsoft Teams (Bot Framework), Facebook Messenger, Instagram, Viber, MQTT, gRPC streaming | Open |

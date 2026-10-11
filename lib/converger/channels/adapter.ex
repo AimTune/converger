@@ -224,6 +224,15 @@ defmodule Converger.Channels.Adapter do
   @callback verify_subscription(channel, params :: map()) :: {:ok, String.t()} | :error
 
   @doc """
+  Answer a handshake that arrives as an ordinary inbound `POST` (e.g. Slack's
+  `url_verification`, which must be answered with its `challenge`). Called
+  after the signature is verified and before the payload is parsed:
+  `{:ok, body}` is sent as the JSON response with `200`; `:none` lets the
+  request be processed as usual.
+  """
+  @callback inbound_challenge(channel, params :: map()) :: {:ok, map()} | :none
+
+  @doc """
   Adapter-specific retry policy defaults (e.g. `%{timeout_ms: 10_000}`), merged
   over the global defaults and under the channel's own `retry_policy`. See
   `Converger.Pipeline.RetryPolicy`.
@@ -319,6 +328,7 @@ defmodule Converger.Channels.Adapter do
     parse_status_update: 2,
     verify_inbound_signature: 3,
     verify_subscription: 2,
+    inbound_challenge: 2,
     retry_policy: 0,
     normalize_error: 1,
     capabilities: 0,
@@ -383,7 +393,9 @@ defmodule Converger.Channels.Adapter do
     Converger.Channels.Adapters.Webhook,
     Converger.Channels.Adapters.WebSocket,
     Converger.Channels.Adapters.WhatsAppMeta,
-    Converger.Channels.Adapters.WhatsAppInfobip
+    Converger.Channels.Adapters.WhatsAppInfobip,
+    Converger.Channels.Adapters.Slack,
+    Converger.Channels.Adapters.Email
   ]
 
   @required_functions [type: 0, supported_modes: 0, deliver_activity: 2, parse_inbound: 2]
@@ -622,6 +634,13 @@ defmodule Converger.Channels.Adapter do
   """
   def verify_subscription(%{type: type} = channel, params),
     do: call_optional(type, :verify_subscription, [channel, params], {:ok, "ok"})
+
+  @doc """
+  Answer an in-band inbound handshake with the channel's adapter
+  (`c:inbound_challenge/2`); `:none` when it does not implement one.
+  """
+  def inbound_challenge(%{type: type} = channel, params),
+    do: call_optional(type, :inbound_challenge, [channel, params], :none)
 
   @doc """
   Forward a typing signal with the channel's adapter. `:unsupported` when the
