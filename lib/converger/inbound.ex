@@ -48,12 +48,21 @@ defmodule Converger.Inbound do
   """
   @spec receive_message(Channel.t(), message(), keyword()) :: result()
   def receive_message(%Channel{} = channel, message, opts \\ []) do
-    if accepts_inbound?(channel) do
-      do_receive(channel, message, Keyword.get(opts, :conversation_id))
-    else
-      {:error, :inbound_not_supported}
-    end
+    result =
+      if accepts_inbound?(channel) do
+        do_receive(channel, message, Keyword.get(opts, :conversation_id))
+      else
+        {:error, :inbound_not_supported}
+      end
+
+    Converger.Telemetry.inbound_received(channel, outcome(result))
+    result
   end
+
+  defp outcome({:created, _activity}), do: :created
+  defp outcome({:duplicate, _activity}), do: :duplicate
+  defp outcome({:rejected, _changeset}), do: :rejected
+  defp outcome({:error, _reason}), do: :error
 
   defp do_receive(channel, message, conversation_id) do
     key = message["idempotency_key"]

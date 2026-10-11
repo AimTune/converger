@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+### Delivery SLO telemetry, dashboards and alert rules (#33)
+
+- New telemetry (`Converger.Telemetry`): `[:converger, :delivery, :attempt | :stop | :exception]` around the
+  adapter call of every delivery attempt (`status`: `sent`, `pending`, `failed`, `dead`), `[:converger, :pipeline,
+  :lag]`, `[:converger, :inbound, :received]`, `[:converger, :ws, :connected | :disconnected | :frame]` and
+  `[:converger, :circuit, :state_change]`. Adapter calls run in an OpenTelemetry span `converger.delivery`.
+- New Prometheus metrics: delivery latency and pipeline lag histograms, attempts and retries, dead-letter size,
+  open client connections per socket and transport (`ConvergerWeb.ClientConnections`), frames per second, Oban
+  queue depth and job duration, open circuit breakers, inbound messages, Broadway batches.
+- Grafana dashboards "Delivery SLO", "Realtime" and "Pipeline"; Prometheus alert rules
+  (`docker/prometheus/alerts.yml`) with `promtool` tests and an alert chaos test (`test/chaos/alerts.sh`).
+- `METRICS_TENANT_LABEL` (opt-in `tenant_id` label) and `METRICS_POLL_INTERVAL_MS`; ADR-0043.
+- **Changed:** `phoenix.endpoint.stop.duration`, `phoenix.router_dispatch.stop.duration` / `.exception.duration`,
+  `phoenix.channel_handled_in.duration`, `converger.repo.query.total_time` / `.queue_time` and
+  `oban.job.exception.duration` are histograms instead of last-value gauges: query `<name>_bucket` with
+  `histogram_quantile`. `phoenix.http.request_count` is now actually counted by `status`. The Grafana Prometheus
+  data source has the fixed uid `Prometheus`.
+
 ### Rich activity model (#28)
 
 - Activity types are a closed, documented vocabulary: `message`, `event`, `typing`,

@@ -49,6 +49,10 @@ config :converger, pipeline: [backend: Converger.Pipeline.Inline]
 # Use a different port for metrics in test to avoid conflicts with dev server
 config :converger, :prometheus_port, false
 
+# No database-backed metric polling (queue depth, dead letters): the poller
+# process has no sandbox connection.
+config :converger, :metrics, poll_interval_ms: false
+
 # Store test uploads in a temp dir (per partition)
 config :converger, Converger.Uploads,
   storage: Converger.Uploads.LocalStorage,

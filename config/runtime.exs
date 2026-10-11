@@ -34,6 +34,23 @@ cond do
     :ok
 end
 
+# Delivery/pipeline metrics (ConvergerWeb.Telemetry). METRICS_TENANT_LABEL=true
+# adds a tenant_id label to the delivery series (one series per tenant: keep
+# it off with many tenants). METRICS_POLL_INTERVAL_MS sets how often queue
+# depth, dead letters and open circuits are read from the database.
+metrics_config =
+  [
+    tenant_label: System.get_env("METRICS_TENANT_LABEL") in ~w(true 1),
+    poll_interval_ms:
+      case System.get_env("METRICS_POLL_INTERVAL_MS") do
+        nil -> nil
+        value -> String.to_integer(value)
+      end
+  ]
+  |> Enum.reject(fn {_key, value} -> value in [nil, false] end)
+
+if metrics_config != [], do: config(:converger, :metrics, metrics_config)
+
 # Configurable CORS origins and admin IP whitelist.
 # CORS origins are read per request by ConvergerWeb.Endpoint, so this takes
 # effect on releases without recompiling.

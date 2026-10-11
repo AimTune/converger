@@ -93,6 +93,14 @@ config :converger, ConvergerWeb.Endpoint,
   # reported by ConvergerWeb.SocketGuard; don't log it as a crash.
   http: [websocket_options: [log_protocol_errors: false]]
 
+# Delivery/pipeline metrics (ConvergerWeb.Telemetry); METRICS_* env vars in
+# config/runtime.exs. See docs/operations/observability.md.
+config :converger, :metrics,
+  # Add a tenant_id label to the delivery series (cardinality grows with tenants).
+  tenant_label: false,
+  # How often queue depth, dead letters and open circuits are read from the DB.
+  poll_interval_ms: 15_000
+
 # Client WebSocket limits and draining (ConvergerWeb.SocketGuard,
 # ConvergerWeb.Drain); WS_* env vars in config/runtime.exs. See
 # docs/operations/websocket-limits.md.

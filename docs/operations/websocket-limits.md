@@ -58,7 +58,8 @@ Writes to a client that stops reading entirely are also bounded by the TCP send 
 Every rejection emits `[:converger, :socket, :limit]` with `%{count: 1}` and metadata `reason` (`rate_limited`,
 `payload_too_large`, `frame_too_large`, `too_many_joins`, `slow_consumer`, `ephemeral_dropped`, `draining`) and
 `socket` (the socket module). It is exported as the counter `converger_socket_limit_count` by `reason`. See
-[Observability](observability.md#exported-metrics).
+[Observability](observability.md#exported-metrics). Open connections, connects and frames per second are exported too
+(`converger_ws_connections_count`, `converger_ws_frame_count`, see [Realtime metrics](observability.md#realtime-metrics)).
 
 ## Health probes
 

@@ -194,7 +194,7 @@ Nothing else happens automatically: the activity stays committed and other chann
 | Oban Web (`/admin/oban`) | Cancelled `ActivityDeliveryWorker` jobs with their error, until the Pruner removes them after 24 hours. |
 | Elixir API | `Converger.Deliveries.search_deliveries/2` (filters `status`, `channel_id`, `activity_id`, `tenant_id`, `from`, `to`), and `list_dead_letters/2` / `paginate_dead_letters/2` for `status: "failed"`. All are keyset-paginated on `(updated_at, id)`, most recent first. |
 | SQL | `SELECT id, activity_id, channel_id, attempts, last_error, updated_at FROM deliveries WHERE status = 'failed' ORDER BY updated_at DESC;` |
-| Metrics | Attach a handler to `[:converger, :deliveries, :dead_lettered]`; it is not exported as a Prometheus metric by default. |
+| Metrics | `converger_deliveries_dead_letters_size` (stored dead letters per channel type, polled), `converger_deliveries_dead_lettered_count` and `converger_delivery_stop_duration_count{status="dead"}`; the `ConvergerDeadLettersGrowing` alert and the Delivery SLO dashboard. See [Observability](operations/observability.md#delivery-and-pipeline-metrics). |
 
 ### Replaying dead letters
 

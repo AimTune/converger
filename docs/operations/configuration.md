@@ -149,6 +149,8 @@ The hard frame cap, `config :converger, :websocket_max_frame_size` (`1_048_576`)
 | --- | --- | --- | --- |
 | `DNS_CLUSTER_QUERY` | unset (clustering off) | prod | DNS name `DNSCluster` queries to find and connect other nodes. Also switches the default rate-limit backend to `cluster` (read in every environment for that purpose). |
 | `PROMETHEUS_PORT` | `9568` (not started in test) | all | Port of the `TelemetryMetricsPrometheus` listener. Setting it in test forces the listener on. See [Observability](observability.md#prometheus-endpoint). |
+| `METRICS_TENANT_LABEL` | `false` | all | `true` (or `1`) adds a `tenant_id` label to the delivery, pipeline-lag and inbound series. One series per tenant and channel type: leave it off with many tenants. See [Observability](observability.md#delivery-and-pipeline-metrics). |
+| `METRICS_POLL_INTERVAL_MS` | `15000` | all | How often every node reads the database-backed gauges (Oban queue depth, dead letters, open circuit breakers). |
 
 Node naming and the distribution cookie use the standard Mix release variables (`RELEASE_COOKIE`,
 `RELEASE_NODE`, `RELEASE_DISTRIBUTION`); Converger does not read them itself and ships no `rel/env.sh.eex`.
@@ -400,6 +402,7 @@ PgBouncer transaction pooling). See [Migrations and maintenance windows](migrati
 | `:dead_letters` | `bulk_retry_limit: 10_000`, `export_limit: 10_000` | Max deliveries replayed by one bulk retry call, and max rows in one Deliveries CSV export. See [Replaying dead letters](../delivery.md#replaying-dead-letters). |
 | `:circuit_breaker` | `failure_threshold: 5`, `cooldown_ms: 30_000`, `park_seconds: 600`, `replay_dead_letters_on_close: false`, `replay_window_ms: 3_600_000` | Per-channel delivery circuit breaker and opt-in dead-letter replay on close. See [Circuit breaker](../delivery.md#circuit-breaker). |
 | `:prometheus_port` | `9568`; `false` in test | `false` disables the metrics listener. |
+| `:metrics` | `tenant_label: false`, `poll_interval_ms: 15_000`; `poll_interval_ms: false` in test | See `METRICS_TENANT_LABEL` and `METRICS_POLL_INTERVAL_MS`. `poll_interval_ms: false` turns the database-backed gauges off. |
 | `:force_ssl` | unset outside prod | Keyword list of `Plug.SSL` options, built from the TLS variables in prod; `false` disables. |
 | `:webhook` | `[]` | `allowed_targets`, `allow_private_targets`, `resolver` (SSRF guard), and installation defaults for `connect_timeout` (5000 ms), `receive_timeout` (10000 ms), `max_response_bytes` (1 MiB). |
 | `:channel_signals_async` | `true`; `false` in test | Forward typing indicators and read receipts to external channels (`Converger.Channels.Signals`) in a task under `Converger.TaskSupervisor`. `false` runs them inline in the WebSocket channel process. |

@@ -1,0 +1,96 @@
+# Converger alert rules (issue #33). Loaded by docker/prometheus/prometheus.yml;
+# unit tests in alerts.test.yml (`promtool test rules`). See
+# docs/operations/observability.md#alert-rules for what each alert means and
+# what to do about it.
+#
+# Gauges polled from the database (dead letters, queue depth, open circuits)
+# are reported by every node with the same value: aggregate them with max().
+groups:
+  - name: converger-delivery
+    rules:
+      - alert: ConvergerDeliverySuccessRateLow
+        # Attempts that reached the provider (sent) or a WebSocket client
+        # (pending) over all attempts, per channel type. Needs some traffic:
+        # 2 failures out of 5 attempts are not an outage.
+        expr: |
+          (
+            sum by (channel_type) (rate(converger_delivery_stop_duration_count{status=~"sent|pending"}[5m]))
+            /
+            sum by (channel_type) (rate(converger_delivery_stop_duration_count[5m]))
+          ) < 0.99
+          and
+          sum by (channel_type) (increase(converger_delivery_stop_duration_count[5m])) >= 20
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Delivery success rate below 99% for {{ $labels.channel_type }} channels"
+          description: "{{ $value | humanizePercentage }} of delivery attempts succeeded over the last 5 minutes."
+
+      - alert: ConvergerChannelCircuitOpen
+        # Once a breaker opens, deliveries are parked and no longer attempted,
+        # so the success-rate alert stops seeing failures: this one keeps firing
+        # while the endpoint is down.
+        expr: max by (channel_type) (converger_channels_circuit_count{state=~"open|half_open"}) > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $value }} {{ $labels.channel_type }} channel(s) with an open circuit breaker"
+          description: "Deliveries to these channels are parked until a probe succeeds. See the Delivery SLO dashboard."
+
+      - alert: ConvergerDeadLettersGrowing
+        expr: max by (channel_type) (delta(converger_deliveries_dead_letters_size[15m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Dead letters growing for {{ $labels.channel_type }} channels"
+          description: "{{ $value }} more dead-lettered deliveries than 15 minutes ago. Replay them once the endpoint is fixed."
+
+  - name: converger-pipeline
+    rules:
+      - alert: ConvergerPipelineLagHigh
+        # First attempts only: a retried delivery's lag includes its backoff.
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le) (rate(converger_pipeline_lag_duration_bucket{retry="false"}[5m]))
+          ) > 5000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Pipeline lag p95 above 5 s"
+          description: "95% of first-attempt deliveries left the pipeline within {{ $value | humanize }} ms of the activity being stored."
+
+      - alert: ConvergerDeliveryBacklog
+        expr: max by (queue) (converger_oban_queue_depth{state="available", queue=~"deliveries.*"}) > 1000
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $value }} delivery jobs waiting in queue {{ $labels.queue }}"
+          description: "Jobs are enqueued faster than they are worked. Check the queue concurrency and the database."
+
+      - alert: ConvergerDatabasePoolSaturated
+        expr: |
+          histogram_quantile(0.95,
+            sum by (instance, le) (rate(converger_repo_query_queue_time_bucket[5m]))
+          ) > 50
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Queries wait {{ $value | humanize }} ms (p95) for a database connection on {{ $labels.instance }}"
+          description: "The Ecto pool is saturated: raise POOL_SIZE or find the slow queries."
+
+  - name: converger-node
+    rules:
+      - alert: ConvergerMetricsDown
+        expr: up{job="converger"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Prometheus cannot scrape {{ $labels.instance }}"
+          description: "The node is down or its metrics listener is unreachable."

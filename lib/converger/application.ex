@@ -22,6 +22,8 @@ defmodule Converger.Application do
         ConvergerWeb.ConversationPresence,
         # Native v1 WebSockets and SSE streams, drained by ConvergerWeb.Drain.
         ConvergerWeb.ProtocolConnections,
+        # Open client connections, for the connection gauge (ConvergerWeb.Telemetry).
+        ConvergerWeb.ClientConnections,
         {Task.Supervisor, name: Converger.TaskSupervisor},
         Converger.RateLimit.Supervisor,
         {Oban, oban_config()}
