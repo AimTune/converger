@@ -98,8 +98,9 @@ spec:
 ```
 
 An init container on the `Deployment` also works thanks to the advisory lock, but it makes every pod start wait
-for the migration and couples migration failures to pod crash loops; prefer the Job. Kubernetes manifests are
-Planned ([#29](https://github.com/AimTune/converger/issues/29)).
+for the migration and couples migration failures to pod crash loops; prefer the Job. `deploy/k8s/migrate-job.yaml`
+and the Helm chart's pre-upgrade hook do exactly this; pods that start before the Job has finished stay unready
+(`/health/ready` reports `migrations pending`). See [Kubernetes](kubernetes.md).
 
 ### Other platforms and development
 

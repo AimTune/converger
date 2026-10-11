@@ -34,6 +34,10 @@ config :converger, Converger.Mailer, adapter: Swoosh.Adapters.Test
 # Disable swoosh api client as it is only required for production adapters
 config :swoosh, :api_client, false
 
+# Email channels send through Swoosh.Adapters.Test (sent mails go to the
+# test process), whatever their provider.
+config :converger, :email_swoosh_adapter, Swoosh.Adapters.Test
+
 # Print only warnings and errors during test
 config :logger, level: :warning
 
@@ -46,8 +50,8 @@ config :phoenix, :plug_init_mode, :runtime
 # Use inline pipeline for synchronous testing
 config :converger, pipeline: [backend: Converger.Pipeline.Inline]
 
-# Use a different port for metrics in test to avoid conflicts with dev server
-config :converger, :prometheus_port, false
+# No health probes against real providers in tests (tests enable them per case)
+config :converger, :channel_health, probe_idle_channels: false
 
 # No database-backed metric polling (queue depth, dead letters): the poller
 # process has no sandbox connection.

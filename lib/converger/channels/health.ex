@@ -7,11 +7,16 @@ defmodule Converger.Channels.Health do
   - degraded:  failure rate 10% – 50%
   - unhealthy: failure rate > 50%
   - unknown:   no deliveries in window
+
+  Only channels whose adapter has the `:external_delivery` capability are
+  checked. For a channel without deliveries in the window, the adapter's
+  `health_probe/1` (when it has one) decides between healthy and degraded.
   """
 
   import Ecto.Query, warn: false
   require Logger
 
+  alias Converger.Channels.Adapter
   alias Converger.Channels.Channel
   alias Converger.Channels.HealthCheck
   alias Converger.Channels.UrlGuard
@@ -62,21 +67,18 @@ defmodule Converger.Channels.Health do
   `{channel, health_check, previous_status}` tuples where the status changed.
   """
   def check_all_channels(window_minutes \\ 60) do
-    channels =
-      from(c in Channel,
-        where:
-          c.status == "active" and c.type in ["webhook", "whatsapp_meta", "whatsapp_infobip"],
-        preload: [:tenant]
-      )
-      |> Repo.all()
-
+    channels = list_monitored_channels()
     now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
 
     Enum.reduce(channels, [], fn channel, changes ->
       previous = get_latest_health(channel.id)
       previous_status = if previous, do: previous.status, else: nil
 
-      {status, total, failed, rate} = compute_channel_health(channel.id, window_minutes)
+      {status, total, failed, rate} =
+        case compute_channel_health(channel.id, window_minutes) do
+          {"unknown", total, failed, rate} -> {probe_status(channel), total, failed, rate}
+          result -> result
+        end
 
       {:ok, health_check} =
         %HealthCheck{}
@@ -96,6 +98,55 @@ defmodule Converger.Channels.Health do
         changes
       end
     end)
+  end
+
+  @doc """
+  Active channels that get health checks: those whose adapter has the
+  `:external_delivery` capability, with the tenant preloaded.
+  """
+  def list_monitored_channels do
+    types = Adapter.types_with(:external_delivery)
+
+    from(c in Channel,
+      where: c.status == "active" and c.type in ^types,
+      preload: [:tenant]
+    )
+    |> Repo.all()
+  end
+
+  # A channel without deliveries in the window says nothing about its
+  # provider. When its adapter has a health probe (and probes are enabled),
+  # the probe decides: `healthy`, or `degraded` on failure. Never
+  # `unhealthy`: one failed probe must not open the circuit breaker.
+  defp probe_status(channel) do
+    if probe_idle_channels?() do
+      case Adapter.health_probe(channel) do
+        :ok ->
+          "healthy"
+
+        :unsupported ->
+          "unknown"
+
+        {:error, reason} ->
+          Logger.warning("Health probe failed for channel #{channel.id}: #{inspect(reason)}")
+          "degraded"
+      end
+    else
+      "unknown"
+    end
+  rescue
+    error ->
+      Logger.warning(
+        "Health probe crashed for channel #{channel.id}: #{Exception.message(error)}"
+      )
+
+      "degraded"
+  end
+
+  defp probe_idle_channels? do
+    :converger
+    |> Application.get_env(:channel_health, [])
+    |> Keyword.get(:probe_idle_channels, true)
   end
 
   @doc """

@@ -249,3 +249,44 @@ jobs:
           MINIO_SECRET_KEY: minioadmin
           AZURITE_ENDPOINT: http://127.0.0.1:10000/devstoreaccount1
         run: mix test test/converger/uploads/storage_integration_test.exs --only minio --only azurite
+
+  cluster:
+    name: Two-node cluster suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          otp-version: ${{ env.OTP_VERSION }}
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            deps
+            _build
+          key: mix-${{ runner.os }}-${{ env.ELIXIR_VERSION }}-${{ env.OTP_VERSION }}-${{ hashFiles('mix.lock') }}
+          restore-keys: mix-${{ runner.os }}-${{ env.ELIXIR_VERSION }}-${{ env.OTP_VERSION }}-
+
+      - run: mix deps.get
+      - run: mix compile --warnings-as-errors
+
+      # test/cluster boots two Converger nodes with :peer (clustered by
+      # libcluster, sharing Postgres) and checks cross-node WebSocket
+      # broadcasts, shared rate limits and exactly-once delivery jobs.
+      # The peers start EPMD on their own; the test node needs no -name.
+      - name: Run the two-node cluster suite
+        run: mix test --only cluster --warnings-as-errors

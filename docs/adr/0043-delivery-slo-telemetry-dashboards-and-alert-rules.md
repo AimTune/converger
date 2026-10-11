@@ -144,8 +144,10 @@ ship and test dashboards and alerts.
 
 - Load testing harness with published baselines, which will populate the dashboards and calibrate the thresholds:
   [#34](https://github.com/AimTune/converger/issues/34).
-- Serving metrics on the main port behind authentication, and clustering:
-  [#29](https://github.com/AimTune/converger/issues/29).
+- The metrics are served on the main port behind `METRICS_TOKEN` since
+  [ADR-0037](0037-libcluster-clustering-health-endpoints-and-metrics-on-the-main-port.md); the new metrics share
+  that registry, and `config :converger, :metrics` holds both its `token` / `allowed_ips` and this ADR's
+  `tenant_label` / `poll_interval_ms`. With many clustered nodes, the database gauges could move to one node.
 - Moving the channel adapters to `Converger.HTTP`, so each provider request gets its own client span under
   `converger.delivery`.
 
@@ -169,5 +171,5 @@ ship and test dashboards and alerts.
 ## Links
 
 - [Observability](../operations/observability.md)
-- [Configuration reference](../operations/configuration.md#clustering-and-metrics)
+- [Configuration reference](../operations/configuration.md#metrics-and-health)
 - [Chaos testing](../chaos.md#alert-rules-chaos-test)

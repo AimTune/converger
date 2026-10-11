@@ -27,7 +27,7 @@ alternatives that were rejected (Redis, Postgres counters) are in
 | Backend | Behaviour | When |
 | --- | --- | --- |
 | `local` | Counters per node. Exact on one node; behind a load balancer with N nodes a client can get up to N times the limit. | Default without clustering |
-| `cluster` | Counters per node plus replication: every `sync_interval_ms` (default 100 ms) each node broadcasts its new increments, and receivers add them to their own counters. | Default when `DNS_CLUSTER_QUERY` is set |
+| `cluster` | Counters per node plus replication: every `sync_interval_ms` (default 100 ms) each node broadcasts its new increments, and receivers add them to their own counters. | Default when clustering is enabled (`CLUSTER_STRATEGY`, see [Clustering](clustering.md)) |
 
 ```mermaid
 sequenceDiagram
@@ -53,6 +53,9 @@ Properties of the `cluster` backend:
 - **In memory.** A restarted or newly joined node starts with empty counters for the current window and catches up
   with the next syncs.
 - **Netsplit.** Nodes that are not connected fall back to per-node limits.
+- **Verified on real nodes.** The two-node suite (`mix test --only cluster`, see
+  [Clustering](clustering.md#the-two-node-test-suite)) checks that a budget used up over HTTP on one node is
+  enforced by the other.
 
 Pending deltas are subtracted rather than deleted after each flush, so increments that arrive during a flush are
 kept for the next one.
@@ -165,7 +168,7 @@ Every rejection (including login lockouts) emits `[:converger, :rate_limit, :exc
 
 | Setting | Where | Default | Notes |
 | --- | --- | --- | --- |
-| Backend | `RATE_LIMIT_BACKEND` (`local` / `cluster`) | `cluster` if `DNS_CLUSTER_QUERY` is set, else `local` | Invalid values raise at boot. Ignored in test. |
+| Backend | `RATE_LIMIT_BACKEND` (`local` / `cluster`) | `cluster` if `CLUSTER_STRATEGY` is not `none`, else `local` | Invalid values raise at boot. Ignored in test. |
 | Sync interval | `RATE_LIMIT_SYNC_INTERVAL_MS` | `100` | Lower values reduce overshoot at the cost of more PubSub messages. |
 | Installation-wide limits | `config :converger, Converger.RateLimit, limits: %{...}` | `%{}` | Atom bucket keys, `{limit, window_ms}` values. |
 | Override cache TTL | `override_cache_ttl_ms` in the same config | `30_000` | Upper bound for stale overrides if an invalidation is missed. |

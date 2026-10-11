@@ -20,6 +20,27 @@
   `histogram_quantile`. `phoenix.http.request_count` is now actually counted by `status`. The Grafana Prometheus
   data source has the fixed uid `Prometheus`.
 
+### Adapter behaviour v2: capabilities, config schemas, registry (#36)
+
+- Adapters `use Converger.Channels.Adapter, type: "..."` and declare `capabilities/0` and `config_schema/0`.
+  New capabilities: `:external_delivery`, `:receipts`, `:typing`, `:lifecycle_events`, `:provider_ack`
+  (plus `:media`, `:templates`, `:reactions`, `:edits`). New optional callbacks: `verify_subscription/2`,
+  `health_probe/1`, `normalize_error/1`.
+- Registry: the built-in adapters plus `config :converger, :adapters, [...]`; a configured adapter with a
+  built-in type replaces it. Checked at boot. Nothing in `lib/` lists channel types any more: accepted
+  types, health checks, the dashboard, the admin config form, lifecycle-event delivery, the inbound `200`
+  policy and the Meta verification handshake all come from the adapters.
+- Config is validated against the schema before the adapter's own checks. `required: :with_signature`
+  replaces the hardcoded Meta `app_secret` rule. The webhook's missing-URL error is now
+  `webhook config missing: url`.
+- The admin channel form is generated from the schema (secrets as password inputs, booleans as selects);
+  the channel list summary and masking use it too.
+- Health checks: idle `whatsapp_meta` channels are probed on the Graph API (`healthy`, or `degraded` on
+  failure). Disable with `config :converger, :channel_health, probe_idle_channels: false`.
+- `deliver_activity/2` may return `provider_message_id`; `Pipeline.deliver/2` now returns retryable failures
+  as `{:error, %DeliveryError{}}`.
+- `docs/channels/writing-an-adapter.md` rewritten around the new behaviour. ADR-0038.
+
 ### Rich activity model (#28)
 
 - Activity types are a closed, documented vocabulary: `message`, `event`, `typing`,
@@ -197,6 +218,30 @@
   an end user's token could mint legacy conversation tokens for other conversations of its
   channel under any user id. The legacy socket accepts only conversation tokens, and legacy
   verifiers reject Converger client tokens.
+### Multi-node clustering, health endpoints, metrics on the main port (#29)
+
+- Clustering with `libcluster` (replaces `dns_cluster`): `CLUSTER_STRATEGY` =
+  `kubernetes_dns` | `dns` | `gossip` | `epmd` | `none`. `rel/env.sh.eex` names
+  nodes `converger@<ip>` and **requires `RELEASE_COOKIE`** when clustering.
+  `DNS_CLUSTER_QUERY` still works (implies `dns`).
+- `GET /health/ready` now checks the database, Oban, migrations and the
+  draining state of `ConvergerWeb.Drain` (#27); 503 with `reasons` and a
+  per-check `checks` map (`status` stays `ready` / `draining`, plus `unavailable`).
+- **Breaking:** Prometheus metrics moved to `GET /metrics` on the main port,
+  behind `METRICS_TOKEN` (bearer) or `METRICS_ALLOWED_IPS`; 404 when neither
+  is set. The unauthenticated listener on 9568 only starts when
+  `PROMETHEUS_PORT` is set. `plug_cowboy`/`cowboy`/`cowlib` are gone (and the
+  two acknowledged `cowlib` advisories with them).
+- Two-node test suite (`test/cluster`, `mix test --only cluster`, own CI job):
+  cross-node WebSocket broadcast, shared rate limits, exactly-once deliveries.
+- `deploy/k8s` (kustomize), `deploy/fly/fly.toml` and `docker-compose.cluster.yml`.
+- Helm chart `deploy/helm/converger`: migration hook, values schema,
+  `helm test`, optional Ingress, `PodMonitor`, `NetworkPolicy` and
+  chart-managed Secret. Published to `oci://ghcr.io/aimtune/charts/converger`
+  on every `v*` tag; the new `Deploy manifests` workflow lints and
+  kubeconform-validates the chart and `deploy/k8s`.
+- `CLUSTER_DIST_PORT` pins the server's Erlang distribution port (start only,
+  so `bin/converger rpc` still works). ADR-0037.
 
 ### Converger Protocol v1 specification (#21, refs #63 #68)
 

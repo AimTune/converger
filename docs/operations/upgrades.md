@@ -80,7 +80,8 @@ Locked versions on `main` (`mix.lock`) for the libraries operators and contribut
 | `bandit` | 1.12.5 | HTTP server. |
 | `broadway` | 1.3.0 | Optional pipeline backend. |
 | `gettext` | 1.0.2 | Backend uses `use Gettext.Backend`. |
-| `dns_cluster` | 0.3.1 | `query:` option unchanged. |
+| `libcluster` | 3.5.0 | Replaced `dns_cluster` in [#29](https://github.com/AimTune/converger/issues/29); see [Clustering](clustering.md). `DNS_CLUSTER_QUERY` still works as an alias. |
+| `telemetry_metrics_prometheus_core` | 1.2.1 | Replaced `telemetry_metrics_prometheus` (and with it `plug_cowboy`, `cowboy`, `cowlib`, `ranch`) when metrics moved to the main port. |
 | `joken` | 2.7.0 | JWT signing. |
 | `cloak` / `cloak_ecto` | 1.1.4 / 1.3.0 | Two advisories acknowledged in `mix.exs` (affected ciphers and types are not used). |
 | `opentelemetry` / `opentelemetry_exporter` | 1.7.0 / 1.10.0 | Plus `opentelemetry_phoenix` 2.0.1, `opentelemetry_ecto` 1.2.0, `opentelemetry_oban` 1.2.0, `opentelemetry_req` 1.0.0. |
@@ -231,3 +232,25 @@ log line. If you maintain a fork with a customized `config/prod.exs`, configure 
 - Deleting a tenant, channel or conversation removes its activities and deliveries asynchronously (a
   `PurgeWorker` job on the new `maintenance` queue). Scripts that delete tenants with raw SQL no longer remove them.
 - Old releases cannot run against the new schema; roll back by restoring the pre-upgrade backup.
+### Metrics moved to the main port
+
+[#29](https://github.com/AimTune/converger/issues/29). Prometheus metrics are served at `GET /metrics` on the main
+HTTP port, behind `METRICS_TOKEN` (bearer token) or `METRICS_ALLOWED_IPS`. The separate listener on port `9568`
+is no longer started by default, and `/metrics` answers `404` until one of the two variables is set.
+
+- **Action:** set `METRICS_TOKEN` and point the scraper at `<host>:<PORT>/metrics` with
+  `authorization: {type: Bearer, ...}` (see [Observability](observability.md#prometheus-endpoint)), or allow the
+  scraper's addresses with `METRICS_ALLOWED_IPS`. To keep the old unauthenticated listener for now, set
+  `PROMETHEUS_PORT=9568` explicitly; it serves only `/metrics` and must not be reachable from outside.
+
+### Clustering with libcluster
+
+[#29](https://github.com/AimTune/converger/issues/29). `dns_cluster` was replaced by `libcluster`, configured with
+`CLUSTER_STRATEGY` ([Clustering](clustering.md)).
+
+- `DNS_CLUSTER_QUERY` keeps working (it implies `CLUSTER_STRATEGY=dns`), but the nodes must now be named
+  `<CLUSTER_NODE_BASENAME>@<ip>` (default `converger@<ip>`), which `rel/env.sh.eex` does automatically.
+- **Action:** when clustering is enabled, set `RELEASE_COOKIE` to a shared secret on every node. The release
+  refuses to start without it.
+- Point load balancer health checks at `GET /health/ready` instead of a TCP check; entries for health paths in
+  `FORCE_SSL_EXCLUDE_PATHS` are no longer needed.

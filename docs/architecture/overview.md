@@ -22,27 +22,27 @@ The application callback is [`Converger.Application`](https://github.com/AimTune
 
 | # | Child | Role |
 | --- | --- | --- |
-| 1 | `ConvergerWeb.Telemetry` | Supervisor for `:telemetry_poller` (10 s period) and, unless `:prometheus_port` is `false`, the `TelemetryMetricsPrometheus` exporter (port `9568` by default, `PROMETHEUS_PORT` overrides). |
+| 1 | `ConvergerWeb.Telemetry` | Supervisor for `:telemetry_poller` (10 s period) and the `TelemetryMetricsPrometheus.Core` registry served at `GET /metrics` on the main port (plus the unauthenticated listener on `PROMETHEUS_PORT` only when that variable is set). |
 | 2 | `Converger.Vault` | Cloak vault (AES-256-GCM) that encrypts channel secrets and configs at rest. Must be up before anything reads a channel. |
 | 3 | `Converger.Repo` | Ecto repository (PostgreSQL via Postgrex). |
-| 4 | `DNSCluster` | Node discovery from `:dns_cluster_query` (`DNS_CLUSTER_QUERY`); `:ignore` when unset. |
+| 4 | `Cluster.Supervisor` (`Converger.ClusterSupervisor`) | libcluster node discovery built by `Converger.Cluster` from `CLUSTER_STRATEGY`; not started when the strategy is `none`. See [Clustering](../operations/clustering.md). |
 | 5 | `Phoenix.PubSub` (`Converger.PubSub`) | Cluster-wide pub/sub used by the endpoint, channels, LiveViews, presence and the rate limiter. |
 | 6 | `ConvergerWeb.SocketPresence` | `Phoenix.Presence` tracker of joined client sockets per channel (used for channel-wide disconnects). |
 | 7 | `Converger.RateLimit.Supervisor` | Hammer ETS counters, the per-tenant override cache and, with the `:cluster` backend, the PubSub counter replication. |
 | 8 | `Oban` | Job processing, configured from `config :converger, Oban`. |
 | 9 | `Converger.Pipeline.child_specs()` | Children of the configured pipeline backend. Empty for Oban and Inline; the Broadway pipeline for the Broadway backend. |
 | 10 | `ConvergerWeb.Endpoint` | Bandit HTTP server, sockets and the router. Started after everything it depends on, so it only accepts traffic once they are running. Client sockets are limited by `ConvergerWeb.SocketGuard`. |
-| 11 | `ConvergerWeb.Drain` | Shutdown gate. Stopped first, it turns `/health/ready` to 503 and refuses new sockets for `drain_delay_ms` before the endpoint drains its sockets in batches. See [WebSocket limits and draining](../operations/websocket-limits.md). |
+| 11 | `ConvergerWeb.Drain` | Shutdown gate. Stopped first, it turns `/health/ready` to 503 (`draining`, one of the readiness checks of `Converger.Health`) and refuses new sockets for `drain_delay_ms` before the endpoint drains its sockets in batches. See [WebSocket limits and draining](../operations/websocket-limits.md). |
 
 ```mermaid
 flowchart TD
     SUP["Converger.Supervisor (one_for_one)"]
     SUP --> TEL["ConvergerWeb.Telemetry"]
     TEL --> POLL["telemetry_poller"]
-    TEL --> PROM["TelemetryMetricsPrometheus :9568"]
+    TEL --> PROM["TelemetryMetricsPrometheus.Core (/metrics)"]
     SUP --> VAULT["Converger.Vault"]
     SUP --> REPO["Converger.Repo"]
-    SUP --> DNS["DNSCluster"]
+    SUP --> DNS["Cluster.Supervisor (libcluster, if CLUSTER_STRATEGY)"]
     SUP --> PS["Phoenix.PubSub (Converger.PubSub)"]
     SUP --> PRES["ConvergerWeb.SocketPresence"]
     SUP --> RL["Converger.RateLimit.Supervisor"]
@@ -206,7 +206,7 @@ PubSub is fire-and-forget. Nothing that must not be lost is sent only over PubSu
 
 ### Rate limiting
 
-`Converger.RateLimit` uses Hammer 7 with per-node ETS counters. With `RATE_LIMIT_BACKEND=cluster` (the default when `DNS_CLUSTER_QUERY` is set) counter increments are replicated to other nodes over PubSub every `RATE_LIMIT_SYNC_INTERVAL_MS` (100 ms by default). Tenants can carry per-bucket overrides in `tenants.limits` ([ADR-0013](../adr/0013-cluster-wide-rate-limiting-with-hammer-and-pubsub.md)).
+`Converger.RateLimit` uses Hammer 7 with per-node ETS counters. With `RATE_LIMIT_BACKEND=cluster` (the default when clustering is enabled with `CLUSTER_STRATEGY`) counter increments are replicated to other nodes over PubSub every `RATE_LIMIT_SYNC_INTERVAL_MS` (100 ms by default). Tenants can carry per-bucket overrides in `tenants.limits` ([ADR-0013](../adr/0013-cluster-wide-rate-limiting-with-hammer-and-pubsub.md)).
 
 ### Telemetry and tracing
 

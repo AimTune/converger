@@ -1,0 +1,32 @@
+# `helm test <release>`: the Service answers GET /health/ready with 200.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "converger.fullname" . }}-test-ready
+  labels:
+    {{- include "converger.labels" . | nindent 4 }}
+    app.kubernetes.io/component: test
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  automountServiceAccountToken: false
+  securityContext:
+    {{- toYaml .Values.podSecurityContext | nindent 4 }}
+  containers:
+    - name: wget
+      image: {{ .Values.tests.image }}
+      command:
+        - wget
+        - -q
+        - -O-
+        - {{ printf "http://%s:%v/health/ready" (include "converger.fullname" .) .Values.service.port | quote }}
+      securityContext:
+        {{- toYaml .Values.securityContext | nindent 8 }}
+      resources:
+        requests:
+          cpu: 10m
+          memory: 16Mi
+        limits:
+          memory: 32Mi

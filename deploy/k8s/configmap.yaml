@@ -1,0 +1,28 @@
+# Non-secret settings. Secrets (DATABASE_URL, SECRET_KEY_BASE, CLOAK_KEY,
+# RELEASE_COOKIE, METRICS_TOKEN) live in the `converger-env` Secret, see
+# kustomization.yaml. Every variable is documented in
+# docs/operations/configuration.md.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: converger-config
+  labels:
+    app.kubernetes.io/name: converger
+data:
+  PHX_HOST: converger.example.com
+  # The ingress / load balancer terminates TLS. List its addresses so that
+  # X-Forwarded-For / X-Forwarded-Proto are honoured (pod network of most
+  # clusters; narrow it to your ingress controller's range).
+  TRUSTED_PROXIES: 10.0.0.0/8
+  FORCE_SSL: "true"
+  POOL_SIZE: "10"
+  # Clustering: libcluster resolves the headless Service and connects to
+  # converger@<pod IP> (RELEASE_NODE is derived from POD_IP by
+  # rel/env.sh.eex). A short name is resolved through the pod's DNS search
+  # path; the FQDN converger-headless.<namespace>.svc.cluster.local works too.
+  CLUSTER_STRATEGY: kubernetes_dns
+  CLUSTER_SERVICE: converger-headless
+  CLUSTER_NODE_BASENAME: converger
+  # Optional: Prometheus scrapers by IP instead of (or in addition to)
+  # METRICS_TOKEN. Empty means token only.
+  METRICS_ALLOWED_IPS: ""

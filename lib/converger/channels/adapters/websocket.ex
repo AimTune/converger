@@ -23,28 +23,23 @@ defmodule Converger.Channels.Adapters.WebSocket do
   `Converger.Inbound`, like inbound webhooks of other channel types.
   """
 
-  @behaviour Converger.Channels.Adapter
+  use Converger.Channels.Adapter, type: "websocket"
 
   alias Converger.Activities.Serializer
 
   @impl true
-  def supported_modes, do: ~w(inbound outbound duplex)
+  def capabilities, do: [:inbound, :outbound, :lifecycle_events]
 
   @impl true
-  def capabilities, do: [:inbound, :outbound]
-
-  @impl true
-  def validate_config(config) do
-    if Map.get(config, "require_ack", Map.get(config, :require_ack)) in [
-         nil,
-         "",
-         true,
-         false,
-         "true",
-         "false"
-       ],
-       do: :ok,
-       else: {:error, "websocket config require_ack must be true or false"}
+  def config_schema do
+    [
+      %{
+        name: "require_ack",
+        type: :boolean,
+        label: "Require client ack",
+        help: "Keep deliveries pending until a client acknowledges them (default false)"
+      }
+    ]
   end
 
   @impl true

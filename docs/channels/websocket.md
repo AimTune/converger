@@ -23,9 +23,9 @@ Existing `websocket` channels, which could only be `outbound` before, were chang
 
 | Callback | Behaviour |
 | --- | --- |
-| `supported_modes/0` | `["inbound", "outbound", "duplex"]`. |
-| `capabilities/0` | `[:inbound, :outbound]`: the pipeline delivers to it. |
-| `validate_config/1` | `presence` is not validated; `require_ack` must be `true`, `false` (or the strings `"true"`, `"false"`) or empty. |
+| `supported_modes/0` | `["inbound", "outbound", "duplex"]`, derived from the capabilities. |
+| `capabilities/0` | `[:inbound, :outbound, :lifecycle_events]`: the pipeline delivers to it, including conversation close and reopen events. No `:external_delivery`, so it gets no health checks. |
+| `config_schema/0` | `require_ack` (`:boolean`): must be `true`, `false` (or the strings `"true"`, `"false"`) or empty; the admin form shows it as a default/true/false select. `presence` is not validated. |
 | `deliver_activity/2` | Broadcasts the activity and returns `{:ok, %{connected_clients: n}}` or `{:pending, %{connected_clients: n}}`, see below. |
 | `parse_inbound/2` | `{:error, ...}`: clients send over the socket, not through `/inbound`. |
 

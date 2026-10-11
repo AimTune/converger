@@ -7,27 +7,34 @@ defmodule Converger.Application do
 
   @impl true
   def start(_type, _args) do
+    # A misconfigured `config :converger, :adapters` fails the boot, not a delivery.
+    Converger.Channels.Adapter.validate_registry!()
+
     OpentelemetryPhoenix.setup(adapter: :bandit)
     OpentelemetryEcto.setup([:converger, :repo])
     OpentelemetryOban.setup()
 
+    # Node discovery (libcluster). Nothing is started without a
+    # CLUSTER_STRATEGY; see Converger.Cluster.
     children =
       [
         ConvergerWeb.Telemetry,
         Converger.Vault,
-        Converger.Repo,
-        {DNSCluster, query: Application.get_env(:converger, :dns_cluster_query) || :ignore},
-        {Phoenix.PubSub, name: Converger.PubSub},
-        ConvergerWeb.SocketPresence,
-        ConvergerWeb.ConversationPresence,
-        # Native v1 WebSockets and SSE streams, drained by ConvergerWeb.Drain.
-        ConvergerWeb.ProtocolConnections,
-        # Open client connections, for the connection gauge (ConvergerWeb.Telemetry).
-        ConvergerWeb.ClientConnections,
-        {Task.Supervisor, name: Converger.TaskSupervisor},
-        Converger.RateLimit.Supervisor,
-        {Oban, oban_config()}
+        Converger.Repo
       ] ++
+        Converger.Cluster.child_specs() ++
+        [
+          {Phoenix.PubSub, name: Converger.PubSub},
+          ConvergerWeb.SocketPresence,
+          ConvergerWeb.ConversationPresence,
+          # Native v1 WebSockets and SSE streams, drained by ConvergerWeb.Drain.
+          ConvergerWeb.ProtocolConnections,
+          # Open client connections, for the connection gauge (ConvergerWeb.Telemetry).
+          ConvergerWeb.ClientConnections,
+          {Task.Supervisor, name: Converger.TaskSupervisor},
+          Converger.RateLimit.Supervisor,
+          {Oban, oban_config()}
+        ] ++
         Converger.Partitions.boot_children() ++
         Converger.Pipeline.child_specs() ++
         [

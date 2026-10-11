@@ -1,5 +1,5 @@
 defmodule Converger.Channels.Adapters.WhatsAppMeta do
-  @behaviour Converger.Channels.Adapter
+  use Converger.Channels.Adapter, type: "whatsapp_meta"
 
   alias Converger.Channels.{DeliveryError, InboundSignature}
   alias Converger.Participants
@@ -11,30 +11,72 @@ defmodule Converger.Channels.Adapters.WhatsAppMeta do
   # with `graph_api_version` or globally in config.
   @default_graph_api_version "v26.0"
 
+  # Outbound messages are sent as WhatsApp text. Native outbound reactions,
+  # media and interactive messages are planned (#37); other activity types are
+  # downgraded to text or skipped (Converger.Activities.Downgrade).
   @impl true
-  def supported_modes, do: ~w(inbound outbound duplex)
+  def capabilities do
+    [
+      :inbound,
+      :outbound,
+      :external_delivery,
+      :receipts,
+      :typing,
+      :provider_ack,
+      activity_types: ~w(message)
+    ]
+  end
+
+  @impl true
+  def config_schema do
+    [
+      %{
+        name: "phone_number_id",
+        type: :string,
+        required: true,
+        label: "Phone Number ID",
+        placeholder: "e.g. 1234567890",
+        summary: true
+      },
+      %{
+        name: "access_token",
+        type: :string,
+        required: true,
+        secret: true,
+        label: "Access Token",
+        placeholder: "Graph API access token"
+      },
+      %{
+        name: "verify_token",
+        type: :string,
+        required: true,
+        secret: true,
+        label: "Verify Token",
+        placeholder: "Webhook verify token"
+      },
+      # Meta signs webhooks with the app secret, so a channel that requires
+      # signatures cannot accept anything without it.
+      %{
+        name: "app_secret",
+        type: :string,
+        required: :with_signature,
+        secret: true,
+        label: "App Secret",
+        placeholder: "Signs X-Hub-Signature-256"
+      },
+      %{
+        name: "graph_api_version",
+        type: :string,
+        label: "Graph API version",
+        placeholder: @default_graph_api_version
+      }
+    ]
+  end
 
   # Cloud API default throughput per business phone number (80 messages/s);
   # higher-throughput numbers override it with the channel's `rate_limit`.
   @impl true
   def rate_limit, do: "80/s"
-
-  # Outbound messages are sent as WhatsApp text. Native outbound reactions,
-  # media and interactive messages are planned (#37); other activity types are
-  # downgraded to text or skipped (Converger.Activities.Downgrade).
-  @impl true
-  def capabilities, do: [:inbound, :outbound, activity_types: ~w(message)]
-
-  @impl true
-  def validate_config(config) do
-    required = ["phone_number_id", "access_token", "verify_token"]
-    missing = Enum.filter(required, fn key -> !is_binary(config[key]) or config[key] == "" end)
-
-    case missing do
-      [] -> :ok
-      fields -> {:error, "whatsapp_meta config missing: #{Enum.join(fields, ", ")}"}
-    end
-  end
 
   @impl true
   def deliver_activity(channel, activity) do
@@ -71,7 +113,8 @@ defmodule Converger.Channels.Adapters.WhatsAppMeta do
 
       case Req.post(url, options) do
         {:ok, %Req.Response{status: 200, body: body}} ->
-          {:ok, %{whatsapp_message_id: get_in(body, ["messages", Access.at(0), "id"])}}
+          message_id = get_in(body, ["messages", Access.at(0), "id"])
+          {:ok, %{whatsapp_message_id: message_id, provider_message_id: message_id}}
 
         # 400 (e.g. invalid recipient) and auth errors are permanent; 429 and
         # 5xx are retried, honouring Retry-After.
@@ -383,6 +426,47 @@ defmodule Converger.Channels.Adapters.WhatsAppMeta do
         if Plug.Crypto.secure_compare(expected, String.downcase(signature)),
           do: :ok,
           else: {:error, :invalid_signature}
+    end
+  end
+
+  @doc """
+  Meta's webhook handshake: echo `hub.challenge` verbatim once
+  `hub.verify_token` matches the channel's `verify_token`.
+  """
+  @impl true
+  def verify_subscription(channel, params) do
+    verify_token = (channel.config || %{})["verify_token"]
+    provided = params["hub.verify_token"]
+
+    if is_binary(verify_token) and verify_token != "" and is_binary(provided) and
+         Plug.Crypto.secure_compare(provided, verify_token),
+       do: {:ok, params["hub.challenge"] || ""},
+       else: :error
+  end
+
+  @doc """
+  Reads the channel's phone number from the Graph API
+  (`GET /<version>/<phone_number_id>?fields=id`): checks that the access
+  token is valid and can reach the number.
+  """
+  @impl true
+  def health_probe(channel) do
+    url =
+      "https://graph.facebook.com/#{graph_api_version(channel)}/#{channel.config["phone_number_id"]}"
+
+    options =
+      [
+        params: [fields: "id"],
+        headers: [{"authorization", "Bearer #{channel.config["access_token"]}"}],
+        receive_timeout: 5_000,
+        retry: false
+      ]
+      |> Keyword.merge(Application.get_env(:converger, :whatsapp_req_options, []))
+
+    case Req.get(url, options) do
+      {:ok, %Req.Response{status: 200}} -> :ok
+      {:ok, %Req.Response{status: status}} -> {:error, "WhatsApp API returned #{status}"}
+      {:error, reason} -> {:error, "WhatsApp API request failed: #{inspect(reason)}"}
     end
   end
 

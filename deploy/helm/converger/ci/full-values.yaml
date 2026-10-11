@@ -1,0 +1,42 @@
+# Every optional template on, a chart-managed Secret and a pinned digest.
+image:
+  digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+secret:
+  create: true
+  databaseUrl: ecto://converger:secret@postgres/converger
+  secretKeyBase: ci-secret-key-base-ci-secret-key-base-ci-secret-key-base-ci-secret
+  cloakKey: Y2ktY2xvYWsta2V5LWNpLWNsb2FrLWtleS1jaS0xMjM=
+  releaseCookie: ci-release-cookie
+  metricsToken: ci-metrics-token
+extraEnv:
+  - name: CORS_ORIGINS
+    value: https://app.example.com
+autoscaling:
+  targetMemoryUtilizationPercentage: 80
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+  hosts:
+    - host: converger.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: converger-tls
+      hosts:
+        - converger.example.com
+metrics:
+  podMonitor:
+    enabled: true
+networkPolicy:
+  enabled: true
+  httpFrom:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: ingress-nginx
+serviceAccount:
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/converger
+priorityClassName: high-priority

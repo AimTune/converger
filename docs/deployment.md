@@ -43,7 +43,7 @@ See [TLS, HSTS and WebSocket origins](#tls-hsts-and-websocket-origins).
 | `HSTS_MAX_AGE` | `31536000` | HSTS `max-age` in seconds. Start low (e.g. `300`) when first enabling it. |
 | `HSTS_INCLUDE_SUBDOMAINS` | `false` | Add `includeSubDomains`. Only if every subdomain serves HTTPS. |
 | `HSTS_PRELOAD` | `false` | Add `preload`. Only together with a long max-age and `includeSubDomains`, and after submitting to the preload list. |
-| `FORCE_SSL_EXCLUDE_PATHS` | unset | Comma-separated paths served over plain HTTP without redirect (e.g. a load balancer health check path). Requests for host `localhost`/`127.0.0.1` are never redirected. |
+| `FORCE_SSL_EXCLUDE_PATHS` | unset | Comma-separated paths served over plain HTTP without redirect. `/health/live`, `/health/ready` and `/metrics` never need it. Requests for host `localhost`/`127.0.0.1` are never redirected. |
 | `CHECK_ORIGIN` | host of `PHX_HOST` | Comma-separated origins allowed to open browser WebSocket connections (LiveView, `/socket`, `/socket/converger`), e.g. `https://converger.example.com,//*.example.com`. Clients that send no `Origin` header (servers, mobile SDKs) are not affected. |
 
 ### Release scripts
@@ -81,12 +81,22 @@ Load balancers and Kubernetes probe `GET /health/live` and `GET /health/ready`.
 | `ADMIN_IP_WHITELIST` | `127.0.0.1,::1` | Comma-separated list of client IPs allowed to reach the `/admin` routes. |
 | `TRUSTED_PROXIES` | unset | Comma-separated IPs/CIDRs of reverse proxies whose `X-Forwarded-For` and `X-Forwarded-Proto` headers are honoured. See [docs/security.md](security.md). |
 
-### Clustering and metrics
+### Clustering, health and metrics
+
+See [Clustering](operations/clustering.md), [Kubernetes](operations/kubernetes.md) and
+[Observability](operations/observability.md#health-endpoints).
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `DNS_CLUSTER_QUERY` | unset | DNS name queried by `DNSCluster` to discover and connect other nodes (prod only). Clustering is disabled when unset. |
-| `PROMETHEUS_PORT` | `9568` | Port of the Prometheus metrics exporter. Not started in `test` unless set. |
+| `CLUSTER_STRATEGY` | `none` | How nodes discover each other (libcluster): `none`, `kubernetes_dns` (with `CLUSTER_SERVICE`), `dns` (with `CLUSTER_DNS_QUERY`), `gossip` (with `CLUSTER_GOSSIP_SECRET`) or `epmd` (with `CLUSTER_HOSTS`). The full list of `CLUSTER_*` variables is in the [Configuration reference](operations/configuration.md#clustering). |
+| `RELEASE_COOKIE` | none | Shared Erlang distribution cookie. **Required** when `CLUSTER_STRATEGY` is not `none`; the release refuses to start without it. |
+| `CLUSTER_NODE_BASENAME` | `converger` | Node names are `<basename>@<ip>`; `rel/env.sh.eex` sets `RELEASE_DISTRIBUTION=name` and `RELEASE_NODE` from `POD_IP` / `FLY_PRIVATE_IP` / `hostname -i`. |
+| `DNS_CLUSTER_QUERY` | unset | Deprecated (former `dns_cluster` setting); implies `CLUSTER_STRATEGY=dns` with this query. |
+| `METRICS_TOKEN` | unset | Bearer token for `GET /metrics` on the main port. |
+| `METRICS_ALLOWED_IPS` | unset | IPs/CIDRs that may read `/metrics` without a token. With neither set, `/metrics` answers `404`. |
+| `PROMETHEUS_PORT` | unset | Opt-in legacy listener serving `/metrics` **without authentication** on a separate port (formerly always on at `9568`). |
+
+`GET /health/live` and `GET /health/ready` need no configuration and no authentication.
 
 ### Background jobs (Oban)
 
@@ -105,7 +115,7 @@ plugin rescues it; only then is the delivery retried. See
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `RATE_LIMIT_BACKEND` | `cluster` when `DNS_CLUSTER_QUERY` is set, otherwise `local` | `local`: per-node ETS counters. `cluster`: per-node ETS counters replicated to every connected node over Phoenix PubSub, so limits apply across the cluster. |
+| `RATE_LIMIT_BACKEND` | `cluster` when clustering is enabled (`CLUSTER_STRATEGY` other than `none`), otherwise `local` | `local`: per-node ETS counters. `cluster`: per-node ETS counters replicated to every connected node over Phoenix PubSub, so limits apply across the cluster. |
 | `RATE_LIMIT_SYNC_INTERVAL_MS` | `100` | How often the `cluster` backend broadcasts counter deltas to the other nodes. |
 
 Default limits (requests per window; rejected requests get `429` with a
@@ -142,7 +152,7 @@ no database or network round trip.
 - `local` is exact on a single node. Behind a load balancer with N nodes each
   node counts on its own, so a client can get up to N times the limit.
 - `cluster` needs no extra infrastructure (it uses the Erlang distribution
-  that `DNS_CLUSTER_QUERY` already sets up). Counter deltas are batched and
+  that clustering (`CLUSTER_STRATEGY`) already sets up). Counter deltas are batched and
   broadcast every `RATE_LIMIT_SYNC_INTERVAL_MS`, so it is eventually
   consistent: a burst can overshoot by what the other nodes accept within one
   interval. Counters are in memory: a restarted node starts empty for the
@@ -268,8 +278,9 @@ reaches the app directly cannot claim `X-Forwarded-Proto: https`. So:
 2. Make the proxy set (overwrite) `X-Forwarded-Proto` (nginx:
    `proxy_set_header X-Forwarded-Proto $scheme;`; ALB, GCP LB, Traefik and
    ingress-nginx do this by default).
-3. If the load balancer health-checks over plain HTTP, either health-check the
-   `localhost` host header, or list the path in `FORCE_SSL_EXCLUDE_PATHS`.
+3. Point load balancer health checks at `/health/ready` (or `/health/live`):
+   `/health/*` is served before `ForceSSL` and never redirected, so plain HTTP
+   probes work without `FORCE_SSL_EXCLUDE_PATHS`.
 4. Roll HSTS out with a short `HSTS_MAX_AGE` first; browsers cache it.
 
 Set `FORCE_SSL=false` only when TLS is enforced elsewhere and clients can never
@@ -507,11 +518,13 @@ Rollback:
 ## Capacity guidance
 
 Starting points; measure with your traffic (`test/load/performance_test.exs`,
-the Prometheus metrics on `PROMETHEUS_PORT`):
+the Prometheus metrics at `/metrics`):
 
 - **Replicas**: at least 2 behind the load balancer for availability. The app is
-  stateless apart from WebSocket connections; enable clustering with
-  `DNS_CLUSTER_QUERY` so PubSub broadcasts reach sockets on every node.
+  stateless apart from WebSocket connections; enable clustering
+  (`CLUSTER_STRATEGY`, see [Clustering](operations/clustering.md)) so PubSub
+  broadcasts reach sockets on every node. Point the load balancer health
+  check at `/health/ready`.
 - **CPU / memory**: 1 vCPU and 1 GiB per replica handles a few thousand idle
   WebSocket connections; each connected socket costs tens of KiB. Scale out on
   CPU and on connection count.

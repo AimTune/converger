@@ -1,5 +1,5 @@
 defmodule Converger.Channels.Adapters.WhatsAppInfobip do
-  @behaviour Converger.Channels.Adapter
+  use Converger.Channels.Adapter, type: "whatsapp_infobip"
 
   alias Converger.Participants
 
@@ -8,30 +8,55 @@ defmodule Converger.Channels.Adapters.WhatsAppInfobip do
   alias Converger.Channels.{DeliveryError, UrlGuard}
   alias Converger.Pipeline.RetryPolicy
 
-  @impl true
-  def supported_modes, do: ~w(inbound outbound duplex)
-
   # Outbound messages are sent as WhatsApp text. Native outbound reactions,
   # media and interactive messages are planned (#37); other activity types are
   # downgraded to text or skipped (Converger.Activities.Downgrade).
   @impl true
-  def capabilities, do: [:inbound, :outbound, activity_types: ~w(message)]
+  def capabilities do
+    [
+      :inbound,
+      :outbound,
+      :external_delivery,
+      :receipts,
+      :provider_ack,
+      activity_types: ~w(message)
+    ]
+  end
 
   @impl true
-  def validate_config(config) do
-    required = ["base_url", "api_key", "sender"]
-    missing = Enum.filter(required, fn key -> !is_binary(config[key]) or config[key] == "" end)
-
-    case missing do
-      [] -> validate_base_url(config["base_url"])
-      fields -> {:error, "whatsapp_infobip config missing: #{Enum.join(fields, ", ")}"}
-    end
+  def config_schema do
+    [
+      %{
+        name: "base_url",
+        type: :url,
+        required: true,
+        label: "Base URL",
+        placeholder: "https://xxxxx.api.infobip.com"
+      },
+      %{
+        name: "api_key",
+        type: :string,
+        required: true,
+        secret: true,
+        label: "API Key",
+        placeholder: "Infobip API key"
+      },
+      %{
+        name: "sender",
+        type: :string,
+        required: true,
+        label: "Sender",
+        placeholder: "Sender phone number",
+        summary: true
+      }
+    ]
   end
 
   # base_url is per-tenant config the server sends requests to: same SSRF
   # guard as webhook channels.
-  defp validate_base_url(url) do
-    case UrlGuard.check(url) do
+  @impl true
+  def validate_config(config) do
+    case UrlGuard.check(config["base_url"]) do
       :ok -> :ok
       {:error, message} -> {:error, "whatsapp_infobip config base_url is not allowed: #{message}"}
     end
@@ -71,7 +96,7 @@ defmodule Converger.Channels.Adapters.WhatsAppInfobip do
       case Req.post(url, options) do
         {:ok, %Req.Response{status: status, body: body}} when status in 200..299 ->
           message_id = get_in(body, ["messages", Access.at(0), "messageId"])
-          {:ok, %{infobip_message_id: message_id}}
+          {:ok, %{infobip_message_id: message_id, provider_message_id: message_id}}
 
         {:ok, %Req.Response{status: status, headers: headers, body: body}} ->
           {:error, DeliveryError.from_http(status, headers, body, "Infobip API")}

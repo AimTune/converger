@@ -361,24 +361,29 @@ defmodule ConvergerWeb.Admin.ChannelLive do
 
   defp middleware_types, do: @middleware_types
 
-  defp config_summary(%{type: "webhook", config: %{"url" => url}}) when url != "", do: url
-
-  defp config_summary(%{type: "whatsapp_meta", config: %{"phone_number_id" => id}}) when id != "",
-    do: "Phone: #{id}"
-
-  defp config_summary(%{type: "whatsapp_infobip", config: %{"sender" => s}}) when s != "",
-    do: "Sender: #{s}"
+  # The schema fields marked `summary: true` with a value, e.g. the webhook
+  # URL or the WhatsApp phone number id.
+  defp config_summary(%{type: type, config: config}) when is_map(config) do
+    for %{summary: true} = field <- Adapter.config_schema(type),
+        value = config[field.name],
+        is_binary(value) and value != "" do
+      if field.type == :url, do: value, else: "#{field_label(field)}: #{value}"
+    end
+    |> Enum.join(", ")
+  end
 
   defp config_summary(_), do: ""
 
   defp config_detail(%{config: config}) when config == %{}, do: ""
 
-  defp config_detail(%{config: config}) do
+  defp config_detail(%{type: type, config: config}) do
+    secret_fields = for %{secret: true, name: name} <- Adapter.config_schema(type), do: name
+
     config
     |> Converger.Secrets.redact()
     |> Enum.reject(fn {_k, v} -> v == "" end)
     |> Enum.map_join("\n", fn {k, v} ->
-      if Converger.Secrets.sensitive_key?(k),
+      if k in secret_fields or Converger.Secrets.sensitive_key?(k),
         do: "#{k}: #{Converger.Secrets.mask(config[k])}",
         else: "#{k}: #{format_config_value(v)}"
     end)
@@ -387,37 +392,24 @@ defmodule ConvergerWeb.Admin.ChannelLive do
   defp format_config_value(v) when is_binary(v), do: v
   defp format_config_value(v), do: inspect(v)
 
-  defp config_fields("webhook") do
-    [
-      {"url", "Webhook URL", "https://example.com/webhook", :text},
-      {"method", "HTTP Method", "POST", :text}
-    ]
+  # The admin form renders the adapter's config schema. Map fields (such as
+  # the webhook's headers) and fields with `form: false` are API only.
+  defp config_fields(type) do
+    for field <- Adapter.config_schema(type),
+        field.type != :map and Map.get(field, :form, true),
+        do: field
   end
 
-  defp config_fields("whatsapp_meta") do
-    [
-      {"phone_number_id", "Phone Number ID", "e.g. 1234567890", :text},
-      {"access_token", "Access Token", "Graph API access token", :password},
-      {"verify_token", "Verify Token", "Webhook verify token", :password},
-      {"app_secret", "App Secret", "Signs X-Hub-Signature-256", :password}
-    ]
-  end
+  defp field_label(field), do: Map.get(field, :label, field.name)
 
-  defp config_fields("whatsapp_infobip") do
-    [
-      {"base_url", "Base URL", "https://xxxxx.api.infobip.com", :text},
-      {"api_key", "API Key", "Infobip API key", :password},
-      {"sender", "Sender", "Sender phone number", :text}
-    ]
-  end
+  defp field_placeholder(%{placeholder: placeholder}), do: placeholder
+  defp field_placeholder(%{help: help}), do: help
+  defp field_placeholder(_field), do: ""
 
-  defp config_fields("websocket") do
-    [
-      {"require_ack", "Require client ack", "false (default) or true", :text}
-    ]
-  end
-
-  defp config_fields(_), do: []
+  defp field_input_type(%{secret: true}), do: "password"
+  defp field_input_type(%{type: :integer}), do: "number"
+  defp field_input_type(%{type: :url}), do: "url"
+  defp field_input_type(_field), do: "text"
 
   defp mode_label("inbound"), do: "← Inbound (receive only)"
   defp mode_label("outbound"), do: "→ Outbound (send only)"
@@ -493,12 +485,24 @@ defmodule ConvergerWeb.Admin.ChannelLive do
         <div :if={config_fields(@selected_type) != []} style="margin-top: 12px; padding: 12px; background: #f8f9fa; border-radius: 6px; border: 1px solid #e9ecef;">
           <h4 style="margin: 0 0 10px 0; font-size: 0.9em; color: #555;">Configuration</h4>
           <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-            <div :for={{key, label, placeholder, type} <- config_fields(@selected_type)}>
-              <label style="display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.85em; color: #555;"><%= label %></label>
+            <div :for={field <- config_fields(@selected_type)} title={Map.get(field, :help)}>
+              <label style="display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.85em; color: #555;">
+                <%= field_label(field) %><span :if={Map.get(field, :required) == true}> *</span>
+              </label>
+              <select
+                :if={field.type == :boolean}
+                name={"channel[config][#{field.name}]"}
+                style="padding: 8px; border: 1px solid #ddd; border-radius: 4px; min-width: 200px;"
+              >
+                <option value="">default</option>
+                <option value="true">true</option>
+                <option value="false">false</option>
+              </select>
               <input
-                type={if type == :password, do: "password", else: "text"}
-                name={"channel[config][#{key}]"}
-                placeholder={placeholder}
+                :if={field.type != :boolean}
+                type={field_input_type(field)}
+                name={"channel[config][#{field.name}]"}
+                placeholder={field_placeholder(field)}
                 style="padding: 8px; border: 1px solid #ddd; border-radius: 4px; min-width: 200px;"
               />
             </div>

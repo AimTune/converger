@@ -1,0 +1,14 @@
+# Voluntary disruptions (node drains, cluster upgrades) never take down the
+# last ready pod.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: converger
+  labels:
+    app.kubernetes.io/name: converger
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: converger
+      app.kubernetes.io/component: server

@@ -1,14 +1,18 @@
 defmodule ConvergerWeb.Plugs.Health do
   @moduledoc """
-  Unauthenticated probes for load balancers and Kubernetes:
+  Serves `GET /health/live` and `GET /health/ready` for load balancers and
+  Kubernetes probes. Unauthenticated and plain JSON.
 
-    * `GET /health/live` - 200 while the node is up.
-    * `GET /health/ready` - 200 `{"status":"ready"}`, or 503
-      `{"status":"draining"}` once the node has started shutting down
-      (`ConvergerWeb.Drain`), so new traffic goes to other nodes.
+  Plugged into `ConvergerWeb.Endpoint` before `TrustedProxies`, `ForceSSL`,
+  request logging and telemetry, so probes over plain HTTP to the pod IP are
+  never redirected to HTTPS and do not flood the logs. Any other request
+  passes through untouched.
 
-  Further readiness checks (database, Oban, migrations) are planned in
-  [#29](https://github.com/AimTune/converger/issues/29).
+  * `/health/live` - always `200 {"status":"ok"}` while the VM answers.
+  * `/health/ready` - `200 {"status":"ready","checks":{...}}` when every check
+    of `Converger.Health.readiness/0` passes. Otherwise `503` with the failing
+    `"reasons"`, every check result and `"status"`: `"draining"` when the node
+    is shutting down (`ConvergerWeb.Drain`), else `"unavailable"`.
   """
 
   @behaviour Plug
@@ -19,25 +23,37 @@ defmodule ConvergerWeb.Plugs.Health do
   def init(opts), do: opts
 
   @impl true
-  def call(%Plug.Conn{method: method, path_info: ["health", "live"]} = conn, _opts)
-      when method in ["GET", "HEAD"] do
-    respond(conn, 200, "ok")
-  end
+  def call(%Plug.Conn{method: method, path_info: ["health", check]} = conn, _opts)
+      when method in ["GET", "HEAD"] and check in ["live", "ready"] do
+    {status, body} = respond(check)
 
-  def call(%Plug.Conn{method: method, path_info: ["health", "ready"]} = conn, _opts)
-      when method in ["GET", "HEAD"] do
-    if ConvergerWeb.Drain.draining?(),
-      do: respond(conn, 503, "draining"),
-      else: respond(conn, 200, "ready")
+    conn
+    |> put_resp_content_type("application/json")
+    |> put_resp_header("cache-control", "no-store")
+    |> send_resp(status, Jason.encode_to_iodata!(body))
+    |> halt()
   end
 
   def call(conn, _opts), do: conn
 
-  defp respond(conn, status, value) do
-    conn
-    |> put_resp_content_type("application/json")
-    |> put_resp_header("cache-control", "no-store")
-    |> send_resp(status, Jason.encode!(%{status: value}))
-    |> halt()
+  defp respond("live"), do: {200, %{status: "ok"}}
+
+  defp respond("ready") do
+    {result, checks} = Converger.Health.readiness()
+
+    checks_json = Map.new(checks, fn {name, res} -> {name, format(res)} end)
+
+    case result do
+      :ok ->
+        {200, %{status: "ready", checks: checks_json}}
+
+      :error ->
+        reasons = for {_name, {:error, reason}} <- checks, do: reason
+        status = if checks[:draining] == :ok, do: "unavailable", else: "draining"
+        {503, %{status: status, reasons: reasons, checks: checks_json}}
+    end
   end
+
+  defp format(:ok), do: "ok"
+  defp format({:error, _reason}), do: "error"
 end

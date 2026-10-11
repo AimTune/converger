@@ -26,3 +26,4 @@
 # above; kept explicit so they stay LF even if the default changes).
 *.sh text eol=lf
 rel/overlays/bin/* text eol=lf
+rel/*.eex text eol=lf

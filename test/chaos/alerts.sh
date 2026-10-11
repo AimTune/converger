@@ -121,8 +121,9 @@ rule_files:
   - /etc/prometheus/alerts.yml
 scrape_configs:
   - job_name: converger
+    metrics_path: /metrics
     static_configs:
-      - targets: ["app:9568"]
+      - targets: ["app:4000"]
 EOF
 # Same rules, minutes-long `for:` shortened so the run takes minutes.
 sed -E 's/^( +for: )(5m|10m|2m)$/\120s/; s/^( +for: )1m$/\110s/' docker/prometheus/alerts.yml \

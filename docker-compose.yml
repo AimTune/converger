@@ -36,11 +36,14 @@ services:
       CREATE_DB: "true"
       PHX_HOST: ${PHX_HOST:-localhost}
       PORT: "4000"
-      PROMETHEUS_PORT: "9568"
       # Local compose serves plain HTTP. Set FORCE_SSL=true (and
       # TRUSTED_PROXIES) when running behind a TLS-terminating proxy.
       FORCE_SSL: ${FORCE_SSL:-false}
       TRUSTED_PROXIES: ${TRUSTED_PROXIES:-}
+      # GET /metrics on port 4000 needs this bearer token (or an IP in
+      # METRICS_ALLOWED_IPS); unset, /metrics answers 404.
+      METRICS_TOKEN: ${METRICS_TOKEN:-}
+      METRICS_ALLOWED_IPS: ${METRICS_ALLOWED_IPS:-}
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
 
   app:
@@ -53,7 +56,6 @@ services:
         condition: service_completed_successfully
     ports:
       - "4000:4000"
-      - "9568:9568"
     environment:
       <<: *app_env
       CREATE_DB: "false"

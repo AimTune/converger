@@ -12,12 +12,11 @@ defmodule ConvergerWeb.InboundController do
        [bucket: :inbound, scope: :channel]
        when action in [:create, :status]
 
-  action_fallback ConvergerWeb.FallbackController
+  # Providers that post a body Plug.Parsers leaves unread: Amazon SNS
+  # (`text/plain` JSON) and raw mail (`message/rfc822`).
+  plug :read_unparsed_body when action in [:create, :status]
 
-  # Channel types whose provider retries any non-200 response (for days, in
-  # Meta's case). They always get 200 once the request has been handled,
-  # including for messages rejected permanently (retrying cannot fix those).
-  @provider_ack_types ~w(whatsapp_meta whatsapp_infobip)
+  action_fallback ConvergerWeb.FallbackController
 
   @doc """
   Inbound webhook. A request may carry several messages and status updates
@@ -39,30 +38,41 @@ defmodule ConvergerWeb.InboundController do
       duplicates on re-delivery and the remaining ones are created, in order.
 
   Status updates are applied best-effort before the messages.
+
+  A handshake the adapter answers in-band (`c:Converger.Channels.Adapter.inbound_challenge/2`,
+  e.g. Slack's `url_verification`) is answered once the signature is verified,
+  without creating anything.
   """
   def create(conn, %{"channel_id" => channel_id} = params) do
     with {:ok, channel} <- Channels.get_active_channel(channel_id),
          :ok <- verify_inbound_signature(conn, channel) do
-      status_updates =
-        case Adapter.parse_status_update(channel, params) do
-          {:ok, updates} when is_list(updates) -> updates
-          _ -> []
-        end
-
-      case Adapter.parse_inbound(channel, params) do
-        {:ok, [_ | _] = messages} ->
-          receipts = apply_status_updates(channel, status_updates)
-          process_inbound_messages(conn, channel, params, messages, receipts)
-
-        {:ok, []} ->
-          process_status_updates(conn, channel, status_updates)
-
-        {:error, _} when status_updates != [] ->
-          process_status_updates(conn, channel, status_updates)
-
-        {:error, _} = error ->
-          error
+      case Adapter.inbound_challenge(channel, params) do
+        {:ok, body} -> json(conn, body)
+        :none -> receive_inbound(conn, channel, params)
       end
+    end
+  end
+
+  defp receive_inbound(conn, channel, params) do
+    status_updates =
+      case Adapter.parse_status_update(channel, params) do
+        {:ok, updates} when is_list(updates) -> updates
+        _ -> []
+      end
+
+    case Adapter.parse_inbound(channel, params) do
+      {:ok, [_ | _] = messages} ->
+        receipts = apply_status_updates(channel, status_updates)
+        process_inbound_messages(conn, channel, params, messages, receipts)
+
+      {:ok, []} ->
+        process_status_updates(conn, channel, status_updates)
+
+      {:error, _} when status_updates != [] ->
+        process_status_updates(conn, channel, status_updates)
+
+      {:error, _} = error ->
+        error
     end
   end
 
@@ -74,27 +84,75 @@ defmodule ConvergerWeb.InboundController do
     end
   end
 
-  # Meta's webhook handshake requires echoing `hub.challenge` verbatim once the
-  # verify token matches.
+  # The adapter answers the provider's webhook handshake (Meta echoes
+  # `hub.challenge` verbatim once the verify token matches); adapters without
+  # one answer `200 ok`.
   # sobelow_skip ["XSS.SendResp"]
   def verify(conn, %{"channel_id" => channel_id} = params) do
     with {:ok, channel} <- Channels.get_active_channel(channel_id) do
-      case channel.type do
-        "whatsapp_meta" ->
-          verify_token = channel.config["verify_token"]
-
-          provided = params["hub.verify_token"]
-
-          if is_binary(verify_token) and is_binary(provided) and
-               Plug.Crypto.secure_compare(provided, verify_token) do
-            send_resp(conn, 200, params["hub.challenge"] || "")
-          else
-            send_resp(conn, 403, "Verification failed")
-          end
-
-        _ ->
-          send_resp(conn, 200, "ok")
+      case Adapter.verify_subscription(channel, params) do
+        {:ok, body} -> send_resp(conn, 200, body)
+        :error -> send_resp(conn, 403, "Verification failed")
       end
+    end
+  end
+
+  # Reads a body no parser handled into `conn.assigns.raw_body` (for
+  # signature checks) and the `"_body"` param (for the adapter). Bounded like
+  # multipart requests: the upload size limit plus 1 MB.
+  defp read_unparsed_body(conn, _opts) do
+    if is_nil(conn.assigns[:raw_body]) and unparsed_content_type?(conn) do
+      max = Converger.Uploads.max_file_size() + 1_000_000
+
+      case read_full_body(conn, max, "") do
+        {:ok, "", conn} ->
+          conn
+
+        {:ok, body, conn} ->
+          conn
+          |> assign(:raw_body, body)
+          |> Map.update!(:params, &Map.put(&1, "_body", body))
+
+        {:error, :too_large, conn} ->
+          conn |> send_resp(413, "Request body too large") |> halt()
+
+        {:error, _reason, conn} ->
+          conn |> send_resp(400, "Could not read request body") |> halt()
+      end
+    else
+      conn
+    end
+  end
+
+  defp unparsed_content_type?(conn) do
+    case get_req_header(conn, "content-type") do
+      [type | _] ->
+        not String.starts_with?(String.downcase(type), [
+          "application/json",
+          "application/x-www-form-urlencoded",
+          "multipart/"
+        ])
+
+      [] ->
+        true
+    end
+  end
+
+  defp read_full_body(conn, max, acc) do
+    case Plug.Conn.read_body(conn, length: min(max, 1_000_000)) do
+      {:ok, chunk, conn} ->
+        body = acc <> chunk
+        if byte_size(body) > max, do: {:error, :too_large, conn}, else: {:ok, body, conn}
+
+      {:more, chunk, conn} ->
+        body = acc <> chunk
+
+        if byte_size(body) > max,
+          do: {:error, :too_large, conn},
+          else: read_full_body(conn, max, body)
+
+      {:error, reason} ->
+        {:error, reason, conn}
     end
   end
 
@@ -168,7 +226,10 @@ defmodule ConvergerWeb.InboundController do
     created = Enum.count(results, &match?({:created, _}, &1))
     rejected = for {:rejected, changeset} <- results, do: changeset
 
-    provider_ack? = channel.type in @provider_ack_types
+    # Providers that retry any non-200 response (for days, in Meta's case)
+    # always get 200 once the request has been handled, including for
+    # messages rejected permanently (retrying cannot fix those).
+    provider_ack? = Adapter.capability?(channel.type, :provider_ack)
 
     if accepted == [] and not provider_ack? do
       # A generic webhook client sent an invalid message: tell it why.
