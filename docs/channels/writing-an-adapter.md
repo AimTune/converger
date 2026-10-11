@@ -286,6 +286,10 @@ Callback checklist:
 
 Signals are best effort: they run in a task under `Converger.TaskSupervisor`, are never retried, and an `{:error, reason}` or a raise is only logged. Do not retry inside the callback (pass `retry: false` to Req). Return `:ok` without calling the provider when there is nothing to do, for example `is_typing: false` on a provider that clears indicators on its own, or a `nil` `:provider_message_id`. Typing is forwarded at most every 20 seconds per WebSocket connection. See [ADR-0032](../adr/0032-transient-conversation-signals.md) and the WhatsApp Cloud API implementation in `whatsapp_meta.ex`.
 
+### Webhook registration (optional)
+
+If the provider registers its webhook through an API call (Telegram `setWebhook`), implement `register_webhook(channel, inbound_url)` and return `:ok` or `{:error, reason}` (a readable string is shown to the admin). The admin channel list then shows a **Register webhook** button for your channels; it calls `Channels.register_webhook/3` with the channel's public inbound URL (`https://<PHX_HOST>/api/v1/channels/<id>/inbound`) and audits a successful call as `register_webhook`. Pass the channel's verification secret to the provider in the same call, as the Telegram adapter passes `secret_token`. Use `retry: false` and a timeout of a few seconds: an admin is waiting for the answer.
+
 ## 2. Register the type
 
 Add the module to the registry with one config line, in `config/config.exs` of your fork or application:
@@ -294,7 +298,7 @@ Add the module to the registry with one config line, in `config/config.exs` of y
 config :converger, :adapters, [Converger.Channels.Adapters.AcmeSms]
 ```
 
-The registry (`Converger.Channels.Adapter.adapters/0`) is the built-in adapters (`echo`, `webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `email`) followed by this list, in order. An adapter whose `type/0` equals a built-in type replaces the built-in, so a fork can swap an implementation without patching core. A built-in adapter that ships with Converger itself is added to `@builtin_adapters` in `adapter.ex` instead.
+The registry (`Converger.Channels.Adapter.adapters/0`) is the built-in adapters (`echo`, `webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram`, `email`) followed by this list, in order. An adapter whose `type/0` equals a built-in type replaces the built-in, so a fork can swap an implementation without patching core. A built-in adapter that ships with Converger itself is added to `@builtin_adapters` in `adapter.ex` instead.
 
 That is all. From the registry and the adapter's declarations:
 
@@ -402,6 +406,7 @@ def normalize_error(reason), do: DeliveryError.normalize(reason)
 - Use [`Converger.HTTP`](https://github.com/AimTune/converger/blob/main/lib/converger/http.ex) (`request/1`, `post/2`) for outbound calls. It wraps Req and attaches `OpentelemetryReq`, so each call becomes a client span under the delivery job's span. (The existing webhook and WhatsApp adapters still call `Req` directly.) Do not add other HTTP clients.
 - Set `receive_timeout` from `RetryPolicy.for_channel(channel).timeout_ms`.
 - Merge test options from the application env (`Application.get_env(:converger, :acme_sms_req_options, [])`), the same pattern as `:webhook_req_options` and `:whatsapp_req_options`, so tests can inject `plug: {Req.Test, ...}`.
+- A provider API URL that carries a credential (Telegram puts the bot token in the path) must not be a tenant setting at all: make it application config, as `config :converger, Converger.Channels.Adapters.Telegram, api_base_url: ...`. Such adapters call `Req` directly, because `OpentelemetryReq` records the full URL (`url.full`) on the client span.
 - Any URL a tenant can configure (a base URL, a callback URL) must pass [`Converger.Channels.UrlGuard`](https://github.com/AimTune/converger/blob/main/lib/converger/channels/url_guard.ex): `check/1` at config validation and `resolve/1` before every request. `resolve/1` returns the checked address; to defeat DNS rebinding, pin the connection to it the way the webhook adapter does (`target_url/1` and `connect_options/2` with `hostname:`), and disable redirects (`redirect: false`). The guard is configured with `config :converger, :webhook, allow_private_targets: ..., allowed_targets: [...]` (`WEBHOOK_ALLOW_PRIVATE_TARGETS`, `WEBHOOK_ALLOWED_TARGETS` in releases). See [ADR-0014](../adr/0014-webhook-ssrf-guard-and-outbound-signing.md) and [Outbound webhooks](../webhooks.md#ssrf-protection).
 
 The example above checks `base_url` but, for brevity, does not pin the connection.

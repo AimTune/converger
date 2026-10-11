@@ -6,7 +6,7 @@ defmodule Converger.Channels do
   import Ecto.Query, warn: false
   alias Ecto.Multi
   alias Converger.Repo
-  alias Converger.Channels.{Channel, Circuit}
+  alias Converger.Channels.{Adapter, Channel, Circuit}
   alias Converger.AuditLogs
   alias Converger.AuditLogs.Changes
 
@@ -174,6 +174,30 @@ defmodule Converger.Channels do
     {:ok, updated} = Circuit.resume(channel)
     audit_circuit(channel, updated, "resume_deliveries", actor)
     {:ok, updated}
+  end
+
+  @doc """
+  Point the provider's webhook at `inbound_url` with the channel's adapter
+  (`c:Converger.Channels.Adapter.register_webhook/2`, e.g. Telegram's
+  `setWebhook`). Audited when an actor is given. Returns `:ok`,
+  `{:error, reason}` or `:unsupported`.
+  """
+  def register_webhook(%Channel{} = channel, inbound_url, actor \\ nil) do
+    result = Adapter.register_webhook(channel, inbound_url)
+
+    if result == :ok and actor do
+      AuditLogs.create_audit_log(%{
+        tenant_id: channel.tenant_id,
+        actor_type: actor.type,
+        actor_id: actor.id,
+        action: "register_webhook",
+        resource_type: "channel",
+        resource_id: channel.id,
+        changes: %{"after" => %{"webhook_url" => inbound_url}}
+      })
+    end
+
+    result
   end
 
   defp audit_circuit(_before, _updated, _action, nil), do: :ok

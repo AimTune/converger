@@ -323,7 +323,15 @@ defmodule Converger.Channels.Adapter do
   """
   @callback list_templates(channel) :: {:ok, [map()]} | {:error, term()}
 
+  @doc """
+  Point the provider's webhook at the channel's inbound URL (e.g. Telegram's
+  `setWebhook`). The admin channel list shows a "Register webhook" button for
+  adapters that implement it.
+  """
+  @callback register_webhook(channel, inbound_url :: String.t()) :: :ok | {:error, term()}
+
   @optional_callbacks [
+    register_webhook: 2,
     config_schema: 0,
     parse_status_update: 2,
     verify_inbound_signature: 3,
@@ -395,6 +403,7 @@ defmodule Converger.Channels.Adapter do
     Converger.Channels.Adapters.WhatsAppMeta,
     Converger.Channels.Adapters.WhatsAppInfobip,
     Converger.Channels.Adapters.Slack,
+    Converger.Channels.Adapters.Telegram,
     Converger.Channels.Adapters.Email
   ]
 
@@ -676,6 +685,14 @@ defmodule Converger.Channels.Adapter do
   """
   def health_probe(%{type: type} = channel),
     do: call_optional(type, :health_probe, [channel], :unsupported)
+
+  @doc """
+  Register the provider webhook of the channel with its adapter
+  (`c:register_webhook/2`). `:unsupported` when the adapter does not
+  implement it.
+  """
+  def register_webhook(%{type: type} = channel, inbound_url),
+    do: call_optional(type, :register_webhook, [channel, inbound_url], :unsupported)
 
   @doc "Whether the adapter for `type` implements the optional callback `name/arity`."
   def supports?(type, name, arity), do: optional(type, name, arity) != :error
