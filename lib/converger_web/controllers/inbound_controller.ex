@@ -38,30 +38,41 @@ defmodule ConvergerWeb.InboundController do
       duplicates on re-delivery and the remaining ones are created, in order.
 
   Status updates are applied best-effort before the messages.
+
+  A handshake the adapter answers in-band (`c:Converger.Channels.Adapter.inbound_challenge/2`,
+  e.g. Slack's `url_verification`) is answered once the signature is verified,
+  without creating anything.
   """
   def create(conn, %{"channel_id" => channel_id} = params) do
     with {:ok, channel} <- Channels.get_active_channel(channel_id),
          :ok <- verify_inbound_signature(conn, channel) do
-      status_updates =
-        case Adapter.parse_status_update(channel, params) do
-          {:ok, updates} when is_list(updates) -> updates
-          _ -> []
-        end
-
-      case Adapter.parse_inbound(channel, params) do
-        {:ok, [_ | _] = messages} ->
-          receipts = apply_status_updates(channel, status_updates)
-          process_inbound_messages(conn, channel, params, messages, receipts)
-
-        {:ok, []} ->
-          process_status_updates(conn, channel, status_updates)
-
-        {:error, _} when status_updates != [] ->
-          process_status_updates(conn, channel, status_updates)
-
-        {:error, _} = error ->
-          error
+      case Adapter.inbound_challenge(channel, params) do
+        {:ok, body} -> json(conn, body)
+        :none -> receive_inbound(conn, channel, params)
       end
+    end
+  end
+
+  defp receive_inbound(conn, channel, params) do
+    status_updates =
+      case Adapter.parse_status_update(channel, params) do
+        {:ok, updates} when is_list(updates) -> updates
+        _ -> []
+      end
+
+    case Adapter.parse_inbound(channel, params) do
+      {:ok, [_ | _] = messages} ->
+        receipts = apply_status_updates(channel, status_updates)
+        process_inbound_messages(conn, channel, params, messages, receipts)
+
+      {:ok, []} ->
+        process_status_updates(conn, channel, status_updates)
+
+      {:error, _} when status_updates != [] ->
+        process_status_updates(conn, channel, status_updates)
+
+      {:error, _} = error ->
+        error
     end
   end
 

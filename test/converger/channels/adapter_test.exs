@@ -10,7 +10,7 @@ defmodule Converger.Channels.AdapterTest do
   import Converger.ConversationsFixtures
   import Converger.ActivitiesFixtures
 
-  @builtin ~w(echo webhook websocket whatsapp_meta whatsapp_infobip email)
+  @builtin ~w(echo webhook websocket whatsapp_meta whatsapp_infobip slack email)
 
   defp put_env(key, value) do
     previous = Application.get_env(:converger, key)
@@ -45,9 +45,9 @@ defmodule Converger.Channels.AdapterTest do
 
     test "derives the externally delivering types from capabilities" do
       assert Adapter.types_with(:external_delivery) ==
-               ~w(webhook whatsapp_meta whatsapp_infobip email)
+               ~w(webhook whatsapp_meta whatsapp_infobip slack email)
 
-      assert Adapter.types_with(:provider_ack) == ~w(whatsapp_meta whatsapp_infobip email)
+      assert Adapter.types_with(:provider_ack) == ~w(whatsapp_meta whatsapp_infobip slack email)
       assert Adapter.types_with(:lifecycle_events) == ~w(webhook websocket)
     end
 
