@@ -30,6 +30,8 @@ defmodule Converger.Application do
           # Native v1 WebSockets and SSE streams, drained by ConvergerWeb.Drain.
           ConvergerWeb.ProtocolConnections,
           {Task.Supervisor, name: Converger.TaskSupervisor},
+          # Per-node cache of provider message templates (WhatsApp HSM).
+          Converger.Channels.Templates,
           Converger.RateLimit.Supervisor,
           {Oban, oban_config()}
         ] ++

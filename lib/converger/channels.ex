@@ -62,6 +62,7 @@ defmodule Converger.Channels do
   """
   def update_channel(%Channel{} = channel, attrs, actor \\ nil) do
     result = do_update_channel(channel, attrs, actor)
+    Converger.Channels.Templates.invalidate(channel.id)
 
     with {:ok, %Channel{status: status} = updated} when status != "active" <- result do
       ConvergerWeb.Sockets.disconnect_channel(updated.id)

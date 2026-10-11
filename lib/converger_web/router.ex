@@ -69,6 +69,9 @@ defmodule ConvergerWeb.Router do
     post "/channels/:channel_id/pause", ChannelDeliveryController, :pause
     post "/channels/:channel_id/resume", ChannelDeliveryController, :resume
 
+    # Provider message templates (WhatsApp HSM), cached
+    get "/channels/:channel_id/templates", ChannelTemplateController, :index
+
     # Dead-letter inspection and replay
     get "/deliveries", DeliveryController, :index
     post "/deliveries/:id/retry", DeliveryController, :retry

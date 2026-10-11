@@ -291,6 +291,29 @@ defmodule Converger.Channels.Adapter do
   """
   @callback send_read_receipt(channel, signal) :: :ok | {:error, term()}
 
+  @doc """
+  Download the file behind an inbound media attachment stub (one returned by
+  `c:parse_inbound/2` with a provider media id or URL in `channelData` and no
+  `contentUrl`), so it can be stored in Converger. Called by
+  `Converger.Inbound.Media` before the activity is created.
+
+  Returns `{:ok, %{data: binary, filename: name_or_nil}}`, `:skip` when the
+  attachment has nothing to download, or `{:error, reason}`; on error the
+  stub is kept and the message is still accepted.
+  """
+  @callback fetch_media(channel, attachment :: map()) ::
+              {:ok, %{required(:data) => binary(), optional(:filename) => String.t() | nil}}
+              | :skip
+              | {:error, term()}
+
+  @doc """
+  List the provider's message templates (WhatsApp HSM) of the channel's
+  account, each a map with at least `"name"`, `"language"` and `"status"`.
+  Served, cached, by `GET /api/v1/channels/:id/templates`
+  (`Converger.Channels.Templates`).
+  """
+  @callback list_templates(channel) :: {:ok, [map()]} | {:error, term()}
+
   @optional_callbacks [
     config_schema: 0,
     parse_status_update: 2,
@@ -302,7 +325,9 @@ defmodule Converger.Channels.Adapter do
     rate_limit: 0,
     health_probe: 1,
     send_typing: 2,
-    send_read_receipt: 2
+    send_read_receipt: 2,
+    fetch_media: 2,
+    list_templates: 1
   ]
 
   @default_capabilities [:inbound, :outbound]
@@ -611,6 +636,20 @@ defmodule Converger.Channels.Adapter do
   """
   def send_read_receipt(%{type: type} = channel, signal),
     do: call_optional(type, :send_read_receipt, [channel, signal], :unsupported)
+
+  @doc """
+  Download an inbound media attachment with the channel's adapter
+  (`c:fetch_media/2`). `:unsupported` when the adapter does not implement it.
+  """
+  def fetch_media(%{type: type} = channel, attachment),
+    do: call_optional(type, :fetch_media, [channel, attachment], :unsupported)
+
+  @doc """
+  List the provider templates of the channel with its adapter
+  (`c:list_templates/1`). `:unsupported` when the adapter does not implement it.
+  """
+  def list_templates(%{type: type} = channel),
+    do: call_optional(type, :list_templates, [channel], :unsupported)
 
   @doc """
   Probe the channel's provider with its adapter (`c:health_probe/1`).

@@ -79,7 +79,8 @@ The channel types are the registered adapters: the built-ins (`echo`, `webhook`,
 | `:typing` | Forwards typing indicators | `whatsapp_meta` |
 | `:lifecycle_events` | Receives conversation close and reopen events | `webhook`, `websocket` |
 | `:provider_ack` | Handled inbound requests always get `200` | `whatsapp_meta`, `whatsapp_infobip` |
-| `:media`, `:templates`, `:reactions`, `:edits` | Native outbound content (planned, [#37](https://github.com/AimTune/converger/issues/37)) | none yet |
+| `:media`, `:templates` | Sends media and template (HSM) messages natively ([WhatsApp](whatsapp.md#what-is-sent)) | `whatsapp_meta`, `whatsapp_infobip` |
+| `:reactions`, `:edits` | Native outbound reactions and edits (descriptive) | none yet |
 
 ### `deliver_activity/2`
 
@@ -135,8 +136,8 @@ Status progression is monotonic (`pending` < `sent` < `delivered` < `read`): a `
 | Type | Modes | Outbound delivery | Native activity types | Inbound webhook | Status receipts | Inbound signature | Batches | Typing / read receipts out |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `webhook` | inbound, outbound, duplex | Canonical activity JSON to the configured URL, signed with `x-converger-signature` | all | One message per request | Yes: `delivery_id` or `provider_message_id` plus `status` | Generic `x-converger-signature` | No (one message per request) | No |
-| `whatsapp_meta` | inbound, outbound, duplex | Text messages through the Graph API | `message` | Yes (Cloud API webhook) | Yes (`statuses`) | Meta `X-Hub-Signature-256` keyed with `app_secret` | Yes: every `entry` / `changes` / `messages` / `statuses` item | Yes: typing indicator and mark as read |
-| `whatsapp_infobip` | inbound, outbound, duplex | Text messages through the Infobip API | `message` | Yes (`results`) | Yes (delivery reports in `results`) | Generic `x-converger-signature` (no Infobip-native check) | Yes: every item of `results` | No |
+| `whatsapp_meta` | inbound, outbound, duplex | Text, media, template, interactive, location and contacts messages through the Graph API | `message` | Yes (Cloud API webhook) | Yes (`statuses`) | Meta `X-Hub-Signature-256` keyed with `app_secret` | Yes: every `entry` / `changes` / `messages` / `statuses` item | Yes: typing indicator and mark as read |
+| `whatsapp_infobip` | inbound, outbound, duplex | Text, media, template, interactive, location and contacts messages through the Infobip API | `message` | Yes (`results`) | Yes (delivery reports in `results`) | Generic `x-converger-signature` (no Infobip-native check) | Yes: every item of `results` | No |
 | `echo` | outbound | Creates a reply activity from `bot` in the same conversation | `message` | No | No | Not applicable | Not applicable | No |
 | `websocket` | inbound, outbound, duplex | Broadcast to the channel's connected sockets; `pending` until a client is connected, replays or acks ([WebSocket](websocket.md)) | all | No (clients send over the socket, through the same inbound path) | Client `ack` over the socket | Not applicable (socket token) | Not applicable | Not applicable (clients get `typing` and `deliveryStatus` frames) |
 
@@ -146,7 +147,7 @@ Notes:
 - Conversation lifecycle events (close, reopen) are delivered only to channels whose adapter has `:lifecycle_events` (`webhook` and `websocket`).
 - Activity types outside an adapter's native types (the `activity_types:` entry of `capabilities/0`) are downgraded to a text `message` (for example `messageReaction` becomes `"user reacted with 👍"`) or skipped, as set by the channel config key `unsupported_activities` (`downgrade`, the default, or `skip`). `typing` and the internal `deliveryReceipt` never reach messaging adapters. See [activities](../concepts/activities.md#delivery-to-channels).
 - An inbound message from the conversation's participant is never delivered back to that participant's own channel, unless it is a `websocket` channel (its other sockets need it).
-- Outbound WhatsApp media, templates and interactive messages are planned ([#37](https://github.com/AimTune/converger/issues/37)). `capabilities/0` drives pipeline delivery (`:outbound`), health checks (`:external_delivery`), lifecycle events, the inbound `200` policy (`:provider_ack`) and, with its `activity_types:` entry, the downgrade of unsupported activity types ([#28](https://github.com/AimTune/converger/issues/28)).
+- WhatsApp channels send media, templates, interactive messages, locations and contacts, and download inbound media into Converger storage ([WhatsApp](whatsapp.md#what-is-sent), [ADR-0039](../adr/0039-whatsapp-rich-outbound-and-inbound-media-download.md)). `capabilities/0` drives pipeline delivery (`:outbound`), health checks (`:external_delivery`), lifecycle events, the inbound `200` policy (`:provider_ack`) and, with its `activity_types:` entry, the downgrade of unsupported activity types ([#28](https://github.com/AimTune/converger/issues/28)).
 
 ## Inbound endpoints
 
