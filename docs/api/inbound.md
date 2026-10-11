@@ -32,6 +32,7 @@ Which channel types accept which requests:
 | `webhook` | yes (modes `inbound`, `duplex`) | `x-converger-signature` |
 | `whatsapp_meta` | yes (modes `inbound`, `duplex`) | `x-hub-signature-256` (Meta app secret) |
 | `whatsapp_infobip` | yes (modes `inbound`, `duplex`) | `x-converger-signature` |
+| `email` | yes (modes `inbound`, `duplex`) | per inbound provider: SNS signature and topic (`ses`), payload signature (`mailgun`), basic auth or `x-converger-signature` (others); see [Email](../channels/email.md) |
 | `echo`, `websocket` | no: `400` with the adapter's message | `x-converger-signature` |
 
 A channel in `outbound` mode answers messages with `400 {"error": "Channel does not accept inbound messages"}`.
@@ -194,6 +195,11 @@ is documented per adapter in [WhatsApp](../channels/whatsapp.md). A body the ada
 `400` with a message such as `{"error": "unable to parse WhatsApp Meta webhook payload"}`. A well-formed body
 without messages (for example a statuses-only Meta webhook) is acknowledged with `200`.
 
+`email` channels accept the inbound mail webhooks of Amazon SES (through SNS), SendGrid Inbound Parse, Mailgun
+routes and Postmark, or a raw `message/rfc822` body (`text/plain` and other bodies that are neither JSON, form nor
+multipart are read raw, up to the upload size limit plus 1 MB). A reply joins the conversation of the email it
+answers. See [Email](../channels/email.md).
+
 ### Response
 
 ```json
@@ -220,7 +226,7 @@ Status codes:
 | Status | When |
 | --- | --- |
 | `201 Created` | Generic channel types, at least one new activity created |
-| `200 OK` | Generic channel types with only duplicates; `whatsapp_meta` and `whatsapp_infobip` always, once the request has been handled (also when messages were rejected), because those providers retry any non-200 response |
+| `200 OK` | Generic channel types with only duplicates; `whatsapp_meta`, `whatsapp_infobip` and `email` always, once the request has been handled (also when messages were rejected), because those providers retry any non-200 response |
 | `200 OK` with only `status` and `receipts_processed` | Status-only request |
 | `422` | Generic channel types where every message was rejected: the first rejection's changeset errors, for example `{"errors": {"type": ["is invalid"]}}`; or the empty-message error above |
 | `503` | A transient failure (delivery jobs could not be enqueued): `{"error": "Activity could not be accepted, please retry"}`. The provider should re-deliver. |
@@ -291,6 +297,7 @@ Idempotency keys:
 | --- | --- |
 | `whatsapp_meta` | The message `id` (`wamid...`) |
 | `whatsapp_infobip` | `messageId` |
+| `email` | The `Message-ID` header, without angle brackets |
 | `webhook` | The optional `idempotency_key` body field. Without it, a re-delivered request creates a second activity. |
 
 Re-sending the same generic message with the same `idempotency_key` returns `200` (instead of `201`) with

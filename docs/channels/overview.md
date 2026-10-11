@@ -9,6 +9,7 @@ A **channel** is a tenant-owned connection to one external system: a WhatsApp nu
 This page covers the behaviour, the built-in channel types and what each one supports, the shared inbound endpoints and their signature scheme, and channel health checks. Each adapter has its own page:
 
 - [WhatsApp (Meta Cloud API and Infobip)](whatsapp.md)
+- [Email](email.md)
 - [Echo](echo.md)
 - [WebSocket](websocket.md)
 - Generic HTTP webhook: see [Outbound webhooks](../webhooks.md)
@@ -20,7 +21,7 @@ The channel schema ([`lib/converger/channels/channel.ex`](https://github.com/Aim
 
 | Field | Values | Default |
 | --- | --- | --- |
-| `type` | `echo`, `webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip` | `webhook` |
+| `type` | `echo`, `webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip`, `email` | `webhook` |
 | `mode` | `inbound`, `outbound`, `duplex` | `duplex` |
 | `status` | `active` or another value such as `inactive`. Only `active` channels accept inbound requests and socket joins, are routing-rule targets and get health checks. | `active` |
 | `require_signature` | `true` / `false` | `true` |
@@ -45,7 +46,7 @@ The behaviour lives in [`lib/converger/channels/adapter.ex`](https://github.com/
 
 ### Registry
 
-The channel types are the registered adapters: the built-ins (`echo`, `webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip`) followed by the modules in `config :converger, :adapters`. A configured adapter with a built-in type replaces it. `Adapter.types/0` lists the types (the channel changeset and the admin type dropdown use it), and `Adapter.types_with/1` the types with a capability. The registry is checked at boot (`Adapter.validate_registry!/0`). Nothing else in the code base lists channel types: the pipeline, health checks, the admin forms and the inbound controller ask the adapter. See [Writing an adapter](writing-an-adapter.md) and [ADR-0038](../adr/0038-adapter-behaviour-v2-and-config-driven-registry.md).
+The channel types are the registered adapters: the built-ins (`echo`, `webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip`, `email`) followed by the modules in `config :converger, :adapters`. A configured adapter with a built-in type replaces it. `Adapter.types/0` lists the types (the channel changeset and the admin type dropdown use it), and `Adapter.types_with/1` the types with a capability. The registry is checked at boot (`Adapter.validate_registry!/0`). Nothing else in the code base lists channel types: the pipeline, health checks, the admin forms and the inbound controller ask the adapter. See [Writing an adapter](writing-an-adapter.md) and [ADR-0038](../adr/0038-adapter-behaviour-v2-and-config-driven-registry.md).
 
 ### Callbacks
 
@@ -72,14 +73,15 @@ The channel types are the registered adapters: the built-ins (`echo`, `webhook`,
 
 | Capability | Effect | Built-in adapters with it |
 | --- | --- | --- |
-| `:inbound` | Accepts inbound messages; with `:outbound`, allows `duplex` | `webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip` |
-| `:outbound` | The pipeline delivers to its channels | all five |
-| `:external_delivery` | Its channels get health checks and dashboard health | `webhook`, `whatsapp_meta`, `whatsapp_infobip` |
-| `:receipts` | Reports delivery or read receipts | `webhook`, `whatsapp_meta`, `whatsapp_infobip` |
+| `:inbound` | Accepts inbound messages; with `:outbound`, allows `duplex` | `webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip`, `email` |
+| `:outbound` | The pipeline delivers to its channels | all six |
+| `:external_delivery` | Its channels get health checks and dashboard health | `webhook`, `whatsapp_meta`, `whatsapp_infobip`, `email` |
+| `:receipts` | Reports delivery or read receipts | `webhook`, `whatsapp_meta`, `whatsapp_infobip`, `email` |
 | `:typing` | Forwards typing indicators | `whatsapp_meta` |
 | `:lifecycle_events` | Receives conversation close and reopen events | `webhook`, `websocket` |
-| `:provider_ack` | Handled inbound requests always get `200` | `whatsapp_meta`, `whatsapp_infobip` |
-| `:media`, `:templates`, `:reactions`, `:edits` | Native outbound content (planned, [#37](https://github.com/AimTune/converger/issues/37)) | none yet |
+| `:provider_ack` | Handled inbound requests always get `200` | `whatsapp_meta`, `whatsapp_infobip`, `email` |
+| `:media` | Native outbound attachments | `email` (stored uploads are attached) |
+| `:templates`, `:reactions`, `:edits` | Native outbound content (planned, [#37](https://github.com/AimTune/converger/issues/37)) | none yet |
 
 ### `deliver_activity/2`
 
@@ -112,6 +114,8 @@ Providers batch several messages into one webhook call, so the callback returns 
 | `reply_to_provider_id` | no | The provider id of the message this one replies or reacts to (a WhatsApp `context.id` or `reaction.message_id`). The controller resolves it to `reply_to_id`; an unresolvable `messageReaction`, `messageUpdate` or `messageDelete` is stored as an `event`. |
 | `idempotency_key` | no | A stable provider message id (a WhatsApp `wamid`, an Infobip `messageId`). A re-delivered webhook carrying the same id never creates a second activity. |
 | `participant` | no | `%{"external_id" => ..., "display_name" => ...}`. When present (and the request has no `conversation_id`), the message joins the participant's active conversation on the channel. See [ADR-0016](../adr/0016-participant-based-conversation-resolution.md). |
+| `thread_refs` | no | Provider message ids of the messages this one replies to, most recent first (an email's `In-Reply-To` and `References`). Before the participant, the message joins the active conversation of the first one that went through this channel: an inbound message (by idempotency key) or an outbound one (by its delivery's provider message id), whatever channel that conversation started on. |
+| `thread_activity_ids` | no | Ids of activities this one replies to (decoded from the `Message-ID` Converger gives outbound email). Used like `thread_refs`, for activities with a delivery on this channel. |
 
 Only client fields are taken from the parsed message when the activity is created (`Activities.create_client_activity/2`); `sender` and `idempotency_key` are passed as server-controlled attributes by the controller.
 
@@ -137,12 +141,13 @@ Status progression is monotonic (`pending` < `sent` < `delivered` < `read`): a `
 | `webhook` | inbound, outbound, duplex | Canonical activity JSON to the configured URL, signed with `x-converger-signature` | all | One message per request | Yes: `delivery_id` or `provider_message_id` plus `status` | Generic `x-converger-signature` | No (one message per request) | No |
 | `whatsapp_meta` | inbound, outbound, duplex | Text messages through the Graph API | `message` | Yes (Cloud API webhook) | Yes (`statuses`) | Meta `X-Hub-Signature-256` keyed with `app_secret` | Yes: every `entry` / `changes` / `messages` / `statuses` item | Yes: typing indicator and mark as read |
 | `whatsapp_infobip` | inbound, outbound, duplex | Text messages through the Infobip API | `message` | Yes (`results`) | Yes (delivery reports in `results`) | Generic `x-converger-signature` (no Infobip-native check) | Yes: every item of `results` | No |
+| `email` | inbound, outbound, duplex | Email through Swoosh: SMTP, Amazon SES, SendGrid, Mailgun or Postmark ([Email](email.md)) | `message` | Yes: SES (SNS), SendGrid Inbound Parse, Mailgun routes, Postmark inbound, raw `message/rfc822` | Yes: delivered, opened, bounced and complained events; bounce mails | SES: SNS signature and topic; Mailgun: payload signature; others: basic auth or `x-converger-signature` | One email per request (SendGrid events: an array) | No |
 | `echo` | outbound | Creates a reply activity from `bot` in the same conversation | `message` | No | No | Not applicable | Not applicable | No |
 | `websocket` | inbound, outbound, duplex | Broadcast to the channel's connected sockets; `pending` until a client is connected, replays or acks ([WebSocket](websocket.md)) | all | No (clients send over the socket, through the same inbound path) | Client `ack` over the socket | Not applicable (socket token) | Not applicable | Not applicable (clients get `typing` and `deliveryStatus` frames) |
 
 Notes:
 
-- The pipeline calls the adapter of every channel whose adapter has the `:outbound` capability (`Adapter.capability?/2`, used by `resolve_delivery_channels/1` in [`lib/converger/pipeline.ex`](https://github.com/AimTune/converger/blob/main/lib/converger/pipeline.ex)): all five types today.
+- The pipeline calls the adapter of every channel whose adapter has the `:outbound` capability (`Adapter.capability?/2`, used by `resolve_delivery_channels/1` in [`lib/converger/pipeline.ex`](https://github.com/AimTune/converger/blob/main/lib/converger/pipeline.ex)): all six types today.
 - Conversation lifecycle events (close, reopen) are delivered only to channels whose adapter has `:lifecycle_events` (`webhook` and `websocket`).
 - Activity types outside an adapter's native types (the `activity_types:` entry of `capabilities/0`) are downgraded to a text `message` (for example `messageReaction` becomes `"user reacted with 👍"`) or skipped, as set by the channel config key `unsupported_activities` (`downgrade`, the default, or `skip`). `typing` and the internal `deliveryReceipt` never reach messaging adapters. See [activities](../concepts/activities.md#delivery-to-channels).
 - An inbound message from the conversation's participant is never delivered back to that participant's own channel, unless it is a `websocket` channel (its other sockets need it).
@@ -173,7 +178,7 @@ flowchart TD
   G -- "none" --> H["Apply receipts, 200"]
   G -- "one or more" --> I["Apply receipts, then each message in order"]
   I --> J["Duplicate check by idempotency_key on the channel"]
-  J --> K["Resolve conversation (conversation_id, participant or new)"]
+  J --> K["Resolve conversation (conversation_id, thread, participant or new)"]
   K --> L["Create activity + delivery jobs (one transaction per message)"]
 ```
 
@@ -310,7 +315,7 @@ Inside the Converger code base (tests, tools), `Converger.Channels.InboundSignat
 
 ## Channel health
 
-Converger computes a health status for every active channel whose adapter has the `:external_delivery` capability (built in: `webhook`, `whatsapp_meta` and `whatsapp_infobip`) from its delivery failure rate.
+Converger computes a health status for every active channel whose adapter has the `:external_delivery` capability (built in: `webhook`, `whatsapp_meta`, `whatsapp_infobip` and `email`) from its delivery failure rate.
 
 - [`Converger.Channels.Health`](https://github.com/AimTune/converger/blob/main/lib/converger/channels/health.ex) counts the channel's deliveries created in the last 60 minutes and the ones with status `failed`.
 - [`Converger.Channels.HealthCheck`](https://github.com/AimTune/converger/blob/main/lib/converger/channels/health_check.ex) is the stored result (table `channel_health_checks`): `status`, `total_deliveries`, `failed_deliveries`, `failure_rate` (0.0 to 1.0, rounded to 4 decimals) and `checked_at`.

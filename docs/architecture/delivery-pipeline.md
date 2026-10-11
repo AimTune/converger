@@ -159,7 +159,7 @@ Because `Converger.Pipeline` reads the backend on every call, and `child_specs/0
 
 `Pipeline.resolve_delivery_channels/1` decides which channels receive an activity:
 
-1. The conversation's own channel, if it is deliverable and its mode is `outbound` or `duplex`. A channel is deliverable when its adapter has the `:outbound` capability (`Converger.Channels.Adapter.capability?/2`); all five types have it today. `inbound`-only channels never receive deliveries. The primary channel's `status` is not checked at this step, unlike routing targets.
+1. The conversation's own channel, if it is deliverable and its mode is `outbound` or `duplex`. A channel is deliverable when its adapter has the `:outbound` capability (`Converger.Channels.Adapter.capability?/2`); all six types have it today. `inbound`-only channels never receive deliveries. The primary channel's `status` is not checked at this step, unlike routing targets.
 2. The target channels of the tenant's **enabled** routing rules whose source is that channel (`RoutingRules.resolve_target_channels/2`), keeping only channels that exist, are `active`, are deliverable and have an `outbound` or `duplex` mode.
 3. Duplicates are removed.
 4. The participant's own channel is removed when the activity's `sender` equals the participant's `external_id`, so an inbound WhatsApp message is not sent back to the person who wrote it. This does not apply when that channel is a `websocket` channel: it serves many sockets (the participant's other tabs, an agent console), and the sending socket drops the frame by `seq`.

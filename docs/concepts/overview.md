@@ -93,7 +93,7 @@ Platform administrators (`admin_users`) and audit logs are not tenant-owned and 
 | Concept | One-line definition | Page |
 | --- | --- | --- |
 | Tenant | An isolated customer of the hub. It holds a hashed API key, a status, rate-limit overrides and an alert webhook. | [Tenants](tenants.md) |
-| Channel | An endpoint of a given adapter type (`webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip`, `echo`) and mode (`inbound`, `outbound`, `duplex`), with an encrypted secret and config. | [Channels](channels.md) |
+| Channel | An endpoint of a given adapter type (`webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip`, `echo`, `email`) and mode (`inbound`, `outbound`, `duplex`), with an encrypted secret and config. | [Channels](channels.md) |
 | Conversation | An ordered thread of activities on one channel. It is `active` or `closed`, and expires after inactivity. | [Conversations](conversations.md) |
 | Participant | An external party on a channel (phone number, chat id), unique per channel. Inbound messages find their conversation through it. | [Participants](participants.md) |
 | Activity | One message or event in a conversation, with a server-assigned, gap-free `seq`. | [Activities](activities.md) |
