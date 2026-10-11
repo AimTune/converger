@@ -9,7 +9,7 @@ description: Slack messages are identified by "<channel>:<ts>", the participant 
 | **Status** | Accepted |
 | **Date** | 2026-10-11 |
 | **Issue** | [#39](https://github.com/AimTune/converger/issues/39) |
-| **Pull request** | (this PR) |
+| **Pull request** | [#131](https://github.com/AimTune/converger/pull/131) |
 | **Related** | [ADR-0009](0009-inbound-signature-scheme-and-per-channel-enforcement.md), [ADR-0015](0015-per-message-idempotent-inbound-batches.md), [ADR-0016](0016-participant-based-conversation-resolution.md), [ADR-0019](0019-per-channel-retry-policy-delivery-error-and-lifeline.md), [ADR-0038](0038-adapter-behaviour-v2-and-config-driven-registry.md) |
 
 ## Context and problem statement
