@@ -9,7 +9,7 @@ description: One shared planner turns an activity into WhatsApp messages (templa
 | **Status** | Accepted |
 | **Date** | 2026-10-11 |
 | **Issue** | [#37](https://github.com/AimTune/converger/issues/37) |
-| **Pull request** | to be linked when opened |
+| **Pull request** | [#134](https://github.com/AimTune/converger/pull/134) |
 | **Related** | [ADR-0007](0007-attachment-storage-with-hand-written-signing.md), [ADR-0014](0014-webhook-ssrf-guard-and-outbound-signing.md), [ADR-0015](0015-per-message-idempotent-inbound-batches.md), [ADR-0019](0019-per-channel-retry-policy-delivery-error-and-lifeline.md), [ADR-0036](0036-rich-activity-model.md), [ADR-0038](0038-adapter-behaviour-v2-and-config-driven-registry.md) |
 
 ## Context and problem statement
