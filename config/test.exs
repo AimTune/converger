@@ -72,6 +72,12 @@ config :converger, :webhook,
   connect_timeout: 200,
   receive_timeout: 1_000
 
+# Every Telegram Bot API call goes to a Req.Test stub named after the adapter;
+# tests stub it per process (Req.Test follows $callers into tasks).
+config :converger, :telegram_req_options,
+  plug: {Req.Test, Converger.Channels.Adapters.Telegram},
+  retry: false
+
 # Deterministic encryption key for tests only.
 config :converger, Converger.Vault, key: Base.encode64("converger-tst-cloak-key-32bytes!")
 

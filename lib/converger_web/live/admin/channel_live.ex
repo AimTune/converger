@@ -210,6 +210,23 @@ defmodule ConvergerWeb.Admin.ChannelLive do
     end
   end
 
+  def handle_event("register_webhook", %{"id" => id}, socket) do
+    channel = Channels.get_channel!(id)
+    inbound_url = url(~p"/api/v1/channels/#{channel.id}/inbound")
+
+    case Channels.register_webhook(channel, inbound_url, socket.assigns.actor) do
+      :ok ->
+        {:noreply, put_flash(socket, :info, "Webhook registered: #{inbound_url}")}
+
+      {:error, reason} ->
+        message = if is_binary(reason), do: reason, else: inspect(reason)
+        {:noreply, put_flash(socket, :error, "Webhook registration failed: #{message}")}
+
+      :unsupported ->
+        {:noreply, put_flash(socket, :error, "This channel type has no webhook registration")}
+    end
+  end
+
   def handle_event("delete", %{"id" => id}, socket) do
     channel = Channels.get_channel!(id)
 
@@ -727,6 +744,17 @@ defmodule ConvergerWeb.Admin.ChannelLive do
                 title="Whether unsigned inbound webhooks are rejected"
               >
                 <%= if channel.require_signature, do: "Signature: required", else: "Signature: optional" %>
+              </button>
+              <button
+                :if={Adapter.supports?(channel.type, :register_webhook, 2)}
+                id={"register-webhook-#{channel.id}"}
+                phx-click="register_webhook"
+                phx-value-id={channel.id}
+                class="badge"
+                style="margin-left: 4px;"
+                title="Point the provider's webhook at this channel's inbound URL"
+              >
+                Register webhook
               </button>
               <button phx-click="delete" phx-value-id={channel.id} phx-confirm="Are you sure?" class="badge badge-inactive" style="margin-left: 4px;">
                 Delete
