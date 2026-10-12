@@ -14,7 +14,7 @@
 - [x] Echo channel type for testing
 - [x] Rate limiting (IP + tenant scoped)
 - [x] Activity ordering per conversation
-- [x] JavaScript client library (converger_js)
+- [x] JavaScript client library (converger_js, replaced by the TypeScript SDK `@converger/client` in #46)
 
 ## v1.1 — Bug Fixes & Foundation (Completed)
 

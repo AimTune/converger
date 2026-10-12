@@ -73,6 +73,12 @@ supersedes the old one and both are linked. Read
 | [0048](0048-additional-adapters-shared-meta-code-bot-framework-jwt-and-pull-outbox.md) | Discord, Teams, Messenger, Instagram, Viber and HTTP pull: shared Meta Graph code, cached Bot Framework JWT validation with a service URL allowlist, users as participants with reply targets in metadata, `inbound_response/2`, a pull outbox acknowledged by served-only watermarks | Accepted | [#44](https://github.com/AimTune/converger/issues/44) / [#139](https://github.com/AimTune/converger/pull/139) |
 | [0053](0053-platform-event-webhooks.md) | Platform event webhooks: tenant subscriptions to a fixed event catalog emitted from the existing broadcast hooks, one `webhook_events` row and Oban job per subscription, outbound signing and SSRF guard, shared retry policy, per-subscription dead letters and redelivery, 7-day log; `alert_webhook_url` becomes a managed subscription | Accepted | [#49](https://github.com/AimTune/converger/issues/49) / [#143](https://github.com/AimTune/converger/pull/143) |
 
+### Clients and SDKs
+
+| ADR | Decision | Status | Issue / PR |
+| --- | --- | --- | --- |
+| [0051](0051-typescript-sdk-transport-abstraction-and-outbox.md) | TypeScript SDK `@converger/client`: one session core over native / Phoenix / SSE transports, a persistent clientId outbox resent once after the replay, hand-written types in a generator-compatible shape until #45 | Accepted | [#46](https://github.com/AimTune/converger/issues/46) / [#142](https://github.com/AimTune/converger/pull/142) |
+
 ### Security
 
 | ADR | Decision | Status | Issue / PR |
