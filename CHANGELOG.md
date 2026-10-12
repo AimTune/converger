@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### TypeScript SDK `@converger/client` (#46)
+
+- New pnpm workspace (`pnpm-workspace.yaml`) with `packages/client-ts`: a headless, dependency-free TypeScript client
+  for Protocol v1 (ESM + CJS, strict types). `ConvergerClient.connect({tokenProvider})`, `conversation.start()` /
+  `resume(watermark)`, `send()` resolved on `ack`, a persistent outbox (localStorage or memory, pluggable) resent once
+  per reconnect after the replay, jittered exponential reconnects honouring `retryAfterMs`, token refresh before expiry
+  (`auth` on the native endpoint), gap fill with `sync`, typed events, REST helpers (history paging, uploads).
+- Transports: native `/socket/converger/v1` (default), the Phoenix binding (own V2 framing, `activitySet` mapped to v1
+  frames) and the SSE fallback; `["native", "sse"]` by default.
+- Tests: vitest against a mocked native endpoint, and an e2e test that kills `mix phx.server` mid-session (reconnect,
+  resend once, replay of missed activities) and checks the Phoenix and SSE transports. CI workflow `client-ts.yml`;
+  npm publish on `client-ts-v*` tags (`client-ts-publish.yml`). Examples: React widget and Node bot in
+  `examples/typescript/`.
+- `converger_js/` is removed; Dependabot watches the pnpm workspace instead.
+- Docs: [TypeScript SDK](docs/sdk/typescript.md), ADR-0051.
+
 ### Broker channels: Kafka and RabbitMQ (#42)
 
 - New channel types `kafka` and `rabbitmq`: a broker as a first-class channel. Outbound, the pipeline produces the
