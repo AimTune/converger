@@ -1,0 +1,9 @@
+# pnpm workspace for the JavaScript/TypeScript packages of this repository.
+# The Elixir server does not depend on it.
+packages:
+  - "packages/*"
+  - "examples/typescript/*"
+
+# Dependencies allowed to run install scripts.
+allowBuilds:
+  esbuild: true
