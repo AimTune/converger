@@ -1,10 +1,14 @@
 defmodule ConvergerWeb.InboundController do
   use ConvergerWeb, :controller
+  use OpenApiSpex.ControllerSpecs
+
+  import ConvergerWeb.ApiSchemas
 
   require Logger
 
   alias Converger.{Channels, Deliveries, Inbound}
   alias Converger.Channels.Adapter
+  alias ConvergerWeb.APIError
 
   # Per channel, keyed by the channel_id path parameter, so floods are rejected
   # before the channel is loaded or the signature is checked.
@@ -17,6 +21,74 @@ defmodule ConvergerWeb.InboundController do
   plug :read_unparsed_body when action in [:create, :status]
 
   action_fallback ConvergerWeb.FallbackController
+
+  tags(["Inbound"])
+  security([%{"inboundSignature" => []}, %{}])
+
+  @inbound_body %OpenApiSpex.RequestBody{
+    description:
+      "A generic webhook message, or the provider's own payload (WhatsApp, Slack, Telegram, email, SMS, ...).",
+    required: true,
+    content: %{
+      "application/json" => %OpenApiSpex.MediaType{schema: ref("GenericInboundMessage")},
+      "application/x-www-form-urlencoded" => %OpenApiSpex.MediaType{
+        schema: %OpenApiSpex.Schema{type: :object, additionalProperties: true}
+      },
+      "text/plain" => %OpenApiSpex.MediaType{schema: %OpenApiSpex.Schema{type: :string}}
+    }
+  }
+
+  operation(:create,
+    summary: "Receive inbound messages",
+    description:
+      "Messages are processed in order, each idempotent by its idempotency key. Generic channels answer 201 when an activity was created; provider channels always 200 once handled (some with a provider-specific body).",
+    operation_id: "receiveInbound",
+    parameters: [channel_id: path_id("Channel id")],
+    request_body: @inbound_body,
+    responses:
+      with_errors(
+        %{
+          200 => json_schema("Handled", ref("InboundAccepted")),
+          201 => json_schema("Created", ref("InboundAccepted"))
+        },
+        [400, 401, 404, 409, 413, 422, 429, 503]
+      )
+  )
+
+  operation(:status,
+    summary: "Receive delivery receipts",
+    operation_id: "receiveInboundStatus",
+    parameters: [channel_id: path_id("Channel id")],
+    request_body:
+      json_schema("A receipt, or the provider's own payload", ref("GenericStatusUpdate")),
+    responses:
+      with_errors(
+        %{200 => json_schema("Handled", ref("InboundAccepted"))},
+        [400, 401, 404, 413, 429]
+      )
+  )
+
+  operation(:verify,
+    summary: "Webhook verification handshake",
+    description:
+      "Answers the provider's subscription handshake (Meta echoes `hub.challenge` once `hub.verify_token` matches); `ok` for adapters without one.",
+    operation_id: "verifyInbound",
+    security: [],
+    parameters: [
+      channel_id: path_id("Channel id"),
+      "hub.mode": query(%OpenApiSpex.Schema{type: :string}, "Meta: `subscribe`"),
+      "hub.verify_token":
+        query(%OpenApiSpex.Schema{type: :string}, "Meta: the channel's verify token"),
+      "hub.challenge": query(%OpenApiSpex.Schema{type: :string}, "Meta: echoed back")
+    ],
+    responses:
+      with_errors(
+        %{
+          200 => {"The challenge (plain text)", "text/plain", %OpenApiSpex.Schema{type: :string}}
+        },
+        [400, 403, 404]
+      )
+  )
 
   @doc """
   Inbound webhook. A request may carry several messages and status updates
@@ -92,7 +164,7 @@ defmodule ConvergerWeb.InboundController do
     with {:ok, channel} <- Channels.get_active_channel(channel_id) do
       case Adapter.verify_subscription(channel, params) do
         {:ok, body} -> send_resp(conn, 200, body)
-        :error -> send_resp(conn, 403, "Verification failed")
+        :error -> APIError.send_error(conn, "forbidden", "Verification failed")
       end
     end
   end
@@ -114,10 +186,10 @@ defmodule ConvergerWeb.InboundController do
           |> Map.update!(:params, &Map.put(&1, "_body", body))
 
         {:error, :too_large, conn} ->
-          conn |> send_resp(413, "Request body too large") |> halt()
+          APIError.send_error(conn, "payload_too_large", "Request body too large")
 
         {:error, _reason, conn} ->
-          conn |> send_resp(400, "Could not read request body") |> halt()
+          APIError.send_error(conn, "bad_request", "Could not read request body")
       end
     else
       conn

@@ -35,7 +35,7 @@ defmodule ConvergerWeb.SocketGuard do
 
   require Logger
 
-  alias ConvergerWeb.ClientConnections
+  alias ConvergerWeb.{APIError, ClientConnections}
   alias Phoenix.Socket.Reply
 
   @rate_key {__MODULE__, :rate}
@@ -107,22 +107,33 @@ defmodule ConvergerWeb.SocketGuard do
 
   @doc false
   # Error handler for refused connections (`error_handler:` on the socket mounts).
+  # The body is the API error envelope (ConvergerWeb.APIError).
   def handle_error(conn, :draining) do
+    retry_after_ms = retry_after_ms()
+
     conn
-    |> Plug.Conn.put_resp_header("retry-after", to_string(div(retry_after_ms(), 1000) + 1))
-    |> Plug.Conn.send_resp(503, "")
+    |> Plug.Conn.put_resp_header("retry-after", to_string(div(retry_after_ms, 1000) + 1))
+    |> APIError.send_error("unavailable", "The node is draining, reconnect later", %{
+      reason: "draining",
+      retry_after_ms: retry_after_ms
+    })
   end
 
   # The database is unavailable (issue #35): retryable, like draining.
   def handle_error(conn, :database_unavailable) do
-    retry_after_s = div(Converger.Repo.Pressure.retry_after_ms() + 999, 1000)
+    retry_after_ms = Converger.Repo.Pressure.retry_after_ms()
+    retry_after_s = div(retry_after_ms + 999, 1000)
 
     conn
     |> Plug.Conn.put_resp_header("retry-after", to_string(retry_after_s))
-    |> Plug.Conn.send_resp(503, "")
+    |> APIError.send_error("unavailable", "The database is unavailable, please retry", %{
+      reason: "database_unavailable",
+      retry_after_ms: retry_after_ms
+    })
   end
 
-  def handle_error(conn, _reason), do: Plug.Conn.send_resp(conn, 403, "")
+  def handle_error(conn, _reason),
+    do: APIError.send_error(conn, "forbidden", "The connection was refused")
 
   @doc false
   def check_in({payload, opts}, {phx_state, socket} = state, handler) do
