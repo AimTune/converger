@@ -58,7 +58,7 @@ defmodule Converger.Pipeline.Oban do
 
   @impl true
   def enqueue(activity) do
-    channels = Converger.Pipeline.resolve_delivery_channels(activity)
+    channels = Converger.Pipeline.delivery_channels(activity)
     queue = if channels != [], do: queue_for_tenant(activity.tenant_id)
 
     Enum.reduce_while(channels, :ok, fn channel, :ok ->

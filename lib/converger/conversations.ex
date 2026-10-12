@@ -26,7 +26,7 @@ defmodule Converger.Conversations do
   import Ecto.Query, warn: false
   require Logger
   alias Converger.Repo
-  alias Converger.Conversations.Conversation
+  alias Converger.Conversations.{Conversation, ConversationChannel}
 
   @open "active"
   @closed "closed"
@@ -148,7 +148,81 @@ defmodule Converger.Conversations do
   def create_conversation(attrs \\ %{}) do
     %Conversation{}
     |> Conversation.changeset(attrs)
-    |> Repo.insert()
+    |> insert_conversation()
+  end
+
+  @doc """
+  Insert a new conversation changeset together with its `origin` row in
+  `conversation_channels` (the conversation's channel and participant).
+  """
+  def insert_conversation(%Ecto.Changeset{} = changeset) do
+    Ecto.Multi.new()
+    |> Ecto.Multi.insert(:conversation, changeset)
+    |> Ecto.Multi.run(:origin, fn _repo, %{conversation: conversation} ->
+      record_channels(conversation, [
+        {Conversation.origin_channel_id(conversation), "origin", conversation.participant_id}
+      ])
+
+      {:ok, nil}
+    end)
+    |> Repo.transaction()
+    |> case do
+      {:ok, %{conversation: conversation}} -> {:ok, conversation}
+      {:error, :conversation, changeset, _} -> {:error, changeset}
+    end
+  end
+
+  @doc """
+  Record channels the conversation spans, as `{channel_id, role}` or
+  `{channel_id, role, participant_id}` (see
+  `Converger.Conversations.ConversationChannel`). A channel already recorded
+  keeps its row and role.
+  """
+  def record_channels(_conversation, []), do: :ok
+
+  def record_channels(%{id: conversation_id, tenant_id: tenant_id}, entries) do
+    now = DateTime.utc_now()
+
+    rows =
+      entries
+      |> Enum.map(fn
+        {channel_id, role} -> {channel_id, role, nil}
+        {_channel_id, _role, _participant_id} = entry -> entry
+      end)
+      |> Enum.reject(fn {channel_id, _, _} -> is_nil(channel_id) end)
+      |> Enum.uniq_by(fn {channel_id, _, _} -> channel_id end)
+      |> Enum.map(fn {channel_id, role, participant_id} ->
+        %{
+          id: Ecto.UUID.generate(),
+          conversation_id: conversation_id,
+          channel_id: channel_id,
+          tenant_id: tenant_id,
+          role: role,
+          participant_id: participant_id,
+          inserted_at: now,
+          updated_at: now
+        }
+      end)
+
+    Repo.insert_all(ConversationChannel, rows,
+      on_conflict: :nothing,
+      conflict_target: [:conversation_id, :channel_id]
+    )
+
+    :ok
+  end
+
+  @doc "The channels a conversation spans: the origin first, then in the order they joined."
+  def list_conversation_channels(conversation_id) do
+    from(cc in conversation_channels_query(), where: cc.conversation_id == ^conversation_id)
+    |> Repo.all()
+  end
+
+  @doc "Query of `conversation_channels` in display order (for preloads)."
+  def conversation_channels_query do
+    from(cc in ConversationChannel,
+      order_by: [desc: cc.role == "origin", asc: cc.inserted_at, asc: cc.id]
+    )
   end
 
   def update_conversation(%Conversation{} = conversation, attrs) do

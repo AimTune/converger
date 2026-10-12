@@ -69,7 +69,7 @@ defmodule ConvergerWeb.Integration.WebSocketChannelAdapterTest do
     %{tenant: tenant, whatsapp: whatsapp, console: console}
   end
 
-  defp whatsapp_message(channel, id, text) do
+  defp whatsapp_message(channel, id, text, phone \\ @phone) do
     params = %{
       "object" => "whatsapp_business_account",
       "entry" => [
@@ -81,10 +81,10 @@ defmodule ConvergerWeb.Integration.WebSocketChannelAdapterTest do
               "value" => %{
                 "messaging_product" => "whatsapp",
                 "metadata" => %{"phone_number_id" => "106540352242922"},
-                "contacts" => [%{"profile" => %{"name" => "Sheena"}, "wa_id" => @phone}],
+                "contacts" => [%{"profile" => %{"name" => "Sheena"}, "wa_id" => phone}],
                 "messages" => [
                   %{
-                    "from" => @phone,
+                    "from" => phone,
                     "id" => id,
                     "timestamp" => "1749416383",
                     "type" => "text",
@@ -196,6 +196,78 @@ defmodule ConvergerWeb.Integration.WebSocketChannelAdapterTest do
         })
 
       assert_reply ref, :ok, %{id: ^id, seq: 2}
+    end
+
+    test "the agent's reply reaches only the originating WhatsApp number (#43)", %{
+      tenant: tenant,
+      whatsapp: whatsapp,
+      console: console
+    } do
+      # A CRM webhook mirrors every inbound WhatsApp message.
+      previous = Application.get_env(:converger, :webhook_req_options)
+
+      on_exit(fn ->
+        if previous,
+          do: Application.put_env(:converger, :webhook_req_options, previous),
+          else: Application.delete_env(:converger, :webhook_req_options)
+      end)
+
+      Application.put_env(:converger, :webhook_req_options, plug: {Req.Test, __MODULE__.Crm})
+      test_pid = self()
+
+      Req.Test.stub(__MODULE__.Crm, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        send(test_pid, {:crm_request, Jason.decode!(body)})
+        Req.Test.json(conn, %{ok: true})
+      end)
+
+      crm =
+        webhook_channel_fixture(tenant, %{
+          mode: "outbound",
+          config: %{"url" => "https://crm.example.com/hook"}
+        })
+
+      {:ok, _} =
+        RoutingRules.create_routing_rule(%{
+          name: "whatsapp to crm",
+          tenant_id: tenant.id,
+          source_channel_id: whatsapp.id,
+          target_channel_ids: [crm.id]
+        })
+
+      socket = join_console(console)
+
+      # Two customers, two conversations.
+      other = whatsapp_message(whatsapp, "wamid.rb-0", "me too", "16505550099")
+      assert_push "activitySet", %{activities: [_]}
+      inbound = whatsapp_message(whatsapp, "wamid.rb-1", "hello")
+      assert_push "activitySet", %{activities: [_]}
+      assert other.conversation_id != inbound.conversation_id
+      assert_received {:crm_request, %{"text" => "me too"}}
+      assert_received {:crm_request, %{"text" => "hello"}}
+      refute_received {:whatsapp_request, _}
+
+      ref =
+        Phoenix.ChannelTest.push(socket, "postActivity", %{
+          "conversation_id" => inbound.conversation_id,
+          "text" => "On it",
+          "clientId" => "reply-rb-1"
+        })
+
+      assert_reply ref, :ok, %{id: id}, 2_000
+      reply = Repo.get!(Activity, id)
+      assert reply.source_channel_id == console.id
+
+      # Exactly one WhatsApp request, to the number that started the conversation.
+      assert_received {:whatsapp_request,
+                       %{"to" => @phone, "text" => %{"body" => "[Support] On it"}}}
+
+      refute_received {:whatsapp_request, _}
+
+      # The other routing targets of WhatsApp do not get the reply.
+      refute_received {:crm_request, _}
+      assert delivery(reply, crm) == nil
+      assert %{status: "sent"} = delivery(reply, whatsapp)
     end
 
     test "a conversation the channel is not routed to cannot be written or joined", %{

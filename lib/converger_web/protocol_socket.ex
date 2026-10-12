@@ -585,7 +585,10 @@ defmodule ConvergerWeb.ProtocolSocket do
         end
 
       _ ->
-        Activities.create_client_activity(params, system_attrs)
+        Activities.create_client_activity(
+          params,
+          Map.put(system_attrs, "source_channel_id", state.claims["channel_id"])
+        )
     end
   end
 

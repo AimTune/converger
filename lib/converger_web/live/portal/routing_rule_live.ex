@@ -71,6 +71,8 @@ defmodule ConvergerWeb.Portal.RoutingRuleLive do
             <th>Name</th>
             <th>Source Channel</th>
             <th>Target Channels</th>
+            <th>Priority</th>
+            <th>Conditions</th>
             <th>Enabled</th>
             <th :if={@can_edit}>Actions</th>
           </tr>
@@ -78,11 +80,19 @@ defmodule ConvergerWeb.Portal.RoutingRuleLive do
         <tbody>
           <tr :for={rule <- @routing_rules}>
             <td style="font-weight: 500;"><%= rule.name %></td>
-            <td><%= if rule.source_channel, do: rule.source_channel.name, else: "—" %></td>
+            <td><%= channel_name(@channels, rule.source_channel_id) %></td>
             <td>
               <span :for={target_id <- rule.target_channel_ids} class="badge" style="margin-right: 4px;">
                 <%= channel_name(@channels, target_id) %>
               </span>
+            </td>
+            <td>
+              <%= rule.priority %><span :if={rule.stop_processing} style="color: #888;"> (stop)</span>
+            </td>
+            <td style="max-width: 280px;">
+              <code style="font-size: 0.8em; word-break: break-all;">
+                <%= if rule.conditions == %{}, do: "always", else: Jason.encode!(rule.conditions) %>
+              </code>
             </td>
             <td>
               <span class={"badge badge-#{if rule.enabled, do: "active", else: "inactive"}"}>
@@ -96,7 +106,7 @@ defmodule ConvergerWeb.Portal.RoutingRuleLive do
             </td>
           </tr>
           <tr :if={@routing_rules == []}>
-            <td colspan="5" style="text-align: center; color: #999;">No routing rules found.</td>
+            <td colspan="7" style="text-align: center; color: #999;">No routing rules found.</td>
           </tr>
         </tbody>
       </table>

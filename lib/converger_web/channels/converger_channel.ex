@@ -61,7 +61,7 @@ defmodule ConvergerWeb.ConvergerChannel do
   alias Converger.Channels.Adapters.WebSocket
   alias Converger.ConvergerAPI.Watermark
   alias Converger.Pagination
-  alias Converger.Pipeline.Middleware
+  alias Converger.Pipeline
   alias ConvergerWeb.ConvergerAPI.ActivityJSON
   alias ConvergerWeb.{ConversationSignals, SocketGuard}
   alias ConvergerWeb.Protocol.{Frames, InFlight, Send}
@@ -348,6 +348,7 @@ defmodule ConvergerWeb.ConvergerChannel do
     |> Activities.create_client_activity(%{
       tenant_id: channel.tenant_id,
       conversation_id: conversation_id,
+      source_channel_id: channel.id,
       sender: message["sender"],
       idempotency_key: message["idempotency_key"]
     })
@@ -685,9 +686,10 @@ defmodule ConvergerWeb.ConvergerChannel do
   end
 
   # A routed socket sees activities as delivered to its channel: the
-  # channel's middleware applies (a halted activity is not pushed).
+  # channel's middleware and the matching rules' transformations apply (a
+  # halted activity is not pushed).
   defp frame(%{assigns: %{source: :routed, channel: channel}}, activity) do
-    case Middleware.run(activity, channel) do
+    case Pipeline.transform(activity, channel) do
       {:ok, transformed} -> [ActivityJSON.activity_data(transformed)]
       {:halt, _reason} -> []
     end
