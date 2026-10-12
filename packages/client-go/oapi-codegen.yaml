@@ -1,0 +1,9 @@
+# oapi-codegen configuration for the server's OpenAPI document (#45).
+# Run scripts/generate.sh once priv/static/openapi.json exists.
+package: gen
+output: internal/gen/gen.go
+generate:
+  models: true
+  client: true
+output-options:
+  skip-prune: true
