@@ -527,9 +527,12 @@ are in [Benchmarks](benchmarks/index.md):
   (`CLUSTER_STRATEGY`, see [Clustering](operations/clustering.md)) so PubSub
   broadcasts reach sockets on every node. Point the load balancer health
   check at `/health/ready`.
-- **CPU / memory**: 1 vCPU and 1 GiB per replica handles a few thousand idle
-  WebSocket connections; each connected socket costs tens of KiB. Scale out on
-  CPU and on connection count.
+- **CPU / memory**: an idle Protocol v1 connection measured about 130–150 KiB
+  of node RSS ([first benchmark](benchmarks/2026-10-12-612ec15.md): 10 000
+  sockets added 1.9 GB on one node), so plan about 1.5 GiB per 10 000 idle
+  sockets on top of the base footprint. Every handshake reads the database:
+  spread reconnects (clients back off with jitter) or raise `POOL_SIZE`. Scale
+  out on CPU and on connection count.
 - **Database connections**: `replicas x POOL_SIZE` (+ Oban, + `bin/migrate`)
   must stay below Postgres `max_connections` with headroom. Start with
   `POOL_SIZE=10`; raise it when Ecto queue time (`converger.repo.query.queue_time`)

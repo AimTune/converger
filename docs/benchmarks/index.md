@@ -15,7 +15,7 @@ message the server acknowledged is lost. The decision and its trade-offs are in
 
 | Run | Topologies | Notes |
 | --- | --- | --- |
-| [2026-10-12, `a1d3e2b`](2026-10-12-a1d3e2b.md) | 1 node and 3 nodes, native backbone | First run of the harness, on a developer machine (Docker Desktop). Before #35. |
+| [2026-10-12, `612ec15`](2026-10-12-612ec15.md) | 1 node and 3 nodes, native backbone | First run of the harness, on a developer machine (Docker Desktop). Before #35. |
 
 The nightly `Load` workflow publishes a report for every run as its job summary and as the `load-results-*`
 artifacts. Pages here are the runs worth keeping: a new baseline, a release, or a before/after comparison.
@@ -104,7 +104,7 @@ The script:
    the hardware, and writes `load/.run/out/results.json` and `report.md` (`load/results.js`).
 6. Tears the stack down, volumes included (`LOAD_KEEP=1` keeps it).
 
-The exit code is non-zero when a k6 threshold or a loss check failed. The output directory also holds each
+The exit code is non-zero when a loss check or a correctness threshold failed, or k6 crashed (see [thresholds](#running-a-scenario-with-k6-directly)); missed performance targets are only reported. The output directory also holds each
 scenario's k6 log and summary JSON, `samples.csv`, `mock_stats.json`, the node logs and `setup.json`.
 
 ### Tunables
@@ -196,14 +196,24 @@ nightly numbers as a regression signal and use dedicated hardware with `LOAD_APP
 `load/report.js` merges several runs (one per topology) into one page, optionally with a baseline column:
 
 ```bash
-LOAD_NODES=1 load/run.sh && cp load/.run/out/results.json /tmp/1node.json
-LOAD_NODES=3 load/run.sh && cp load/.run/out/results.json /tmp/3node.json
-node load/report.js --title "2026-10-12, a1d3e2b" --out docs/benchmarks/2026-10-12-a1d3e2b.md \
-  /tmp/1node.json /tmp/3node.json
+LOAD_NODES=1 load/run.sh && cp load/.run/out/results.json load/results/<date>-<commit>-1node.json
+LOAD_NODES=3 load/run.sh && cp load/.run/out/results.json load/results/<date>-<commit>-3node.json
+node load/report.js --out docs/benchmarks/<date>-<commit>.md \
+  load/results/<date>-<commit>-1node.json load/results/<date>-<commit>-3node.json
 ```
 
-Add front matter to the page and a row to [Published results](#published-results), and update the summary table in
-the README.
+Add front matter, the hardware context and the findings to the page, a row to
+[Published results](#published-results), and update the summary table in the README. Keep the `results.json`
+files in `load/results/`: a later run shows its before/after columns against them, for example after
+[#35](https://github.com/AimTune/converger/issues/35):
+
+```bash
+node load/report.js --baseline load/results/2026-10-12-612ec15-1node.json \
+  --baseline load/results/2026-10-12-612ec15-3node.json \
+  load/results/<new>-1node.json load/results/<new>-3node.json
+```
+
+Compare runs from the same machine only; the report prints both hardware records.
 
 ## In-process write-path benchmark
 

@@ -88,9 +88,20 @@ Details of the decision:
 - **Results** are one `results.json` per run (one topology) and a markdown report. `load/report.js` merges runs into
   the page published under `docs/benchmarks/`, and the README links to the latest one instead of hardcoding numbers.
 - **Regression gate.** The nightly `Load` workflow runs 1 and 3 nodes on a fixed runner image (`ubuntu-24.04`) and
-  compares each run with `load/baselines/ubuntu-24.04-<n>node.json`. It fails on lost acked messages, failed k6
-  thresholds, or a gated p95 (or memory per socket) worse by more than 15 % **and** by more than that metric's
+  compares each run with `load/baselines/ubuntu-24.04-<n>node.json`. It fails on lost acked messages, failed
+  correctness thresholds, or a gated p95 (or memory per socket) worse by more than 15 % **and** by more than that metric's
   absolute noise floor (for example 5 ms), so a jump from 4 ms to 5 ms is not reported as a 25 % regression.
+- **Correctness fails, targets warn.** k6 thresholds on loss (gaps, duplicates, lost or never-acked messages,
+  unverified subscribers, and for idle sockets, failed or dropped connections) fail the run. The PRD performance
+  targets (REST → WebSocket p95 below 250 ms, burst capacity) are reported as missed targets. The first run misses
+  them ([2026-10-12](../benchmarks/2026-10-12-612ec15.md)): failing on them would keep the nightly job red until #35
+  lands and hide real regressions, so the baseline comparison is the performance gate.
+- **Clients behave like real clients.** Subscribers reconnect with exponential backoff and jitter, and idle sockets
+  connect at 100/s. Otherwise the harness itself turns an overloaded node into a reconnect storm, and the idle
+  scenario would measure handshake capacity (every handshake reads the database) instead of memory. A 15 s e2e
+  warm-up, not measured, runs first: on a cold node the first seconds were up to ten times slower.
+- **Results are kept.** Published runs keep their `results.json` in `load/results/`, so a later run gets
+  before/after columns against them (`report.js --baseline`).
 - **Backbone dimension.** `LOAD_BACKBONE=native` is the only value that runs. Kafka, NATS and RabbitMQ are rejected
   with a pointer to #66, and the report's topology label carries the backbone so the matrix extends without format
   changes.

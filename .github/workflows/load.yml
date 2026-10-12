@@ -3,8 +3,8 @@ name: Load
 # k6 load harness (load/, docs/benchmarks/index.md): REST -> WebSocket
 # fan-out, inbound webhook burst, idle sockets, reconnect storm, rolling
 # restart and node kill, on 1 and 3 nodes. Publishes the report as the job
-# summary and an artifact, and fails on lost acked messages, failed k6
-# thresholds, or a p95 regression of more than 15 % against the committed
+# summary and an artifact, and fails on lost acked messages, failed
+# correctness thresholds, or a p95 regression of more than 15 % against the committed
 # baseline for this runner (load/baselines/).
 on:
   pull_request:

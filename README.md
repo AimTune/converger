@@ -46,11 +46,24 @@ The site is built with Docusaurus from [`website/`](website/) and uses [`docs/`]
 
 ## 🏎️ Performance Benchmarks
 
-In recent stress tests on a live PostgreSQL database:
-- **Simulated Concurrency**: 1,000 concurrent WebSocket sessions.
-- **Peak Throughput**: **~5,200 messages/second**.
-- **Sustained Load**: Stable **~4,300 msgs/sec** during 100,000 message bursts.
-- **Efficiency**: Optimized connection pool management (pool size: 100).
+Numbers come from the [k6 load harness](docs/benchmarks/index.md) against the production release, and every run
+records the hardware it ran on. Latest published run:
+[2026-10-12, 1 and 3 nodes, before #35](docs/benchmarks/2026-10-12-612ec15.md). This was a developer machine with
+12 vCPUs shared by the nodes, Postgres and the load generator.
+
+| Scenario | 1 node | 3 nodes |
+| --- | --- | --- |
+| REST → WebSocket, 1 000 sockets, ~94 msgs/s: p50 / p95 | 80 / 433 ms | 502 / 1 149 ms |
+| Inbound webhook burst (500/s offered): accepted | 96/s | 75/s |
+| Idle WebSocket connections held / memory each | 10 000 / ~149 KiB | 10 000 / ~128 KiB |
+| Reconnect storm (all 1 000 sockets at once): reconnect p95 | 1.8 s | 6.9 s |
+| Node ready again after SIGKILL | 20 s | 29 s |
+| **Lost acknowledged messages** (every scenario, including restarts and kills) | **0** | **0** |
+
+The 250 ms p95 target is not met yet. Under bursts the database pool saturates and requests fail with 500
+(tracked in [#35](https://github.com/AimTune/converger/issues/35)). A nightly CI job runs the same scenarios and
+fails on any lost message or a p95 regression of more than 15 %. For the write path alone, run
+`mix converger.loadtest`.
 
 ---
 
