@@ -1,0 +1,373 @@
+{
+  "default_tolerance_seconds": 300,
+  "description": "Converger outbound webhook signature test vectors, generated from Converger.Channels.InboundSignature.sign/3 by packages/conformance/scripts/generate_signature_vectors.exs. Do not edit by hand.",
+  "errors": [
+    "missing_signature",
+    "no_secret",
+    "malformed_signature",
+    "timestamp_out_of_tolerance",
+    "invalid_signature"
+  ],
+  "header": "x-converger-signature",
+  "scheme": "t=<unix seconds>,v1=<lowercase hex HMAC-SHA256(secret, \"<t>.\" + raw body)>",
+  "sign": [
+    {
+      "body": "{\"id\":\"9b2f6c1e-0000-4000-8000-000000000001\",\"text\":\"hello\"}",
+      "description": "The test vector published in docs/webhooks.md.",
+      "header": "t=1700000000,v1=c8945aa2aa4e6d043cdd46907fdf4ab1d4cedd12737ea10bb6f246ed39533a8a",
+      "name": "documented",
+      "secret": "whsec_test_secret",
+      "timestamp": 1700000000
+    },
+    {
+      "body": "{\"attachments\":[],\"conversation_id\":\"3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10\",\"deleted_at\":null,\"edited_at\":null,\"id\":\"a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d\",\"idempotency_key\":null,\"inserted_at\":\"2026-10-09T12:05:41.004512Z\",\"metadata\":{},\"reply_to_id\":null,\"sender\":\"bot\",\"seq\":3,\"tenant_id\":\"c2a4e6f8-1b3d-4f5a-9c7e-2d4f6a8b0c1e\",\"text\":\"We are open 9 to 5.\",\"timestamp\":\"2026-10-09T12:05:41.010000Z\",\"type\":\"message\"}",
+      "description": "A realistic webhook body: the canonical activity plus timestamp.",
+      "header": "t=1760000000,v1=bf35530f60c29828415b61c7f0d073f3d8e8fc024b23a4c7c2b85e72dcf23465",
+      "name": "activity",
+      "secret": "whsec_9f8e7d6c5b4a39281706f5e4d3c2b1a0",
+      "timestamp": 1760000000
+    },
+    {
+      "body": "{\"text\":\"Merhaba dünya 👋 — ç ğ ı ö ş ü\"}",
+      "description": "Non-ASCII UTF-8 in the body: the HMAC is over the raw bytes.",
+      "header": "t=1760000123,v1=196d5154de1e58f744f0d8db30df8130ef09784cfd255ba1074deec2f161e8a4",
+      "name": "unicode",
+      "secret": "s3cr3t-ünïcode",
+      "timestamp": 1760000123
+    },
+    {
+      "body": "",
+      "description": "An empty body is signed as \"<t>.\".",
+      "header": "t=1700000001,v1=e6af117af6065cb85400d51b2933b3c08813bc52520e2b500ae76c9356f960b8",
+      "name": "empty_body",
+      "secret": "whsec_empty",
+      "timestamp": 1700000001
+    },
+    {
+      "body": "{\n  \"text\": \"pretty printed\"\n}\n",
+      "description": "Whitespace and newlines are significant: verify the raw body, never re-serialized JSON.",
+      "header": "t=1760000999,v1=6e8986a4045f73db0d3355dbc1a8a558324d9370af3b29e5c5bcf430e56f91cd",
+      "name": "whitespace",
+      "secret": "whsec_ws",
+      "timestamp": 1760000999
+    }
+  ],
+  "verify": [
+    {
+      "body": "{\"attachments\":[],\"conversation_id\":\"3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10\",\"deleted_at\":null,\"edited_at\":null,\"id\":\"a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d\",\"idempotency_key\":null,\"inserted_at\":\"2026-10-09T12:05:41.004512Z\",\"metadata\":{},\"reply_to_id\":null,\"sender\":\"bot\",\"seq\":3,\"tenant_id\":\"c2a4e6f8-1b3d-4f5a-9c7e-2d4f6a8b0c1e\",\"text\":\"We are open 9 to 5.\",\"timestamp\":\"2026-10-09T12:05:41.010000Z\",\"type\":\"message\"}",
+      "error": null,
+      "headers": {
+        "x-converger-signature": "t=1760000000,v1=bf35530f60c29828415b61c7f0d073f3d8e8fc024b23a4c7c2b85e72dcf23465"
+      },
+      "name": "valid",
+      "now": 1760000000,
+      "secret": "whsec_9f8e7d6c5b4a39281706f5e4d3c2b1a0",
+      "valid": true
+    },
+    {
+      "body": "{\"attachments\":[],\"conversation_id\":\"3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10\",\"deleted_at\":null,\"edited_at\":null,\"id\":\"a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d\",\"idempotency_key\":null,\"inserted_at\":\"2026-10-09T12:05:41.004512Z\",\"metadata\":{},\"reply_to_id\":null,\"sender\":\"bot\",\"seq\":3,\"tenant_id\":\"c2a4e6f8-1b3d-4f5a-9c7e-2d4f6a8b0c1e\",\"text\":\"We are open 9 to 5.\",\"timestamp\":\"2026-10-09T12:05:41.010000Z\",\"type\":\"message\"}",
+      "error": null,
+      "headers": {
+        "x-converger-signature": "t=1760000000,v1=bf35530f60c29828415b61c7f0d073f3d8e8fc024b23a4c7c2b85e72dcf23465"
+      },
+      "name": "valid_at_past_tolerance_boundary",
+      "now": 1760000300,
+      "secret": "whsec_9f8e7d6c5b4a39281706f5e4d3c2b1a0",
+      "valid": true
+    },
+    {
+      "body": "{\"attachments\":[],\"conversation_id\":\"3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10\",\"deleted_at\":null,\"edited_at\":null,\"id\":\"a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d\",\"idempotency_key\":null,\"inserted_at\":\"2026-10-09T12:05:41.004512Z\",\"metadata\":{},\"reply_to_id\":null,\"sender\":\"bot\",\"seq\":3,\"tenant_id\":\"c2a4e6f8-1b3d-4f5a-9c7e-2d4f6a8b0c1e\",\"text\":\"We are open 9 to 5.\",\"timestamp\":\"2026-10-09T12:05:41.010000Z\",\"type\":\"message\"}",
+      "error": null,
+      "headers": {
+        "x-converger-signature": "t=1760000000,v1=bf35530f60c29828415b61c7f0d073f3d8e8fc024b23a4c7c2b85e72dcf23465"
+      },
+      "name": "valid_at_future_tolerance_boundary",
+      "now": 1759999700,
+      "secret": "whsec_9f8e7d6c5b4a39281706f5e4d3c2b1a0",
+      "valid": true
+    },
+    {
+      "body": "{\"attachments\":[],\"conversation_id\":\"3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10\",\"deleted_at\":null,\"edited_at\":null,\"id\":\"a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d\",\"idempotency_key\":null,\"inserted_at\":\"2026-10-09T12:05:41.004512Z\",\"metadata\":{},\"reply_to_id\":null,\"sender\":\"bot\",\"seq\":3,\"tenant_id\":\"c2a4e6f8-1b3d-4f5a-9c7e-2d4f6a8b0c1e\",\"text\":\"We are open 9 to 5.\",\"timestamp\":\"2026-10-09T12:05:41.010000Z\",\"type\":\"message\"}",
+      "error": "timestamp_out_of_tolerance",
+      "headers": {
+        "x-converger-signature": "t=1760000000,v1=bf35530f60c29828415b61c7f0d073f3d8e8fc024b23a4c7c2b85e72dcf23465"
+      },
+      "name": "expired",
+      "now": 1760000301,
+      "secret": "whsec_9f8e7d6c5b4a39281706f5e4d3c2b1a0",
+      "valid": false
+    },
+    {
+      "body": "{\"attachments\":[],\"conversation_id\":\"3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10\",\"deleted_at\":null,\"edited_at\":null,\"id\":\"a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d\",\"idempotency_key\":null,\"inserted_at\":\"2026-10-09T12:05:41.004512Z\",\"metadata\":{},\"reply_to_id\":null,\"sender\":\"bot\",\"seq\":3,\"tenant_id\":\"c2a4e6f8-1b3d-4f5a-9c7e-2d4f6a8b0c1e\",\"text\":\"We are open 9 to 5.\",\"timestamp\":\"2026-10-09T12:05:41.010000Z\",\"type\":\"message\"}",
+      "error": "timestamp_out_of_tolerance",
+      "headers": {
+        "x-converger-signature": "t=1760000000,v1=bf35530f60c29828415b61c7f0d073f3d8e8fc024b23a4c7c2b85e72dcf23465"
+      },
+      "name": "too_far_in_future",
+      "now": 1759999699,
+      "secret": "whsec_9f8e7d6c5b4a39281706f5e4d3c2b1a0",
+      "valid": false
+    },
+    {
+      "body": "{\"attachments\":[],\"conversation_id\":\"3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10\",\"deleted_at\":null,\"edited_at\":null,\"id\":\"a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d\",\"idempotency_key\":null,\"inserted_at\":\"2026-10-09T12:05:41.004512Z\",\"metadata\":{},\"reply_to_id\":null,\"sender\":\"bot\",\"seq\":3,\"tenant_id\":\"c2a4e6f8-1b3d-4f5a-9c7e-2d4f6a8b0c1e\",\"text\":\"We are open 9 to 5.\",\"timestamp\":\"2026-10-09T12:05:41.010000Z\",\"type\":\"message\"}",
+      "error": null,
+      "headers": {
+        "x-converger-signature": "t=1760000000,v1=bf35530f60c29828415b61c7f0d073f3d8e8fc024b23a4c7c2b85e72dcf23465"
+      },
+      "name": "custom_tolerance",
+      "now": 1760000500,
+      "secret": "whsec_9f8e7d6c5b4a39281706f5e4d3c2b1a0",
+      "tolerance": 600,
+      "valid": true
+    },
+    {
+      "body": "{\"attachments\":[],\"conversation_id\":\"3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10\",\"deleted_at\":null,\"edited_at\":null,\"id\":\"a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d\",\"idempotency_key\":null,\"inserted_at\":\"2026-10-09T12:05:41.004512Z\",\"metadata\":{},\"reply_to_id\":null,\"sender\":\"bot\",\"seq\":3,\"tenant_id\":\"c2a4e6f8-1b3d-4f5a-9c7e-2d4f6a8b0c1e\",\"text\":\"We are open 9 to 5.\",\"timestamp\":\"2026-10-09T12:05:41.010000Z\",\"type\":\"message\"}",
+      "error": "timestamp_out_of_tolerance",
+      "headers": {
+        "x-converger-signature": "t=1760000000,v1=bf35530f60c29828415b61c7f0d073f3d8e8fc024b23a4c7c2b85e72dcf23465"
+      },
+      "name": "custom_tolerance_exceeded",
+      "now": 1760000061,
+      "secret": "whsec_9f8e7d6c5b4a39281706f5e4d3c2b1a0",
+      "tolerance": 60,
+      "valid": false
+    },
+    {
+      "body": "{\"attachments\":[],\"conversation_id\":\"3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10\",\"deleted_at\":null,\"edited_at\":null,\"id\":\"a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d\",\"idempotency_key\":null,\"inserted_at\":\"2026-10-09T12:05:41.004512Z\",\"metadata\":{},\"reply_to_id\":null,\"sender\":\"bot\",\"seq\":3,\"tenant_id\":\"c2a4e6f8-1b3d-4f5a-9c7e-2d4f6a8b0c1e\",\"text\":\"We are open 9 to 6.\",\"timestamp\":\"2026-10-09T12:05:41.010000Z\",\"type\":\"message\"}",
+      "error": "invalid_signature",
+      "headers": {
+        "x-converger-signature": "t=1760000000,v1=bf35530f60c29828415b61c7f0d073f3d8e8fc024b23a4c7c2b85e72dcf23465"
+      },
+      "name": "tampered_body",
+      "now": 1760000000,
+      "secret": "whsec_9f8e7d6c5b4a39281706f5e4d3c2b1a0",
+      "valid": false
+    },
+    {
+      "body": "{\"attachments\":[],\"conversation_id\":\"3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10\",\"deleted_at\":null,\"edited_at\":null,\"id\":\"a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d\",\"idempotency_key\":null,\"inserted_at\":\"2026-10-09T12:05:41.004512Z\",\"metadata\":{},\"reply_to_id\":null,\"sender\":\"bot\",\"seq\":3,\"tenant_id\":\"c2a4e6f8-1b3d-4f5a-9c7e-2d4f6a8b0c1e\",\"text\":\"We are open 9 to 5.\",\"timestamp\":\"2026-10-09T12:05:41.010000Z\",\"type\":\"message\"}",
+      "error": "invalid_signature",
+      "headers": {
+        "x-converger-signature": "t=1760000000,v1=bf35530f60c29828415b61c7f0d073f3d8e8fc024b23a4c7c2b85e72dcf23465"
+      },
+      "name": "wrong_secret",
+      "now": 1760000000,
+      "secret": "whsec_wrong",
+      "valid": false
+    },
+    {
+      "body": "{\"attachments\":[],\"conversation_id\":\"3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10\",\"deleted_at\":null,\"edited_at\":null,\"id\":\"a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d\",\"idempotency_key\":null,\"inserted_at\":\"2026-10-09T12:05:41.004512Z\",\"metadata\":{},\"reply_to_id\":null,\"sender\":\"bot\",\"seq\":3,\"tenant_id\":\"c2a4e6f8-1b3d-4f5a-9c7e-2d4f6a8b0c1e\",\"text\":\"We are open 9 to 5.\",\"timestamp\":\"2026-10-09T12:05:41.010000Z\",\"type\":\"message\"}",
+      "error": "invalid_signature",
+      "headers": {
+        "x-converger-signature": "t=1760000000,v1=BF35530F60C29828415B61C7F0D073F3D8E8FC024B23A4C7C2B85E72DCF23465"
+      },
+      "name": "uppercase_hex_is_not_accepted",
+      "now": 1760000000,
+      "secret": "whsec_9f8e7d6c5b4a39281706f5e4d3c2b1a0",
+      "valid": false
+    },
+    {
+      "body": "{\"attachments\":[],\"conversation_id\":\"3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10\",\"deleted_at\":null,\"edited_at\":null,\"id\":\"a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d\",\"idempotency_key\":null,\"inserted_at\":\"2026-10-09T12:05:41.004512Z\",\"metadata\":{},\"reply_to_id\":null,\"sender\":\"bot\",\"seq\":3,\"tenant_id\":\"c2a4e6f8-1b3d-4f5a-9c7e-2d4f6a8b0c1e\",\"text\":\"We are open 9 to 5.\",\"timestamp\":\"2026-10-09T12:05:41.010000Z\",\"type\":\"message\"}",
+      "description": "Several v1 values (secret rotation): one match is enough.",
+      "error": null,
+      "headers": {
+        "x-converger-signature": "t=1760000000,v1=346cf5b8cdf0204c4749c4f118e89a97cf7800224517e91756a7147114950417,v1=bf35530f60c29828415b61c7f0d073f3d8e8fc024b23a4c7c2b85e72dcf23465"
+      },
+      "name": "multiple_v1_one_matches",
+      "now": 1760000000,
+      "secret": "whsec_9f8e7d6c5b4a39281706f5e4d3c2b1a0",
+      "valid": true
+    },
+    {
+      "body": "{\"attachments\":[],\"conversation_id\":\"3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10\",\"deleted_at\":null,\"edited_at\":null,\"id\":\"a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d\",\"idempotency_key\":null,\"inserted_at\":\"2026-10-09T12:05:41.004512Z\",\"metadata\":{},\"reply_to_id\":null,\"sender\":\"bot\",\"seq\":3,\"tenant_id\":\"c2a4e6f8-1b3d-4f5a-9c7e-2d4f6a8b0c1e\",\"text\":\"We are open 9 to 5.\",\"timestamp\":\"2026-10-09T12:05:41.010000Z\",\"type\":\"message\"}",
+      "description": "The receiver may pass several secrets (rotation on its side).",
+      "error": null,
+      "headers": {
+        "x-converger-signature": "t=1760000000,v1=bf35530f60c29828415b61c7f0d073f3d8e8fc024b23a4c7c2b85e72dcf23465"
+      },
+      "name": "receiver_secret_list",
+      "now": 1760000000,
+      "secret": [
+        "whsec_old_rotated_out",
+        "whsec_9f8e7d6c5b4a39281706f5e4d3c2b1a0"
+      ],
+      "valid": true
+    },
+    {
+      "body": "{\"attachments\":[],\"conversation_id\":\"3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10\",\"deleted_at\":null,\"edited_at\":null,\"id\":\"a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d\",\"idempotency_key\":null,\"inserted_at\":\"2026-10-09T12:05:41.004512Z\",\"metadata\":{},\"reply_to_id\":null,\"sender\":\"bot\",\"seq\":3,\"tenant_id\":\"c2a4e6f8-1b3d-4f5a-9c7e-2d4f6a8b0c1e\",\"text\":\"We are open 9 to 5.\",\"timestamp\":\"2026-10-09T12:05:41.010000Z\",\"type\":\"message\"}",
+      "error": null,
+      "headers": {
+        "x-converger-signature": "t=1760000000, v1=bf35530f60c29828415b61c7f0d073f3d8e8fc024b23a4c7c2b85e72dcf23465"
+      },
+      "name": "spaces_around_parts",
+      "now": 1760000000,
+      "secret": "whsec_9f8e7d6c5b4a39281706f5e4d3c2b1a0",
+      "valid": true
+    },
+    {
+      "body": "{\"attachments\":[],\"conversation_id\":\"3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10\",\"deleted_at\":null,\"edited_at\":null,\"id\":\"a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d\",\"idempotency_key\":null,\"inserted_at\":\"2026-10-09T12:05:41.004512Z\",\"metadata\":{},\"reply_to_id\":null,\"sender\":\"bot\",\"seq\":3,\"tenant_id\":\"c2a4e6f8-1b3d-4f5a-9c7e-2d4f6a8b0c1e\",\"text\":\"We are open 9 to 5.\",\"timestamp\":\"2026-10-09T12:05:41.010000Z\",\"type\":\"message\"}",
+      "error": null,
+      "headers": {
+        "x-converger-signature": "v1=bf35530f60c29828415b61c7f0d073f3d8e8fc024b23a4c7c2b85e72dcf23465,t=1760000000"
+      },
+      "name": "reordered_parts",
+      "now": 1760000000,
+      "secret": "whsec_9f8e7d6c5b4a39281706f5e4d3c2b1a0",
+      "valid": true
+    },
+    {
+      "body": "{\"attachments\":[],\"conversation_id\":\"3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10\",\"deleted_at\":null,\"edited_at\":null,\"id\":\"a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d\",\"idempotency_key\":null,\"inserted_at\":\"2026-10-09T12:05:41.004512Z\",\"metadata\":{},\"reply_to_id\":null,\"sender\":\"bot\",\"seq\":3,\"tenant_id\":\"c2a4e6f8-1b3d-4f5a-9c7e-2d4f6a8b0c1e\",\"text\":\"We are open 9 to 5.\",\"timestamp\":\"2026-10-09T12:05:41.010000Z\",\"type\":\"message\"}",
+      "error": null,
+      "headers": {
+        "x-converger-signature": "t=1760000000,v0=deadbeef,v1=bf35530f60c29828415b61c7f0d073f3d8e8fc024b23a4c7c2b85e72dcf23465"
+      },
+      "name": "unknown_parts_ignored",
+      "now": 1760000000,
+      "secret": "whsec_9f8e7d6c5b4a39281706f5e4d3c2b1a0",
+      "valid": true
+    },
+    {
+      "body": "{\"attachments\":[],\"conversation_id\":\"3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10\",\"deleted_at\":null,\"edited_at\":null,\"id\":\"a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d\",\"idempotency_key\":null,\"inserted_at\":\"2026-10-09T12:05:41.004512Z\",\"metadata\":{},\"reply_to_id\":null,\"sender\":\"bot\",\"seq\":3,\"tenant_id\":\"c2a4e6f8-1b3d-4f5a-9c7e-2d4f6a8b0c1e\",\"text\":\"We are open 9 to 5.\",\"timestamp\":\"2026-10-09T12:05:41.010000Z\",\"type\":\"message\"}",
+      "error": null,
+      "headers": {
+        "X-Converger-Signature": "t=1760000000,v1=bf35530f60c29828415b61c7f0d073f3d8e8fc024b23a4c7c2b85e72dcf23465"
+      },
+      "name": "header_name_case_insensitive",
+      "now": 1760000000,
+      "secret": "whsec_9f8e7d6c5b4a39281706f5e4d3c2b1a0",
+      "valid": true
+    },
+    {
+      "body": "{\"attachments\":[],\"conversation_id\":\"3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10\",\"deleted_at\":null,\"edited_at\":null,\"id\":\"a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d\",\"idempotency_key\":null,\"inserted_at\":\"2026-10-09T12:05:41.004512Z\",\"metadata\":{},\"reply_to_id\":null,\"sender\":\"bot\",\"seq\":3,\"tenant_id\":\"c2a4e6f8-1b3d-4f5a-9c7e-2d4f6a8b0c1e\",\"text\":\"We are open 9 to 5.\",\"timestamp\":\"2026-10-09T12:05:41.010000Z\",\"type\":\"message\"}",
+      "error": "missing_signature",
+      "headers": {
+        "content-type": "application/json"
+      },
+      "name": "missing_header",
+      "now": 1760000000,
+      "secret": "whsec_9f8e7d6c5b4a39281706f5e4d3c2b1a0",
+      "valid": false
+    },
+    {
+      "body": "{\"attachments\":[],\"conversation_id\":\"3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10\",\"deleted_at\":null,\"edited_at\":null,\"id\":\"a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d\",\"idempotency_key\":null,\"inserted_at\":\"2026-10-09T12:05:41.004512Z\",\"metadata\":{},\"reply_to_id\":null,\"sender\":\"bot\",\"seq\":3,\"tenant_id\":\"c2a4e6f8-1b3d-4f5a-9c7e-2d4f6a8b0c1e\",\"text\":\"We are open 9 to 5.\",\"timestamp\":\"2026-10-09T12:05:41.010000Z\",\"type\":\"message\"}",
+      "error": "missing_signature",
+      "headers": {
+        "x-converger-signature": ""
+      },
+      "name": "empty_header",
+      "now": 1760000000,
+      "secret": "whsec_9f8e7d6c5b4a39281706f5e4d3c2b1a0",
+      "valid": false
+    },
+    {
+      "body": "{\"attachments\":[],\"conversation_id\":\"3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10\",\"deleted_at\":null,\"edited_at\":null,\"id\":\"a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d\",\"idempotency_key\":null,\"inserted_at\":\"2026-10-09T12:05:41.004512Z\",\"metadata\":{},\"reply_to_id\":null,\"sender\":\"bot\",\"seq\":3,\"tenant_id\":\"c2a4e6f8-1b3d-4f5a-9c7e-2d4f6a8b0c1e\",\"text\":\"We are open 9 to 5.\",\"timestamp\":\"2026-10-09T12:05:41.010000Z\",\"type\":\"message\"}",
+      "error": "no_secret",
+      "headers": {
+        "x-converger-signature": "t=1760000000,v1=bf35530f60c29828415b61c7f0d073f3d8e8fc024b23a4c7c2b85e72dcf23465"
+      },
+      "name": "empty_secret",
+      "now": 1760000000,
+      "secret": "",
+      "valid": false
+    },
+    {
+      "body": "{\"attachments\":[],\"conversation_id\":\"3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10\",\"deleted_at\":null,\"edited_at\":null,\"id\":\"a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d\",\"idempotency_key\":null,\"inserted_at\":\"2026-10-09T12:05:41.004512Z\",\"metadata\":{},\"reply_to_id\":null,\"sender\":\"bot\",\"seq\":3,\"tenant_id\":\"c2a4e6f8-1b3d-4f5a-9c7e-2d4f6a8b0c1e\",\"text\":\"We are open 9 to 5.\",\"timestamp\":\"2026-10-09T12:05:41.010000Z\",\"type\":\"message\"}",
+      "description": "Outbound webhooks never use the legacy sha256= form; SDKs reject it.",
+      "error": "malformed_signature",
+      "headers": {
+        "x-converger-signature": "sha256=1180e00ff5784acf197f6912850a01b9ba9b1dc833abb33b813a8e0a88d279a8"
+      },
+      "name": "legacy_sha256_not_accepted",
+      "now": 1760000000,
+      "secret": "whsec_9f8e7d6c5b4a39281706f5e4d3c2b1a0",
+      "valid": false
+    },
+    {
+      "body": "{\"attachments\":[],\"conversation_id\":\"3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10\",\"deleted_at\":null,\"edited_at\":null,\"id\":\"a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d\",\"idempotency_key\":null,\"inserted_at\":\"2026-10-09T12:05:41.004512Z\",\"metadata\":{},\"reply_to_id\":null,\"sender\":\"bot\",\"seq\":3,\"tenant_id\":\"c2a4e6f8-1b3d-4f5a-9c7e-2d4f6a8b0c1e\",\"text\":\"We are open 9 to 5.\",\"timestamp\":\"2026-10-09T12:05:41.010000Z\",\"type\":\"message\"}",
+      "error": "malformed_signature",
+      "headers": {
+        "x-converger-signature": "v1=bf35530f60c29828415b61c7f0d073f3d8e8fc024b23a4c7c2b85e72dcf23465"
+      },
+      "name": "missing_timestamp",
+      "now": 1760000000,
+      "secret": "whsec_9f8e7d6c5b4a39281706f5e4d3c2b1a0",
+      "valid": false
+    },
+    {
+      "body": "{\"attachments\":[],\"conversation_id\":\"3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10\",\"deleted_at\":null,\"edited_at\":null,\"id\":\"a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d\",\"idempotency_key\":null,\"inserted_at\":\"2026-10-09T12:05:41.004512Z\",\"metadata\":{},\"reply_to_id\":null,\"sender\":\"bot\",\"seq\":3,\"tenant_id\":\"c2a4e6f8-1b3d-4f5a-9c7e-2d4f6a8b0c1e\",\"text\":\"We are open 9 to 5.\",\"timestamp\":\"2026-10-09T12:05:41.010000Z\",\"type\":\"message\"}",
+      "error": "malformed_signature",
+      "headers": {
+        "x-converger-signature": "t=17600000x0,v1=bf35530f60c29828415b61c7f0d073f3d8e8fc024b23a4c7c2b85e72dcf23465"
+      },
+      "name": "non_integer_timestamp",
+      "now": 1760000000,
+      "secret": "whsec_9f8e7d6c5b4a39281706f5e4d3c2b1a0",
+      "valid": false
+    },
+    {
+      "body": "{\"attachments\":[],\"conversation_id\":\"3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10\",\"deleted_at\":null,\"edited_at\":null,\"id\":\"a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d\",\"idempotency_key\":null,\"inserted_at\":\"2026-10-09T12:05:41.004512Z\",\"metadata\":{},\"reply_to_id\":null,\"sender\":\"bot\",\"seq\":3,\"tenant_id\":\"c2a4e6f8-1b3d-4f5a-9c7e-2d4f6a8b0c1e\",\"text\":\"We are open 9 to 5.\",\"timestamp\":\"2026-10-09T12:05:41.010000Z\",\"type\":\"message\"}",
+      "error": "malformed_signature",
+      "headers": {
+        "x-converger-signature": "t=1760000000"
+      },
+      "name": "missing_v1",
+      "now": 1760000000,
+      "secret": "whsec_9f8e7d6c5b4a39281706f5e4d3c2b1a0",
+      "valid": false
+    },
+    {
+      "body": "{\"attachments\":[],\"conversation_id\":\"3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10\",\"deleted_at\":null,\"edited_at\":null,\"id\":\"a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d\",\"idempotency_key\":null,\"inserted_at\":\"2026-10-09T12:05:41.004512Z\",\"metadata\":{},\"reply_to_id\":null,\"sender\":\"bot\",\"seq\":3,\"tenant_id\":\"c2a4e6f8-1b3d-4f5a-9c7e-2d4f6a8b0c1e\",\"text\":\"We are open 9 to 5.\",\"timestamp\":\"2026-10-09T12:05:41.010000Z\",\"type\":\"message\"}",
+      "error": "malformed_signature",
+      "headers": {
+        "x-converger-signature": "not a signature"
+      },
+      "name": "garbage",
+      "now": 1760000000,
+      "secret": "whsec_9f8e7d6c5b4a39281706f5e4d3c2b1a0",
+      "valid": false
+    },
+    {
+      "body": "{\"id\":\"9b2f6c1e-0000-4000-8000-000000000001\",\"text\":\"hello\"}",
+      "error": null,
+      "headers": {
+        "x-converger-signature": "t=1700000000,v1=c8945aa2aa4e6d043cdd46907fdf4ab1d4cedd12737ea10bb6f246ed39533a8a"
+      },
+      "name": "sign_vector_documented",
+      "now": 1700000000,
+      "secret": "whsec_test_secret",
+      "valid": true
+    },
+    {
+      "body": "{\"text\":\"Merhaba dünya 👋 — ç ğ ı ö ş ü\"}",
+      "error": null,
+      "headers": {
+        "x-converger-signature": "t=1760000123,v1=196d5154de1e58f744f0d8db30df8130ef09784cfd255ba1074deec2f161e8a4"
+      },
+      "name": "sign_vector_unicode",
+      "now": 1760000123,
+      "secret": "s3cr3t-ünïcode",
+      "valid": true
+    },
+    {
+      "body": "",
+      "error": null,
+      "headers": {
+        "x-converger-signature": "t=1700000001,v1=e6af117af6065cb85400d51b2933b3c08813bc52520e2b500ae76c9356f960b8"
+      },
+      "name": "sign_vector_empty_body",
+      "now": 1700000001,
+      "secret": "whsec_empty",
+      "valid": true
+    },
+    {
+      "body": "{\n  \"text\": \"pretty printed\"\n}\n",
+      "error": null,
+      "headers": {
+        "x-converger-signature": "t=1760000999,v1=6e8986a4045f73db0d3355dbc1a8a558324d9370af3b29e5c5bcf430e56f91cd"
+      },
+      "name": "sign_vector_whitespace",
+      "now": 1760000999,
+      "secret": "whsec_ws",
+      "valid": true
+    }
+  ]
+}

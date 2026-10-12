@@ -1,0 +1,104 @@
+{
+  "description": "How an SDK turns a non-2xx HTTP response into its error type. Input: status, headers and raw body. Output: the normalized fields every SDK exposes (status, code, message, details, request_id, retry_after). Covers the five legacy error shapes of docs/api/overview.md and the standard envelope of issue #45.",
+  "status_codes": {
+    "400": "bad_request",
+    "401": "unauthorized",
+    "403": "forbidden",
+    "404": "not_found",
+    "406": "not_acceptable",
+    "409": "conflict",
+    "413": "payload_too_large",
+    "415": "unsupported_media_type",
+    "422": "validation_failed",
+    "429": "rate_limited",
+    "500": "internal",
+    "502": "bad_gateway",
+    "503": "unavailable"
+  },
+  "rules": [
+    "code: body.error.code if body.error is an object with a string code; else body.error if body.error and body.detail are both strings (e.g. conversation_closed); else status_codes[status]; else \"http_<status>\".",
+    "message: body.error.message; else body.detail when code came from body.error; else body.error when it is a string; else body.errors.detail when it is a string; else \"validation failed\" when body.errors is an object; else the raw body (trimmed, at most 200 characters) when it is not JSON; else the empty string.",
+    "details: body.error.details if present; else body.errors when it is an object without a string detail (changeset errors); else null.",
+    "request_id: body.error.request_id if present; else the x-request-id response header; else null.",
+    "retry_after: the Retry-After header as integer seconds when it is an integer; else null."
+  ],
+  "cases": [
+    {
+      "name": "envelope",
+      "status": 422,
+      "headers": { "x-request-id": "F-header" },
+      "body": "{\"error\":{\"code\":\"validation_failed\",\"message\":\"text is too long\",\"details\":{\"text\":[\"should be at most 65536 byte(s)\"]},\"request_id\":\"F-body\"}}",
+      "expected": { "status": 422, "code": "validation_failed", "message": "text is too long", "details": { "text": ["should be at most 65536 byte(s)"] }, "request_id": "F-body", "retry_after": null }
+    },
+    {
+      "name": "envelope_without_request_id_uses_header",
+      "status": 404,
+      "headers": { "x-request-id": "F-123" },
+      "body": "{\"error\":{\"code\":\"not_found\",\"message\":\"Conversation not found\"}}",
+      "expected": { "status": 404, "code": "not_found", "message": "Conversation not found", "details": null, "request_id": "F-123", "retry_after": null }
+    },
+    {
+      "name": "coded_object_client_api",
+      "status": 401,
+      "headers": { "x-request-id": "F-401" },
+      "body": "{\"error\":{\"code\":\"Unauthorized\",\"message\":\"Invalid or expired token\"}}",
+      "expected": { "status": 401, "code": "Unauthorized", "message": "Invalid or expired token", "details": null, "request_id": "F-401", "retry_after": null }
+    },
+    {
+      "name": "flat_string",
+      "status": 401,
+      "headers": {},
+      "body": "{\"error\":\"Unauthorized: Invalid or inactive API Key\"}",
+      "expected": { "status": 401, "code": "unauthorized", "message": "Unauthorized: Invalid or inactive API Key", "details": null, "request_id": null, "retry_after": null }
+    },
+    {
+      "name": "rate_limited_with_retry_after",
+      "status": 429,
+      "headers": { "retry-after": "2", "x-request-id": "F-429" },
+      "body": "{\"error\":\"Too many requests. Please try again later.\"}",
+      "expected": { "status": 429, "code": "rate_limited", "message": "Too many requests. Please try again later.", "details": null, "request_id": "F-429", "retry_after": 2 }
+    },
+    {
+      "name": "phoenix_detail",
+      "status": 404,
+      "headers": {},
+      "body": "{\"errors\":{\"detail\":\"Not Found\"}}",
+      "expected": { "status": 404, "code": "not_found", "message": "Not Found", "details": null, "request_id": null, "retry_after": null }
+    },
+    {
+      "name": "changeset_errors",
+      "status": 422,
+      "headers": {},
+      "body": "{\"errors\":{\"type\":[\"is invalid\"],\"text\":[\"should be at most 65536 byte(s)\"]}}",
+      "expected": { "status": 422, "code": "validation_failed", "message": "validation failed", "details": { "type": ["is invalid"], "text": ["should be at most 65536 byte(s)"] }, "request_id": null, "retry_after": null }
+    },
+    {
+      "name": "conversation_closed",
+      "status": 409,
+      "headers": {},
+      "body": "{\"error\":\"conversation_closed\",\"detail\":\"Conversation is closed\"}",
+      "expected": { "status": 409, "code": "conversation_closed", "message": "Conversation is closed", "details": null, "request_id": null, "retry_after": null }
+    },
+    {
+      "name": "unavailable",
+      "status": 503,
+      "headers": {},
+      "body": "{\"error\":\"Activity could not be accepted, please retry\"}",
+      "expected": { "status": 503, "code": "unavailable", "message": "Activity could not be accepted, please retry", "details": null, "request_id": null, "retry_after": null }
+    },
+    {
+      "name": "non_json_body",
+      "status": 502,
+      "headers": {},
+      "body": "  <html>Bad Gateway</html>\n",
+      "expected": { "status": 502, "code": "bad_gateway", "message": "<html>Bad Gateway</html>", "details": null, "request_id": null, "retry_after": null }
+    },
+    {
+      "name": "unknown_status_empty_body",
+      "status": 418,
+      "headers": {},
+      "body": "",
+      "expected": { "status": 418, "code": "http_418", "message": "", "details": null, "request_id": null, "retry_after": null }
+    }
+  ]
+}
