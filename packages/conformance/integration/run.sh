@@ -59,7 +59,7 @@ for sdk in "${sdks[@]}"; do
       (cd packages/client-go && CONVERGER_FIXTURES="$fixtures" go test -count=1 -run TestIntegration -v ./...) || status=1
       ;;
     elixir)
-      (cd packages/client-elixir && CONVERGER_FIXTURES="$fixtures" mix test --only integration) || status=1
+      (cd packages/client-elixir && MIX_ENV=test CONVERGER_FIXTURES="$fixtures" mix test --only integration) || status=1
       ;;
     *)
       echo "unknown SDK $sdk"
