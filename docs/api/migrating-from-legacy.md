@@ -128,8 +128,8 @@ channel.on("activitySet", (set) => {
 A legacy client that only stored the last activity id has no watermark for the first rejoin after the switch;
 fetch the history once with `GET /api/v1/converger/conversations/:id/activities` and keep its `watermark`.
 
-The bundled [`converger_js`](https://github.com/AimTune/converger/tree/main/converger_js) client does all of the
-above.
+The TypeScript SDK [`@converger/client`](../sdk/typescript.md) does all of the above on the native v1 endpoint,
+and its `phoenixTransport()` on this binding.
 
 ## 3. Server-side calls with a channel token
 

@@ -1,0 +1,15 @@
+{
+  "name": "converger-workspace",
+  "private": true,
+  "description": "pnpm workspace for Converger's JavaScript/TypeScript packages (the Elixir server lives at the repository root).",
+  "packageManager": "pnpm@11.5.2",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "pnpm --filter @converger/client build",
+    "test": "pnpm --filter @converger/client test",
+    "test:e2e": "pnpm --filter @converger/client test:e2e",
+    "typecheck": "pnpm --filter @converger/client typecheck"
+  }
+}
