@@ -82,6 +82,7 @@ export class Subscriber {
     this.nonce = 0;
     this.everConnected = false;
     this.startedAt = null;
+    this.failures = 0; // consecutive failed connects, for the backoff
   }
 
   start() {
@@ -116,12 +117,16 @@ export class Subscriber {
     if (this.ws !== ws) return;
     this.ws = null;
     if (this.stopped) return;
-    if (this.closedAt === null) {
-      this.closedAt = Date.now();
-      metrics.unexpectedCloses.add(1);
-    }
+    // Only a drop of an established connection is unexpected; failed connect
+    // attempts are counted as ws_connect_errors.
+    if (this.welcomed) metrics.unexpectedCloses.add(1);
+    if (this.closedAt === null) this.closedAt = Date.now();
     this.node = (this.node + 1) % this.urls.length;
-    setTimeout(() => this.stopped || this.connect(), 200 + Math.random() * 300);
+    // Exponential backoff with jitter, as real clients do: retrying every few
+    // hundred ms turns an overloaded node into a reconnect storm.
+    const backoff = Math.min(10_000, 250 * 2 ** this.failures);
+    this.failures += 1;
+    setTimeout(() => this.stopped || this.connect(), backoff / 2 + Math.random() * backoff);
   }
 
   forceReconnect() {
@@ -154,6 +159,7 @@ export class Subscriber {
           metrics.connect.add(Date.now() - this.startedAt);
         }
         this.everConnected = true;
+        this.failures = 0;
         this.closedAt = null;
         if (this.pending) this.send({ type: "ping", nonce: "final" });
         return;

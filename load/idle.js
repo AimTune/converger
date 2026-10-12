@@ -9,14 +9,14 @@
 // Sockets are spread over the fixtures' idle conversations (several sockets
 // share a conversation token, like one user with several tabs).
 //
-// Environment: SOCKETS (10000), SOCKETS_PER_VU (200), CONNECT_RATE (500/s),
+// Environment: SOCKETS (10000), SOCKETS_PER_VU (200), CONNECT_RATE (100/s),
 // HOLD_S (60), plus lib/converger.js.
 import { TREND_STATS, fixtures, num, sleepMs, Subscriber, WS_URLS } from "./lib/converger.js";
 import { summary } from "./lib/summary.js";
 
 const SOCKETS = num("SOCKETS", 10_000);
 const PER_VU = num("SOCKETS_PER_VU", 200);
-const CONNECT_RATE = num("CONNECT_RATE", 500);
+const CONNECT_RATE = num("CONNECT_RATE", 100);
 const HOLD_S = num("HOLD_S", 60);
 const VUS = Math.ceil(SOCKETS / PER_VU);
 const RAMP_S = SOCKETS / CONNECT_RATE;

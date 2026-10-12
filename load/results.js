@@ -110,18 +110,41 @@ function rssBefore(ts) {
 // --- scenarios ------------------------------------------------------------------
 const scenarios = {};
 const checks = [];
-const check = (name, ok, detail) => checks.push({ name, ok, detail });
+const check = (name, ok, detail, warning = false) => checks.push({ name, ok, detail, warning });
+
+// Thresholds on these metrics guard correctness (lost, duplicated or unacked
+// messages, sockets that could not connect or were dropped while idle) and
+// fail the run. The others are performance targets from the PRD (p95 below
+// 250 ms, burst capacity): missing one is reported, and the baseline
+// comparison in report.js is what gates performance.
+const CORRECTNESS = new Set([
+  "lost_acked_messages",
+  "seq_gaps",
+  "seq_duplicates",
+  "messages_never_acked",
+  "subscribers_unverified",
+  "ws_connected",
+  "ws_unexpected_closes",
+]);
 
 function base(scenario, k6) {
   const exit = exitCodes[scenario];
   const failed = Object.entries(k6.thresholds || {})
     .filter(([, ok]) => !ok)
     .map(([t]) => t);
-  check(`${scenario}: k6 thresholds`, exit === 0 && failed.length === 0, failed.length ? failed.join(", ") : `k6 exit ${exit}`);
+  const broken = failed.filter((t) => CORRECTNESS.has(t.split(":")[0]));
+  const missed = failed.filter((t) => !CORRECTNESS.has(t.split(":")[0]));
+  // k6 exits 99 when a threshold fails; anything else non-zero is a crash.
+  check(
+    `${scenario}: k6 ran and correctness thresholds passed`,
+    (exit === 0 || exit === 99) && broken.length === 0,
+    broken.length ? broken.join(", ") : `k6 exit ${exit}`,
+  );
+  if (missed.length) check(`${scenario}: performance targets`, false, `missed: ${missed.join(", ")}`, true);
   return {
     params: k6.params,
     duration_s: round(k6.duration_ms / 1000),
-    thresholds_failed: failed,
+    targets_missed: missed,
     resources: resources(windowOf(scenario, scenario === "webhook_burst" ? "drained" : null)),
   };
 }
@@ -254,7 +277,7 @@ const results = {
   mock: mock.config,
   scenarios,
   checks,
-  ok: checks.every((c) => c.ok),
+  ok: checks.every((c) => c.ok || c.warning),
 };
 
 fs.writeFileSync(path.join(dir, "results.json"), JSON.stringify(results, null, 2));

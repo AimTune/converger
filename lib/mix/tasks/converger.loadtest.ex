@@ -75,7 +75,9 @@ defmodule Mix.Tasks.Converger.Loadtest do
         )
         |> Enum.flat_map(fn {:ok, latencies} -> latencies end)
 
-      elapsed_ms = System.convert_time_unit(System.monotonic_time() - started, :native, :millisecond)
+      elapsed_ms =
+        System.convert_time_unit(System.monotonic_time() - started, :native, :millisecond)
+
       report(latencies, elapsed_ms)
     after
       unless opts[:keep], do: Tenants.delete_tenant(tenant)

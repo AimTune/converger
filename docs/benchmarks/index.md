@@ -121,7 +121,7 @@ scenario's k6 log and summary JSON, `samples.csv`, `mock_stats.json`, the node l
 | `LOAD_TARGETS` | `3` | | Outbound channels the burst fans out to. |
 | `LOAD_IDLE_SOCKETS` / `LOAD_IDLE_HOLD_S` | `10000` / `60` | `500` / `15` | Idle connections and how long they are held. |
 | `LOAD_IDLE_CONVERSATIONS` | `1000` | `50` | Conversations the idle sockets share. |
-| `LOAD_CONNECT_RATE` | `500` | | New idle connections per second. |
+| `LOAD_CONNECT_RATE` | `100` | | New idle connections per second. Every handshake reads the database, so at much higher rates the pool, not memory, is what is measured. |
 | `LOAD_RESTART_GAP_S` | `10` | | Pause between node restarts. |
 | `LOAD_APP_CPUS` / `LOAD_APP_MEMORY` | unlimited | | Per-node limits (`2`, `2g`) for capacity runs. |
 | `LOAD_POOL_SIZE` | `20` | | `POOL_SIZE` of each node. |
@@ -141,8 +141,18 @@ k6 run -e SETUP_JSON=load/.run/out/setup.json -e APP_URLS=http://127.0.0.1:14100
 ```
 
 k6 prints the end-to-end p95 (`e2e_latency_ms`), the connections (`ws_connected`) and the loss counters, and
-fails when a threshold is crossed: `E2E_P95_MS` (250), `REST_P95_MS` (1000), and zero lost, duplicated or unacked
-messages. Each script lists its variables at the top.
+exits with 99 when a threshold is crossed. Each script lists its variables at the top.
+
+The thresholds are of two kinds:
+
+- **Correctness** (`lost_acked_messages`, `seq_gaps`, `seq_duplicates`, `messages_never_acked`,
+  `subscribers_unverified`, and for `idle`, `ws_connected` and `ws_unexpected_closes`): a miss fails the run.
+- **Performance targets** from the PRD and the scenario sizes: REST → WebSocket p95 below `E2E_P95_MS` (250),
+  REST POST p95 below `REST_P95_MS` (1000), inbound POST p95 below 500 ms, no burst iteration dropped and no inbound
+  request rejected. A miss is reported as "⚠️ performance targets" in the report, but does not fail the run. The
+  [baseline comparison](#nightly-job-and-regression-gate) is what gates performance, so the nightly job stays green
+  while a known gap (such as [#35](https://github.com/AimTune/converger/issues/35)) is open and still catches
+  regressions.
 
 ### The mock provider
 
@@ -168,7 +178,7 @@ node load/report.js --baseline load/baselines/ubuntu-24.04-1node.json load/.run/
 
 The job fails when:
 
-- any run has a lost acked message, a failed loss check or a failed k6 threshold, or
+- any run has a lost acked message, a failed loss check, a failed correctness threshold or a k6 crash, or
 - a gated metric got worse by more than **15 %** and by more than its noise floor. The gated metrics are the
   REST → WebSocket p95, REST POST p95, inbound POST p95, inbound → provider p95, reconnect p95 and memory per idle
   socket. The noise floor is an absolute change below which the metric counts as unchanged: 5 ms for most

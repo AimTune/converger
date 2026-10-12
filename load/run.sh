@@ -84,7 +84,7 @@ TARGETS="${LOAD_TARGETS:-3}"
 IDLE_SOCKETS="${LOAD_IDLE_SOCKETS:-$d_idle_sockets}"
 IDLE_HOLD_S="${LOAD_IDLE_HOLD_S:-$d_idle_hold}"
 IDLE_CONVERSATIONS="${LOAD_IDLE_CONVERSATIONS:-$d_idle_conversations}"
-CONNECT_RATE="${LOAD_CONNECT_RATE:-500}"
+CONNECT_RATE="${LOAD_CONNECT_RATE:-100}"
 RESTART_GAP_S="${LOAD_RESTART_GAP_S:-10}"
 DELIVERY_TIMEOUT_S="${LOAD_DELIVERY_TIMEOUT_S:-300}"
 
@@ -365,7 +365,7 @@ EOF
 dc run --rm -T --no-deps node node /load/results.js /out
 cat "$OUT/report.md"
 
-if grep -q '"ok": false' "$OUT/results.json"; then
+if grep -q '^  "ok": false' "$OUT/results.json"; then
   log "FAILED: see $OUT/report.md"
   exit 1
 fi

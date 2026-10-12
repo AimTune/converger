@@ -144,7 +144,7 @@ function render(runs, { baseline = [], threshold = 0.15, title } = {}) {
 
   out.push("### Checks", "");
   for (const r of runs) {
-    for (const c of r.checks) out.push(`- ${c.ok ? "✅" : "❌"} ${topology(r)}: ${c.name} (${c.detail})`);
+    for (const c of r.checks) out.push(`- ${c.ok ? "✅" : c.warning ? "⚠️" : "❌"} ${topology(r)}: ${c.name} (${c.detail})`);
   }
   if (baseline.length) {
     out.push(
