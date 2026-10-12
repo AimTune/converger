@@ -51,6 +51,18 @@ jobs:
         # --force so cached _build artifacts cannot hide warnings.
         run: mix compile --warnings-as-errors --force
 
+      # priv/static/openapi.json is generated from the controllers
+      # (ConvergerWeb.ApiSpec, ADR-0050) and committed; SDKs build from it.
+      - name: OpenAPI spec is up to date
+        run: mix openapi.spec.json --check
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
+      - name: OpenAPI spec is valid (OpenAPI 3.1)
+        run: npx --yes @redocly/cli@2.56.1 lint --skip-rule info-license priv/static/openapi.json
+
       - name: Credo
         run: mix credo --strict
 
