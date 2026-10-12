@@ -31,6 +31,8 @@ erDiagram
     channels ||--o{ conversation_channels : "part of"
     activities ||--o{ deliveries : "delivered as"
     activities |o--o{ attachments : references
+    tenants ||--o{ webhook_subscriptions : "subscribes"
+    webhook_subscriptions ||--o{ webhook_events : "logs"
 
     tenants {
         uuid id PK
@@ -163,6 +165,26 @@ erDiagram
         float failure_rate
         utc_datetime_usec checked_at
     }
+    webhook_subscriptions {
+        uuid id PK
+        uuid tenant_id FK
+        text url
+        binary secret
+        text_array events
+        boolean enabled
+        binary headers
+        text managed_by
+    }
+    webhook_events {
+        uuid id PK
+        uuid tenant_id FK
+        uuid subscription_id FK
+        uuid event_id
+        text type
+        jsonb payload
+        text status
+        integer attempts
+    }
     tenant_users {
         uuid id PK
         uuid tenant_id FK
@@ -193,7 +215,7 @@ The top-level isolation unit. Every domain row carries a `tenant_id` and every A
 | `api_key_hash` | binary, not null, **unique** | SHA-256 of the tenant API key. The plaintext key is never stored. |
 | `api_key_prefix` | text | First 4 characters, to recognize a key in the UI. |
 | `previous_api_key_hash`, `previous_api_key_expires_at` | binary, timestamp | Grace period for the previous key after a rotation (indexed). |
-| `alert_webhook_url` | string | Receives `channel_health_changed` alerts. |
+| `alert_webhook_url` | string | Receives `channel_health_changed` alerts through a managed `webhook_subscriptions` row (`managed_by = 'alert_webhook_url'`). |
 | `limits` | jsonb, not null, default `{}` | Per-tenant rate-limit overrides, e.g. `{"activity_create": {"limit": 200, "scale_ms": 1000}}`. |
 | `tier` | text, not null, default `"default"` | Delivery queue tier (`high`, `default`, `bulk`), see [tenant tiers](../delivery.md#tenant-tiers-fair-queueing). |
 | `allowed_upload_types` | text[] | Per-tenant MIME allowlist; `NULL` uses the global default. |
@@ -310,7 +332,15 @@ Uploaded files ([storage](../storage.md)). Columns: `tenant_id` (not null), `con
 
 ### audit_logs
 
-Append-only (`updated_at` disabled) trail of administrative changes. Columns: `tenant_id` (nullable, `ON DELETE SET NULL` so the trail outlives the tenant), `actor_type`, `actor_id`, `action`, `resource_type`, `resource_id`, `changes` (jsonb, with secrets redacted, [ADR-0012](../adr/0012-secrets-at-rest-and-audit-redaction.md)). Actions: `create`, `update`, `delete`, `toggle_status`, `toggle_enabled`, `rotate_api_key`, `retry` (dead-letter replay), `pause_deliveries`, `resume_deliveries`, `register_webhook` (provider webhook registration, for example Telegram `setWebhook`). Resource types: `tenant`, `channel`, `routing_rule`, `admin_user`, `tenant_user`, `delivery`. Indexes: `(tenant_id)`, `(resource_type, resource_id)`, `(actor_type, actor_id)`, `(action)`, `(inserted_at)`, `(inserted_at, id)`. Rows older than 365 days (`AUDIT_LOG_RETENTION_DAYS`, `0` keeps them forever) are pruned daily by `PruneWorker`.
+Append-only (`updated_at` disabled) trail of administrative changes. Columns: `tenant_id` (nullable, `ON DELETE SET NULL` so the trail outlives the tenant), `actor_type`, `actor_id`, `action`, `resource_type`, `resource_id`, `changes` (jsonb, with secrets redacted, [ADR-0012](../adr/0012-secrets-at-rest-and-audit-redaction.md)). Actions: `create`, `update`, `delete`, `toggle_status`, `toggle_enabled`, `rotate_api_key`, `retry` (dead-letter replay), `pause_deliveries`, `resume_deliveries`, `register_webhook` (provider webhook registration, for example Telegram `setWebhook`), `redeliver` (platform webhook event). Resource types: `tenant`, `channel`, `routing_rule`, `admin_user`, `tenant_user`, `delivery`, `webhook_subscription`, `webhook_event`. Indexes: `(tenant_id)`, `(resource_type, resource_id)`, `(actor_type, actor_id)`, `(action)`, `(inserted_at)`, `(inserted_at, id)`. Rows older than 365 days (`AUDIT_LOG_RETENTION_DAYS`, `0` keeps them forever) are pruned daily by `PruneWorker`.
+
+### webhook_subscriptions
+
+Tenant-level [platform event webhook](../platform-webhooks.md) subscriptions ([ADR-0053](../adr/0053-platform-event-webhooks.md)). Columns: `tenant_id` (FK, cascade), `url` (text), `description`, `secret` (binary, not null, encrypted), `events` (text[], not null, catalog types or `*`), `enabled` (default `true`), `headers` (binary, encrypted JSON map, nullable), `managed_by` (text, nullable; `alert_webhook_url` for the subscription mirroring `tenants.alert_webhook_url`). Timestamps `utc_datetime_usec`. Indexes: `(tenant_id)`, unique partial `(tenant_id, managed_by) WHERE managed_by IS NOT NULL`.
+
+### webhook_events
+
+The event log: one row per event per subscription. Columns: `tenant_id` (FK, cascade), `subscription_id` (FK, cascade), `event_id` (uuid of the occurrence, shared by every subscription that receives it), `type`, `payload` (jsonb, the event `data`), `status` (`pending`, `delivered`, `failed`), `attempts`, `last_error`, `response_status`, `delivered_at`, `redelivered_at`, timestamps. Rows older than 7 days (`WEBHOOK_EVENT_RETENTION_DAYS`) are pruned daily by `PruneWorker`. Indexes: `(subscription_id, inserted_at)`, `(tenant_id, inserted_at)`, `(inserted_at)`.
 
 ### channel_health_checks
 
@@ -335,6 +365,7 @@ Oban's own table, created by `Oban.Migration.up(version: 12)` and upgraded to sc
 | `channels.secret` | encrypted | Cloak, `Converger.Vault`, AES-256-GCM with a 12-byte IV, key from `CLOAK_KEY` |
 | `channels.config` | encrypted | same, JSON-encoded map |
 | `channels.secret_hash` | SHA-256 digest | lookup by presented secret |
+| `webhook_subscriptions.secret`, `webhook_subscriptions.headers` | encrypted | same (`Converger.Encrypted.Binary`, `Converger.Encrypted.Map`); re-encrypted by `reencrypt_secrets/0` too |
 | `tenants.api_key_hash`, `tenants.previous_api_key_hash` | SHA-256 digest | authentication hashes the presented `x-api-key` |
 | `admin_users.password_hash`, `tenant_users.password_hash` | bcrypt | `bcrypt_elixir` |
 

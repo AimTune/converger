@@ -283,7 +283,7 @@ Queues: `deliveries_high` (10 per node), `deliveries` (20) and `deliveries_bulk`
 | `degraded` | 10% up to (not including) 50% |
 | `unhealthy` | 50% or more |
 
-Each run inserts a row into `channel_health_checks`. When a channel's status differs from its previous check, the worker broadcasts `health_changed` on the `channel_health` PubSub topic (shown live in the admin dashboard and channel list) and, if the tenant has an `alert_webhook_url`, POSTs a `channel_health_changed` event to it (fire-and-forget, 10 s timeout):
+Each run inserts a row into `channel_health_checks`. When a channel's status differs from its previous check, the worker broadcasts `health_changed` on the `channel_health` PubSub topic (shown live in the admin dashboard and channel list) and emits the `channel.health_changed` [platform event](platform-webhooks.md). The tenant's legacy `alert_webhook_url` is a managed subscription that still receives this `channel_health_changed` body (now signed, retried and logged):
 
 ```json
 {
@@ -351,7 +351,7 @@ config :converger, :circuit_breaker,
 
 **Replaying dead letters on close (opt-in).** With `replay_dead_letters_on_close: true`, a probe that closes the breaker also enqueues `Converger.Workers.ChannelDeadLetterReplayWorker` (queue `default`). It replays the channel's dead letters that failed within the last `replay_window_ms`, using the [bulk replay](#replaying-dead-letters) rules, as the `system` actor `circuit_breaker`: every replay is audited and has `retried_by: "system:circuit_breaker"`. These are typically deliveries that used up their retries just before the breaker opened. Dead letters from permanent errors in the window are replayed too and fail again after one attempt. A manual resume never replays; use the Deliveries page or the API for that.
 
-When the breaker opens or closes, the tenant's `alert_webhook_url` (if set) receives a POST. The request is fire-and-forget with a 10 s timeout, and a failed probe re-opening the breaker sends nothing:
+When the breaker opens or closes, the `channel.circuit_opened` or `channel.circuit_closed` [platform event](platform-webhooks.md) is emitted. The tenant's legacy `alert_webhook_url` subscription receives this body (signed and retried), except when a failed probe re-opens the breaker:
 
 ```json
 {

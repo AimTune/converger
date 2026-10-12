@@ -20,7 +20,8 @@ the inbound webhooks (`/api/v1/channels/{channel_id}/inbound|status`), with a st
 `listConversations`, `postActivity`), request bodies, parameters and every response, error responses included.
 
 - **Named schemas.** Every resource is a component schema (`Conversation`, `Activity`, `ClientActivity`,
-  `Delivery`, `RoutingRule`, `ActivitySet`, ...), so generated SDKs get one named type per resource.
+  `Delivery`, `RoutingRule`, `WebhookSubscription`, `WebhookEvent`, `ActivitySet`, ...), so generated SDKs get one
+  named type per resource.
 - **One error schema.** All error responses reference `ErrorResponse`, the [error envelope](errors.md); its `code`
   is the `ErrorCode` enumeration.
 - **Security schemes.** `apiKey` (`x-api-key`), `channelToken` (`x-channel-token`, deprecated),

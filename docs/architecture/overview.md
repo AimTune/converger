@@ -174,7 +174,7 @@ config :converger, Oban,
        {"*/5 * * * *", Converger.Workers.ChannelHealthWorker}
      ]}
   ],
-  queues: [default: 10, deliveries_high: 10, deliveries: 20, deliveries_bulk: 5]
+  queues: [default: 10, deliveries_high: 10, deliveries: 20, deliveries_bulk: 5, maintenance: 1, webhooks: 10]
 ```
 
 | Worker | Queue | Schedule | Purpose |

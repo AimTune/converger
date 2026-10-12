@@ -7,6 +7,10 @@ description: The webhook channel adapter - outbound JSON delivery, request signi
 
 A `webhook` channel delivers every activity to the configured URL as JSON.
 
+To receive tenant-wide events (every activity, delivery status changes, conversation lifecycle, channel health)
+without a channel per conversation, use [platform event webhooks](platform-webhooks.md) instead. They share this
+page's signature scheme and SSRF guard.
+
 ## Channel config
 
 | Key | Default | Notes |

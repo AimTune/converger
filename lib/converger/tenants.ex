@@ -97,6 +97,10 @@ defmodule Converger.Tenants do
   end
 
   def create_tenant(attrs \\ %{}, actor \\ nil) do
+    attrs |> do_create_tenant(actor) |> sync_alert_subscription()
+  end
+
+  defp do_create_tenant(attrs, actor) do
     changeset = Tenant.changeset(%Tenant{}, attrs)
 
     if actor do
@@ -122,7 +126,23 @@ defmodule Converger.Tenants do
     end
   end
 
+  @doc """
+  Updates a tenant. Setting, changing or clearing `alert_webhook_url` keeps
+  its managed platform webhook subscription in sync
+  (`Converger.Webhooks.sync_alert_subscription/1`).
+  """
   def update_tenant(%Tenant{} = tenant, attrs, actor \\ nil) do
+    tenant |> do_update_tenant(attrs, actor) |> sync_alert_subscription()
+  end
+
+  defp sync_alert_subscription({:ok, tenant} = result) do
+    Converger.Webhooks.sync_alert_subscription(tenant)
+    result
+  end
+
+  defp sync_alert_subscription(error), do: error
+
+  defp do_update_tenant(tenant, attrs, actor) do
     changeset = Tenant.changeset(tenant, attrs)
 
     if actor do

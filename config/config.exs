@@ -218,7 +218,15 @@ config :converger, Oban,
   ],
   # Delivery queues per tenant tier (tenants.tier), see Converger.Pipeline.Oban.
   # `maintenance`: partitions, retention, pruning and purge jobs (issue #30).
-  queues: [default: 10, deliveries_high: 10, deliveries: 20, deliveries_bulk: 5, maintenance: 1]
+  # `webhooks`: platform event webhooks (issue #49, Converger.Webhooks).
+  queues: [
+    default: 10,
+    deliveries_high: 10,
+    deliveries: 20,
+    deliveries_bulk: 5,
+    maintenance: 1,
+    webhooks: 10
+  ]
 
 # Monthly partitions of activities and deliveries (Converger.Partitions).
 config :converger, Converger.Partitions,
@@ -232,6 +240,7 @@ config :converger, Converger.Retention,
   min_retention_days: 30,
   health_check_days: 7,
   audit_log_days: 365,
+  webhook_event_days: 7,
   prune_batch_size: 10_000
 
 # Archive of expired rows (Converger.Archive). storage: nil uses the
@@ -241,6 +250,15 @@ config :converger, Converger.Archive,
   storage_opts: [],
   prefix: "archive",
   part_rows: 50_000
+
+# Platform event webhooks (issue #49, Converger.Webhooks, ADR-0053). Retries
+# use the shared :retry_policy; event rows are pruned after
+# Converger.Retention :webhook_event_days. `enabled: false` stops emitting.
+config :converger, :platform_webhooks,
+  enabled: true,
+  connect_timeout: 5_000,
+  receive_timeout: 10_000,
+  max_response_bytes: 65_536
 
 # Rate limiting (Hammer 7, see Converger.RateLimit).
 #   backend: :local   - per-node ETS counters (single node)

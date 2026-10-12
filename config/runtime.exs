@@ -484,7 +484,8 @@ end
 retention_env = [
   min_retention_days: "RETENTION_MIN_DAYS",
   health_check_days: "HEALTH_CHECK_RETENTION_DAYS",
-  audit_log_days: "AUDIT_LOG_RETENTION_DAYS"
+  audit_log_days: "AUDIT_LOG_RETENTION_DAYS",
+  webhook_event_days: "WEBHOOK_EVENT_RETENTION_DAYS"
 ]
 
 retention_overrides =

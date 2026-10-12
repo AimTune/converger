@@ -21,7 +21,7 @@ Table `tenants`:
 | `previous_api_key_hash` | binary | Digest of the key replaced by the last rotation. |
 | `previous_api_key_expires_at` | utc_datetime_usec | Until when the previous key is still accepted. |
 | `status` | text | Defaults to `"active"`. Only active tenants authenticate. The admin panel toggles between `active` and `inactive`. |
-| `alert_webhook_url` | string | Optional `http`/`https` URL for channel health alerts. |
+| `alert_webhook_url` | string | Optional `http`/`https` URL for channel health alerts, kept as a managed [platform event webhook](../platform-webhooks.md) subscription. |
 | `limits` | map, default `{}` | Per-tenant rate-limit overrides (see below). |
 | `tier` | text, default `"default"` | Delivery queue tier: `high`, `default` or `bulk` (see [tenant tiers](../delivery.md#tenant-tiers-fair-queueing)). Set by an admin on the Tenants page. |
 | `allowed_upload_types` | text array | Optional MIME allowlist for uploads. `NULL` or empty means the global default ([storage](../storage.md)). |
@@ -118,7 +118,7 @@ When `alert_webhook_url` is set, the channel health worker (`Converger.Workers.C
 
 The same URL also receives `channel.circuit_opened` and `channel.circuit_closed` events when a channel's delivery circuit breaker changes state (see [Delivery: circuit breaker](../delivery.md#circuit-breaker)).
 
-The request is fire-and-forget (a `Task`, 10 s receive timeout). It is not retried, and only the outcome is logged. Durable, signed platform event webhooks are Planned ([#49](https://github.com/AimTune/converger/issues/49)).
+The URL is kept as a [platform event webhook](../platform-webhooks.md) subscription (`managed_by: "alert_webhook_url"`) on `channel.health_changed`, `channel.circuit_opened` and `channel.circuit_closed`, created, updated and removed with the tenant field ([#49](https://github.com/AimTune/converger/issues/49)). It keeps the JSON above, but requests are now signed (`x-converger-signature`), retried under the shared retry policy and visible in the event log; see [the legacy alert_webhook_url](../platform-webhooks.md#the-legacy-alert_webhook_url). New integrations should create their own subscriptions instead.
 
 ## Data retention
 

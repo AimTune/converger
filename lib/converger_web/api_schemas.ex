@@ -15,6 +15,7 @@ defmodule ConvergerWeb.ApiSchemas do
 
   alias Converger.Activities.Activity
   alias Converger.Deliveries.Delivery
+  alias Converger.Webhooks.{Catalog, Event}
   alias OpenApiSpex.{Header, MediaType, Reference, Response, Schema}
 
   @uuid %Schema{type: :string, format: :uuid}
@@ -108,7 +109,10 @@ defmodule ConvergerWeb.ApiSchemas do
 
   @doc "The component schemas (`#/components/schemas`)."
   def schemas do
-    Map.merge(common_schemas(), Map.merge(tenant_schemas(), client_schemas()))
+    common_schemas()
+    |> Map.merge(tenant_schemas())
+    |> Map.merge(webhook_schemas())
+    |> Map.merge(client_schemas())
   end
 
   defp nullable(%Schema{} = schema), do: %{schema | nullable: true}
@@ -735,6 +739,177 @@ defmodule ConvergerWeb.ApiSchemas do
       conversation_id: @uuid,
       tenant_id: @uuid,
       inserted_at: nullable(@datetime)
+    }
+  end
+
+  ## Platform event webhooks (ADR-0053)
+
+  defp webhook_schemas do
+    %{
+      "WebhookEventType" => %Schema{
+        title: "WebhookEventType",
+        description: "A platform event type of the catalog.",
+        type: :string,
+        enum: Catalog.types()
+      },
+      "WebhookEventTypeList" =>
+        data("WebhookEventTypeList", "The platform event catalog.", %Schema{
+          type: :array,
+          items: ref("WebhookEventType")
+        }),
+      "WebhookSubscription" =>
+        object(
+          "WebhookSubscription",
+          "A platform event webhook subscription. Header values are never returned, only their names; the signing secret only by create and rotate_secret.",
+          webhook_subscription_properties(),
+          :all
+        ),
+      "WebhookSubscriptionWithSecret" =>
+        object(
+          "WebhookSubscriptionWithSecret",
+          "A subscription with its signing secret: only the create and rotate_secret responses carry it.",
+          Map.put(webhook_subscription_properties(), :secret, %Schema{
+            type: :string,
+            description: "The signing secret (`whsec_...`); store it, it is not returned again"
+          }),
+          :all
+        ),
+      "WebhookSubscriptionResponse" =>
+        data("WebhookSubscriptionResponse", "One subscription.", ref("WebhookSubscription")),
+      "WebhookSubscriptionWithSecretResponse" =>
+        data(
+          "WebhookSubscriptionWithSecretResponse",
+          "One subscription with its signing secret.",
+          ref("WebhookSubscriptionWithSecret")
+        ),
+      "WebhookSubscriptionList" =>
+        data(
+          "WebhookSubscriptionList",
+          "Every platform webhook subscription of the tenant.",
+          %Schema{type: :array, items: ref("WebhookSubscription")}
+        ),
+      "CreateWebhookSubscriptionRequest" =>
+        object(
+          "CreateWebhookSubscriptionRequest",
+          "Create a subscription.",
+          %{
+            webhook_subscription:
+              object(
+                nil,
+                "The subscription",
+                Map.put(webhook_subscription_input(), :secret, %Schema{
+                  type: :string,
+                  minLength: 16,
+                  maxLength: 255,
+                  description: "Signing secret; generated (`whsec_...`) when omitted"
+                }),
+                [:url, :events]
+              )
+          },
+          [:webhook_subscription]
+        ),
+      "UpdateWebhookSubscriptionRequest" =>
+        object(
+          "UpdateWebhookSubscriptionRequest",
+          "Fields to change. A `secret` is ignored: use rotate_secret.",
+          %{
+            webhook_subscription:
+              object(nil, "Fields to change", webhook_subscription_input(), [])
+          },
+          [:webhook_subscription]
+        ),
+      "WebhookEventStatus" => %Schema{
+        title: "WebhookEventStatus",
+        type: :string,
+        enum: Event.statuses()
+      },
+      "WebhookEvent" =>
+        object(
+          "WebhookEvent",
+          "One event sent (or to be sent) to one subscription.",
+          %{
+            id: @uuid,
+            event_id: %Schema{
+              type: :string,
+              format: :uuid,
+              description: "The event's id, the same for every subscription it went to"
+            },
+            subscription_id: @uuid,
+            type: %Schema{type: :string, description: "The event type (`WebhookEventType`)"},
+            status: ref("WebhookEventStatus"),
+            attempts: %Schema{type: :integer},
+            last_error: nullable(%Schema{type: :string}),
+            response_status: nullable(%Schema{type: :integer}),
+            payload: %Schema{
+              type: :object,
+              additionalProperties: true,
+              description: "The event's `data`"
+            },
+            delivered_at: nullable(@datetime),
+            redelivered_at: nullable(@datetime),
+            inserted_at: @datetime,
+            updated_at: @datetime
+          },
+          :all
+        ),
+      "WebhookEventResponse" => data("WebhookEventResponse", "One event.", ref("WebhookEvent")),
+      "WebhookEventList" =>
+        object(
+          "WebhookEventList",
+          "A page of the webhook event log, newest first.",
+          %{
+            data: %Schema{type: :array, items: ref("WebhookEvent")},
+            meta: ref("CursorPageMeta")
+          },
+          [:data, :meta]
+        )
+    }
+  end
+
+  defp webhook_subscription_properties do
+    %{
+      id: @uuid,
+      tenant_id: @uuid,
+      url: %Schema{type: :string},
+      description: nullable(%Schema{type: :string}),
+      events: webhook_events_schema(),
+      enabled: %Schema{type: :boolean},
+      header_names: %Schema{
+        type: :array,
+        items: %Schema{type: :string},
+        description: "Names of the extra request headers; their values are never returned"
+      },
+      managed_by:
+        nullable(%Schema{
+          type: :string,
+          description:
+            "Set when the platform maintains the subscription (`alert_webhook_url`), else `null`"
+        }),
+      inserted_at: @datetime,
+      updated_at: @datetime
+    }
+  end
+
+  defp webhook_subscription_input do
+    %{
+      url: %Schema{type: :string, description: "Public `https` URL"},
+      description: %Schema{type: :string, maxLength: 255},
+      events: webhook_events_schema(),
+      enabled: %Schema{type: :boolean},
+      headers: %Schema{
+        type: :object,
+        additionalProperties: %Schema{type: :string},
+        description: "Extra request headers (encrypted at rest, never returned)"
+      }
+    }
+  end
+
+  defp webhook_events_schema do
+    %Schema{
+      type: :array,
+      items: %Schema{type: :string},
+      maxItems: 50,
+      description: "Event types (`WebhookEventType`), or `[\"*\"]` for every type"
     }
   end
 

@@ -300,8 +300,8 @@ defmodule Converger.Channels.Circuit do
     if event == :circuit_closed, do: maybe_replay_dead_letters(channel, now)
     broadcast(channel, to, event, reason, now)
 
-    # Automatic transitions are worth an alert; a human pause/resume is not.
-    if event in [:circuit_opened, :circuit_closed] and reason != :probe_failed,
+    # Automatic transitions are platform events; a human pause/resume is not.
+    if event in [:circuit_opened, :circuit_closed],
       do: send_alert(channel, event, reason, now)
 
     :ok
@@ -431,33 +431,24 @@ defmodule Converger.Channels.Circuit do
     })
   end
 
+  # Platform event webhooks (ADR-0053): automatic breaker transitions are
+  # `channel.circuit_opened` / `channel.circuit_closed` events; a human
+  # pause/resume is not. The subscription managed by the legacy
+  # `tenants.alert_webhook_url` skips a breaker re-opened by a failed probe.
   defp send_alert(channel, event, reason, at) do
-    with %{alert_webhook_url: url} when is_binary(url) and url != "" <-
-           Repo.get(Converger.Tenants.Tenant, channel.tenant_id) do
-      payload = %{
-        event: "channel.#{event}",
-        channel_id: channel.id,
-        channel_name: channel.name,
-        tenant_id: channel.tenant_id,
-        reason: to_string(reason),
-        changed_at: DateTime.to_iso8601(at)
-      }
-
-      Task.start(fn ->
-        case Converger.HTTP.post(url, json: payload, receive_timeout: 10_000) do
-          {:ok, %{status: status}} when status in 200..299 ->
-            :ok
-
-          other ->
-            Logger.warning(
-              "Circuit alert webhook failed for channel #{channel.id}: #{inspect(other)}"
-            )
-        end
-      end)
-    end
-
-    :ok
+    Converger.Webhooks.emit(channel.tenant_id, "channel.#{event}", %{
+      channel_id: channel.id,
+      channel_name: channel.name,
+      channel_type: channel.type,
+      tenant_id: channel.tenant_id,
+      circuit_state: if(event == :circuit_opened, do: "open", else: "closed"),
+      reason: reason_string(reason),
+      changed_at: at
+    })
   end
+
+  defp reason_string(reason) when is_atom(reason) or is_binary(reason), do: to_string(reason)
+  defp reason_string(reason), do: inspect(reason)
 
   defp now, do: DateTime.utc_now()
 end

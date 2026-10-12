@@ -102,6 +102,18 @@ defmodule ConvergerWeb.Router do
     post "/deliveries/:id/retry", DeliveryController, :retry
     post "/channels/:channel_id/deliveries/retry", DeliveryController, :bulk_retry
 
+    # Platform event webhooks (ADR-0053): subscriptions, event log, redelivery
+    get "/webhook_event_types", WebhookSubscriptionController, :event_types
+
+    resources "/webhook_subscriptions", WebhookSubscriptionController,
+      only: [:index, :show, :create, :update, :delete] do
+      post "/rotate_secret", WebhookSubscriptionController, :rotate_secret
+    end
+
+    resources "/webhook_events", WebhookEventController, only: [:index, :show] do
+      post "/redeliver", WebhookEventController, :redeliver
+    end
+
     # Inbound webhook endpoints for external channel integrations
     get "/channels/:channel_id/inbound", InboundController, :verify
     post "/channels/:channel_id/inbound", InboundController, :create
@@ -197,6 +209,7 @@ defmodule ConvergerWeb.Router do
       live "/routing_rules", RoutingRuleLive
       live "/routing_rules/dry_run", RoutingRuleDryRunLive
       live "/deliveries", DeliveryLive
+      live "/webhooks", WebhookLive
       live "/audit_logs", AuditLogLive
       live "/users", AdminUserLive
       live "/tenant_users", TenantUserLive
@@ -244,6 +257,7 @@ defmodule ConvergerWeb.Router do
       live "/conversations/:id", ConversationLive, :show
       live "/deliveries", DeliveryLive
       live "/routing_rules", RoutingRuleLive
+      live "/webhooks", WebhookLive
       live "/users", UserLive
     end
   end

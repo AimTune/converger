@@ -105,9 +105,23 @@ All prod only. Boolean values accept `true`, `1`, `yes`, `on` (case-insensitive)
 | `WEBHOOK_ALLOWED_TARGETS` | empty (dev: `localhost,127.0.0.0/8,::1` from `dev.exs`) | all | Comma-separated host names (`*.svc.local` matches subdomains) or IP/CIDR ranges that webhooks may target although they are private. Replaces the dev default when set. |
 | `WEBHOOK_ALLOW_PRIVATE_TARGETS` | unset | all | Exactly `true` or `1` disables the SSRF guard entirely. Development only. |
 
-See [Outbound webhooks](../webhooks.md#ssrf-protection). The same guard, and these two variables, apply to the broker
+See [Outbound webhooks](../webhooks.md#ssrf-protection). The same guard, and these two variables, apply to
+[platform event webhook](../platform-webhooks.md) subscriptions and to the broker
 hosts of [broker channels](../channels/brokers.md#security) (`kafka` brokers, the `rabbitmq` URL host): allow a
 private Kafka or RabbitMQ cluster with `WEBHOOK_ALLOWED_TARGETS`.
+
+## Platform event webhooks
+
+```elixir
+config :converger, :platform_webhooks,
+  enabled: true,              # false stops emitting events
+  connect_timeout: 5_000,     # ms
+  receive_timeout: 10_000,    # ms
+  max_response_bytes: 65_536
+```
+
+Retries use the shared `:retry_policy`; the event log is pruned after `WEBHOOK_EVENT_RETENTION_DAYS`. See
+[Platform event webhooks](../platform-webhooks.md#configuration).
 
 ## Broker channels
 
@@ -269,6 +283,7 @@ set); without them the archive uses the attachment storage.
 | `RETENTION_MIN_DAYS` | `30` | no | Platform minimum for `tenants.retention_days`; months that ended less than this many days ago are never archived. |
 | `HEALTH_CHECK_RETENTION_DAYS` | `7` | no | Delete `channel_health_checks` older than this (daily); `0` disables. |
 | `AUDIT_LOG_RETENTION_DAYS` | `365` | no | Delete `audit_logs` older than this (daily); `0` disables. |
+| `WEBHOOK_EVENT_RETENTION_DAYS` | `7` | no | Delete platform webhook `webhook_events` older than this (daily); `0` disables. |
 | `PARTITION_MONTHS_AHEAD` | `3` | no | Monthly partitions of `activities` / `deliveries` kept in place ahead of the current month. |
 | `ARCHIVE_BUCKET` | unset (attachment bucket) | no | S3, MinIO, R2 or GCS bucket for the archive, with the `UPLOAD_STORAGE` credentials. |
 | `ARCHIVE_CONTAINER` | unset (attachment container) | no | Azure container for the archive. |
@@ -332,7 +347,7 @@ config :converger, Oban,
        {"0 2 1 * *", Converger.Workers.RetentionWorker}
      ]}
   ],
-  queues: [default: 10, deliveries_high: 10, deliveries: 20, deliveries_bulk: 5, maintenance: 1]
+  queues: [default: 10, deliveries_high: 10, deliveries: 20, deliveries_bulk: 5, maintenance: 1, webhooks: 10]
 ```
 
 | Setting | Value | Notes |
@@ -340,6 +355,7 @@ config :converger, Oban,
 | Queue `default` | 10 concurrent jobs per node | Conversation expiration (hourly) and channel health checks (every 5 minutes). |
 | Queue `maintenance` | 1 concurrent job per node | Data lifecycle: partitions (daily 00:15 UTC), pruning (daily 01:30 UTC), retention (monthly, 1st at 02:00 UTC) and the `PurgeWorker` jobs enqueued by tenant, channel and conversation deletes. See [Data retention](retention.md). |
 | Queues `deliveries_high`, `deliveries`, `deliveries_bulk` | 10 / 20 / 5 concurrent jobs per node | `Converger.Workers.ActivityDeliveryWorker` (unique per activity and channel), one queue per tenant tier (`tenants.tier`: `high`, `default`, `bulk`); see [flow control](../delivery.md#tenant-tiers-fair-queueing). |
+| Queue `webhooks` | 10 concurrent jobs per node | `Converger.Workers.WebhookEventWorker`: [platform event webhooks](../platform-webhooks.md). |
 | `Pruner` | completed/discarded jobs older than 24 h | Keeps `oban_jobs` small. |
 | `Lifeline` | rescues jobs stuck in `executing` after 30 min | Recovers deliveries from a crashed node. |
 | Test | `testing: :inline` | Jobs run synchronously in tests. |
@@ -404,6 +420,7 @@ config :converger, Converger.Retention,
   min_retention_days: 30,     # RETENTION_MIN_DAYS
   health_check_days: 7,       # HEALTH_CHECK_RETENTION_DAYS, 0 or nil disables
   audit_log_days: 365,        # AUDIT_LOG_RETENTION_DAYS, 0 or nil disables
+  webhook_event_days: 7,      # WEBHOOK_EVENT_RETENTION_DAYS, 0 or nil disables
   prune_batch_size: 10_000
 
 config :converger, Converger.Archive,
@@ -469,9 +486,10 @@ PgBouncer transaction pooling). See [Migrations and maintenance windows](migrati
 | `Converger.Repo.Pools` | `background: false`; dev `[pool_size: 10]`; prod from `BACKGROUND_*` | The background pool (keyword list of repo options) or `false` for one shared pool. See [Database pools and pressure](database.md). |
 | `Converger.Repo.Pressure` | `retry_after_ms: 1000`, `queue_window_ms: 5000`, `degraded_queue_ms: 200` | See `DB_RETRY_AFTER_MS`, `DB_QUEUE_WINDOW_MS`, `READY_DB_QUEUE_MS`. |
 | `:force_ssl` | unset outside prod | Keyword list of `Plug.SSL` options, built from the TLS variables in prod; `false` disables. |
+| `:platform_webhooks` | see above | `enabled`, `connect_timeout`, `receive_timeout`, `max_response_bytes` of [platform event webhooks](../platform-webhooks.md). |
 | `:webhook` | `[]` | `allowed_targets`, `allow_private_targets`, `resolver` (SSRF guard), and installation defaults for `connect_timeout` (5000 ms), `receive_timeout` (10000 ms), `max_response_bytes` (1 MiB). |
 | `:channel_signals_async` | `true`; `false` in test | Forward typing indicators and read receipts to external channels (`Converger.Channels.Signals`) in a task under `Converger.TaskSupervisor`. `false` runs them inline in the WebSocket channel process. |
-| `:webhook_req_options`, `:whatsapp_req_options`, `:slack_req_options`, `:telegram_req_options`, `:email_req_options`, `:sms_req_options`, `:messenger_req_options`, `:instagram_req_options`, `:viber_req_options`, `:discord_req_options`, `:teams_req_options` | `[]` | Extra `Req` options merged into adapter requests (tests use them for `Req.Test` plugs). `:email_req_options` applies to the SNS certificate and subscription requests of `email` channels. |
+| `:webhook_req_options`, `:platform_webhook_req_options`, `:whatsapp_req_options`, `:slack_req_options`, `:telegram_req_options`, `:email_req_options`, `:sms_req_options`, `:messenger_req_options`, `:instagram_req_options`, `:viber_req_options`, `:discord_req_options`, `:teams_req_options` | `[]` | Extra `Req` options merged into adapter (and platform webhook) requests (tests use them for `Req.Test` plugs). `:email_req_options` applies to the SNS certificate and subscription requests of `email` channels. |
 | `:email_swoosh_adapter` | `nil` | A Swoosh adapter module used instead of the provider adapter of every `email` channel. The test config sets `Swoosh.Adapters.Test`. See [Email](../channels/email.md). |
 | `Converger.Channels.Adapters.WhatsappMeta`, `graph_api_version:` | `"v26.0"` | Default Graph API version when the channel config has none. |
 | `Converger.Channels.Adapters.Telegram`, `api_base_url:` | `"https://api.telegram.org"` | Bot API base URL for every `telegram` channel, for a self-hosted Bot API server. Not a channel setting: the URL receives the bot token. |

@@ -142,6 +142,9 @@ defmodule ConvergerWeb.Admin.TenantLive do
               placeholder="https://example.com/alerts (optional)"
               style="padding: 8px; border: 1px solid #ddd; border-radius: 4px; min-width: 300px;"
             />
+            <small style="display: block; color: #888;">
+              Kept as a managed subscription on channel health events, see Webhooks.
+            </small>
           </div>
           <div>
             <label style="display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.85em; color: #555;">Delivery tier</label>

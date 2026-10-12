@@ -873,6 +873,58 @@
         "title": "CreateConversationRequest",
         "type": "object"
       },
+      "CreateWebhookSubscriptionRequest": {
+        "description": "Create a subscription.",
+        "properties": {
+          "webhook_subscription": {
+            "description": "The subscription",
+            "properties": {
+              "description": {
+                "maxLength": 255,
+                "type": "string"
+              },
+              "enabled": {
+                "type": "boolean"
+              },
+              "events": {
+                "description": "Event types (`WebhookEventType`), or `[\"*\"]` for every type",
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 50,
+                "type": "array"
+              },
+              "headers": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "Extra request headers (encrypted at rest, never returned)",
+                "type": "object"
+              },
+              "secret": {
+                "description": "Signing secret; generated (`whsec_...`) when omitted",
+                "maxLength": 255,
+                "minLength": 16,
+                "type": "string"
+              },
+              "url": {
+                "description": "Public `https` URL",
+                "type": "string"
+              }
+            },
+            "required": [
+              "url",
+              "events"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "webhook_subscription"
+        ],
+        "title": "CreateWebhookSubscriptionRequest",
+        "type": "object"
+      },
       "CursorPageMeta": {
         "description": "Keyset pagination: pass `next_cursor` back as `cursor`.",
         "properties": {
@@ -1973,6 +2025,48 @@
         "title": "RoutingRuleResponse",
         "type": "object"
       },
+      "UpdateWebhookSubscriptionRequest": {
+        "description": "Fields to change. A `secret` is ignored: use rotate_secret.",
+        "properties": {
+          "webhook_subscription": {
+            "description": "Fields to change",
+            "properties": {
+              "description": {
+                "maxLength": 255,
+                "type": "string"
+              },
+              "enabled": {
+                "type": "boolean"
+              },
+              "events": {
+                "description": "Event types (`WebhookEventType`), or `[\"*\"]` for every type",
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 50,
+                "type": "array"
+              },
+              "headers": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "Extra request headers (encrypted at rest, never returned)",
+                "type": "object"
+              },
+              "url": {
+                "description": "Public `https` URL",
+                "type": "string"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "webhook_subscription"
+        ],
+        "title": "UpdateWebhookSubscriptionRequest",
+        "type": "object"
+      },
       "UploadRequest": {
         "description": "A file and, optionally, the activity that carries it.",
         "properties": {
@@ -2060,6 +2154,352 @@
           "limit"
         ],
         "title": "WatermarkPageMeta",
+        "type": "object"
+      },
+      "WebhookEvent": {
+        "description": "One event sent (or to be sent) to one subscription.",
+        "properties": {
+          "attempts": {
+            "type": "integer"
+          },
+          "delivered_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "event_id": {
+            "description": "The event's id, the same for every subscription it went to",
+            "format": "uuid",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "inserted_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "last_error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "payload": {
+            "additionalProperties": true,
+            "description": "The event's `data`",
+            "type": "object"
+          },
+          "redelivered_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "response_status": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/WebhookEventStatus"
+          },
+          "subscription_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "type": {
+            "description": "The event type (`WebhookEventType`)",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "attempts",
+          "delivered_at",
+          "event_id",
+          "id",
+          "inserted_at",
+          "last_error",
+          "payload",
+          "redelivered_at",
+          "response_status",
+          "status",
+          "subscription_id",
+          "type",
+          "updated_at"
+        ],
+        "title": "WebhookEvent",
+        "type": "object"
+      },
+      "WebhookEventList": {
+        "description": "A page of the webhook event log, newest first.",
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/WebhookEvent"
+            },
+            "type": "array"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/CursorPageMeta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "WebhookEventList",
+        "type": "object"
+      },
+      "WebhookEventResponse": {
+        "description": "One event.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/WebhookEvent"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "WebhookEventResponse",
+        "type": "object"
+      },
+      "WebhookEventStatus": {
+        "enum": [
+          "pending",
+          "delivered",
+          "failed"
+        ],
+        "title": "WebhookEventStatus",
+        "type": "string"
+      },
+      "WebhookEventType": {
+        "description": "A platform event type of the catalog.",
+        "enum": [
+          "activity.created",
+          "delivery.sent",
+          "delivery.delivered",
+          "delivery.read",
+          "delivery.failed",
+          "conversation.created",
+          "conversation.closed",
+          "conversation.reopened",
+          "channel.health_changed",
+          "channel.circuit_opened",
+          "channel.circuit_closed",
+          "participant.opted_out"
+        ],
+        "title": "WebhookEventType",
+        "type": "string"
+      },
+      "WebhookEventTypeList": {
+        "description": "The platform event catalog.",
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/WebhookEventType"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "WebhookEventTypeList",
+        "type": "object"
+      },
+      "WebhookSubscription": {
+        "description": "A platform event webhook subscription. Header values are never returned, only their names; the signing secret only by create and rotate_secret.",
+        "properties": {
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "events": {
+            "description": "Event types (`WebhookEventType`), or `[\"*\"]` for every type",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 50,
+            "type": "array"
+          },
+          "header_names": {
+            "description": "Names of the extra request headers; their values are never returned",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "inserted_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "managed_by": {
+            "description": "Set when the platform maintains the subscription (`alert_webhook_url`), else `null`",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tenant_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "description",
+          "enabled",
+          "events",
+          "header_names",
+          "id",
+          "inserted_at",
+          "managed_by",
+          "tenant_id",
+          "updated_at",
+          "url"
+        ],
+        "title": "WebhookSubscription",
+        "type": "object"
+      },
+      "WebhookSubscriptionList": {
+        "description": "Every platform webhook subscription of the tenant.",
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/WebhookSubscription"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "WebhookSubscriptionList",
+        "type": "object"
+      },
+      "WebhookSubscriptionResponse": {
+        "description": "One subscription.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/WebhookSubscription"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "WebhookSubscriptionResponse",
+        "type": "object"
+      },
+      "WebhookSubscriptionWithSecret": {
+        "description": "A subscription with its signing secret: only the create and rotate_secret responses carry it.",
+        "properties": {
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "events": {
+            "description": "Event types (`WebhookEventType`), or `[\"*\"]` for every type",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 50,
+            "type": "array"
+          },
+          "header_names": {
+            "description": "Names of the extra request headers; their values are never returned",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "inserted_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "managed_by": {
+            "description": "Set when the platform maintains the subscription (`alert_webhook_url`), else `null`",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "secret": {
+            "description": "The signing secret (`whsec_...`); store it, it is not returned again",
+            "type": "string"
+          },
+          "tenant_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "description",
+          "enabled",
+          "events",
+          "header_names",
+          "id",
+          "inserted_at",
+          "managed_by",
+          "secret",
+          "tenant_id",
+          "updated_at",
+          "url"
+        ],
+        "title": "WebhookSubscriptionWithSecret",
+        "type": "object"
+      },
+      "WebhookSubscriptionWithSecretResponse": {
+        "description": "One subscription with its signing secret.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/WebhookSubscriptionWithSecret"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "WebhookSubscriptionWithSecretResponse",
         "type": "object"
       }
     },
@@ -4572,6 +5012,613 @@
           "Tokens (legacy)"
         ]
       }
+    },
+    "/api/v1/webhook_event_types": {
+      "get": {
+        "callbacks": {},
+        "description": "The platform event catalog: every type a subscription can name.",
+        "operationId": "listWebhookEventTypes",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookEventTypeList"
+                }
+              }
+            },
+            "description": "Event types"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "List webhook event types",
+        "tags": [
+          "Webhooks"
+        ]
+      }
+    },
+    "/api/v1/webhook_events": {
+      "get": {
+        "callbacks": {},
+        "description": "The platform webhook event log, newest first, keyset-paginated. Events are kept for `WEBHOOK_EVENT_RETENTION_DAYS` (default 7).",
+        "operationId": "listWebhookEvents",
+        "parameters": [
+          {
+            "description": "Filter by subscription",
+            "in": "query",
+            "name": "subscription_id",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by status",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/WebhookEventStatus"
+            }
+          },
+          {
+            "description": "Filter by event type",
+            "in": "query",
+            "name": "type",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size (clamped to the max)",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "`meta.next_cursor` of the previous page",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookEventList"
+                }
+              }
+            },
+            "description": "A page"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "List webhook events",
+        "tags": [
+          "Webhooks"
+        ]
+      }
+    },
+    "/api/v1/webhook_events/{id}": {
+      "get": {
+        "callbacks": {},
+        "operationId": "getWebhookEvent",
+        "parameters": [
+          {
+            "description": "Webhook event id",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookEventResponse"
+                }
+              }
+            },
+            "description": "The event"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Get a webhook event",
+        "tags": [
+          "Webhooks"
+        ]
+      }
+    },
+    "/api/v1/webhook_events/{webhook_event_id}/redeliver": {
+      "post": {
+        "callbacks": {},
+        "description": "Sends a dead-lettered (`failed`) event again, with the same `event_id`. `409 not_failed` for any other status.",
+        "operationId": "redeliverWebhookEvent",
+        "parameters": [
+          {
+            "description": "Webhook event id",
+            "in": "path",
+            "name": "webhook_event_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookEventResponse"
+                }
+              }
+            },
+            "description": "Sent again"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Redeliver a webhook event",
+        "tags": [
+          "Webhooks"
+        ]
+      }
+    },
+    "/api/v1/webhook_subscriptions": {
+      "get": {
+        "callbacks": {},
+        "description": "Every platform event webhook subscription of the tenant. Not paginated.",
+        "operationId": "listWebhookSubscriptions",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookSubscriptionList"
+                }
+              }
+            },
+            "description": "Subscriptions"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "List webhook subscriptions",
+        "tags": [
+          "Webhooks"
+        ]
+      },
+      "post": {
+        "callbacks": {},
+        "description": "The response is the only one, besides rotate_secret, that carries the signing `secret`.",
+        "operationId": "createWebhookSubscription",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateWebhookSubscriptionRequest"
+              }
+            }
+          },
+          "description": "The subscription",
+          "required": false
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookSubscriptionWithSecretResponse"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Create a webhook subscription",
+        "tags": [
+          "Webhooks"
+        ]
+      }
+    },
+    "/api/v1/webhook_subscriptions/{id}": {
+      "delete": {
+        "callbacks": {},
+        "description": "Its event log is deleted with it.",
+        "operationId": "deleteWebhookSubscription",
+        "parameters": [
+          {
+            "description": "Subscription id",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Delete a webhook subscription",
+        "tags": [
+          "Webhooks"
+        ]
+      },
+      "get": {
+        "callbacks": {},
+        "operationId": "getWebhookSubscription",
+        "parameters": [
+          {
+            "description": "Subscription id",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookSubscriptionResponse"
+                }
+              }
+            },
+            "description": "The subscription"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Get a webhook subscription",
+        "tags": [
+          "Webhooks"
+        ]
+      },
+      "patch": {
+        "callbacks": {},
+        "description": "A `secret` in the body is ignored; use rotate_secret.",
+        "operationId": "updateWebhookSubscription",
+        "parameters": [
+          {
+            "description": "Subscription id",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateWebhookSubscriptionRequest"
+              }
+            }
+          },
+          "description": "Fields to change",
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookSubscriptionResponse"
+                }
+              }
+            },
+            "description": "Updated"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Update a webhook subscription",
+        "tags": [
+          "Webhooks"
+        ]
+      },
+      "put": {
+        "callbacks": {},
+        "description": "A `secret` in the body is ignored; use rotate_secret.",
+        "operationId": "updateWebhookSubscriptionPut",
+        "parameters": [
+          {
+            "description": "Subscription id",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateWebhookSubscriptionRequest"
+              }
+            }
+          },
+          "description": "Fields to change",
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookSubscriptionResponse"
+                }
+              }
+            },
+            "description": "Updated"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Update a webhook subscription",
+        "tags": [
+          "Webhooks"
+        ]
+      }
+    },
+    "/api/v1/webhook_subscriptions/{webhook_subscription_id}/rotate_secret": {
+      "post": {
+        "callbacks": {},
+        "description": "Generates a new signing secret, returned once; the old one stops working.",
+        "operationId": "rotateWebhookSubscriptionSecret",
+        "parameters": [
+          {
+            "description": "Subscription id",
+            "in": "path",
+            "name": "webhook_subscription_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookSubscriptionWithSecretResponse"
+                }
+              }
+            },
+            "description": "The new secret"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Rotate a webhook subscription's secret",
+        "tags": [
+          "Webhooks"
+        ]
+      }
     }
   },
   "security": [],
@@ -4606,6 +5653,10 @@
     {
       "description": "Tenant API: delivery state, templates, pull outbox",
       "name": "Channels"
+    },
+    {
+      "description": "Tenant API: platform event webhook subscriptions, event log and redelivery",
+      "name": "Webhooks"
     },
     {
       "description": "Provider webhooks",

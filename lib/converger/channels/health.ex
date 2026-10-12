@@ -19,7 +19,6 @@ defmodule Converger.Channels.Health do
   alias Converger.Channels.Adapter
   alias Converger.Channels.Channel
   alias Converger.Channels.HealthCheck
-  alias Converger.Channels.UrlGuard
   alias Converger.Deliveries.Delivery
   alias Converger.Repo
 
@@ -209,68 +208,17 @@ defmodule Converger.Channels.Health do
   end
 
   @doc """
-  Send a webhook alert for a health status change.
-  Fire-and-forget with 10s timeout.
-  """
-  def send_alert_webhook(channel, health_check, previous_status) do
-    tenant = channel.tenant
-
-    if tenant && tenant.alert_webhook_url && tenant.alert_webhook_url != "" do
-      payload = %{
-        event: "channel_health_changed",
-        channel_id: channel.id,
-        channel_name: channel.name,
-        tenant_id: tenant.id,
-        previous_status: previous_status,
-        new_status: health_check.status,
-        failure_rate: health_check.failure_rate,
-        total_deliveries: health_check.total_deliveries,
-        failed_deliveries: health_check.failed_deliveries,
-        checked_at: DateTime.to_iso8601(health_check.checked_at)
-      }
-
-      Task.start(fn -> post_alert(channel, tenant.alert_webhook_url, payload) end)
-    end
-  end
-
-  # Re-check the target at send time (DNS may have changed since the URL was
-  # saved, and URLs saved before the guard existed were never checked), and
-  # never follow redirects to a target that was not checked.
-  defp post_alert(channel, url, payload) do
-    case UrlGuard.resolve(url) do
-      {:ok, _target} ->
-        do_post_alert(channel, url, payload)
-
-      {:error, reason} ->
-        Logger.warning(
-          "Health alert for channel #{channel.id} not sent: target rejected (" <>
-            UrlGuard.format_error(reason) <> ")"
-        )
-    end
-  end
-
-  defp do_post_alert(channel, url, payload) do
-    case Converger.HTTP.post(url, json: payload, receive_timeout: 10_000, redirect: false) do
-      {:ok, %{status: status}} when status in 200..299 ->
-        Logger.info("Health alert sent for channel #{channel.id} to #{url}")
-
-      {:ok, %{status: status}} ->
-        Logger.warning("Health alert webhook returned #{status} for channel #{channel.id}")
-
-      {:error, reason} ->
-        Logger.warning(
-          "Health alert webhook failed for channel #{channel.id}: #{inspect(reason)}"
-        )
-    end
-  end
-
-  @doc """
-  Broadcast a health status change via PubSub.
+  Publish a health status change: broadcast on the `channel_health` PubSub
+  topic and emit the `channel.health_changed` platform event (ADR-0053),
+  which also replaces the legacy `tenants.alert_webhook_url` alert (a
+  subscription managed by that URL, see
+  `Converger.Webhooks.sync_alert_subscription/1`).
   """
   def broadcast_health_change(channel, health_check, previous_status) do
-    ConvergerWeb.Endpoint.broadcast!("channel_health", "health_changed", %{
+    payload = %{
       channel_id: channel.id,
       channel_name: channel.name,
+      channel_type: channel.type,
       tenant_id: channel.tenant_id,
       previous_status: previous_status,
       status: health_check.status,
@@ -278,6 +226,9 @@ defmodule Converger.Channels.Health do
       total_deliveries: health_check.total_deliveries,
       failed_deliveries: health_check.failed_deliveries,
       checked_at: health_check.checked_at
-    })
+    }
+
+    ConvergerWeb.Endpoint.broadcast!("channel_health", "health_changed", payload)
+    Converger.Webhooks.emit(channel.tenant_id, "channel.health_changed", payload)
   end
 end

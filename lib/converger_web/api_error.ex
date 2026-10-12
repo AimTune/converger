@@ -56,7 +56,7 @@ defmodule ConvergerWeb.APIError do
      "The conversation is closed; reopen it before posting activities"},
     {"conflict", 409, "Conflict", "The request conflicts with the current state of the resource"},
     {"not_failed", 409, "Only failed deliveries can be retried",
-     "Replay of a delivery that is not failed"},
+     "Replay of a delivery, or redelivery of a platform webhook event, that is not failed"},
     {"payload_too_large", 413, "Payload too large", "A size limit was exceeded"},
     {"unsupported_media_type", 415, "Unsupported media type",
      "The uploaded file type is not allowed"},
