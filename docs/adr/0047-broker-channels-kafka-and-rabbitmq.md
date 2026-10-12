@@ -9,7 +9,7 @@ description: Kafka and RabbitMQ become channel types; each inbound channel gets 
 | **Status** | Accepted |
 | **Date** | 2026-10-12 |
 | **Issue** | [#42](https://github.com/AimTune/converger/issues/42) |
-| **Pull request** | to be linked |
+| **Pull request** | [#141](https://github.com/AimTune/converger/pull/141) |
 | **Related** | [ADR-0002](0002-broadway-for-throughput-oban-for-retries.md), [ADR-0003](0003-pipeline-is-the-only-delivery-path.md), [ADR-0012](0012-secrets-at-rest-and-audit-redaction.md), [ADR-0014](0014-webhook-ssrf-guard-and-outbound-signing.md), [ADR-0015](0015-per-message-idempotent-inbound-batches.md), [ADR-0037](0037-libcluster-clustering-health-endpoints-and-metrics-on-the-main-port.md), [ADR-0038](0038-adapter-behaviour-v2-and-config-driven-registry.md) |
 
 ## Context and problem statement
