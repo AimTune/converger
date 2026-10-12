@@ -9,7 +9,7 @@ description: Messenger and Instagram share the Graph and Messenger Platform code
 | **Status** | Accepted |
 | **Date** | 2026-10-12 |
 | **Issue** | [#44](https://github.com/AimTune/converger/issues/44) |
-| **Pull request** | to be linked |
+| **Pull request** | [#139](https://github.com/AimTune/converger/pull/139) |
 | **Related** | [ADR-0006](0006-per-conversation-seq-and-opaque-watermarks.md), [ADR-0009](0009-inbound-signature-scheme-and-per-channel-enforcement.md), [ADR-0014](0014-webhook-ssrf-guard-and-outbound-signing.md), [ADR-0016](0016-participant-based-conversation-resolution.md), [ADR-0038](0038-adapter-behaviour-v2-and-config-driven-registry.md), [ADR-0039](0039-whatsapp-rich-outbound-and-inbound-media-download.md), [ADR-0045](0045-sms-adapters-opt-out-flag-and-twilio-signature-urls.md) |
 
 ## Context and problem statement
