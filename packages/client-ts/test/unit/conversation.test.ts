@@ -7,6 +7,9 @@ import {
   type ConnectionStateChange,
   type ConvergerClientOptions,
 } from "../../src/index.js";
+import { createServer, type Socket } from "node:net";
+import type { AddressInfo } from "node:net";
+import { nativeTransport } from "../../src/index.js";
 import { MockServer, fakeToken } from "../support/mock-server.js";
 import { sleep, waitFor } from "../support/helpers.js";
 
@@ -272,6 +275,32 @@ describe("reconnect, watermark resume and the outbox", () => {
     await conversation.resume(10);
     await waitFor(() => activities.length === 1, { message: "resync" });
     expect(conversation.watermark).toBe(1);
+  });
+});
+
+describe("connect timeout", () => {
+  it("abandons a connection that never completes and retries", async () => {
+    // Accepts TCP connections and never answers the upgrade.
+    const held: Socket[] = [];
+    const tcp = createServer((socket) => void held.push(socket));
+    await new Promise<void>((resolve) => tcp.listen(0, "127.0.0.1", () => resolve()));
+    const port = (tcp.address() as AddressInfo).port;
+    try {
+      const client = await makeClient({
+        baseUrl: `http://127.0.0.1:${port}`,
+        transport: nativeTransport({ connectTimeoutMs: 200 }),
+      });
+      const conversation = client.conversation();
+      const states: ConnectionStateChange[] = [];
+      conversation.on("connectionState", (s) => states.push(s));
+      void conversation.start().catch(() => undefined);
+      const retry = await waitFor(() => states.find((s) => s.state === "reconnecting"), { timeout: 3_000, message: "timeout" });
+      expect(retry.close?.reason).toBe("connect timeout");
+      await conversation.disconnect();
+    } finally {
+      for (const socket of held) socket.destroy();
+      await new Promise<void>((resolve) => tcp.close(() => resolve()));
+    }
   });
 });
 

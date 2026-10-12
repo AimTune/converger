@@ -42,6 +42,8 @@ export interface NativeTransportOptions {
   path?: string;
   /** Extra time beyond `idleTimeoutMs` before a silent connection is dropped. Default 15000. */
   livenessGraceMs?: number;
+  /** Give up on a connection that has not completed the handshake (`welcome`) after this long. Default 15000. */
+  connectTimeoutMs?: number;
 }
 
 class NativeTransport implements Transport {
@@ -51,6 +53,8 @@ class NativeTransport implements Transport {
   readonly #env: TransportEnvironment;
   readonly #path: string;
   readonly #graceMs: number;
+  readonly #connectTimeoutMs: number;
+  #connectTimer: ReturnType<typeof setTimeout> | undefined;
   #socket: WebSocketLike | undefined;
   #handlers: TransportHandlers | undefined;
   #opened = false;
@@ -66,6 +70,7 @@ class NativeTransport implements Transport {
     this.#env = env;
     this.#path = options.path ?? "/socket/converger/v1";
     this.#graceMs = options.livenessGraceMs ?? 15_000;
+    this.#connectTimeoutMs = options.connectTimeoutMs ?? 15_000;
   }
 
   connect(params: TransportConnectParams, handlers: TransportHandlers): void {
@@ -83,6 +88,8 @@ class NativeTransport implements Transport {
       return;
     }
     this.#socket = socket;
+    // A connect that never completes (blackholed host, stuck proxy) must not stall the session.
+    this.#connectTimer = setTimeout(() => this.close(CLIENT_IDLE_CLOSE, "connect timeout"), this.#connectTimeoutMs);
 
     socket.onopen = () => {
       this.#opened = true;
@@ -109,6 +116,7 @@ class NativeTransport implements Transport {
       if (typeof frame !== "object" || frame === null || typeof (frame as { type?: unknown }).type !== "string") return;
       const typed = frame as ServerFrame;
       if (typed.type === "welcome") {
+        if (this.#connectTimer) clearTimeout(this.#connectTimer);
         const idle = (typed as WelcomeFrame).data.limits?.idleTimeoutMs;
         if (typeof idle === "number" && idle > 0) this.#idleTimeoutMs = idle;
       } else if (typed.type === "error") {
@@ -138,15 +146,17 @@ class NativeTransport implements Transport {
 
   close(code = 1000, reason = "client closed"): void {
     const socket = this.#socket;
-    if (socket && !this.#closed) {
+    const open = !this.#closed;
+    // Report first (and detach the handlers): do not wait for the close
+    // handshake of a dead connection, and ignore the socket's own close event.
+    this.#finish(code, reason);
+    if (socket && open) {
       try {
         socket.close(code, reason);
       } catch {
         // ignore
       }
     }
-    // Do not wait for the close handshake of a dead connection.
-    this.#finish(code, reason);
   }
 
   #tick(): void {
@@ -166,6 +176,7 @@ class NativeTransport implements Transport {
     if (this.#closed) return;
     this.#closed = true;
     if (this.#timer) clearInterval(this.#timer);
+    if (this.#connectTimer) clearTimeout(this.#connectTimer);
     const socket = this.#socket;
     if (socket) {
       socket.onopen = null;

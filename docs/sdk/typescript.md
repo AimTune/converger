@@ -105,7 +105,9 @@ iterator over REST pages), `conversation.upload(file, {activity})`, `conversatio
   to a `sync` from the right position. `invalid_watermark` (the client is ahead of the server, for example after a
   database restore) resets the watermark to 0.
 - The native transport sends `ping` after `idleTimeoutMs / 2` of its own silence and drops a connection that has been
-  silent for `idleTimeoutMs` plus 15 s, so a half-open TCP connection is noticed.
+  silent for `idleTimeoutMs` plus 15 s, so a half-open TCP connection is noticed. A connection attempt that has not
+  completed its handshake within `connectTimeoutMs` (15 s; `nativeTransport({connectTimeoutMs})`,
+  `phoenixTransport({connectTimeoutMs})`) is abandoned and retried, so a blackholed host cannot stall the session.
 
 ## Outbox: exactly-once sends
 

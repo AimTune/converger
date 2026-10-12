@@ -93,6 +93,12 @@ export class ConvergerServer {
 
   async start(timeoutMs = 120_000): Promise<void> {
     if (this.#process) throw new Error("already running");
+    // Never test against someone else's server on the same port.
+    const busy = await fetch(`${this.baseUrl}/health/live`, { signal: AbortSignal.timeout(2_000) }).then(
+      () => true,
+      () => false,
+    );
+    if (busy) throw new Error(`port ${this.options.port} is already in use; set E2E_PORT`);
     const [cmd, cmdArgs] = command(["phx.server"]);
     const child = spawn(cmd, cmdArgs, {
       cwd: REPO_ROOT,

@@ -16,6 +16,7 @@ import {
   type WebSocketConstructor,
   type WebSocketLike,
 } from "../../src/index.js";
+import { createServer, type AddressInfo } from "node:net";
 import { ConvergerServer, mixAvailable, prepareDatabase, serverOptions } from "./server.js";
 import { waitFor } from "../support/helpers.js";
 
@@ -29,7 +30,7 @@ function step(message: string): void {
 const enabled = process.env["E2E_SKIP"] !== "1" && mixAvailable();
 
 /** Counts outgoing text frames per clientId, and can keep the client offline. */
-function instrumentedWebSocket(): {
+function instrumentedWebSocket(blockedUrl: string): {
   WebSocket: WebSocketConstructor;
   sends: Map<string, number>;
   hellos: Record<string, unknown>[];
@@ -42,7 +43,7 @@ function instrumentedWebSocket(): {
   class Instrumented {
     constructor(url: string, protocols?: string | string[]) {
       // While blocked, connect to a port nobody listens on (the attempt fails).
-      const socket = new Native(blocked ? "ws://127.0.0.1:9/blocked" : url, protocols) as WebSocketLike;
+      const socket = new Native(blocked ? blockedUrl : url, protocols) as WebSocketLike;
       const send = socket.send.bind(socket);
       socket.send = (data: string) => {
         const frame = JSON.parse(data) as Record<string, unknown>;
@@ -69,19 +70,25 @@ describe.skipIf(!enabled)("e2e against mix phx.server", () => {
   const options = serverOptions();
   const server = new ConvergerServer(options);
   let secret = "";
+  // While "blocked", the client connects here: a TCP server that drops every connection.
+  const refuser = createServer((socket) => socket.destroy());
+  let blockedUrl = "";
 
   beforeAll(async () => {
+    await new Promise<void>((resolve) => refuser.listen(0, "127.0.0.1", () => resolve()));
+    blockedUrl = `ws://127.0.0.1:${(refuser.address() as AddressInfo).port}/blocked`;
     secret = prepareDatabase(options).secret;
     await server.start();
   });
 
   afterAll(async () => {
     await server.kill();
+    await new Promise<void>((resolve) => refuser.close(() => resolve()));
   });
 
   it("survives a server crash: reconnect, resend once, replay missed activities", async () => {
     const baseUrl = server.baseUrl;
-    const ws = instrumentedWebSocket();
+    const ws = instrumentedWebSocket(blockedUrl);
     const tokenRequests: string[] = [];
 
     // Stands in for the application's backend endpoint that mints tokens.

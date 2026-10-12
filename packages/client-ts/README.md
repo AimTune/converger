@@ -98,7 +98,8 @@ standard error envelope `{"error": {"code", "message", "details", "request_id"}}
   new token (`reason: "rejected"`).
 - The reconnect `hello` carries the conversation id, the user id the server assigned and the **watermark**, which is the
   highest seq up to which the client has seen everything. The server replays everything after it. Duplicates are dropped
-  by seq. A gap (a seq that never arrived) is filled with `sync` after a short wait.
+  by seq. A gap (a seq that never arrived) is filled with `sync` after a short wait. A connection attempt that does not
+  finish its handshake within `connectTimeoutMs` (15 s) is abandoned and retried.
 - Sends are written to the outbox before they hit the wire. After a reconnect the client waits for the replay to
   finish, settles any send whose turn shows up in it (stored before the crash, ack lost), and then puts each remaining
   send on the wire **once**. A resend of a `clientId` the server already stored is answered with the original ack plus
@@ -155,7 +156,7 @@ pnpm --filter @converger/client run docs       # typedoc -> docs-api/
 `pnpm --filter @converger/client test:e2e` starts the real server with `mix phx.server` (`MIX_ENV=dev`, database
 `converger_sdk_e2e`, port 4123; override with `E2E_MIX_ENV`, `E2E_DB_NAME`, `E2E_PORT`). It creates the database and a
 channel, then kills the server mid-session. It needs Elixir and PostgreSQL (the `DB_*` variables of `config/dev.exs`)
-and skips itself when `mix` is not installed. Set `E2E_SKIP=1` to skip it explicitly.
+and skips itself when `mix` is not installed. It refuses to run when something already listens on the port. Set `E2E_SKIP=1` to skip it explicitly.
 
 ## License
 

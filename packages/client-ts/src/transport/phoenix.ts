@@ -52,6 +52,8 @@ export interface PhoenixTransportOptions {
   path?: string;
   /** Phoenix heartbeat interval. Default 30000. */
   heartbeatIntervalMs?: number;
+  /** Give up on a connection whose join has not been answered after this long. Default 15000. */
+  connectTimeoutMs?: number;
 }
 
 type PhoenixMessage = [string | null, string | null, string, string, unknown];
@@ -125,6 +127,8 @@ class PhoenixTransport implements Transport {
   #closed = false;
   #welcomed = false;
   #heartbeat: ReturnType<typeof setInterval> | undefined;
+  readonly #connectTimeoutMs: number;
+  #connectTimer: ReturnType<typeof setTimeout> | undefined;
   #pendingHeartbeat: string | null = null;
   #watermark: number | undefined;
   #retryAfterMs: number | undefined;
@@ -133,6 +137,7 @@ class PhoenixTransport implements Transport {
     this.#env = env;
     this.#path = options.path ?? "/socket/converger";
     this.#heartbeatMs = options.heartbeatIntervalMs ?? 30_000;
+    this.#connectTimeoutMs = options.connectTimeoutMs ?? 15_000;
   }
 
   connect(params: TransportConnectParams, handlers: TransportHandlers): void {
@@ -157,6 +162,7 @@ class PhoenixTransport implements Transport {
       return;
     }
     this.#socket = socket;
+    this.#connectTimer = setTimeout(() => this.close(4000, "connect timeout"), this.#connectTimeoutMs);
 
     socket.onopen = () => {
       this.#opened = true;
@@ -272,6 +278,7 @@ class PhoenixTransport implements Transport {
       return;
     }
     this.#joined = true;
+    if (this.#connectTimer) clearTimeout(this.#connectTimer);
     if (this.#welcomed) return;
     this.#welcomed = true;
     const welcome: WelcomeFrame = {
@@ -340,20 +347,24 @@ class PhoenixTransport implements Transport {
 
   close(code = 1000, reason = "client closed"): void {
     const socket = this.#socket;
-    if (socket && !this.#closed) {
+    const open = !this.#closed;
+    // Report first (and detach the handlers): do not wait for the close
+    // handshake of a dead connection, and ignore the socket's own close event.
+    this.#finish(code, reason);
+    if (socket && open) {
       try {
         socket.close(code >= 4000 || code === 1000 ? code : 1000, reason);
       } catch {
         // ignore
       }
     }
-    this.#finish(code, reason);
   }
 
   #finish(code: number, reason: string): void {
     if (this.#closed) return;
     this.#closed = true;
     if (this.#heartbeat) clearInterval(this.#heartbeat);
+    if (this.#connectTimer) clearTimeout(this.#connectTimer);
     const socket = this.#socket;
     if (socket) {
       socket.onopen = null;
