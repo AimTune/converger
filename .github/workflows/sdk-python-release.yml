@@ -1,0 +1,53 @@
+name: Release Python SDK
+
+# Publishes packages/client-python to PyPI when a tag client-python/vX.Y.Z is
+# pushed. Uses PyPI trusted publishing (OIDC): register this repository, this
+# workflow file and the "pypi" environment as a trusted publisher of the
+# "converger" project on PyPI. No API token is stored.
+
+on:
+  push:
+    tags: ["client-python/v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/client-python
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Tag matches the package version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' src/converger/_version.py)
+          test "client-python/v${version}" = "$TAG" || { echo "tag $TAG does not match version $version"; exit 1; }
+      - run: pip install -e '.[test]' build
+      - run: python -m pytest
+      - run: python -m build
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: packages/client-python/dist/
+
+  publish:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1

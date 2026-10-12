@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+### Server-side SDKs: Python, Go, Elixir (#47)
+
+- `packages/client-python` (PyPI `converger`): `httpx` REST client (sync and async) for the client and tenant APIs,
+  Pydantic v2 models, an async Protocol v1 socket client with resume, `verify_signature` for webhooks.
+- `packages/client-go` (`github.com/AimTune/converger/packages/client-go`): REST client, Protocol v1 socket client
+  on `github.com/coder/websocket`, `VerifySignature`.
+- `packages/client-elixir` (Hex `converger_client`): `Req` REST client, a `Mint.WebSocket` socket process,
+  `ConvergerClient.Webhook.verify_signature/4`.
+- `packages/conformance`: a shared, language-neutral conformance suite every SDK runs (REST requests, error
+  normalization for the legacy shapes and the #45 envelope, the protocol resume state machine, webhook signature
+  vectors). The vectors are generated from `Converger.Channels.InboundSignature.sign/3`; a new server test fails
+  when signer and vectors disagree. `integration/run.sh` runs every SDK against a real server, including a signed
+  webhook delivery.
+- CI workflow `SDKs` and tag-triggered release workflows (`client-python/v*` to PyPI with trusted publishing,
+  `packages/client-go/v*`, `client-elixir/v*` to Hex).
+- Docs: [Client SDKs](docs/sdk/server-sdks.md) with pages per language, signature verification details and test
+  vectors in [webhooks](docs/webhooks.md); ADR-0052.
+
 ### OpenAPI 3.1, Swagger UI, one error envelope, versioning policy (#45)
 
 - **Breaking for error bodies (statuses unchanged):** every HTTP API error is now

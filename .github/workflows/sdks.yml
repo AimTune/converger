@@ -1,0 +1,154 @@
+name: SDKs
+
+# Tests of the server-side SDKs in packages/ (Python, Go, Elixir) against the
+# shared conformance suite (packages/conformance), plus an end-to-end run of
+# every SDK against a real server. See docs/sdk/server-sdks.md.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "packages/client-python/**"
+      - "packages/client-go/**"
+      - "packages/client-elixir/**"
+      - "packages/conformance/**"
+      - "lib/**"
+      - "priv/protocol/**"
+      - ".github/workflows/sdks.yml"
+  pull_request:
+    paths:
+      - "packages/client-python/**"
+      - "packages/client-go/**"
+      - "packages/client-elixir/**"
+      - "packages/conformance/**"
+      - "lib/**"
+      - "priv/protocol/**"
+      - ".github/workflows/sdks.yml"
+
+concurrency:
+  group: sdks-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  # Keep in sync with ci.yml.
+  ELIXIR_VERSION: "1.19.5"
+  OTP_VERSION: "28.5.0.5"
+
+jobs:
+  python:
+    name: Python ${{ matrix.python }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.13"]
+    defaults:
+      run:
+        working-directory: packages/client-python
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+      - run: pip install -e '.[test]'
+      - run: python -m pytest -v
+
+  go:
+    name: Go ${{ matrix.go }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        go: ["1.22", "stable"]
+    defaults:
+      run:
+        working-directory: packages/client-go
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ matrix.go }}
+          cache-dependency-path: packages/client-go/go.sum
+      - name: gofmt
+        run: test -z "$(gofmt -l .)"
+      - run: go vet ./...
+      - run: go test -race -count=1 ./...
+
+  elixir:
+    name: Elixir client
+    runs-on: ubuntu-latest
+    env:
+      MIX_ENV: test
+    defaults:
+      run:
+        working-directory: packages/client-elixir
+    steps:
+      - uses: actions/checkout@v7
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          otp-version: ${{ env.OTP_VERSION }}
+      - uses: actions/cache@v6
+        with:
+          path: |
+            packages/client-elixir/deps
+            packages/client-elixir/_build
+          key: sdk-elixir-${{ runner.os }}-${{ env.ELIXIR_VERSION }}-${{ env.OTP_VERSION }}-${{ hashFiles('packages/client-elixir/mix.lock') }}
+      - run: mix deps.get
+      - run: mix format --check-formatted
+      - run: mix compile --warnings-as-errors --force
+      - run: mix test --warnings-as-errors
+
+  integration:
+    name: End-to-end against the server
+    runs-on: ubuntu-latest
+    needs: [python, go, elixir]
+    env:
+      MIX_ENV: dev
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          otp-version: ${{ env.OTP_VERSION }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version: stable
+          cache-dependency-path: packages/client-go/go.sum
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - uses: actions/cache@v6
+        with:
+          path: |
+            deps
+            _build
+            packages/client-elixir/deps
+            packages/client-elixir/_build
+          key: sdk-e2e-${{ runner.os }}-${{ env.ELIXIR_VERSION }}-${{ env.OTP_VERSION }}-${{ hashFiles('mix.lock', 'packages/client-elixir/mix.lock') }}
+      - name: Server dependencies
+        run: mix deps.get && mix compile
+      - name: Python SDK dependencies
+        run: pip install -e 'packages/client-python[test]'
+      - name: Elixir client dependencies
+        working-directory: packages/client-elixir
+        env:
+          MIX_ENV: test
+        run: mix deps.get
+      - name: Run every SDK against the server
+        run: packages/conformance/integration/run.sh python go elixir
+      - name: Server log
+        if: failure()
+        run: cat packages/conformance/integration/server.log || true

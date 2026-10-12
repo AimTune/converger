@@ -20,6 +20,12 @@ The API is described by an OpenAPI 3.1 document, committed as
 Changes follow the [versioning policy](versioning.md).
 :::
 
+:::tip SDKs
+Server-side SDKs for [Python](../sdk/python.md), [Go](../sdk/go.md) and [Elixir](../sdk/elixir.md) wrap the client
+and tenant APIs, normalize every error shape below into one error type, and verify webhook signatures. See
+[Server-side SDKs](../sdk/server-sdks.md).
+:::
+
 ## Base URLs
 
 | Environment | Base URL | Notes |

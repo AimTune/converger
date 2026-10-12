@@ -1,0 +1,137 @@
+{
+  "description": "Converger Protocol v1 client resume conformance. Each SDK has a transport-independent session state machine (hello frame, watermark, duplicate and gap handling). A scenario creates a session with `initial`, checks the `hello` frame it builds, then feeds each step's `recv` frame and checks `expect`: `deliver` lists the frames handed to the application, as \"type\" or \"type:seq\" for frames with a seq; `send` lists the frames the session asks the transport to send now (exact match); `schedule` lists frames to send after a delay; `watermark` is the session watermark after the step. Absent keys in `expect` mean: deliver nothing, send nothing, schedule nothing; `watermark` is not checked when absent. See packages/conformance/README.md for the rules.",
+  "scenarios": [
+    {
+      "name": "fresh handshake, replay, then live",
+      "initial": { "watermark": 0 },
+      "hello": { "type": "hello", "protocol": "converger/1", "watermark": 0 },
+      "steps": [
+        { "recv": { "type": "welcome", "data": { "protocol": "converger/1", "conversationId": "c-1", "watermark": 2 } }, "expect": { "deliver": ["welcome"], "watermark": 0 } },
+        { "recv": { "type": "text", "id": "a-1", "seq": 1, "from": "user", "data": { "text": "hi" }, "timestamp": 1750000000000 }, "expect": { "deliver": ["text:1"], "watermark": 1 } },
+        { "recv": { "type": "text", "id": "a-2", "seq": 2, "from": "bot", "data": { "text": "hello" }, "timestamp": 1750000001000 }, "expect": { "deliver": ["text:2"], "watermark": 2 } },
+        { "recv": { "type": "conversationUpdate", "id": "a-3", "seq": 3, "from": "bot", "data": { "event": "conversation_closed" }, "timestamp": 1750000002000 }, "expect": { "deliver": ["conversationUpdate:3"], "watermark": 3 } }
+      ]
+    },
+    {
+      "name": "resume drops duplicates at or below the watermark",
+      "initial": { "watermark": 5, "conversation_id": "c-1" },
+      "hello": { "type": "hello", "protocol": "converger/1", "watermark": 5, "conversationId": "c-1" },
+      "steps": [
+        { "recv": { "type": "welcome", "data": { "conversationId": "c-1", "watermark": 6 } }, "expect": { "deliver": ["welcome"], "watermark": 5 } },
+        { "recv": { "type": "text", "id": "a-5", "seq": 5, "from": "bot", "data": { "text": "old" } }, "expect": { "watermark": 5 } },
+        { "recv": { "type": "text", "id": "a-6", "seq": 6, "from": "bot", "data": { "text": "new" } }, "expect": { "deliver": ["text:6"], "watermark": 6 } },
+        { "recv": { "type": "text", "id": "a-6", "seq": 6, "from": "bot", "data": { "text": "new" } }, "expect": { "watermark": 6 } }
+      ]
+    },
+    {
+      "name": "a gap sends one sync and waits for the replay",
+      "initial": { "watermark": 3, "conversation_id": "c-1" },
+      "hello": { "type": "hello", "protocol": "converger/1", "watermark": 3, "conversationId": "c-1" },
+      "steps": [
+        { "recv": { "type": "welcome", "data": { "conversationId": "c-1", "watermark": 3 } }, "expect": { "deliver": ["welcome"] } },
+        { "recv": { "type": "text", "seq": 5, "from": "bot", "data": { "text": "five" } }, "expect": { "send": [{ "type": "sync", "watermark": 3 }], "watermark": 3 } },
+        { "recv": { "type": "text", "seq": 6, "from": "bot", "data": { "text": "six" } }, "expect": { "watermark": 3 } },
+        { "recv": { "type": "text", "seq": 4, "from": "bot", "data": { "text": "four" } }, "expect": { "deliver": ["text:4"], "watermark": 4 } },
+        { "recv": { "type": "text", "seq": 5, "from": "bot", "data": { "text": "five" } }, "expect": { "deliver": ["text:5"], "watermark": 5 } },
+        { "recv": { "type": "text", "seq": 6, "from": "bot", "data": { "text": "six" } }, "expect": { "deliver": ["text:6"], "watermark": 6 } },
+        { "recv": { "type": "text", "seq": 8, "from": "bot", "data": { "text": "eight" } }, "expect": { "send": [{ "type": "sync", "watermark": 6 }], "watermark": 6 } }
+      ]
+    },
+    {
+      "name": "own acks advance the watermark (own turns are not echoed)",
+      "initial": { "watermark": 2, "conversation_id": "c-1" },
+      "hello": { "type": "hello", "protocol": "converger/1", "watermark": 2, "conversationId": "c-1" },
+      "steps": [
+        { "recv": { "type": "welcome", "data": { "conversationId": "c-1", "watermark": 2 } }, "expect": { "deliver": ["welcome"] } },
+        { "recv": { "type": "ack", "clientId": "c-1", "id": "a-3", "seq": 3, "timestamp": 1750000004000 }, "expect": { "watermark": 3 } },
+        { "recv": { "type": "ack", "clientId": "c-2", "id": "a-5", "seq": 5, "timestamp": 1750000005000 }, "expect": { "watermark": 3 } },
+        { "recv": { "type": "text", "seq": 4, "from": "bot", "data": { "text": "four" } }, "expect": { "deliver": ["text:4"], "watermark": 5 } },
+        { "recv": { "type": "text", "seq": 5, "from": "user", "data": { "text": "mine, replayed" } }, "expect": { "watermark": 5 } },
+        { "recv": { "type": "ack", "clientId": "c-2", "id": "a-5", "seq": 5, "duplicate": true }, "expect": { "watermark": 5 } },
+        { "recv": { "type": "text", "seq": 6, "from": "bot", "data": { "text": "six" } }, "expect": { "deliver": ["text:6"], "watermark": 6 } }
+      ]
+    },
+    {
+      "name": "a replaced conversation resets the watermark",
+      "initial": { "watermark": 9, "conversation_id": "c-old" },
+      "hello": { "type": "hello", "protocol": "converger/1", "watermark": 9, "conversationId": "c-old" },
+      "steps": [
+        { "recv": { "type": "welcome", "data": { "conversationId": "c-new", "watermark": 1 } }, "expect": { "deliver": ["welcome"], "watermark": 0 } },
+        { "recv": { "type": "text", "seq": 1, "from": "bot", "data": { "text": "welcome" } }, "expect": { "deliver": ["text:1"], "watermark": 1 } }
+      ]
+    },
+    {
+      "name": "heartbeat headSeq detects a lost tail",
+      "initial": { "watermark": 4, "conversation_id": "c-1" },
+      "hello": { "type": "hello", "protocol": "converger/1", "watermark": 4, "conversationId": "c-1" },
+      "steps": [
+        { "recv": { "type": "welcome", "data": { "conversationId": "c-1", "watermark": 4 } }, "expect": { "deliver": ["welcome"] } },
+        { "recv": { "type": "heartbeat", "timestamp": 1750000031000, "headSeq": 4 }, "expect": { "watermark": 4 } },
+        { "recv": { "type": "heartbeat", "timestamp": 1750000061000, "headSeq": 6 }, "expect": { "send": [{ "type": "sync", "watermark": 4 }] } },
+        { "recv": { "type": "heartbeat", "timestamp": 1750000091000, "headSeq": 6 }, "expect": {} },
+        { "recv": { "type": "text", "seq": 5, "from": "bot", "data": { "text": "five" } }, "expect": { "deliver": ["text:5"], "watermark": 5 } },
+        { "recv": { "type": "text", "seq": 6, "from": "bot", "data": { "text": "six" } }, "expect": { "deliver": ["text:6"], "watermark": 6 } }
+      ]
+    },
+    {
+      "name": "heartbeat syncs when an own ack leaves a hole below it",
+      "initial": { "watermark": 4, "conversation_id": "c-1" },
+      "hello": { "type": "hello", "protocol": "converger/1", "watermark": 4, "conversationId": "c-1" },
+      "steps": [
+        { "recv": { "type": "welcome", "data": { "conversationId": "c-1", "watermark": 4 } }, "expect": { "deliver": ["welcome"] } },
+        { "recv": { "type": "ack", "clientId": "x", "id": "a-6", "seq": 6 }, "expect": { "watermark": 4 } },
+        { "recv": { "type": "heartbeat", "headSeq": 6 }, "expect": { "send": [{ "type": "sync", "watermark": 4 }] } },
+        { "recv": { "type": "text", "seq": 5, "from": "bot", "data": { "text": "five" } }, "expect": { "deliver": ["text:5"], "watermark": 6 } },
+        { "recv": { "type": "heartbeat", "headSeq": 6 }, "expect": { "watermark": 6 } }
+      ]
+    },
+    {
+      "name": "replayTruncated is delivered and continued with sync",
+      "initial": { "watermark": 0 },
+      "hello": { "type": "hello", "protocol": "converger/1", "watermark": 0 },
+      "steps": [
+        { "recv": { "type": "welcome", "data": { "conversationId": "c-1", "watermark": 5 } }, "expect": { "deliver": ["welcome"] } },
+        { "recv": { "type": "text", "seq": 1, "from": "bot", "data": { "text": "1" } }, "expect": { "deliver": ["text:1"] } },
+        { "recv": { "type": "text", "seq": 2, "from": "bot", "data": { "text": "2" } }, "expect": { "deliver": ["text:2"] } },
+        { "recv": { "type": "replayTruncated", "data": { "watermark": 2, "headSeq": 5 } }, "expect": { "deliver": ["replayTruncated"], "send": [{ "type": "sync", "watermark": 2 }], "watermark": 2 } },
+        { "recv": { "type": "text", "seq": 6, "from": "bot", "data": { "text": "live" } }, "expect": { "watermark": 2 } },
+        { "recv": { "type": "text", "seq": 3, "from": "bot", "data": { "text": "3" } }, "expect": { "deliver": ["text:3"], "watermark": 3 } }
+      ]
+    },
+    {
+      "name": "replay_unavailable schedules a sync after retryAfterMs",
+      "initial": { "watermark": 15, "conversation_id": "c-1" },
+      "hello": { "type": "hello", "protocol": "converger/1", "watermark": 15, "conversationId": "c-1" },
+      "steps": [
+        { "recv": { "type": "welcome", "data": { "conversationId": "c-1", "watermark": 19 } }, "expect": { "deliver": ["welcome"] } },
+        { "recv": { "type": "error", "data": { "code": "replay_unavailable", "number": 9002, "retryable": true, "message": "the database is unavailable", "details": { "watermark": 15 }, "retryAfterMs": 1400 } }, "expect": { "deliver": ["error"], "schedule": [{ "after_ms": 1400, "frame": { "type": "sync", "watermark": 15 } }], "watermark": 15 } },
+        { "recv": { "type": "text", "seq": 20, "from": "bot", "data": { "text": "live" } }, "expect": { "watermark": 15 } }
+      ]
+    },
+    {
+      "name": "invalid_watermark restarts from zero",
+      "initial": { "watermark": 50, "conversation_id": "c-1" },
+      "hello": { "type": "hello", "protocol": "converger/1", "watermark": 50, "conversationId": "c-1" },
+      "steps": [
+        { "recv": { "type": "welcome", "data": { "conversationId": "c-1", "watermark": 10 } }, "expect": { "deliver": ["welcome"] } },
+        { "recv": { "type": "error", "data": { "code": "invalid_watermark", "number": 1003, "retryable": false, "message": "watermark above head" } }, "expect": { "deliver": ["error"], "send": [{ "type": "sync", "watermark": 0 }], "watermark": 0 } },
+        { "recv": { "type": "text", "seq": 1, "from": "bot", "data": { "text": "1" } }, "expect": { "deliver": ["text:1"], "watermark": 1 } }
+      ]
+    },
+    {
+      "name": "transient and unknown frames pass through, transport frames do not",
+      "initial": { "watermark": 0 },
+      "hello": { "type": "hello", "protocol": "converger/1", "watermark": 0 },
+      "steps": [
+        { "recv": { "type": "welcome", "data": { "conversationId": "c-1", "watermark": 0 } }, "expect": { "deliver": ["welcome"] } },
+        { "recv": { "type": "typing", "isTyping": true, "from": "bot", "sender": { "id": "agent-7", "role": "agent" } }, "expect": { "deliver": ["typing"] } },
+        { "recv": { "type": "presence", "participant": { "id": "agent-7", "role": "agent" }, "status": "online" }, "expect": { "deliver": ["presence"] } },
+        { "recv": { "type": "deliveryStatus", "data": { "activityId": "a-1", "seq": 1, "status": "delivered" } }, "expect": { "deliver": ["deliveryStatus"] } },
+        { "recv": { "type": "somethingNew", "data": {} }, "expect": { "deliver": ["somethingNew"] } },
+        { "recv": { "type": "error", "data": { "code": "rate_limited", "retryable": true, "retryAfterMs": 1500, "clientId": "c-9" } }, "expect": { "deliver": ["error"] } },
+        { "recv": { "type": "tokenRefreshed", "data": { "expiresAt": 1750003600000 } }, "expect": {} },
+        { "recv": { "type": "heartbeat", "timestamp": 1750000031000, "headSeq": 0 }, "expect": { "watermark": 0 } }
+      ]
+    }
+  ]
+}

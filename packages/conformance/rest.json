@@ -1,0 +1,150 @@
+{
+  "description": "REST conformance cases. Each SDK builds a client from `client`, calls `operation` with `args` against a mock transport, checks the HTTP request it sent against `request`, answers with `response`, and checks the returned value against `result` (or the raised error against `error`). Result paths are dot-separated; segments match SDK field names case-insensitively with underscores ignored (conversation_id matches ConversationID), and integer segments index lists. `request.headers` is a subset match on lowercase names; `request.query` is exact; `request.json` is an exact match of the decoded body and is not checked when absent.",
+  "client": { "base_url": "http://converger.test", "api_key": "cvg_live_test", "channel_secret": "chsec_test" },
+  "cases": [
+    {
+      "name": "client_api generate_token with a user id",
+      "operation": "client_api.generate_token",
+      "args": { "user_id": "user-42" },
+      "request": { "method": "POST", "path": "/api/v1/converger/tokens/generate", "query": {}, "headers": { "authorization": "Bearer chsec_test", "content-type": "application/json" }, "json": { "user": { "id": "user-42" } } },
+      "response": { "status": 200, "body": { "conversationId": null, "token": "tok-unscoped", "expires_in": 1800 } },
+      "result": { "token": "tok-unscoped", "expires_in": 1800, "conversation_id": null }
+    },
+    {
+      "name": "client_api generate_token channel scope without user",
+      "operation": "client_api.generate_token",
+      "args": { "scope": "channel" },
+      "request": { "method": "POST", "path": "/api/v1/converger/tokens/generate", "query": {}, "headers": { "authorization": "Bearer chsec_test" }, "json": { "scope": "channel" } },
+      "response": { "status": 200, "body": { "conversationId": null, "token": "tok-channel", "expires_in": 1800 } },
+      "result": { "token": "tok-channel" }
+    },
+    {
+      "name": "client_api refresh_token",
+      "operation": "client_api.refresh_token",
+      "args": { "token": "tok-old" },
+      "request": { "method": "POST", "path": "/api/v1/converger/tokens/refresh", "query": {}, "headers": { "authorization": "Bearer tok-old" } },
+      "response": { "status": 200, "body": { "conversationId": "3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10", "token": "tok-new", "expires_in": 1800 } },
+      "result": { "token": "tok-new", "conversation_id": "3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10" }
+    },
+    {
+      "name": "client_api create_conversation",
+      "operation": "client_api.create_conversation",
+      "args": { "token": "tok-unscoped" },
+      "request": { "method": "POST", "path": "/api/v1/converger/conversations", "query": {}, "headers": { "authorization": "Bearer tok-unscoped" } },
+      "response": { "status": 201, "body": { "conversationId": "3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10", "token": "tok-conv", "expires_in": 1800, "streamUrl": "ws://converger.test/socket/converger/websocket?token=tok-conv&conversation_id=3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10" } },
+      "result": { "conversation_id": "3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10", "token": "tok-conv", "expires_in": 1800, "stream_url": "ws://converger.test/socket/converger/websocket?token=tok-conv&conversation_id=3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10" }
+    },
+    {
+      "name": "client_api get_conversation with watermark",
+      "operation": "client_api.get_conversation",
+      "args": { "token": "tok-conv", "conversation_id": "3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10", "watermark": "c2VxOjQy" },
+      "request": { "method": "GET", "path": "/api/v1/converger/conversations/3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10", "query": { "watermark": "c2VxOjQy" }, "headers": { "authorization": "Bearer tok-conv" } },
+      "response": { "status": 200, "body": { "conversationId": "3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10", "token": "tok-conv-2", "expires_in": 1800, "streamUrl": "ws://converger.test/socket/converger/websocket?token=tok-conv-2" } },
+      "result": { "token": "tok-conv-2" }
+    },
+    {
+      "name": "client_api close_conversation",
+      "operation": "client_api.close_conversation",
+      "args": { "token": "tok-conv", "conversation_id": "3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10" },
+      "request": { "method": "POST", "path": "/api/v1/converger/conversations/3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10/close", "query": {}, "headers": { "authorization": "Bearer tok-conv" } },
+      "response": { "status": 200, "body": { "conversationId": "3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10", "status": "closed" } },
+      "result": { "conversation_id": "3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10", "status": "closed" }
+    },
+    {
+      "name": "client_api reopen_conversation",
+      "operation": "client_api.reopen_conversation",
+      "args": { "token": "tok-conv", "conversation_id": "3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10" },
+      "request": { "method": "POST", "path": "/api/v1/converger/conversations/3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10/reopen", "query": {}, "headers": { "authorization": "Bearer tok-conv" } },
+      "response": { "status": 200, "body": { "conversationId": "3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10", "status": "active" } },
+      "result": { "status": "active" }
+    },
+    {
+      "name": "client_api post_activity with idempotency key",
+      "operation": "client_api.post_activity",
+      "args": { "token": "tok-conv", "conversation_id": "3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10", "activity": { "type": "message", "text": "Hi, I need help", "from_id": "user-42", "channel_data": { "locale": "en-US" } }, "idempotency_key": "msg-1" },
+      "request": { "method": "POST", "path": "/api/v1/converger/conversations/3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10/activities", "query": {}, "headers": { "authorization": "Bearer tok-conv", "x-idempotency-key": "msg-1", "content-type": "application/json" }, "json": { "type": "message", "text": "Hi, I need help", "from": { "id": "user-42" }, "channelData": { "locale": "en-US" } } },
+      "response": { "status": 200, "body": { "id": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d" } },
+      "result": { "id": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d" }
+    },
+    {
+      "name": "client_api post_activity reply with attachments",
+      "operation": "client_api.post_activity",
+      "args": { "token": "tok-conv", "conversation_id": "3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10", "activity": { "type": "message", "text": "see attached", "attachments": [{ "contentType": "image/png", "contentUrl": "https://cdn.example.com/a.png" }], "reply_to_id": "0f1e2d3c-4b5a-4968-8776-655443322110" } },
+      "request": { "method": "POST", "path": "/api/v1/converger/conversations/3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10/activities", "query": {}, "headers": { "authorization": "Bearer tok-conv" }, "json": { "type": "message", "text": "see attached", "attachments": [{ "contentType": "image/png", "contentUrl": "https://cdn.example.com/a.png" }], "replyToId": "0f1e2d3c-4b5a-4968-8776-655443322110" } },
+      "response": { "status": 200, "body": { "id": "b1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d" } },
+      "result": { "id": "b1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d" }
+    },
+    {
+      "name": "client_api list_activities",
+      "operation": "client_api.list_activities",
+      "args": { "token": "tok-conv", "conversation_id": "3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10", "watermark": "c2VxOjQx", "limit": 50 },
+      "request": { "method": "GET", "path": "/api/v1/converger/conversations/3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10/activities", "query": { "watermark": "c2VxOjQx", "limit": "50" }, "headers": { "authorization": "Bearer tok-conv" } },
+      "response": { "status": 200, "body": { "activities": [{ "id": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d", "type": "message", "from": { "id": "bot" }, "text": "Sure, what is your order number?", "timestamp": "2026-10-09T12:05:43.118020Z", "attachments": [], "conversationId": "3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10", "channelData": {}, "replyToId": null, "editedAt": null, "deletedAt": null, "futureField": 1 }], "watermark": "c2VxOjQy", "has_more": false } },
+      "result": { "watermark": "c2VxOjQy", "has_more": false, "activities.0.id": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d", "activities.0.from.id": "bot", "activities.0.text": "Sure, what is your order number?", "activities.0.conversation_id": "3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10" }
+    },
+    {
+      "name": "client_api post_activity into a closed conversation",
+      "operation": "client_api.post_activity",
+      "args": { "token": "tok-conv", "conversation_id": "3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10", "activity": { "text": "late" } },
+      "request": { "method": "POST", "path": "/api/v1/converger/conversations/3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10/activities", "query": {}, "headers": { "authorization": "Bearer tok-conv" }, "json": { "text": "late" } },
+      "response": { "status": 409, "body": { "error": "conversation_closed", "detail": "Conversation is closed" } },
+      "error": { "status": 409, "code": "conversation_closed", "message": "Conversation is closed" }
+    },
+    {
+      "name": "tenant_api list_conversations with filters",
+      "operation": "tenant_api.list_conversations",
+      "args": { "limit": 20, "status": "active", "external_id": "16505551234", "cursor": "abc" },
+      "request": { "method": "GET", "path": "/api/v1/conversations", "query": { "limit": "20", "status": "active", "external_id": "16505551234", "cursor": "abc" }, "headers": { "x-api-key": "cvg_live_test" } },
+      "response": { "status": 200, "body": { "data": [{ "id": "3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10", "status": "active", "metadata": { "source": "inbound_webhook" }, "channel_id": "9b1f3a52-6c0d-4e2b-8f7a-1d2c3b4a5e6f", "origin_channel_id": "9b1f3a52-6c0d-4e2b-8f7a-1d2c3b4a5e6f", "tenant_id": "c2a4e6f8-1b3d-4f5a-9c7e-2d4f6a8b0c1e", "participant_id": "5e7a9c1b-3d5f-4a7c-9e1b-3d5f7a9c1b3d", "participant": { "id": "5e7a9c1b-3d5f-4a7c-9e1b-3d5f7a9c1b3d", "external_id": "16505551234", "display_name": "Sheena", "opted_out_at": null }, "inserted_at": "2026-10-09T12:00:00.123456Z", "updated_at": "2026-10-09T12:05:41.004512Z" }], "meta": { "next_cursor": "next-1", "has_more": true, "limit": 20 } } },
+      "result": { "next_cursor": "next-1", "has_more": true, "data.0.id": "3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10", "data.0.status": "active", "data.0.participant.external_id": "16505551234", "data.0.metadata.source": "inbound_webhook" }
+    },
+    {
+      "name": "tenant_api get_conversation",
+      "operation": "tenant_api.get_conversation",
+      "args": { "conversation_id": "3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10" },
+      "request": { "method": "GET", "path": "/api/v1/conversations/3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10", "query": {}, "headers": { "x-api-key": "cvg_live_test" } },
+      "response": { "status": 200, "body": { "data": { "id": "3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10", "status": "active", "metadata": {}, "channel_id": "9b1f3a52-6c0d-4e2b-8f7a-1d2c3b4a5e6f", "tenant_id": "c2a4e6f8-1b3d-4f5a-9c7e-2d4f6a8b0c1e", "participant_id": null, "participant": null, "inserted_at": "2026-10-09T12:00:00.123456Z", "updated_at": "2026-10-09T12:00:00.123456Z" } } },
+      "result": { "id": "3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10", "channel_id": "9b1f3a52-6c0d-4e2b-8f7a-1d2c3b4a5e6f", "participant": null }
+    },
+    {
+      "name": "tenant_api close_conversation",
+      "operation": "tenant_api.close_conversation",
+      "args": { "conversation_id": "3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10" },
+      "request": { "method": "POST", "path": "/api/v1/conversations/3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10/close", "query": {}, "headers": { "x-api-key": "cvg_live_test" } },
+      "response": { "status": 200, "body": { "data": { "id": "3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10", "status": "closed", "metadata": {}, "channel_id": "9b1f3a52-6c0d-4e2b-8f7a-1d2c3b4a5e6f", "tenant_id": "c2a4e6f8-1b3d-4f5a-9c7e-2d4f6a8b0c1e", "participant_id": null, "participant": null, "inserted_at": "2026-10-09T12:00:00.123456Z", "updated_at": "2026-10-09T12:30:00.000000Z" } } },
+      "result": { "status": "closed" }
+    },
+    {
+      "name": "tenant_api reopen_conversation",
+      "operation": "tenant_api.reopen_conversation",
+      "args": { "conversation_id": "3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10" },
+      "request": { "method": "POST", "path": "/api/v1/conversations/3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10/reopen", "query": {}, "headers": { "x-api-key": "cvg_live_test" } },
+      "response": { "status": 200, "body": { "data": { "id": "3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10", "status": "active", "metadata": {}, "channel_id": "9b1f3a52-6c0d-4e2b-8f7a-1d2c3b4a5e6f", "tenant_id": "c2a4e6f8-1b3d-4f5a-9c7e-2d4f6a8b0c1e", "participant_id": null, "participant": null, "inserted_at": "2026-10-09T12:00:00.123456Z", "updated_at": "2026-10-09T12:31:00.000000Z" } } },
+      "result": { "status": "active" }
+    },
+    {
+      "name": "tenant_api post_activity as the bot",
+      "operation": "tenant_api.post_activity",
+      "args": { "conversation_id": "3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10", "activity": { "type": "message", "sender": "bot", "text": "We are open 9 to 5.", "metadata": { "intent": "hours" } }, "idempotency_key": "reply-7781" },
+      "request": { "method": "POST", "path": "/api/v1/conversations/3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10/activities", "query": {}, "headers": { "x-api-key": "cvg_live_test", "x-idempotency-key": "reply-7781", "content-type": "application/json" }, "json": { "type": "message", "sender": "bot", "text": "We are open 9 to 5.", "metadata": { "intent": "hours" } } },
+      "response": { "status": 201, "body": { "data": { "id": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d", "type": "message", "sender": "bot", "text": "We are open 9 to 5.", "attachments": [], "metadata": { "intent": "hours" }, "idempotency_key": "reply-7781", "seq": 3, "reply_to_id": null, "edited_at": null, "deleted_at": null, "conversation_id": "3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10", "tenant_id": "c2a4e6f8-1b3d-4f5a-9c7e-2d4f6a8b0c1e", "inserted_at": "2026-10-09T12:05:41.004512Z" } } },
+      "result": { "id": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d", "seq": 3, "sender": "bot", "idempotency_key": "reply-7781", "metadata.intent": "hours" }
+    },
+    {
+      "name": "tenant_api list_activities",
+      "operation": "tenant_api.list_activities",
+      "args": { "conversation_id": "3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10", "limit": 2 },
+      "request": { "method": "GET", "path": "/api/v1/conversations/3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10/activities", "query": { "limit": "2" }, "headers": { "x-api-key": "cvg_live_test" } },
+      "response": { "status": 200, "body": { "data": [{ "id": "0f1e2d3c-4b5a-4968-8776-655443322110", "type": "message", "sender": "16505551234", "text": "What are your hours?", "attachments": [], "metadata": {}, "idempotency_key": null, "seq": 1, "reply_to_id": null, "edited_at": null, "deleted_at": null, "conversation_id": "3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10", "tenant_id": "c2a4e6f8-1b3d-4f5a-9c7e-2d4f6a8b0c1e", "inserted_at": "2026-10-09T12:04:10.551200Z" }], "meta": { "watermark": "c2VxOjE", "has_more": true, "limit": 2 } } },
+      "result": { "watermark": "c2VxOjE", "has_more": true, "data.0.seq": 1, "data.0.sender": "16505551234" }
+    },
+    {
+      "name": "tenant_api unauthorized",
+      "operation": "tenant_api.get_conversation",
+      "args": { "conversation_id": "3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10" },
+      "request": { "method": "GET", "path": "/api/v1/conversations/3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10", "query": {}, "headers": { "x-api-key": "cvg_live_test" } },
+      "response": { "status": 401, "headers": { "x-request-id": "F-777" }, "body": { "error": "Unauthorized: Invalid or inactive API Key" } },
+      "error": { "status": 401, "code": "unauthorized", "message": "Unauthorized: Invalid or inactive API Key", "request_id": "F-777" }
+    }
+  ]
+}
