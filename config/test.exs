@@ -96,6 +96,15 @@ config :converger, Converger.Partitions,
   detach_concurrently: false,
   ensure_on_boot: false
 
+# No broker consumer manager: it would query channels without a sandbox
+# connection. Tests start consumers explicitly (Converger.Channels.Consumers)
+# and retry broker messages without waiting.
+config :converger, :broker_channels,
+  consumers: false,
+  inbound_backoff_ms: 1,
+  inbound_max_backoff_ms: 5,
+  dead_letter_max_backoff_ms: 5
+
 # Forward typing indicators and read receipts to external channels inline
 # (Converger.Channels.Signals), so tests see the provider calls synchronously.
 config :converger, :channel_signals_async, false

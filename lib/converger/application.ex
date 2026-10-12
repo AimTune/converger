@@ -35,12 +35,17 @@ defmodule Converger.Application do
           # Per-node cache of provider message templates (WhatsApp HSM).
           Converger.Channels.Templates,
           Converger.RateLimit.Supervisor,
+          # Broker channels (kafka, rabbitmq): per-channel publishers, started
+          # on first delivery, so before Oban runs delivery jobs.
+          {Registry, keys: :unique, name: Converger.Channels.Broker.Registry},
+          Converger.Channels.Broker.Publishers,
           {Oban, oban_config()}
         ] ++
         Converger.Partitions.boot_children() ++
         Converger.Pipeline.child_specs() ++
+        [ConvergerWeb.Endpoint] ++
+        broker_consumers() ++
         [
-          ConvergerWeb.Endpoint,
           # Last: stopped first on shutdown, it flips readiness to 503 and
           # waits before the endpoint drains its sockets.
           ConvergerWeb.Drain
@@ -51,6 +56,10 @@ defmodule Converger.Application do
     opts = [strategy: :one_for_one, name: Converger.Supervisor]
     Supervisor.start_link(children, opts)
   end
+
+  # Broker channel consumers create activities (PubSub broadcasts through the
+  # endpoint), so they start after it and, on shutdown, drain before it stops.
+  defp broker_consumers, do: Converger.Channels.Consumers.child_specs()
 
   @doc """
   The Oban config, with `config :converger, :oban_lifeline` options (set from

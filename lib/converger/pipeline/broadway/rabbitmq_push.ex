@@ -2,7 +2,7 @@ defmodule Converger.Pipeline.Broadway.RabbitmqPush do
   @moduledoc """
   RabbitMQ message push module.
 
-  Requires `{:amqp, "~> 3.3"}` in your deps.
+  Opens and closes an AMQP connection per message.
 
   ## Configuration
 

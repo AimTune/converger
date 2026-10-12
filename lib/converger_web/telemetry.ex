@@ -170,6 +170,15 @@ defmodule ConvergerWeb.Telemetry do
       counter("converger.inbound.received.count",
         tags: delivery_tags([:channel_type, :outcome])
       ),
+      # Broker channel consumers (Converger.Channels.Broker)
+      counter("converger.broker.dead_lettered.count",
+        tags: [:channel_type, :reason],
+        description: "Inbound broker messages moved to the channel's dead-letter topic or queue"
+      ),
+      counter("converger.broker.retry.count",
+        tags: [:channel_type],
+        description: "Inbound broker messages retried in place after a transient failure"
+      ),
 
       # Realtime connections (ConvergerWeb.ClientConnections)
       last_value("converger.ws.connections.count",

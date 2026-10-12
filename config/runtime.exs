@@ -273,6 +273,19 @@ if System.get_env("WEBHOOK_ALLOW_PRIVATE_TARGETS") in ~w(true 1) do
   config :converger, :webhook, allow_private_targets: true
 end
 
+# Broker channels (kafka, rabbitmq; see Converger.Channels.Consumers).
+# BROKER_CONSUMERS=false keeps broker consumers off this node (e.g. web-only
+# nodes); the other nodes run them. BROKER_RECONCILE_INTERVAL_MS sets how
+# often consumers are reconciled with the channels (default 30000).
+case System.get_env("BROKER_CONSUMERS") do
+  nil -> :ok
+  value -> config :converger, :broker_channels, consumers: value in ~w(true 1)
+end
+
+if interval = System.get_env("BROKER_RECONCILE_INTERVAL_MS") do
+  config :converger, :broker_channels, reconcile_interval_ms: String.to_integer(interval)
+end
+
 # Rate-limit backend: "local" (per-node counters) or "cluster" (counters
 # replicated between nodes over PubSub). Defaults to "cluster" when node
 # discovery is configured (CLUSTER_STRATEGY other than none), otherwise "local".
