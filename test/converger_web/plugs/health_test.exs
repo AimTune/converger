@@ -30,7 +30,8 @@ defmodule ConvergerWeb.Plugs.HealthTest do
                "database" => "ok",
                "oban" => "ok",
                "draining" => "ok",
-               "migrations" => "ok"
+               "migrations" => "ok",
+               "pool" => "ok"
              }
            }
 

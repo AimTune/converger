@@ -227,6 +227,23 @@ if websocket_overrides != [] do
   config :converger, :websocket, websocket_overrides
 end
 
+# Behaviour under database pressure (defaults in config/config.exs). See
+# docs/operations/database.md.
+pressure_overrides =
+  for {key, var} <- [
+        retry_after_ms: "DB_RETRY_AFTER_MS",
+        queue_window_ms: "DB_QUEUE_WINDOW_MS",
+        degraded_queue_ms: "READY_DB_QUEUE_MS"
+      ],
+      value = System.get_env(var),
+      value not in [nil, ""] do
+    {key, String.to_integer(value)}
+  end
+
+if pressure_overrides != [] do
+  config :converger, Converger.Repo.Pressure, pressure_overrides
+end
+
 # Oban Lifeline: jobs left `executing` by a node that died (SIGKILL, OOM, lost
 # host) are made available again after OBAN_LIFELINE_RESCUE_AFTER_SECONDS
 # (default 30 minutes, config/config.exs), checked every
@@ -490,10 +507,32 @@ if config_env() == :prod do
   config :converger, Converger.Repo,
     # ssl: true,
     url: database_url,
+    # Interactive pool: HTTP, WebSocket and LiveView (docs/operations/database.md).
     pool_size: String.to_integer(System.get_env("POOL_SIZE") || "10"),
-    # For machines with several cores, consider starting multiple pools of `pool_size`
-    # pool_count: 4,
+    queue_target: String.to_integer(System.get_env("DB_QUEUE_TARGET_MS") || "50"),
+    queue_interval: String.to_integer(System.get_env("DB_QUEUE_INTERVAL_MS") || "1000"),
+    timeout: String.to_integer(System.get_env("DB_TIMEOUT_MS") || "15000"),
     socket_options: maybe_ipv6
+
+  # Background pool for Oban jobs, a bulkhead between background work and
+  # requests (Converger.Repo.Pools). BACKGROUND_POOL_SIZE=0 shares the
+  # interactive pool instead (the behaviour before #35).
+  background_pool_size = String.to_integer(System.get_env("BACKGROUND_POOL_SIZE") || "10")
+
+  background_pool =
+    if background_pool_size > 0 do
+      [
+        pool_size: background_pool_size,
+        queue_target: String.to_integer(System.get_env("BACKGROUND_DB_QUEUE_TARGET_MS") || "500"),
+        queue_interval:
+          String.to_integer(System.get_env("BACKGROUND_DB_QUEUE_INTERVAL_MS") || "5000"),
+        timeout: String.to_integer(System.get_env("BACKGROUND_DB_TIMEOUT_MS") || "60000")
+      ]
+    else
+      false
+    end
+
+  config :converger, Converger.Repo.Pools, background: background_pool
 
   # The secret key base is used to sign/encrypt cookies and other secrets.
   # A default value is used in config/dev.exs and config/test.exs but you

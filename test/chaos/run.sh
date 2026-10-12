@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Chaos test: kill the app node (SIGKILL) repeatedly while REST and WebSocket
-# clients send activities, then verify that no acked message was lost or
+# Chaos test: kill the app node (SIGKILL) repeatedly, or pause Postgres
+# (CHAOS_MODE=db_pause), while REST and WebSocket clients send activities,
+# then verify that no acked message was lost or
 # duplicated, `seq` is gap-free and every acked message reached the webhook
 # sink. See docs/chaos.md.
 #
@@ -12,6 +13,9 @@
 # CHAOS_DELIVERY_TIMEOUT_S (300), CHAOS_APP_PORT (14000),
 # CHAOS_PROJECT (converger-chaos), CHAOS_SKIP_BUILD (0), CHAOS_KEEP (0: tear
 # the stack down, volumes included, when done).
+# CHAOS_MODE (kill | db_pause), CHAOS_DB_PAUSES (1), CHAOS_DB_PAUSE_S (10):
+# db_pause freezes the db container (`docker pause`) instead of killing the app
+# (issue #35); the first pause starts at CHAOS_FIRST_KILL_S.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -29,6 +33,9 @@ DOWN_S="${CHAOS_DOWN_S:-3}"
 REST_CONVERSATIONS="${CHAOS_REST_CONVERSATIONS:-8}"
 WS_CONVERSATIONS="${CHAOS_WS_CONVERSATIONS:-8}"
 DELIVERY_TIMEOUT_S="${CHAOS_DELIVERY_TIMEOUT_S:-300}"
+export CHAOS_MODE="${CHAOS_MODE:-kill}"
+DB_PAUSES="${CHAOS_DB_PAUSES:-1}"
+DB_PAUSE_S="${CHAOS_DB_PAUSE_S:-10}"
 export CHAOS_APP_PORT="${CHAOS_APP_PORT:-14000}"
 
 log() { echo "[chaos $(date +%H:%M:%S)] $*"; }
@@ -109,24 +116,77 @@ log "starting driver"
 dc run --rm -T --no-deps driver >"$OUT/driver.log" 2>&1 &
 DRIVER_PID=$!
 
+# Readiness as the load balancer sees it, once a second: "<s since start> <status>".
+(
+  start=$SECONDS
+  while :; do
+    code=$(curl -s -o /dev/null -m 2 -w '%{http_code}' "http://127.0.0.1:$CHAOS_APP_PORT/health/ready" || true)
+    echo "$((SECONDS - start)) $code"
+    sleep 1
+  done
+) >"$OUT/readiness.log" 2>/dev/null &
+READINESS_PID=$!
+
+app_started_at() { docker inspect -f '{{.State.Running}} {{.State.StartedAt}}' "$(dc ps -aq app)"; }
+APP_STARTED_AT=$(app_started_at)
+
 sleep "$FIRST_KILL_S"
 LAST_RESTART=$SECONDS
-for i in $(seq 1 "$KILLS"); do
-  CID=$(dc ps -q app)
-  log "kill $i/$KILLS: docker kill -s KILL $CID"
-  docker kill -s KILL "$CID" >/dev/null
-  sleep "$DOWN_S"
-  dc start app >/dev/null
-  wait_ready 120
-  LAST_RESTART=$SECONDS
-  log "app back after kill $i"
-  if [ "$i" -lt "$KILLS" ]; then sleep "$KILL_INTERVAL_S"; fi
-done
+RECOVERED_AFTER_S=null
+case "$CHAOS_MODE" in
+  kill)
+    for i in $(seq 1 "$KILLS"); do
+      CID=$(dc ps -q app)
+      log "kill $i/$KILLS: docker kill -s KILL $CID"
+      docker kill -s KILL "$CID" >/dev/null
+      sleep "$DOWN_S"
+      dc start app >/dev/null
+      wait_ready 120
+      LAST_RESTART=$SECONDS
+      log "app back after kill $i"
+      if [ "$i" -lt "$KILLS" ]; then sleep "$KILL_INTERVAL_S"; fi
+    done
+    ;;
+  db_pause)
+    # Postgres freezes with its connections open: queries hang, pools fill up.
+    # The app must answer 503 meanwhile and recover on its own.
+    for i in $(seq 1 "$DB_PAUSES"); do
+      DB_CID=$(dc ps -q db)
+      log "pause $i/$DB_PAUSES: docker pause db for ${DB_PAUSE_S}s"
+      docker pause "$DB_CID" >/dev/null
+      sleep "$DB_PAUSE_S"
+      docker unpause "$DB_CID" >/dev/null
+      LAST_RESTART=$SECONDS
+      deadline=$((SECONDS + 120))
+      until [ "$(curl -s -o /dev/null -m 2 -w '%{http_code}' "http://127.0.0.1:$CHAOS_APP_PORT/health/ready")" = "200" ]; do
+        if [ "$SECONDS" -ge "$deadline" ]; then
+          log "app not ready 120s after unpausing the database"
+          exit 1
+        fi
+        sleep 1
+      done
+      RECOVERED_AFTER_S=$((SECONDS - LAST_RESTART))
+      log "app ready ${RECOVERED_AFTER_S}s after unpause $i"
+      if [ "$i" -lt "$DB_PAUSES" ]; then sleep "$KILL_INTERVAL_S"; fi
+    done
+    ;;
+  *)
+    log "unknown CHAOS_MODE: $CHAOS_MODE (kill | db_pause)"
+    exit 1
+    ;;
+esac
 
 log "waiting for the driver to finish"
 DRIVER_CODE=0
 wait "$DRIVER_PID" || DRIVER_CODE=$?
+kill "$READINESS_PID" 2>/dev/null || true
 tail -n 1 "$OUT/driver.log"
+
+# In db_pause mode the app must never have restarted (same container start).
+APP_RESTARTS=0
+if [ "$CHAOS_MODE" = "db_pause" ] && [ "$(app_started_at)" != "$APP_STARTED_AT" ]; then
+  APP_RESTARTS=1
+fi
 if [ "$DRIVER_CODE" != "0" ]; then
   log "driver failed ($DRIVER_CODE), see $OUT/driver.log"
   exit 1
@@ -153,8 +213,13 @@ psql_q "COPY (SELECT id, conversation_id, seq, coalesce(idempotency_key, ''), te
 psql_q "COPY (SELECT id, last_seq FROM conversations WHERE tenant_id = '$TENANT_ID') TO STDOUT WITH CSV" >"$OUT/conversations.csv"
 psql_q "COPY (SELECT d.activity_id, d.status, d.attempts FROM deliveries d JOIN activities a ON a.id = d.activity_id WHERE a.tenant_id = '$TENANT_ID') TO STDOUT WITH CSV" >"$OUT/deliveries.csv"
 psql_q "COPY (SELECT state, attempt, count(*) FROM oban_jobs WHERE queue = 'deliveries' GROUP BY state, attempt ORDER BY state, attempt) TO STDOUT WITH CSV" >"$OUT/oban_jobs.csv"
+# Error-level log lines that mention a database connection error (crash
+# reports); informational, see report.json.
+dc logs --no-color app >"$OUT/app.log" 2>&1 || true
+DB_ERROR_LOGS=$(grep -cE '\[error\].*DBConnection|\*\* \(DBConnection' "$OUT/app.log" || true)
+NOT_READY_PROBES=$(awk '$2 != "200"' "$OUT/readiness.log" | wc -l | tr -d " ")
 cat >"$OUT/timing.json" <<EOF
-{"kills": $KILLS, "down_s": $DOWN_S, "open_delivery_jobs": $open, "delivery_drained_after_last_restart_s": $DRAINED_AFTER_S}
+{"mode": "$CHAOS_MODE", "kills": $KILLS, "down_s": $DOWN_S, "db_pauses": $DB_PAUSES, "db_pause_s": $DB_PAUSE_S, "ready_after_unpause_s": $RECOVERED_AFTER_S, "app_restarts": $APP_RESTARTS, "app_db_error_logs": $DB_ERROR_LOGS, "readiness_non_200_probes": $NOT_READY_PROBES, "open_delivery_jobs": $open, "delivery_drained_after_last_restart_s": $DRAINED_AFTER_S}
 EOF
 
 log "verifying"

@@ -12,7 +12,9 @@ defmodule ConvergerWeb.Plugs.Health do
   * `/health/ready` - `200 {"status":"ready","checks":{...}}` when every check
     of `Converger.Health.readiness/0` passes. Otherwise `503` with the failing
     `"reasons"`, every check result and `"status"`: `"draining"` when the node
-    is shutting down (`ConvergerWeb.Drain`), else `"unavailable"`.
+    is shutting down (`ConvergerWeb.Drain`), `"degraded"` when the only
+    failing check is `pool` (the database pool is saturated, issue #35), else
+    `"unavailable"`.
   """
 
   @behaviour Plug
@@ -49,8 +51,18 @@ defmodule ConvergerWeb.Plugs.Health do
 
       :error ->
         reasons = for {_name, {:error, reason}} <- checks, do: reason
-        status = if checks[:draining] == :ok, do: "unavailable", else: "draining"
-        {503, %{status: status, reasons: reasons, checks: checks_json}}
+        {503, %{status: status(checks), reasons: reasons, checks: checks_json}}
+    end
+  end
+
+  # `draining` wins; `degraded` when the pool wait is the only failure.
+  defp status(checks) do
+    failing = for {name, {:error, _reason}} <- checks, do: name
+
+    cond do
+      :draining in failing -> "draining"
+      failing == [:pool] -> "degraded"
+      true -> "unavailable"
     end
   end
 

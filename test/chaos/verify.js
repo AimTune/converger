@@ -126,7 +126,14 @@ const report = {
         .filter((r) => Number(r.attempt) > 1)
         .reduce((n, r) => n + Number(r.count), 0)
     : null,
+  mode: process.env.CHAOS_MODE || "kill",
   timing: fs.existsSync(path.join(OUT_DIR, "timing.json")) ? JSON.parse(read("timing.json")) : null,
+  // REST answers with a 5xx other than 503: a database outage must be answered
+  // 503 + Retry-After, never 500 (issue #35).
+  rest_server_errors: Object.entries(driver.summary.stats.rest_status || {})
+    .filter(([status]) => /^5\d\d$/.test(status) && status !== "503")
+    .reduce((n, [, count]) => n + count, 0),
+  rest_unavailable: (driver.summary.stats.rest_status || {})["503"] || 0,
   driver_stats: driver.summary.stats,
   samples: {
     lost: lost.slice(0, 10).map((m) => m.key),
@@ -149,6 +156,13 @@ if (report.unknown_activities > 0) failures.push(`${report.unknown_activities} u
 if (report.seq_problems > 0) failures.push(`${report.seq_problems} conversations with seq gaps`);
 if (report.deliveries_not_sent > 0) failures.push(`${report.deliveries_not_sent} acked messages not marked sent`);
 if (report.not_at_sink > 0) failures.push(`${report.not_at_sink} acked messages never reached the sink`);
+if (report.mode === "db_pause") {
+  // Every refusal during a database outage is retryable, so everything is acked eventually.
+  if (report.never_acked > 0) failures.push(`${report.never_acked} messages were never acked`);
+  if (report.rest_server_errors > 0) failures.push(`${report.rest_server_errors} REST answers were 5xx other than 503`);
+  const restarts = report.timing && report.timing.app_restarts;
+  if (restarts > 0) failures.push(`the app container restarted ${restarts} times`);
+}
 
 if (failures.length > 0) {
   console.error("CHAOS FAILED: " + failures.join("; "));
