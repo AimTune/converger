@@ -428,7 +428,8 @@ defmodule Converger.Channels.Adapter do
     Converger.Channels.Adapters.SmsTwilio,
     Converger.Channels.Adapters.SmsVonage,
     Converger.Channels.Adapters.Messenger,
-    Converger.Channels.Adapters.Instagram
+    Converger.Channels.Adapters.Instagram,
+    Converger.Channels.Adapters.Viber
   ]
 
   @required_functions [type: 0, supported_modes: 0, deliver_activity: 2, parse_inbound: 2]
