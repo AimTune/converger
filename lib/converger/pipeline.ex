@@ -264,16 +264,30 @@ defmodule Converger.Pipeline do
         {:error, {:halted, reason}}
 
       {:ok, transformed_activity} ->
-        # Every failure is classified by the adapter (normalize_error/1)
-        # into a DeliveryError before the breaker and the retry policy see it.
-        result =
-          case Adapter.deliver_activity(channel, transformed_activity) do
-            {:error, reason} -> {:error, Adapter.normalize_error(channel, reason)}
-            other -> other
-          end
+        # Times the adapter call only (Converger.Telemetry), not the
+        # bookkeeping around it. Every failure is classified by the adapter
+        # (normalize_error/1) into a DeliveryError before the breaker and the
+        # retry policy see it.
+        {result, duration} =
+          Converger.Telemetry.delivery_attempt(delivery, activity, channel, fn ->
+            case Adapter.deliver_activity(channel, transformed_activity) do
+              {:error, reason} -> {:error, Adapter.normalize_error(channel, reason)}
+              other -> other
+            end
+          end)
 
         Converger.Channels.Circuit.record(channel, result)
-        record_result(result, delivery, channel)
+        outcome = record_result(result, delivery, channel)
+
+        Converger.Telemetry.delivery_stop(
+          delivery,
+          activity,
+          channel,
+          {result, duration},
+          outcome
+        )
+
+        outcome
     end
   end
 

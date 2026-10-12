@@ -168,11 +168,11 @@
                         "uid": "Prometheus"
                     },
                     "editorMode": "code",
-                    "expr": "phoenix_socket_connected_count",
+                    "expr": "sum(converger_ws_connections_count)",
                     "refId": "A"
                 }
             ],
-            "title": "Active WebSocket Connections",
+            "title": "Open Client Connections",
             "type": "gauge"
         },
         {
@@ -350,19 +350,19 @@
                         "uid": "Prometheus"
                     },
                     "editorMode": "code",
-                    "expr": "converger_repo_query_total_time",
-                    "legendFormat": "Last Query Time",
+                    "expr": "histogram_quantile(0.95, sum by (le) (rate(converger_repo_query_total_time_bucket[5m])))",
+                    "legendFormat": "p95",
                     "range": true,
                     "refId": "A"
                 }
             ],
-            "title": "Database Latency (last query)",
+            "title": "Database Query Time p95",
             "type": "timeseries"
         }
     ],
     "refresh": "5s",
     "schemaVersion": 39,
-    "tags": [],
+    "tags": ["converger"],
     "templating": {
         "list": []
     },

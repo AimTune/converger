@@ -1,0 +1,140 @@
+# Unit tests for alerts.yml:
+#   docker run --rm -v "$PWD/docker/prometheus:/w" --entrypoint promtool \
+#     prom/prometheus:v2.55.0 test rules /w/alerts.test.yml
+rule_files:
+  - alerts.yml
+
+evaluation_interval: 1m
+
+tests:
+  # The webhook target is down: 5% of attempts fail, then the breaker opens.
+  - interval: 1m
+    input_series:
+      - series: 'converger_delivery_stop_duration_count{instance="a", channel_type="webhook", status="sent"}'
+        values: '0+57x20'
+      - series: 'converger_delivery_stop_duration_count{instance="a", channel_type="webhook", status="failed"}'
+        values: '0+3x20'
+      - series: 'converger_delivery_stop_duration_count{instance="a", channel_type="echo", status="sent"}'
+        values: '0+60x20'
+      - series: 'converger_channels_circuit_count{instance="a", channel_type="webhook", state="open"}'
+        values: '0 0 0 1x17'
+      - series: 'converger_channels_circuit_count{instance="b", channel_type="webhook", state="open"}'
+        values: '0 0 0 1x17'
+      - series: 'converger_channels_circuit_count{instance="a", channel_type="echo", state="open"}'
+        values: '0x20'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: ConvergerDeliverySuccessRateLow
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: ConvergerDeliverySuccessRateLow
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              channel_type: webhook
+            exp_annotations:
+              summary: "Delivery success rate below 99% for webhook channels"
+              description: "95% of delivery attempts succeeded over the last 5 minutes."
+      - eval_time: 10m
+        alertname: ConvergerChannelCircuitOpen
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              channel_type: webhook
+            exp_annotations:
+              summary: "1 webhook channel(s) with an open circuit breaker"
+              description: "Deliveries to these channels are parked until a probe succeeds. See the Delivery SLO dashboard."
+
+  # Too little traffic to judge a success rate.
+  - interval: 1m
+    input_series:
+      - series: 'converger_delivery_stop_duration_count{instance="a", channel_type="webhook", status="sent"}'
+        values: '0+1x20'
+      - series: 'converger_delivery_stop_duration_count{instance="a", channel_type="webhook", status="failed"}'
+        values: '0+1x20'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: ConvergerDeliverySuccessRateLow
+        exp_alerts: []
+
+  - interval: 1m
+    input_series:
+      - series: 'converger_deliveries_dead_letters_size{instance="a", channel_type="webhook"}'
+        values: '0+1x30'
+      - series: 'converger_deliveries_dead_letters_size{instance="a", channel_type="echo"}'
+        values: '4x30'
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: ConvergerDeadLettersGrowing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              channel_type: webhook
+            exp_annotations:
+              summary: "Dead letters growing for webhook channels"
+              description: "15 more dead-lettered deliveries than 15 minutes ago. Replay them once the endpoint is fixed."
+
+  # p95 lag of first attempts around 9.7 s; retried deliveries are ignored.
+  - interval: 1m
+    input_series:
+      - series: 'converger_pipeline_lag_duration_bucket{instance="a", channel_type="webhook", retry="false", le="5000"}'
+        values: '0+1x20'
+      - series: 'converger_pipeline_lag_duration_bucket{instance="a", channel_type="webhook", retry="false", le="10000"}'
+        values: '0+10x20'
+      - series: 'converger_pipeline_lag_duration_bucket{instance="a", channel_type="webhook", retry="false", le="+Inf"}'
+        values: '0+10x20'
+      - series: 'converger_pipeline_lag_duration_bucket{instance="a", channel_type="webhook", retry="true", le="+Inf"}'
+        values: '0+1000x20'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: ConvergerPipelineLagHigh
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "Pipeline lag p95 above 5 s"
+              description: "95% of first-attempt deliveries left the pipeline within 9.722k ms of the activity being stored."
+
+  - interval: 1m
+    input_series:
+      - series: 'converger_repo_query_queue_time_bucket{instance="a", le="50"}'
+        values: '0+1x20'
+      - series: 'converger_repo_query_queue_time_bucket{instance="a", le="100"}'
+        values: '0+100x20'
+      - series: 'converger_repo_query_queue_time_bucket{instance="a", le="+Inf"}'
+        values: '0+100x20'
+      - series: 'converger_oban_queue_depth{instance="a", queue="deliveries", state="available"}'
+        values: '5000x20'
+      - series: 'converger_oban_queue_depth{instance="a", queue="maintenance", state="available"}'
+        values: '5000x20'
+      - series: 'up{job="converger", instance="a"}'
+        values: '0x10'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: ConvergerDatabasePoolSaturated
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: a
+            exp_annotations:
+              summary: "Queries wait 97.47 ms (p95) for a database connection on a"
+              description: "The Ecto pool is saturated: raise POOL_SIZE or find the slow queries."
+      - eval_time: 15m
+        alertname: ConvergerDeliveryBacklog
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              queue: deliveries
+            exp_annotations:
+              summary: "5000 delivery jobs waiting in queue deliveries"
+              description: "Jobs are enqueued faster than they are worked. Check the queue concurrency and the database."
+      - eval_time: 5m
+        alertname: ConvergerMetricsDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: converger
+              instance: a
+            exp_annotations:
+              summary: "Prometheus cannot scrape a"
+              description: "The node is down or its metrics listener is unreachable."

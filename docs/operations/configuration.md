@@ -173,6 +173,8 @@ cookie) is configured by `rel/env.sh.eex` when the release starts.
 | `METRICS_TOKEN` | unset | all | Bearer token for `GET /metrics` on the main port (`Authorization: Bearer <token>`). See [Observability](observability.md#prometheus-endpoint). |
 | `METRICS_ALLOWED_IPS` | unset (dev: loopback and private ranges) | all | Comma-separated IPs/CIDRs allowed to read `/metrics` without a token (client IP after `TRUSTED_PROXIES`). With neither variable set, `/metrics` answers `404`. |
 | `PROMETHEUS_PORT` | unset | all | Starts the old separate, **unauthenticated** metrics listener on this port (`/metrics`). Only for scrapers that cannot send a token; never expose it publicly. |
+| `METRICS_TENANT_LABEL` | `false` | all | `true` (or `1`) adds a `tenant_id` label to the delivery, pipeline-lag and inbound series. One series per tenant and channel type: leave it off with many tenants. See [Observability](observability.md#delivery-and-pipeline-metrics). |
+| `METRICS_POLL_INTERVAL_MS` | `15000` | all | How often every node reads the database-backed gauges (Oban queue depth, dead letters, open circuit breakers). |
 
 `GET /health/live` and `GET /health/ready` need no configuration. How long a stopping node keeps serving after
 readiness turns `draining` is `WS_DRAIN_DELAY_MS` (see [WebSocket limits and draining](#websocket-limits-and-draining)).
@@ -427,7 +429,7 @@ PgBouncer transaction pooling). See [Migrations and maintenance windows](migrati
 | `:channel_health` | `probe_idle_channels: true`; `false` in test | Call the adapter's `health_probe/1` for channels without deliveries in the health window. See [Health probes](../channels/overview.md#health-probes). |
 | `Converger.Channels.MediaDownload` | `timeout_ms: 10_000` | Receive timeout of each inbound media download (WhatsApp images, voice notes, documents). See [inbound media download](../channels/whatsapp.md#inbound-media-download). |
 | `Converger.Channels.Templates` | `ttl_ms: 300_000` | How long a channel's provider templates are cached per node. See [channel message templates](../api/tenant-api.md#channel-message-templates). |
-| `:metrics` | `[]` (dev: `allowed_ips` with loopback and private ranges) | `token:` and `allowed_ips:` for `GET /metrics`; see `METRICS_TOKEN`. |
+| `:metrics` | `tenant_label: false`, `poll_interval_ms: 15_000` (`false` in test); dev adds `allowed_ips` with loopback and private ranges | `token:` and `allowed_ips:` for `GET /metrics` (see `METRICS_TOKEN`); `tenant_label:` and `poll_interval_ms:` (see `METRICS_TENANT_LABEL`, `METRICS_POLL_INTERVAL_MS`; `poll_interval_ms: false` turns the database-backed gauges off). |
 | `:prometheus_port` | unset | Port of the optional unauthenticated metrics listener (`PROMETHEUS_PORT`). |
 | `Converger.Health` | `db_timeout_ms: 1000` | Readiness database timeout. |
 | `:force_ssl` | unset outside prod | Keyword list of `Plug.SSL` options, built from the TLS variables in prod; `false` disables. |

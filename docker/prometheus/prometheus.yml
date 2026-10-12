@@ -2,6 +2,10 @@ global:
   scrape_interval: 15s
   evaluation_interval: 15s
 
+# Alert rules (issue #33); tested with `promtool test rules alerts.test.yml`.
+rule_files:
+  - /etc/prometheus/alerts.yml
+
 scrape_configs:
   # The dev server (`mix phx.server` on the host) serves GET /metrics on its
   # main port; config/dev.exs allows private and loopback IPs without a
