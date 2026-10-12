@@ -1,16 +1,18 @@
 defmodule Converger.Channels.Adapters.WhatsAppMeta do
   use Converger.Channels.Adapter, type: "whatsapp_meta"
 
-  alias Converger.Channels.{DeliveryError, InboundSignature, MediaDownload}
+  alias Converger.Channels.DeliveryError
+  alias Converger.Channels.Meta.Graph
   alias Converger.Channels.WhatsApp.Outbound
   alias Converger.{Participants, Uploads}
   alias Converger.Pipeline.RetryPolicy
 
   require Logger
 
-  # Latest Graph API version as of 2026-07-29 (v26.0); override per channel
-  # with `graph_api_version` or globally in config.
-  @default_graph_api_version "v26.0"
+  # Graph API version, request options, signatures, the hub.challenge
+  # handshake and media downloads are shared with the Messenger and
+  # Instagram adapters (Converger.Channels.Meta.Graph, ADR-0048).
+  @default_graph_api_version Graph.default_version()
 
   # `message` activities are sent as text, media, template, interactive,
   # location and contacts messages (Converger.Channels.WhatsApp.Outbound).
@@ -290,61 +292,51 @@ defmodule Converger.Channels.Adapters.WhatsAppMeta do
   # since the customer last wrote, so only templates are accepted.
   @outside_window_code 131_047
 
-  defp classify_http(status, headers, body, label) do
-    if error_code(body) == @outside_window_code do
-      error =
-        DeliveryError.permanent(Outbound.outside_window_message("#{label} returned #{status}"))
+  # Cloud API throughput errors, answered with 400: cloud API throughput
+  # (130429), spam rate limit (131048) and pair rate limit (131056).
+  @throttle_codes [130_429, 131_048, 131_056]
 
-      %{error | status: status}
-    else
-      DeliveryError.from_http(status, headers, body, label)
+  defp classify_http(status, headers, body, label) do
+    case Graph.error_code(body) do
+      @outside_window_code ->
+        error =
+          DeliveryError.permanent(Outbound.outside_window_message("#{label} returned #{status}"))
+
+        %{error | status: status}
+
+      code when code in @throttle_codes ->
+        %{Graph.classify_http(status, headers, body, label) | retryable?: true}
+
+      _ ->
+        Graph.classify_http(status, headers, body, label)
     end
   end
 
-  defp error_code(%{"error" => %{"code" => code}}), do: code
-  defp error_code(_body), do: nil
-
   defp request_options(channel, options) do
-    [
-      headers: [{"authorization", "Bearer #{channel.config["access_token"]}"}],
-      receive_timeout: RetryPolicy.for_channel(channel).timeout_ms
-    ]
-    |> Keyword.merge(options)
-    |> Keyword.merge(Application.get_env(:converger, :whatsapp_req_options, []))
+    Graph.request_options(
+      channel.config["access_token"],
+      Keyword.merge([receive_timeout: RetryPolicy.for_channel(channel).timeout_ms], options),
+      :whatsapp_req_options
+    )
   end
 
-  defp graph_url(channel, path),
-    do: "https://graph.facebook.com/#{graph_api_version(channel)}/#{path}"
+  defp graph_url(channel, path), do: Graph.url(graph_api_version(channel), path)
 
   @doc """
   Downloads an inbound media file: `GET /<version>/<media id>` returns a
   short-lived URL and the file size (checked against the upload limit), and
-  the URL is fetched with the same access token.
+  the URL is fetched with the same access token
+  (`Converger.Channels.Meta.Graph.fetch_media_by_id/4`).
   """
   @impl true
   def fetch_media(channel, %{"channelData" => %{"providerMediaId" => media_id}})
       when is_binary(media_id) and media_id != "" do
-    url = graph_url(channel, URI.encode(media_id, &URI.char_unreserved?/1))
-    options = [receive_timeout: MediaDownload.timeout_ms(), retry: false]
-
-    case Req.get(url, request_options(channel, options)) do
-      {:ok, %Req.Response{status: 200, body: %{"url" => media_url} = media}} ->
-        if is_integer(media["file_size"]) and media["file_size"] > Uploads.max_file_size() do
-          {:error, :too_large}
-        else
-          headers = [{"authorization", "Bearer #{channel.config["access_token"]}"}]
-
-          with {:ok, data} <- MediaDownload.get(media_url, headers: headers) do
-            {:ok, %{data: data, filename: nil}}
-          end
-        end
-
-      {:ok, %Req.Response{status: status}} ->
-        {:error, {:http_error, status}}
-
-      {:error, reason} ->
-        {:error, reason}
-    end
+    Graph.fetch_media_by_id(
+      media_id,
+      channel.config["access_token"],
+      graph_api_version(channel),
+      :whatsapp_req_options
+    )
   end
 
   def fetch_media(_channel, _attachment), do: :skip
@@ -436,19 +428,9 @@ defmodule Converger.Channels.Adapters.WhatsAppMeta do
   def send_read_receipt(_channel, _signal), do: :ok
 
   defp post_status(channel, payload) do
-    url =
-      "https://graph.facebook.com/#{graph_api_version(channel)}/#{channel.config["phone_number_id"]}/messages"
+    url = graph_url(channel, "#{channel.config["phone_number_id"]}/messages")
 
-    options =
-      [
-        json: payload,
-        headers: [{"authorization", "Bearer #{channel.config["access_token"]}"}],
-        receive_timeout: RetryPolicy.for_channel(channel).timeout_ms,
-        retry: false
-      ]
-      |> Keyword.merge(Application.get_env(:converger, :whatsapp_req_options, []))
-
-    case Req.post(url, options) do
+    case Req.post(url, request_options(channel, json: payload, retry: false)) do
       {:ok, %Req.Response{status: 200}} -> :ok
       {:ok, %Req.Response{status: status, body: body}} -> {:error, {:http_error, status, body}}
       {:error, reason} -> {:error, reason}
@@ -461,19 +443,7 @@ defmodule Converger.Channels.Adapters.WhatsAppMeta do
   `config :converger, Converger.Channels.Adapters.WhatsAppMeta, graph_api_version: "..."`,
   then #{@default_graph_api_version}.
   """
-  def graph_api_version(channel \\ %{config: %{}}) do
-    config = Map.get(channel, :config) || %{}
-
-    case config["graph_api_version"] do
-      version when is_binary(version) and version != "" ->
-        version
-
-      _ ->
-        :converger
-        |> Application.get_env(__MODULE__, [])
-        |> Keyword.get(:graph_api_version, @default_graph_api_version)
-    end
-  end
+  def graph_api_version(channel \\ %{config: %{}}), do: Graph.version(channel, __MODULE__)
 
   @doc """
   Parses every message of a Cloud API webhook. Meta batches several
@@ -686,39 +656,16 @@ defmodule Converger.Channels.Adapters.WhatsAppMeta do
   policy.
   """
   @impl true
-  def verify_inbound_signature(channel, headers, raw_body) do
-    app_secret = (channel.config || %{})["app_secret"]
-
-    case InboundSignature.get_header(headers, "x-hub-signature-256") do
-      nil ->
-        :missing
-
-      _signature when not is_binary(app_secret) or app_secret == "" ->
-        :missing
-
-      signature ->
-        expected = "sha256=" <> InboundSignature.hmac_hex(app_secret, raw_body || "")
-
-        if Plug.Crypto.secure_compare(expected, String.downcase(signature)),
-          do: :ok,
-          else: {:error, :invalid_signature}
-    end
-  end
+  def verify_inbound_signature(channel, headers, raw_body),
+    do: Graph.verify_signature((channel.config || %{})["app_secret"], headers, raw_body)
 
   @doc """
   Meta's webhook handshake: echo `hub.challenge` verbatim once
   `hub.verify_token` matches the channel's `verify_token`.
   """
   @impl true
-  def verify_subscription(channel, params) do
-    verify_token = (channel.config || %{})["verify_token"]
-    provided = params["hub.verify_token"]
-
-    if is_binary(verify_token) and verify_token != "" and is_binary(provided) and
-         Plug.Crypto.secure_compare(provided, verify_token),
-       do: {:ok, params["hub.challenge"] || ""},
-       else: :error
-  end
+  def verify_subscription(channel, params),
+    do: Graph.verify_subscription((channel.config || %{})["verify_token"], params)
 
   @doc """
   Reads the channel's phone number from the Graph API
@@ -727,17 +674,10 @@ defmodule Converger.Channels.Adapters.WhatsAppMeta do
   """
   @impl true
   def health_probe(channel) do
-    url =
-      "https://graph.facebook.com/#{graph_api_version(channel)}/#{channel.config["phone_number_id"]}"
+    url = graph_url(channel, channel.config["phone_number_id"])
 
     options =
-      [
-        params: [fields: "id"],
-        headers: [{"authorization", "Bearer #{channel.config["access_token"]}"}],
-        receive_timeout: 5_000,
-        retry: false
-      ]
-      |> Keyword.merge(Application.get_env(:converger, :whatsapp_req_options, []))
+      request_options(channel, params: [fields: "id"], receive_timeout: 5_000, retry: false)
 
     case Req.get(url, options) do
       {:ok, %Req.Response{status: 200}} -> :ok

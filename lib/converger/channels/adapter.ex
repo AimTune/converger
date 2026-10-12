@@ -242,6 +242,15 @@ defmodule Converger.Channels.Adapter do
   @callback inbound_response(channel) :: {String.t(), iodata()}
 
   @doc """
+  Like `c:inbound_response/1`, for providers whose expected answer depends on
+  the request (e.g. a Discord interaction is answered with a different
+  interaction response for a slash command than for a button press).
+  Receives the request params; takes precedence over `c:inbound_response/1`.
+  `:default` falls back to the JSON summary.
+  """
+  @callback inbound_response(channel, params :: map()) :: {String.t(), iodata()} | :default
+
+  @doc """
   Adapter-specific retry policy defaults (e.g. `%{timeout_ms: 10_000}`), merged
   over the global defaults and under the channel's own `retry_policy`. See
   `Converger.Pipeline.RetryPolicy`.
@@ -347,6 +356,7 @@ defmodule Converger.Channels.Adapter do
     verify_subscription: 2,
     inbound_challenge: 2,
     inbound_response: 1,
+    inbound_response: 2,
     retry_policy: 0,
     normalize_error: 1,
     capabilities: 0,
@@ -665,11 +675,15 @@ defmodule Converger.Channels.Adapter do
 
   @doc """
   The provider's expected answer to a handled inbound request
-  (`c:inbound_response/1`); `:default` (the JSON summary) when the adapter
-  does not implement one.
+  (`c:inbound_response/2`, else `c:inbound_response/1`); `:default` (the
+  JSON summary) when the adapter implements neither.
   """
-  def inbound_response(%{type: type} = channel),
-    do: call_optional(type, :inbound_response, [channel], :default)
+  def inbound_response(%{type: type} = channel, params \\ %{}) do
+    case optional(type, :inbound_response, 2) do
+      {:ok, mod} -> mod.inbound_response(channel, params)
+      :error -> call_optional(type, :inbound_response, [channel], :default)
+    end
+  end
 
   @doc """
   Forward a typing signal with the channel's adapter. `:unsupported` when the
