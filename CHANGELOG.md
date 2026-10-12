@@ -16,6 +16,8 @@
 - API: `/api/v1/webhook_subscriptions` (CRUD, `rotate_secret`), `/api/v1/webhook_events` (list, show,
   `redeliver`), `/api/v1/webhook_event_types`. Portal and admin **Webhooks** pages with recent events and a
   redeliver button. Audit log: resource types `webhook_subscription` and `webhook_event`, action `redeliver`.
+  Errors use the API error envelope (`409 not_failed` for redelivering an event that is not `failed`); every
+  endpoint is in `priv/static/openapi.json` (tag `Webhooks`).
 - `tenants.alert_webhook_url` is migrated to a managed subscription on the channel health and circuit events,
   kept in sync with the tenant form; it keeps the legacy body but is now signed, retried and logged. The
   fire-and-forget `Health.send_alert_webhook/3` and circuit alert are removed.

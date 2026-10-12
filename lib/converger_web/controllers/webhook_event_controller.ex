@@ -8,19 +8,44 @@ defmodule ConvergerWeb.WebhookEventController do
       (`pending`, `delivered`, `failed`), `type`, `limit`, `cursor`.
     * `GET /api/v1/webhook_events/:id` - one event, with its payload
     * `POST /api/v1/webhook_events/:id/redeliver` - send a dead-lettered
-      (`failed`) event again; `409` for any other status
+      (`failed`) event again; `409 not_failed` for any other status
 
-  Server-to-server only: requires the tenant API key (`x-api-key`).
+  Server-to-server only: requires the tenant API key (`x-api-key`). Errors
+  use the API error envelope (`ConvergerWeb.APIError`, ADR-0050).
   """
   use ConvergerWeb, :controller
+  use OpenApiSpex.ControllerSpecs
+
+  import ConvergerWeb.ApiSchemas
 
   alias Converger.Webhooks
   alias Converger.Webhooks.Event
+  alias ConvergerWeb.APIError
 
   plug ConvergerWeb.Plugs.TenantAuth
   plug :require_api_key
 
   action_fallback ConvergerWeb.FallbackController
+
+  tags(["Webhooks"])
+  security([%{"apiKey" => []}])
+
+  operation(:index,
+    summary: "List webhook events",
+    description:
+      "The platform webhook event log, newest first, keyset-paginated. Events are kept for `WEBHOOK_EVENT_RETENTION_DAYS` (default 7).",
+    operation_id: "listWebhookEvents",
+    parameters: [
+      subscription_id:
+        query(%OpenApiSpex.Schema{type: :string, format: :uuid}, "Filter by subscription"),
+      status: query(ref("WebhookEventStatus"), "Filter by status"),
+      type: query(%OpenApiSpex.Schema{type: :string}, "Filter by event type"),
+      limit: limit_param(),
+      cursor: query(%OpenApiSpex.Schema{type: :string}, "`meta.next_cursor` of the previous page")
+    ],
+    responses:
+      with_errors(%{200 => json_schema("A page", ref("WebhookEventList"))}, [400, 401, 403])
+  )
 
   def index(conn, params) do
     with {:ok, filters} <- filters(conn, params),
@@ -30,17 +55,39 @@ defmodule ConvergerWeb.WebhookEventController do
         events: page.entries,
         meta: %{next_cursor: page.next_cursor, has_more: page.has_more, limit: page.limit}
       )
-    else
-      {:error, :invalid_cursor} -> {:error, "Invalid cursor"}
-      {:error, _} = error -> error
     end
   end
+
+  operation(:show,
+    summary: "Get a webhook event",
+    operation_id: "getWebhookEvent",
+    parameters: [id: path_id("Webhook event id")],
+    responses:
+      with_errors(%{200 => json_schema("The event", ref("WebhookEventResponse"))}, [
+        401,
+        403,
+        404
+      ])
+  )
 
   def show(conn, %{"id" => id}) do
     with {:ok, event} <- fetch(conn, id) do
       render(conn, :show, event: event)
     end
   end
+
+  operation(:redeliver,
+    summary: "Redeliver a webhook event",
+    description:
+      "Sends a dead-lettered (`failed`) event again, with the same `event_id`. `409 not_failed` for any other status.",
+    operation_id: "redeliverWebhookEvent",
+    parameters: [webhook_event_id: path_id("Webhook event id")],
+    responses:
+      with_errors(
+        %{202 => json_schema("Sent again", ref("WebhookEventResponse"))},
+        [401, 403, 404, 409]
+      )
+  )
 
   def redeliver(conn, %{"webhook_event_id" => id}) do
     with {:ok, event} <- fetch(conn, id) do
@@ -51,9 +98,7 @@ defmodule ConvergerWeb.WebhookEventController do
           |> render(:show, event: event)
 
         {:error, :not_failed} ->
-          conn
-          |> put_status(:conflict)
-          |> json(%{error: "not_failed", detail: "Only failed events can be redelivered"})
+          {:error, APIError.new(:not_failed, "Only failed events can be redelivered")}
       end
     end
   end
@@ -99,13 +144,14 @@ defmodule ConvergerWeb.WebhookEventController do
   end
 
   defp require_api_key(conn, _opts) do
-    if get_req_header(conn, "x-api-key") == [] do
-      conn
-      |> ConvergerWeb.FallbackController.call({:error, :forbidden})
-      |> halt()
-    else
-      conn
-    end
+    if get_req_header(conn, "x-api-key") == [],
+      do:
+        APIError.send_error(
+          conn,
+          :forbidden,
+          "This endpoint requires the tenant API key (x-api-key)"
+        ),
+      else: conn
   end
 
   defp build_actor(conn), do: %{type: "tenant_api", id: conn.assigns.tenant.id}

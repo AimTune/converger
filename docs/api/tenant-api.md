@@ -934,9 +934,16 @@ How to send a template is described in [WhatsApp: templates](../channels/whatsap
 
 Tenant-level subscriptions to [platform events](../platform-webhooks.md) (activities, delivery status,
 conversation lifecycle, channel health and circuit breaker, opt-outs) and their event log. These endpoints require
-the tenant API key (`x-api-key`); a channel token gets `403`. Changes are audit-logged
-(`resource_type: "webhook_subscription"`, `"webhook_event"`). Errors follow the shared conventions: `422` with
-`{"errors": {...}}` for validation, `404` for an unknown id or one of another tenant.
+the tenant API key (`x-api-key`); a channel token gets `403 forbidden`. Changes are audit-logged
+(`resource_type: "webhook_subscription"`, `"webhook_event"`). Errors use the [error envelope](errors.md):
+`422 validation_failed` with the invalid fields in `details`, `404 not_found` for an unknown id or one of another
+tenant, `400 bad_request` for a missing `webhook_subscription` object or an invalid filter or cursor.
+
+The endpoints are in the [OpenAPI document](openapi.md) under the `Webhooks` tag (operations
+`listWebhookSubscriptions`, `createWebhookSubscription`, `getWebhookSubscription`, `updateWebhookSubscription`,
+`deleteWebhookSubscription`, `rotateWebhookSubscriptionSecret`, `listWebhookEventTypes`, `listWebhookEvents`,
+`getWebhookEvent`, `redeliverWebhookEvent`). The create and `rotate_secret` responses use the
+`WebhookSubscriptionWithSecret` schema; every other response uses `WebhookSubscription`, which has no `secret`.
 
 ### Subscription
 
@@ -973,8 +980,13 @@ curl -s -X POST "$CONVERGER/api/v1/webhook_subscriptions" \
 `201` with the subscription and its `secret` (`whsec_...`). Store the secret: it is not shown again. `url`
 (`http`/`https`, public targets only), `events` (catalog types or `"*"`, at least one), `secret` (optional, at least
 16 characters), `enabled`, `headers` (string values; `host`, `content-length`, `content-type`, hop-by-hop headers and
-`x-converger-*` are reserved) and `description` are accepted. `422` lists invalid fields, for example
-`{"errors": {"events": ["unknown event types: bogus.event"]}}`.
+`x-converger-*` are reserved) and `description` are accepted. `422` lists invalid fields in `details`:
+
+```json
+{ "error": { "code": "validation_failed", "message": "Validation failed", "details": { "events": ["unknown event types: bogus.event"] }, "request_id": "GBHDfGZ0bW5Sl2YAAAEB" } }
+```
+
+A body without the `webhook_subscription` object is `400 bad_request: webhook_subscription object is required`.
 
 ### List, get, update and delete
 
@@ -1019,7 +1031,8 @@ The tenant's events, newest first, keyset-paginated on `(inserted_at, id)`. Even
 }
 ```
 
-`400` for an invalid `status`, `subscription_id` or cursor. `GET /api/v1/webhook_events/:id` returns one event.
+`400 bad_request` for an invalid `status`, `subscription_id` or cursor. `GET /api/v1/webhook_events/:id` returns
+one event (`404 not_found` for an unknown id or one of another tenant).
 
 ### Redeliver an event
 
@@ -1028,11 +1041,11 @@ The tenant's events, newest first, keyset-paginated on `(inserted_at, id)`. Even
 Moves a `failed` event back to `pending` with `attempts` reset, enqueues a new delivery job and writes an audit
 entry (`action: "redeliver"`). The receiver gets the same `x-converger-delivery-id`.
 
-| Status | Body | When |
+| Status | Error (`code: message`) | Cause |
 | --- | --- | --- |
 | `202` | `{"data": {...}}` | Re-enqueued (the event may already show its new outcome) |
-| `404` | `{"errors": {"detail": "Not Found"}}` | Unknown event, or one of another tenant |
-| `409` | `{"error": "not_failed", "detail": "Only failed events can be redelivered"}` | The event is not `failed` |
+| `404` | `not_found` | Unknown event, or one of another tenant |
+| `409` | `not_failed: Only failed events can be redelivered` | The event is not `failed` |
 
 ## Related
 

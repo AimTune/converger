@@ -56,11 +56,11 @@ says so. Codes that also exist in [Converger Protocol v1](../protocol/v1.md#122-
 | `not_acceptable` | 406 | - | The `Accept` header excludes JSON |
 | `conflict` | 409 | - | The request conflicts with the current state of the resource |
 | `conversation_closed` | 409 | 4000 | The conversation is closed; reopen it before posting activities ([ADR-0017](../adr/0017-conversation-lifecycle-enforced-under-the-seq-lock.md)) |
-| `not_failed` | 409 | - | Replay of a delivery that is not `failed` |
+| `not_failed` | 409 | - | Replay of a delivery (`POST /api/v1/deliveries/:id/retry`) or redelivery of a platform webhook event (`POST /api/v1/webhook_events/:id/redeliver`) that is not `failed` |
 | `payload_too_large` | 413 | 3001 | A size limit was exceeded (upload size, raw inbound body) |
 | `unsupported_media_type` | 415 | - | The uploaded file's sniffed type is not allow-listed; `details.content_type` |
 | `invalid_message` | 422 | 1004 | The activity failed validation; `details` has the errors per field |
-| `validation_failed` | 422 | - | Another resource (a routing rule) failed validation; `details` has the errors per field |
+| `validation_failed` | 422 | - | Another resource (a routing rule, a platform webhook subscription) failed validation; `details` has the errors per field |
 | `unsupported_channel_type` | 422 | - | The channel type does not support the operation (pull outbox, message templates) |
 | `invalid_channel_config` | 422 | - | The channel configuration lacks what the operation needs (for example `waba_id` to list templates) |
 | `upgrade_required` | 426 | - | `/socket/converger/v1` only accepts WebSocket upgrades |

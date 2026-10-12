@@ -3,8 +3,10 @@ defmodule ConvergerWeb.WebhookControllerTest do
   use ConvergerWeb.ConnCase, async: false
 
   import Converger.TenantsFixtures
+  import Converger.ChannelsFixtures
   import Ecto.Query
 
+  alias Converger.Auth.Token
   alias Converger.{Repo, Webhooks}
   alias Converger.Webhooks.Event
 
@@ -81,14 +83,14 @@ defmodule ConvergerWeb.WebhookControllerTest do
       refute rotated == created["secret"]
 
       assert response(delete(api, ~p"/api/v1/webhook_subscriptions/#{id}"), 204)
-      assert json_response(get(api, ~p"/api/v1/webhook_subscriptions/#{id}"), 404)
+      assert_api_error(get(api, ~p"/api/v1/webhook_subscriptions/#{id}"), 404, "not_found")
     end
 
     test "invalid input is a 422", %{api: api} do
       conn =
         post(api, ~p"/api/v1/webhook_subscriptions", create_body(%{"events" => ["nope"]}))
 
-      assert %{"errors" => %{"events" => [_]}} = json_response(conn, 422)
+      assert %{"details" => %{"events" => [_]}} = assert_api_error(conn, 422, "validation_failed")
 
       conn =
         post(
@@ -97,7 +99,7 @@ defmodule ConvergerWeb.WebhookControllerTest do
           create_body(%{"url" => "http://private.test/"})
         )
 
-      assert %{"errors" => %{"url" => [_]}} = json_response(conn, 422)
+      assert %{"details" => %{"url" => [_]}} = assert_api_error(conn, 422, "validation_failed")
     end
 
     test "lists the event catalog", %{api: api} do
@@ -107,7 +109,25 @@ defmodule ConvergerWeb.WebhookControllerTest do
     end
 
     test "requires the API key", %{conn: conn} do
-      assert json_response(get(conn, ~p"/api/v1/webhook_subscriptions"), 401)
+      assert_api_error(get(conn, ~p"/api/v1/webhook_subscriptions"), 401, "unauthorized")
+    end
+
+    test "a channel token is not enough", %{conn: conn, tenant: tenant} do
+      {:ok, token, _} =
+        tenant |> channel_fixture() |> Token.generate_channel_token()
+
+      channel_conn = put_req_header(conn, "x-channel-token", token)
+
+      assert_api_error(get(channel_conn, ~p"/api/v1/webhook_subscriptions"), 403, "forbidden")
+      assert_api_error(get(channel_conn, ~p"/api/v1/webhook_events"), 403, "forbidden")
+    end
+
+    test "a body without webhook_subscription is a 400", %{api: api} do
+      assert_api_error(
+        post(api, ~p"/api/v1/webhook_subscriptions", %{"url" => "https://x.example.com"}),
+        400,
+        "bad_request"
+      )
     end
   end
 
@@ -124,19 +144,18 @@ defmodule ConvergerWeb.WebhookControllerTest do
       Webhooks.emit(other.id, "conversation.closed", %{conversation_id: Ecto.UUID.generate()})
       [their_event] = Repo.all(from e in Event, where: e.subscription_id == ^theirs.id)
 
-      assert json_response(get(api, ~p"/api/v1/webhook_subscriptions/#{theirs.id}"), 404)
-
-      assert json_response(
-               patch(api, ~p"/api/v1/webhook_subscriptions/#{theirs.id}", %{
-                 "webhook_subscription" => %{"enabled" => false}
-               }),
-               404
-             )
-
-      assert json_response(delete(api, ~p"/api/v1/webhook_subscriptions/#{theirs.id}"), 404)
-      assert json_response(get(api, ~p"/api/v1/webhook_events/#{their_event.id}"), 404)
-
-      assert json_response(post(api, ~p"/api/v1/webhook_events/#{their_event.id}/redeliver"), 404)
+      for conn <- [
+            get(api, ~p"/api/v1/webhook_subscriptions/#{theirs.id}"),
+            patch(api, ~p"/api/v1/webhook_subscriptions/#{theirs.id}", %{
+              "webhook_subscription" => %{"enabled" => false}
+            }),
+            delete(api, ~p"/api/v1/webhook_subscriptions/#{theirs.id}"),
+            post(api, ~p"/api/v1/webhook_subscriptions/#{theirs.id}/rotate_secret"),
+            get(api, ~p"/api/v1/webhook_events/#{their_event.id}"),
+            post(api, ~p"/api/v1/webhook_events/#{their_event.id}/redeliver")
+          ] do
+        assert_api_error(conn, 404, "not_found")
+      end
 
       assert %{"data" => []} = json_response(get(api, ~p"/api/v1/webhook_subscriptions"), 200)
       assert %{"data" => []} = json_response(get(api, ~p"/api/v1/webhook_events"), 200)
@@ -165,7 +184,7 @@ defmodule ConvergerWeb.WebhookControllerTest do
       assert %{"data" => []} =
                json_response(get(api, ~p"/api/v1/webhook_events?status=delivered"), 200)
 
-      assert json_response(get(api, ~p"/api/v1/webhook_events?status=bogus"), 400)
+      assert_api_error(get(api, ~p"/api/v1/webhook_events?status=bogus"), 400, "bad_request")
 
       assert %{"data" => %{"id" => id}} =
                json_response(get(api, ~p"/api/v1/webhook_events/#{event["id"]}"), 200)
@@ -179,8 +198,12 @@ defmodule ConvergerWeb.WebhookControllerTest do
       conn = post(api, ~p"/api/v1/webhook_events/#{id}/redeliver")
       assert %{"data" => %{"status" => "delivered", "attempts" => 1}} = json_response(conn, 202)
 
-      assert %{"error" => "not_failed"} =
-               json_response(post(api, ~p"/api/v1/webhook_events/#{id}/redeliver"), 409)
+      assert %{"message" => "Only failed events can be redelivered"} =
+               assert_api_error(
+                 post(api, ~p"/api/v1/webhook_events/#{id}/redeliver"),
+                 409,
+                 "not_failed"
+               )
     end
   end
 end

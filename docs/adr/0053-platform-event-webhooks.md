@@ -10,7 +10,7 @@ description: Tenant subscriptions to a fixed event catalog; events are emitted f
 | **Date** | 2026-10-12 |
 | **Issue** | [#49](https://github.com/AimTune/converger/issues/49) |
 | **Pull request** | [#143](https://github.com/AimTune/converger/pull/143) |
-| **Related** | [ADR-0001](0001-transactional-outbox-with-oban.md), [ADR-0012](0012-secrets-at-rest-and-audit-redaction.md), [ADR-0014](0014-webhook-ssrf-guard-and-outbound-signing.md), [ADR-0019](0019-per-channel-retry-policy-delivery-error-and-lifeline.md), [ADR-0028](0028-dead-letter-replay-in-place-through-oban.md), [ADR-0031](0031-per-channel-circuit-breaker-rate-limit-and-tier-queues.md), [ADR-0034](0034-monthly-partitioning-and-per-tenant-retention.md) |
+| **Related** | [ADR-0001](0001-transactional-outbox-with-oban.md), [ADR-0012](0012-secrets-at-rest-and-audit-redaction.md), [ADR-0014](0014-webhook-ssrf-guard-and-outbound-signing.md), [ADR-0019](0019-per-channel-retry-policy-delivery-error-and-lifeline.md), [ADR-0028](0028-dead-letter-replay-in-place-through-oban.md), [ADR-0031](0031-per-channel-circuit-breaker-rate-limit-and-tier-queues.md), [ADR-0034](0034-monthly-partitioning-and-per-tenant-retention.md), [ADR-0050](0050-openapi-spec-error-envelope-and-api-versioning.md) |
 
 ## Context and problem statement
 
@@ -134,7 +134,10 @@ transaction.
 encrypted at rest like channel secrets ([ADR-0012](0012-secrets-at-rest-and-audit-redaction.md)) and re-encrypted by
 `Release.reencrypt_secrets/0`. The API returns the secret only on create and `rotate_secret`, and header names only;
 audit entries redact the secret and every header value. The API requires the tenant API key, and the portal lets
-owners and admins change subscriptions.
+owners and admins change subscriptions. Errors use the API error envelope of
+[ADR-0050](0050-openapi-spec-error-envelope-and-api-versioning.md) (a redelivery of an event that is not `failed`
+is `409 not_failed`), and every endpoint is an OpenAPI operation (tag `Webhooks`) whose create and `rotate_secret`
+responses are the only ones with a schema that has `secret`.
 
 **Retention.** `webhook_events` rows older than `:webhook_event_days` (default 7, `WEBHOOK_EVENT_RETENTION_DAYS`) are
 deleted in batches by the daily `PruneWorker` (`Converger.Retention.prune/1`). The table is not partitioned: at a
@@ -175,8 +178,6 @@ removed.
 
 ### Follow-ups
 
-- [#45](https://github.com/AimTune/converger/issues/45): the standard error envelope and OpenAPI annotations for the
-  new controllers.
 - [#47](https://github.com/AimTune/converger/issues/47): SDK helpers to verify platform event signatures.
 - [#51](https://github.com/AimTune/converger/issues/51): the management API may expose subscriptions across tenants
   for operators.
@@ -195,7 +196,8 @@ removed.
   `Participants.set_opted_out/3`.
 - Migrations: `20261012300000_create_webhook_subscriptions_and_events` and
   `20261012300100_migrate_alert_webhook_url_to_subscriptions`.
-- API: `ConvergerWeb.WebhookSubscriptionController`, `ConvergerWeb.WebhookEventController`; UI:
+- API: `ConvergerWeb.WebhookSubscriptionController`, `ConvergerWeb.WebhookEventController` (OpenAPI schemas in
+  `ConvergerWeb.ApiSchemas`, `Webhook*`); UI:
   `ConvergerWeb.Live.WebhooksPage` behind `/portal/webhooks` and `/admin/webhooks`.
 - Retention: `Converger.Retention.prune/1` (`webhook_events`), `WEBHOOK_EVENT_RETENTION_DAYS`.
 

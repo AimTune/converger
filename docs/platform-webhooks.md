@@ -35,7 +35,9 @@ A subscription has:
 
 Manage subscriptions with the [tenant API](api/tenant-api.md#platform-event-webhooks), in the tenant portal
 (**Webhooks**, owners and admins; members and viewers can look) or in the admin panel (**Webhooks**, super admins
-and admins). Every change is audit-logged (`resource_type: "webhook_subscription"`).
+and admins). Every change is audit-logged (`resource_type: "webhook_subscription"`). The endpoints are in the
+[OpenAPI document](api/openapi.md) (tag `Webhooks`) and answer errors with the [error envelope](api/errors.md), for
+example `422 validation_failed` with the invalid fields in `details`.
 
 ## Event catalog
 
@@ -185,7 +187,7 @@ capped at one hour). A receiver's `Retry-After` overrides the backoff for the ne
 A dead-lettered event stays in the log with its last error and HTTP status. **Redeliver** it from the portal or
 admin page, or with `POST /api/v1/webhook_events/:id/redeliver`: it goes back to `pending` with `attempts` reset and a
 new job, keeps its `x-converger-delivery-id`, and the action is audit-logged (`action: "redeliver"`). Only `failed`
-events can be redelivered (`409` otherwise).
+events can be redelivered; any other status is `409` with the code `not_failed` in the [error envelope](api/errors.md).
 
 Telemetry: `[:converger, :webhooks, :emitted]` (`count`), `[:converger, :webhooks, :delivered]`,
 `[:converger, :webhooks, :failed]` (a retried attempt) and `[:converger, :webhooks, :dead_lettered]`, with

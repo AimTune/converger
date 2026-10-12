@@ -144,6 +144,95 @@ defmodule ConvergerWeb.ApiContractTest do
       api(tenant) |> get(~p"/api/v1/channels/#{channel.id}/templates") |> check(422)
     end
 
+    test "platform event webhooks", %{tenant: tenant} do
+      previous = Application.get_env(:converger, :platform_webhook_req_options)
+
+      on_exit(fn ->
+        if previous,
+          do: Application.put_env(:converger, :platform_webhook_req_options, previous),
+          else: Application.delete_env(:converger, :platform_webhook_req_options)
+      end)
+
+      Application.put_env(:converger, :platform_webhook_req_options,
+        plug: fn conn -> Plug.Conn.send_resp(conn, 400, "nope") end
+      )
+
+      api(tenant) |> get(~p"/api/v1/webhook_event_types") |> check(200)
+
+      subscription =
+        api(tenant)
+        |> post(~p"/api/v1/webhook_subscriptions", %{
+          "webhook_subscription" => %{
+            "url" => "https://hooks.example.com/events",
+            "events" => ["conversation.closed"],
+            "headers" => %{"authorization" => "Bearer abc"}
+          }
+        })
+        |> check(201)
+        |> json_response(201)
+        |> get_in(["data", "id"])
+
+      api(tenant) |> get(~p"/api/v1/webhook_subscriptions") |> check(200)
+      api(tenant) |> get(~p"/api/v1/webhook_subscriptions/#{subscription}") |> check(200)
+
+      api(tenant)
+      |> patch(~p"/api/v1/webhook_subscriptions/#{subscription}", %{
+        "webhook_subscription" => %{"description" => "CRM"}
+      })
+      |> check(200)
+
+      api(tenant)
+      |> put(~p"/api/v1/webhook_subscriptions/#{subscription}", %{
+        "webhook_subscription" => %{"enabled" => true}
+      })
+      |> check(200)
+
+      api(tenant)
+      |> post(~p"/api/v1/webhook_subscriptions/#{subscription}/rotate_secret")
+      |> check(200)
+
+      api(tenant)
+      |> post(~p"/api/v1/webhook_subscriptions", %{
+        "webhook_subscription" => %{"url" => "https://hooks.example.com/x", "events" => ["no"]}
+      })
+      |> check(422)
+
+      api(tenant) |> post(~p"/api/v1/webhook_subscriptions", %{}) |> check(400)
+
+      api(tenant)
+      |> get(~p"/api/v1/webhook_subscriptions/#{Ecto.UUID.generate()}")
+      |> check(404)
+
+      Converger.Webhooks.emit(tenant.id, "conversation.closed", %{conversation_id: "c-1"})
+
+      event =
+        api(tenant)
+        |> get(~p"/api/v1/webhook_events?status=failed&subscription_id=#{subscription}")
+        |> check(200)
+        |> json_response(200)
+        |> get_in(["data", Access.at(0), "id"])
+
+      api(tenant) |> get(~p"/api/v1/webhook_events?cursor=nope") |> check(400)
+      api(tenant) |> get(~p"/api/v1/webhook_events/#{event}") |> check(200)
+      api(tenant) |> get(~p"/api/v1/webhook_events/#{Ecto.UUID.generate()}") |> check(404)
+
+      Application.put_env(:converger, :platform_webhook_req_options,
+        plug: fn conn -> Plug.Conn.send_resp(conn, 200, "ok") end
+      )
+
+      api(tenant) |> post(~p"/api/v1/webhook_events/#{event}/redeliver") |> check(202)
+      api(tenant) |> post(~p"/api/v1/webhook_events/#{event}/redeliver") |> check(409)
+
+      {:ok, channel_token, _} = Token.generate_channel_token(channel_fixture(tenant))
+
+      build_conn()
+      |> put_req_header("x-channel-token", channel_token)
+      |> get(~p"/api/v1/webhook_events")
+      |> check(403)
+
+      api(tenant) |> delete(~p"/api/v1/webhook_subscriptions/#{subscription}") |> check(204)
+    end
+
     test "pull outbox", %{tenant: tenant} do
       {:ok, channel} =
         Channels.create_channel(%{

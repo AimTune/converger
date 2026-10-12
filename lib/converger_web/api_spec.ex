@@ -43,6 +43,7 @@ defmodule ConvergerWeb.ApiSpec do
     {"Routing rules", "Tenant API: routing rules and dry-run"},
     {"Deliveries", "Tenant API: dead-letter inspection and replay"},
     {"Channels", "Tenant API: delivery state, templates, pull outbox"},
+    {"Webhooks", "Tenant API: platform event webhook subscriptions, event log and redelivery"},
     {"Inbound", "Provider webhooks"},
     {"Client: Tokens", "Client API: Converger tokens"},
     {"Client: Conversations", "Client API: conversations"},
