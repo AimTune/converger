@@ -15,7 +15,7 @@ land in one pull request. The design is recorded in
 | Go 1.22+ | `github.com/AimTune/converger/packages/client-go` | [`packages/client-go`](https://github.com/AimTune/converger/tree/main/packages/client-go) | [Go SDK](go.md) |
 | Elixir 1.15+ | `converger_client` on Hex | [`packages/client-elixir`](https://github.com/AimTune/converger/tree/main/packages/client-elixir) | [Elixir client](elixir.md) |
 
-Browser, mobile and Node front ends use the TypeScript SDK ([#46](https://github.com/AimTune/converger/issues/46)).
+Browser, mobile and Node front ends use the [TypeScript SDK](typescript.md) ([#46](https://github.com/AimTune/converger/issues/46)).
 
 ## What every SDK covers
 

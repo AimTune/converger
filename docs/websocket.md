@@ -705,11 +705,9 @@ const socket = new Socket(url, {
 
 The `phoenix` client reconnects automatically with backoff and rejoins its channels; handle a refused connection (inactive channel, expired token) by fetching a new token. Sockets connected with a channel-level token that has neither `user_id` nor `conversation_id` have no socket id and cannot be disconnected individually or by channel, so always issue tokens with `user.id`.
 
-## The converger_js demo
+## TypeScript SDK
 
-The repository contains [`converger_js/`](https://github.com/AimTune/converger/tree/main/converger_js), a minimal client for the Converger API socket, not a published SDK:
-
-- `src/converger-client.js` exports `ConvergerClient` with `connect(token)`, `joinConversation(conversationId, {watermark})` (joins `converger:conversation:<id>`, forwards each activity of every `activitySet` to the `onActivity(callback)` handler, and rejoins with the latest watermark) and `sendMessage(text, {clientId})` (pushes `postActivity` and returns a promise of `{id, seq, watermark}`; a random `clientId` by default).
-- `index.html` is a demo page: paste a user token from `POST /api/v1/converger/tokens/generate`, it creates a conversation (`POST /api/v1/converger/conversations`) and connects to `ws://localhost:4000/socket/converger`. It loads `phoenix` from jsDelivr through an import map; `package.json` depends on `phoenix` `^1.8.15`.
-
-Serve the folder on port 5500 (for example with a "Live Server" editor extension): the default `cors_origins` in `config/config.exs` allow `http://127.0.0.1:5500` and `http://localhost:5500`. An SDK for Converger Protocol v1 will follow the protocol specification.
+The repository's TypeScript SDK, [`@converger/client`](sdk/typescript.md) (`packages/client-ts`, #46), implements
+everything on this page: reconnects with jitter that honour `retryAfterMs`, watermark resume, acked sends with a
+persistent outbox, and token refresh. It uses the native v1 endpoint by default, and the `converger:` Phoenix topic with
+`phoenixTransport()`. It replaces the earlier `converger_js` demo, which was removed.

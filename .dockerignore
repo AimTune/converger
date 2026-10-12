@@ -15,3 +15,9 @@ doc
 .credo.exs
 .env
 .env.*
+
+
+# Node workspace (not part of the release image).
+packages
+examples
+pnpm-lock.yaml

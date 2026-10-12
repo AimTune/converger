@@ -37,7 +37,7 @@ The full walkthrough is in [Getting started](./getting-started.md). In short:
   something, a **Deployment notes** or **Breaking changes** section (new required variables, migrations that need
   a maintenance window, behavior changes for integrators). Those sections feed
   [Upgrades](operations/upgrades.md).
-- Dependency updates arrive from Dependabot (`mix`, `converger_js` npm, GitHub Actions, Docker; weekly).
+- Dependency updates arrive from Dependabot (`mix`, npm for the pnpm workspace and `website`, GitHub Actions, Docker; weekly).
 
 ## Checks
 
