@@ -13,7 +13,7 @@
 //     "node_kill", set with SCENARIO), and sockets reconnect to the next node.
 //
 // Every subscriber must end with every seq of its conversation exactly once
-// (lost_acked_messages, seq_gaps, seq_duplicates); ws_reconnect_ms is the
+// (lost_acked_messages, seq_duplicates); ws_reconnect_ms is the
 // close -> welcome time.
 //
 // Environment: MODE (storm), STORM_AT_S (15), STORM_EVERY_S (15), plus the
@@ -43,7 +43,6 @@ export const options = {
   },
   thresholds: {
     lost_acked_messages: ["count<1"],
-    seq_gaps: ["count<1"],
     seq_duplicates: ["count<1"],
     subscribers_unverified: ["count<1"],
     messages_never_acked: ["count<1"],

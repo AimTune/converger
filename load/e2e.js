@@ -3,8 +3,8 @@
 // One VU per conversation. Each VU opens SUBSCRIBERS Protocol v1 sockets on
 // its conversation, then POSTs RATE activities per second over the tenant REST
 // API for DURATION_S seconds. Every subscriber measures send -> text frame
-// latency (e2e_latency_ms) and checks that it saw every seq up to the head
-// exactly once (lost_acked_messages, seq_gaps, seq_duplicates).
+// latency (e2e_latency_ms) and checks that it ends up with every seq up to the
+// head (lost_acked_messages), each delivered once (seq_duplicates).
 //
 //   k6 run -e SETUP_JSON=load/.run/out/setup.json -e APP_URLS=http://localhost:4000 load/e2e.js
 //
@@ -33,7 +33,6 @@ export const options = {
   thresholds: {
     e2e_latency_ms: [`p(95)<${num("E2E_P95_MS", 250)}`],
     lost_acked_messages: ["count<1"],
-    seq_gaps: ["count<1"],
     seq_duplicates: ["count<1"],
     messages_never_acked: ["count<1"],
     "http_req_duration{name:POST /activities}": [`p(95)<${num("REST_P95_MS", 1000)}`],

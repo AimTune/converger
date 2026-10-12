@@ -73,9 +73,11 @@ Details of the decision:
   three outbound channels), `idle` (10 000 idle sockets), `reconnect_storm` (every socket drops and resumes at
   once), `rolling_restart` (each node restarted with SIGTERM under load), `node_kill` (one node SIGKILLed under
   load). Clients use the native Protocol v1 endpoint, the recommended one.
-- **Loss detection by `seq`.** Every subscriber socket is read-only and must see every `seq` of its conversation
-  exactly once and in order, up to the head it learns from a final `ping`/`heartbeat`. A gap, a duplicate or a
-  head above the last `seq` seen is a lost acked message. This is exact because `seq` is gap-free per conversation
+- **Loss detection by `seq`.** Every subscriber socket is read-only and must end with every `seq` of its conversation
+  up to the head it learns from a final `ping`/`heartbeat`. Everything above its last contiguous `seq` is a lost
+  acked message, and a frame repeated outside a resync is a duplicate. Like a real client, it recovers holes the
+  server reports it could not replay under database pressure (`replay_unavailable`, ADR-0044) with `sync`; those
+  are reported, not counted as loss. This is exact because `seq` is gap-free per conversation
   ([ADR-0006](0006-per-conversation-seq-and-opaque-watermarks.md)) and the server already fills gaps and drops
   duplicates per connection, so a correct server shows zero. Senders retry with the same idempotency key until
   acked, as the chaos harness does, so restarts do not count as loss. For webhook deliveries, the harness compares

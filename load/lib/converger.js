@@ -32,9 +32,11 @@ export const metrics = {
   connectErrors: new Counter("ws_connect_errors"),
   framesReceived: new Counter("frames_received"),
   replayed: new Counter("frames_replayed"),
-  // Zero-loss accounting. Each subscriber must see every seq of its
-  // conversation exactly once, in order, up to the head.
-  gaps: new Counter("seq_gaps"),
+  // Zero-loss accounting. Each subscriber must end up with every seq of its
+  // conversation up to the head, each delivered once outside of resyncs.
+  // Holes it saw and recovered with `sync` (server could not replay, #35).
+  gapsResynced: new Counter("seq_gaps_resynced"),
+  replayUnavailable: new Counter("replay_unavailable"),
   duplicates: new Counter("seq_duplicates"),
   lost: new Counter("lost_acked_messages"),
   unverified: new Counter("subscribers_unverified"),
@@ -83,6 +85,13 @@ export class Subscriber {
     this.everConnected = false;
     this.startedAt = null;
     this.failures = 0; // consecutive failed connects, for the backoff
+    this.maxSeen = 0; // highest seq received
+    this.ahead = new Set(); // seqs received beyond a hole
+    // A sync or resume replays everything after our position; repeats of seqs up
+    // to the highest one seen when it was sent are expected, not duplicates.
+    this.resyncUpTo = 0;
+    this.syncTimer = null;
+    this.pendingReplay = false; // replay_unavailable: sync even without a hole
   }
 
   start() {
@@ -97,6 +106,7 @@ export class Subscriber {
     this.welcomed = false;
 
     ws.onopen = () => {
+      this.resyncUpTo = Math.max(this.resyncUpTo, this.maxSeen);
       const hello = { type: "hello", protocol: "converger/1" };
       if (this.lastSeq > 0) hello.watermark = this.lastSeq;
       ws.send(JSON.stringify(hello));
@@ -168,47 +178,109 @@ export class Subscriber {
         if (frame.nonce === "final" && this.pending) this.pending(frame.headSeq);
         return;
 
+      case "error": {
+        // Under database pressure (#35) the server skips the replay or gap
+        // fill and says so; the client syncs again later.
+        const data = frame.data || {};
+        if (data.code === "replay_unavailable") {
+          metrics.replayUnavailable.add(1);
+          this.scheduleSync(data.retryAfterMs || (data.details && data.details.retryAfterMs) || 1000);
+        }
+        return;
+      }
+
       case "replayTruncated":
         // Never expected at benchmark sizes; anything missing shows up as loss.
         return;
 
       default:
         if (typeof frame.seq !== "number") return; // transient frames
-        metrics.framesReceived.add(1);
-        if (frame.seq <= this.lastSeq) {
-          metrics.duplicates.add(1);
-          return;
-        }
-        if (frame.seq > this.lastSeq + 1) metrics.gaps.add(frame.seq - this.lastSeq - 1);
-        this.lastSeq = frame.seq;
-
-        if (frame.seq <= this.headAtWelcome) {
-          metrics.replayed.add(1);
-        } else if (this.measureLatency) {
-          const at = sentAt(frame.data && frame.data.text);
-          if (at !== null) metrics.e2e.add(Date.now() - at);
-        }
+        this.onPersistent(frame);
     }
   }
 
-  // Ask for the conversation head and record everything below it that this
-  // subscriber never saw. Resolves once verified (or after timeoutMs).
+  // Persistent frames. `lastSeq` is the highest seq up to which everything was
+  // received; frames beyond a hole wait in `ahead` until a sync fills it.
+  onPersistent(frame) {
+    const seq = frame.seq;
+    metrics.framesReceived.add(1);
+    if (seq <= this.lastSeq || this.ahead.has(seq)) {
+      // Frames we already have are expected while a sync replays; otherwise
+      // the server delivered a frame twice.
+      if (seq > this.resyncUpTo) metrics.duplicates.add(1);
+      return;
+    }
+
+    // Live frames are new highs; anything else is replay or gap fill.
+    const live = seq > this.maxSeen && seq > this.headAtWelcome;
+    this.maxSeen = Math.max(this.maxSeen, seq);
+    if (!live) metrics.replayed.add(1);
+    else if (this.measureLatency) {
+      const at = sentAt(frame.data && frame.data.text);
+      if (at !== null) metrics.e2e.add(Date.now() - at);
+    }
+
+    if (seq === this.lastSeq + 1) {
+      this.lastSeq = seq;
+      while (this.ahead.delete(this.lastSeq + 1)) this.lastSeq += 1;
+    } else {
+      // A hole: the server normally fills it before pushing; if it could not
+      // (replay_unavailable), ask again from the last contiguous seq.
+      if (this.ahead.size === 0) metrics.gapsResynced.add(1);
+      this.ahead.add(seq);
+      this.scheduleSync(1000);
+    }
+  }
+
+  sync() {
+    this.resyncUpTo = Math.max(this.resyncUpTo, this.maxSeen);
+    this.send({ type: "sync", watermark: this.lastSeq });
+  }
+
+  scheduleSync(afterMs) {
+    if (this.syncTimer) return;
+    this.syncTimer = setTimeout(() => {
+      this.syncTimer = null;
+      if (this.stopped) return;
+      if (this.ahead.size === 0 && !this.pendingReplay) return;
+      this.pendingReplay = false;
+      this.sync();
+    }, afterMs);
+    if (this.ahead.size === 0) this.pendingReplay = true;
+  }
+
+  // Ask for the conversation head, sync until everything below it arrived (or
+  // timeoutMs passes) and record what never did as lost.
   finish(timeoutMs = 30_000) {
     return new Promise((resolve) => {
+      const deadline = Date.now() + timeoutMs;
+      let head = null;
       let timer = null;
-      const done = (headSeq) => {
+      const done = () => {
         if (this.pending === null) return;
         this.pending = null;
         // A pending timer keeps the VU's event loop (and iteration) alive.
         clearTimeout(timer);
-        if (headSeq === null) metrics.unverified.add(1);
-        else if (headSeq > this.lastSeq) metrics.lost.add(headSeq - this.lastSeq);
+        clearTimeout(this.syncTimer);
+        if (head === null) metrics.unverified.add(1);
+        else if (head > this.lastSeq) metrics.lost.add(head - this.lastSeq);
         this.stop();
         resolve();
       };
-      this.pending = done;
-      timer = setTimeout(() => done(null), timeoutMs);
-      this.send({ type: "ping", nonce: "final" });
+      const ask = () => {
+        if (Date.now() >= deadline) return done();
+        this.send({ type: "ping", nonce: "final" });
+        timer = setTimeout(ask, 2000);
+      };
+      this.pending = (headSeq) => {
+        head = headSeq;
+        clearTimeout(timer);
+        if (this.lastSeq >= headSeq || Date.now() >= deadline) return done();
+        // Behind the head: sync from the last contiguous seq and ask again.
+        this.sync();
+        timer = setTimeout(ask, 2000);
+      };
+      ask();
     });
   }
 

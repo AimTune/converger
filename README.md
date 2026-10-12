@@ -60,8 +60,8 @@ records the hardware it ran on. Latest published run:
 | Node ready again after SIGKILL | 20 s | 29 s |
 | **Lost acknowledged messages** (every scenario, including restarts and kills) | **0** | **0** |
 
-The 250 ms p95 target is not met yet. Under bursts the database pool saturates and requests fail with 500
-(tracked in [#35](https://github.com/AimTune/converger/issues/35)). A nightly CI job runs the same scenarios and
+The 250 ms p95 target is not met yet. In that run the database pool saturated under bursts and requests failed with 500.
+Since [#35](https://github.com/AimTune/converger/issues/35) they get 503 with `Retry-After`; the after-#35 numbers are not published yet. A nightly CI job runs the same scenarios and
 fails on any lost message or a p95 regression of more than 15 %. For the write path alone, run
 `mix converger.loadtest`.
 

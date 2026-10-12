@@ -104,6 +104,17 @@ function render(runs, { baseline = [], threshold = 0.15, title } = {}) {
       if (baseline.length) row.push("must be 0");
     }
     out.push(`| ${row.join(" | ")} |`);
+    // Holes the server could not replay under database pressure (#35) and
+    // the client recovered with `sync`: not lost, but worth seeing.
+    if (runs.some((r) => get(r.scenarios[scenario], "gaps_resynced"))) {
+      const info = [scenario, "holes recovered with `sync` / `replay_unavailable` errors"];
+      for (const r of runs) {
+        const s = r.scenarios[scenario];
+        info.push(`${fmt(get(s, "gaps_resynced"))} / ${fmt(get(s, "replay_unavailable"))}`);
+        if (baseline.length) info.push("–");
+      }
+      out.push(`| ${info.join(" | ")} |`);
+    }
   }
   out.push("");
 

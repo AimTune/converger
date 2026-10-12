@@ -135,7 +135,6 @@ const check = (name, ok, detail, warning = false) => checks.push({ name, ok, det
 // comparison in report.js is what gates performance.
 const CORRECTNESS = new Set([
   "lost_acked_messages",
-  "seq_gaps",
   "seq_duplicates",
   "messages_never_acked",
   "subscribers_unverified",
@@ -175,7 +174,9 @@ function measured(scenario, k6) {
 
 function lossOf(k6) {
   return {
-    lost_acked_messages: count(k6, "lost_acked_messages") + count(k6, "seq_gaps"),
+    lost_acked_messages: count(k6, "lost_acked_messages"),
+    gaps_resynced: count(k6, "seq_gaps_resynced"),
+    replay_unavailable: count(k6, "replay_unavailable"),
     seq_duplicates: count(k6, "seq_duplicates"),
     never_acked: count(k6, "messages_never_acked"),
     unverified_subscribers: count(k6, "subscribers_unverified"),

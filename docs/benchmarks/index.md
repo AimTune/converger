@@ -23,10 +23,12 @@ artifacts. Pages here are the runs worth keeping: a new baseline, a release, or 
 :::note Planned
 The backbone dimension has one value today, `native` (Phoenix.PubSub over Erlang distribution plus Oban on
 Postgres). Kafka, NATS and RabbitMQ columns come with [#66](https://github.com/AimTune/converger/issues/66). The
-full matrix is re-run and published after the scale work
-([#29](https://github.com/AimTune/converger/issues/29), [#30](https://github.com/AimTune/converger/issues/30),
-[#31](https://github.com/AimTune/converger/issues/31), [#35](https://github.com/AimTune/converger/issues/35)) with a
-before/after comparison against the first run.
+scale work ([#29](https://github.com/AimTune/converger/issues/29), [#30](https://github.com/AimTune/converger/issues/30),
+[#31](https://github.com/AimTune/converger/issues/31), [#35](https://github.com/AimTune/converger/issues/35)) has merged, and the first published run predates #35.
+The after-#35 run with before/after columns is still to be published: the first attempt shared the machine with
+unrelated workloads, so its numbers were not comparable. The harness itself was checked against #35: under
+database pressure the server answers `replay_unavailable`, the subscribers recover every hole with `sync`, and no
+acknowledged message is lost.
 :::
 
 ## Scenarios
@@ -63,18 +65,25 @@ with the same idempotency key until it is acknowledged, so a restart delays mess
 Each subscriber socket only reads. Because `seq` is allocated gap-free per conversation
 ([ADR-0006](../adr/0006-per-conversation-seq-and-opaque-watermarks.md)), and the server fills gaps and drops
 duplicates on every connection ([Protocol v1, section 6.3](../protocol/v1.md#63-gap-detection)), a correct server
-delivers every `seq` exactly once and in order. When the sending stops, each subscriber sends a `ping` and reads the
-conversation head (`headSeq`) from the `heartbeat`. The harness counts:
+delivers every `seq` exactly once and in order.
 
-- `seq_gaps`: a frame arrived whose `seq` is more than one above the last one seen;
-- `seq_duplicates`: a frame arrived with a `seq` already seen;
-- `lost_acked_messages`: `headSeq` minus the last `seq` seen, plus the gaps;
-- `subscribers_unverified`: subscribers that could not reach the head within 60 s.
+Under database pressure the server may be unable to replay or fill a gap. It then keeps the connection, sends
+`error` `replay_unavailable` and continues live ([Database pools and pressure](../operations/database.md#under-pressure)).
+The subscriber does what a client must do: it keeps the last **contiguous** `seq`, holds frames received beyond a
+hole, and sends `sync` from the contiguous position after `retryAfterMs` (or one second after it notices a hole).
+When the sending stops, each subscriber sends a `ping` and reads the conversation head (`headSeq`) from the
+`heartbeat`. While it is behind the head it syncs and asks again, for up to 60 s. The harness counts:
 
-Reconnects resume with `hello.watermark` set to the last `seq`, so a socket that was disconnected for a restart
-must still end with every message. For webhook deliveries, the harness compares the inbound messages accepted (2xx)
-with the activities stored in Postgres and with what the mock provider received on each target channel. It also
-checks that every REST activity reached the fan-out channel's outbound webhook.
+- `lost_acked_messages`: `headSeq` minus the last contiguous `seq` at the end, so every message that never arrived;
+- `seq_duplicates`: a frame delivered again outside of a `sync` or resume (where repeats are expected);
+- `subscribers_unverified`: subscribers that could not reach the server for the final check;
+- for information, `seq_gaps_resynced` (holes the client recovered with `sync`) and `replay_unavailable` (the
+  server's errors). They show the server under pressure, not loss.
+
+Reconnects resume with `hello.watermark` set to the last contiguous `seq`, so a socket that was disconnected for a
+restart must still end with every message. For webhook deliveries, the harness compares the inbound messages
+accepted (2xx) with the activities stored in Postgres and with what the mock provider received on each target
+channel. It also checks that every REST activity reached the fan-out channel's outbound webhook.
 
 ## Running it
 
@@ -145,13 +154,13 @@ exits with 99 when a threshold is crossed. Each script lists its variables at th
 
 The thresholds are of two kinds:
 
-- **Correctness** (`lost_acked_messages`, `seq_gaps`, `seq_duplicates`, `messages_never_acked`,
+- **Correctness** (`lost_acked_messages`, `seq_duplicates`, `messages_never_acked`,
   `subscribers_unverified`, and for `idle`, `ws_connected` and `ws_unexpected_closes`): a miss fails the run.
 - **Performance targets** from the PRD and the scenario sizes: REST → WebSocket p95 below `E2E_P95_MS` (250),
   REST POST p95 below `REST_P95_MS` (1000), inbound POST p95 below 500 ms, no burst iteration dropped and no inbound
   request rejected. A miss is reported as "⚠️ performance targets" in the report, but does not fail the run. The
   [baseline comparison](#nightly-job-and-regression-gate) is what gates performance, so the nightly job stays green
-  while a known gap (such as [#35](https://github.com/AimTune/converger/issues/35)) is open and still catches
+  while a known gap (such as the 250 ms target today) is open and still catches
   regressions.
 
 ### The mock provider
