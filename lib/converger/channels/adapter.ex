@@ -426,7 +426,9 @@ defmodule Converger.Channels.Adapter do
     Converger.Channels.Adapters.Telegram,
     Converger.Channels.Adapters.Email,
     Converger.Channels.Adapters.SmsTwilio,
-    Converger.Channels.Adapters.SmsVonage
+    Converger.Channels.Adapters.SmsVonage,
+    Converger.Channels.Adapters.Messenger,
+    Converger.Channels.Adapters.Instagram
   ]
 
   @required_functions [type: 0, supported_modes: 0, deliver_activity: 2, parse_inbound: 2]
