@@ -39,6 +39,7 @@ jobs:
     name: Typecheck, unit tests, build (Node ${{ matrix.node }})
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         node: ["22", "24"]
     steps:
@@ -70,7 +71,7 @@ jobs:
 
       - name: API docs (typedoc)
         if: matrix.node == '22'
-        run: pnpm --filter @converger/client docs
+        run: pnpm --filter @converger/client run docs
 
   e2e:
     name: e2e against mix phx.server

@@ -147,7 +147,7 @@ pnpm install
 pnpm --filter @converger/client typecheck
 pnpm --filter @converger/client test       # unit tests against a mocked server
 pnpm --filter @converger/client build      # dist/ (ESM + CJS + .d.ts)
-pnpm --filter @converger/client docs       # typedoc -> docs-api/
+pnpm --filter @converger/client run docs       # typedoc -> docs-api/
 ```
 
 ### Running the e2e test

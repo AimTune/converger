@@ -173,7 +173,7 @@ Protocol errors are `ConvergerProtocolError` (`code`, `number`, `retryable`, `re
 The protocol frame types are hand-written from this specification and the JSON Schemas in `priv/protocol/v1/`. The
 REST types live in `src/rest/openapi.ts` in the shape `openapi-typescript` generates. When the OpenAPI document
 `priv/static/openapi.json` exists (#45), `pnpm --filter @converger/client generate:types` regenerates that file, and the
-public names in `src/rest/types.ts` stay the same. API reference: `pnpm --filter @converger/client docs` (typedoc).
+public names in `src/rest/types.ts` stay the same. API reference: `pnpm --filter @converger/client run docs` (typedoc).
 
 ## Tests and CI
 
