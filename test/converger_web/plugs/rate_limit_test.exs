@@ -27,7 +27,9 @@ defmodule ConvergerWeb.Plugs.RateLimitTest do
     conn2 = RateLimit.call(conn, opts)
     assert conn2.halted
     assert conn2.status == 429
-    assert json_response(conn2, 429)["error"] =~ "Too many requests"
+    error = assert_api_error(conn2, 429, "rate_limited")
+    assert error["message"] =~ "Too many requests"
+    assert is_integer(error["details"]["retry_after_ms"])
   end
 
   test "scopes by tenant if requested", %{conn: conn, key_prefix: prefix} do

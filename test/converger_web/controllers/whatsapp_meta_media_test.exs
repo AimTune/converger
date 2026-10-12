@@ -490,16 +490,16 @@ defmodule ConvergerWeb.WhatsAppMetaMediaTest do
       Templates.invalidate(channel.id)
       stub_graph(fn conn, _ -> Plug.Conn.send_resp(conn, 401, "{}") end)
 
-      assert %{"error" => "WhatsApp API returned 401" <> _} =
-               json_response(templates(tenant, channel), 502)
+      assert %{"message" => "WhatsApp API returned 401" <> _} =
+               assert_api_error(templates(tenant, channel), 502, "upstream_unavailable")
     end
 
     test "a channel without waba_id cannot list templates", %{tenant: tenant, channel: channel} do
       {:ok, channel} =
         Channels.update_channel(channel, %{config: Map.delete(channel.config, "waba_id")})
 
-      assert %{"error" => "whatsapp_meta config 'waba_id'" <> _} =
-               json_response(templates(tenant, channel), 422)
+      assert %{"message" => "whatsapp_meta config 'waba_id'" <> _} =
+               assert_api_error(templates(tenant, channel), 422, "invalid_channel_config")
     end
 
     test "a channel type without templates is a 422", %{tenant: tenant} do
@@ -512,8 +512,8 @@ defmodule ConvergerWeb.WhatsAppMetaMediaTest do
           tenant_id: tenant.id
         })
 
-      assert %{"error" => "Channel type echo has no message templates"} =
-               json_response(templates(tenant, webhook), 422)
+      assert %{"message" => "Channel type echo has no message templates"} =
+               assert_api_error(templates(tenant, webhook), 422, "unsupported_channel_type")
     end
 
     test "another tenant's channel is a 404", %{channel: channel} do

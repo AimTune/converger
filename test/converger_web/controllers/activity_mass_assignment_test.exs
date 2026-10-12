@@ -71,13 +71,13 @@ defmodule ConvergerWeb.ActivityMassAssignmentTest do
   describe "limits return 422 with field-level errors" do
     test "unknown type", %{conn: conn, conversation: conversation} do
       conn = create(conn, conversation, %{"text" => "hi", "type" => "rm -rf"})
-      assert %{"type" => [_]} = json_response(conn, 422)["errors"]
+      assert %{"type" => [_]} = assert_api_error(conn, 422, "invalid_message")["details"]
     end
 
     test "text too long", %{conn: conn, conversation: conversation} do
       text = String.duplicate("a", Activity.limits()[:max_text_bytes] + 1)
       conn = create(conn, conversation, %{"text" => text})
-      assert %{"text" => [_]} = json_response(conn, 422)["errors"]
+      assert %{"text" => [_]} = assert_api_error(conn, 422, "invalid_message")["details"]
     end
 
     test "too many attachments", %{conn: conn, conversation: conversation} do
@@ -86,7 +86,9 @@ defmodule ConvergerWeb.ActivityMassAssignmentTest do
             do: %{"contentType" => "image/png", "contentUrl" => "https://x/#{i}.png"}
 
       conn = create(conn, conversation, %{"text" => "hi", "attachments" => attachments})
-      assert %{"attachments" => [_ | _]} = json_response(conn, 422)["errors"]
+
+      assert %{"attachments" => [_ | _]} =
+               assert_api_error(conn, 422, "invalid_message")["details"]
     end
 
     test "attachment too large", %{conn: conn, conversation: conversation} do
@@ -98,14 +100,16 @@ defmodule ConvergerWeb.ActivityMassAssignmentTest do
           "attachments" => [%{"contentType" => "text/plain", "content" => big}]
         })
 
-      assert %{"attachments" => [message]} = json_response(conn, 422)["errors"]
+      assert %{"attachments" => [message]} =
+               assert_api_error(conn, 422, "invalid_message")["details"]
+
       assert message =~ "attachment 0"
     end
 
     test "metadata too large", %{conn: conn, conversation: conversation} do
       metadata = %{"blob" => String.duplicate("x", Activity.limits()[:max_metadata_bytes])}
       conn = create(conn, conversation, %{"text" => "hi", "metadata" => metadata})
-      assert %{"metadata" => [_]} = json_response(conn, 422)["errors"]
+      assert %{"metadata" => [_]} = assert_api_error(conn, 422, "invalid_message")["details"]
     end
 
     test "limits are configurable", %{conn: conn, conversation: conversation} do
@@ -119,7 +123,7 @@ defmodule ConvergerWeb.ActivityMassAssignmentTest do
       end)
 
       conn = create(conn, conversation, %{"text" => "123456"})
-      assert %{"text" => [_]} = json_response(conn, 422)["errors"]
+      assert %{"text" => [_]} = assert_api_error(conn, 422, "invalid_message")["details"]
     end
   end
 end

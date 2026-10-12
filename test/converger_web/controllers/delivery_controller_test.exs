@@ -76,18 +76,18 @@ defmodule ConvergerWeb.DeliveryControllerTest do
 
     test "rejects invalid filters and channel tokens",
          %{conn: conn, tenant: tenant, channel: channel} do
-      assert %{"error" => "Invalid status"} =
+      assert %{"message" => "Invalid status"} =
                conn
                |> api(tenant)
                |> get(~p"/api/v1/deliveries?status=bogus")
-               |> json_response(400)
+               |> assert_api_error(400, "bad_request")
 
       {:ok, token, _} = Converger.Auth.Token.generate_channel_token(channel)
 
       conn
       |> put_req_header("x-channel-token", token)
       |> get(~p"/api/v1/deliveries")
-      |> json_response(403)
+      |> assert_api_error(403, "forbidden")
     end
   end
 
@@ -111,11 +111,11 @@ defmodule ConvergerWeb.DeliveryControllerTest do
     test "409 when the delivery is not failed", %{conn: conn, tenant: tenant, channel: channel} do
       sent = dead_letter(tenant, channel, %{status: "sent"})
 
-      assert %{"error" => "not_failed"} =
+      assert %{"message" => "Only failed deliveries can be retried"} =
                conn
                |> api(tenant)
                |> post(~p"/api/v1/deliveries/#{sent.id}/retry")
-               |> json_response(409)
+               |> assert_api_error(409, "not_failed")
     end
 
     test "404 for another tenant's delivery, 400 for a malformed id",

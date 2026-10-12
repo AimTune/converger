@@ -158,25 +158,29 @@ defmodule ConvergerWeb.ChannelOutboxControllerTest do
     conn1 =
       conn |> fresh() |> get(~p"/api/v1/channels/#{channel.id}/outbox", %{"watermark" => "nope"})
 
-    assert json_response(conn1, 400)["error"] =~ "watermark"
+    assert assert_api_error(conn1, 400, "invalid_watermark")["message"] =~ "watermark"
 
     conn2 = conn |> fresh() |> get(~p"/api/v1/channels/#{channel.id}/outbox", %{"limit" => "0"})
-    assert json_response(conn2, 400)
+    assert assert_api_error(conn2, 400, "bad_request")["message"] =~ "limit"
 
     other = channel_fixture(tenant)
     conn3 = conn |> fresh() |> get(~p"/api/v1/channels/#{other.id}/outbox")
-    assert json_response(conn3, 422)["error"] =~ "no outbox"
+    assert assert_api_error(conn3, 422, "unsupported_channel_type")["message"] =~ "no outbox"
 
     conn4 = build_conn() |> get(~p"/api/v1/channels/#{channel.id}/outbox")
-    assert json_response(conn4, 401)
+    assert_api_error(conn4, 401, "unauthorized")
 
     stranger = tenant_fixture()
 
-    assert_error_sent 404, fn ->
-      build_conn()
-      |> put_req_header("x-api-key", stranger.api_key)
-      |> get(~p"/api/v1/channels/#{channel.id}/outbox")
-    end
+    {404, _headers, body} =
+      assert_error_sent 404, fn ->
+        build_conn()
+        |> put_req_header("x-api-key", stranger.api_key)
+        |> get(~p"/api/v1/channels/#{channel.id}/outbox")
+      end
+
+    assert %{"error" => %{"code" => "not_found", "message" => _, "details" => nil}} =
+             Jason.decode!(body)
   end
 
   test "watermarks round-trip" do
