@@ -28,7 +28,9 @@ defmodule Converger.Activities.Activity do
   # Fields only the server sets. `inserted_at` is deliberately absent:
   # the server timestamp always wins. `edited_at` / `deleted_at` are never
   # cast: the server stamps them on the original activity.
-  @system_fields [:tenant_id, :conversation_id, :sender, :idempotency_key]
+  # `source_channel_id` is the channel the activity came in on (nil when it was
+  # written without one, e.g. by the tenant API): reply-back routing, ADR-0046.
+  @system_fields [:tenant_id, :conversation_id, :sender, :idempotency_key, :source_channel_id]
 
   @default_limits [
     max_text_bytes: 65_536,
@@ -53,6 +55,9 @@ defmodule Converger.Activities.Activity do
     # left unchanged; clients apply the update or delete.
     field :edited_at, :utc_datetime_usec
     field :deleted_at, :utc_datetime_usec
+    # The channel the activity came in on, see @system_fields. No foreign key
+    # (partitioned table, ADR-0034).
+    field :source_channel_id, :binary_id
 
     belongs_to :reply_to, __MODULE__, foreign_key: :reply_to_id
     belongs_to :tenant, Converger.Tenants.Tenant

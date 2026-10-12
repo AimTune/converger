@@ -37,7 +37,8 @@ defmodule ConvergerWeb.ConvergerAPI.ActivityController do
         "sender" => from["id"] || "user",
         "tenant_id" => claims["tenant_id"],
         "conversation_id" => conversation_id,
-        "idempotency_key" => idempotency_key
+        "idempotency_key" => idempotency_key,
+        "source_channel_id" => claims["channel_id"]
       }
 
       case Activities.create_client_activity(client_params, system_attrs) do

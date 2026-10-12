@@ -120,7 +120,7 @@ Turn the adapter layer into a real plugin system and ship the channels integrato
 | Issue | Title | State |
 | --- | --- | --- |
 | [#36](https://github.com/AimTune/converger/issues/36) | Adapter behaviour v2: `capabilities/0`, `config_schema/0`, provider signature verification, typing, health probe | Open |
-| [#43](https://github.com/AimTune/converger/issues/43) | Conditional routing rules: filters, priority, reply-back routing, per-rule transformations, dry-run | Open |
+| [#43](https://github.com/AimTune/converger/issues/43) | Conditional routing rules: filters, priority, reply-back routing, per-rule transformations, dry-run | Done ([Routing rules](concepts/routing-rules.md), [ADR-0046](adr/0046-conditional-routing-rules-and-reply-back-routing.md)) |
 | [#37](https://github.com/AimTune/converger/issues/37) | WhatsApp: media messages, template (HSM) messages, interactive messages and inbound media download | Open |
 | [#38](https://github.com/AimTune/converger/issues/38) | Telegram Bot adapter (duplex) | Done ([Telegram](channels/telegram.md), [ADR-0041](adr/0041-telegram-adapter-chat-scoped-ids-and-stored-media.md)) |
 | [#39](https://github.com/AimTune/converger/issues/39) | Slack adapter (Events API inbound, Web API outbound, signing secret verification) | Done ([Slack](channels/slack.md), [ADR-0040](adr/0040-slack-adapter-message-refs-conversation-scopes-and-in-band-challenge.md)) |

@@ -24,6 +24,26 @@
 - Docs: [Broker channels](docs/channels/brokers.md) (pipeline transport versus broker channel), Kafka and RabbitMQ
   pages; ADR-0047. NATS JetStream and Redis Streams channels are planned (#42).
 
+### Conditional routing rules, reply-back routing and dry-run (#43)
+
+- Routing rules have `conditions` (JSON predicates over `type`, `sender`, `text`, `metadata.*`,
+  `conversation.metadata.*`, `participant.*` and `time.*` with `eq`, `neq`, `in`, `contains`, `regex`, `exists`,
+  `gt`, `lt` and `all` / `any` / `not` groups, validated on save; regexes at most 256 bytes, compiled on save, run
+  under a PCRE match limit), `transformations` (run after the target channel's middleware, for that rule's targets),
+  `priority` (default 100, lowest first) and `stop_processing` (first match). Existing rules keep matching everything.
+- **Reply-back routing (behaviour change):** activities record the channel they came in on and conversations their
+  origin channel. An activity written from another channel (for example an agent on a routed `websocket` console)
+  goes back to the origin channel and its participant, plus the replying websocket hub, and no longer to the origin
+  channel's other rule targets. Add a rule with the replying channel as source to copy replies elsewhere. Activities
+  posted with the tenant API have no source channel and fan out as before.
+- Conversations span channels: new `conversation_channels` table (`origin`, `target`, `member`), shown with
+  `origin_channel_id` on `GET /api/v1/conversations/:id`.
+- Dry-run: `POST /api/v1/routing_rules/dry_run` and the admin page `/admin/routing_rules/dry_run` show the matched
+  rules and the payload per target without storing or sending anything. The admin rule form can edit rules,
+  conditions, transformations, priority and stop processing.
+- Migrations `20261012200000`, `20261012200100` (metadata-only) and `20261012200200` (new table, batched backfill);
+  all safe for a rolling deploy. Docs: [Routing rules](docs/concepts/routing-rules.md). ADR-0046.
+
 ### Graceful degradation under database pressure (#35)
 
 - **Two pools.** Oban (its own queries and every job) runs on a background pool of the same repo
