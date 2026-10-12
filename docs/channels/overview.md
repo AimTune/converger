@@ -363,7 +363,7 @@ A channel without deliveries in the window says nothing about its provider. When
 Each run inserts one health check per channel. When a channel's status differs from its previous check, the worker:
 
 1. broadcasts `health_changed` on the PubSub topic `channel_health` (used by the admin dashboard);
-2. if the tenant has an `alert_webhook_url`, posts this JSON to it (fire-and-forget, 10 second timeout, through `Converger.HTTP`):
+2. emits the `channel.health_changed` [platform event](../platform-webhooks.md) to the tenant's subscriptions (signed, retried, logged). The tenant's legacy `alert_webhook_url` is such a subscription ([details](../platform-webhooks.md#the-legacy-alert_webhook_url)) and still receives this JSON:
 
 ```json
 {

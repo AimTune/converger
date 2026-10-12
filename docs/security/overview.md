@@ -170,10 +170,11 @@ configured key can decrypt them.
 | Data | Protection |
 | --- | --- |
 | `channels.secret` | Encrypted (`Converger.Encrypted.Binary`) + SHA-256 `secret_hash` for lookup |
+| `webhook_subscriptions.secret`, `webhook_subscriptions.headers` | Encrypted (`Converger.Encrypted.Binary`, `Converger.Encrypted.Map`); the API returns header names only and the secret only on create or rotation |
 | `channels.config` (provider access tokens, `app_secret`, `verify_token`, Infobip `api_key`, webhook headers, ...) | Encrypted as a whole map (`Converger.Encrypted.Map`) |
 | `tenants.api_key_hash`, `previous_api_key_hash` | SHA-256 digest only; plaintext never stored |
 | `admin_users.password_hash`, `tenant_users.password_hash` | bcrypt |
-| Activities, attachments, `tenants.alert_webhook_url`, audit logs | Not encrypted by the application; rely on database and storage encryption |
+| Activities, attachments, `tenants.alert_webhook_url`, webhook subscription URLs, `webhook_events` payloads, audit logs | Not encrypted by the application; rely on database and storage encryption |
 
 Sensitive schema fields are also declared with `redact: true`, so `inspect/1` (and therefore crash reports) does
 not print them.
@@ -255,9 +256,9 @@ Verification code, the test vector and the full blocked-range list are in
 [ADR-0014](../adr/0014-webhook-ssrf-guard-and-outbound-signing.md).
 
 :::note
-The SSRF guard applies to `webhook` channel deliveries. The tenant health-alert URL
-(`tenants.alert_webhook_url`, posted by `Converger.Channels.Health`) is only validated as an `http`/`https` URL
-and is set by operators, not by end users.
+The SSRF guard applies to `webhook` channel deliveries and to [platform event webhooks](../platform-webhooks.md),
+which include the tenant health-alert URL (`tenants.alert_webhook_url`, now a managed subscription): targets are
+checked when saved and again, with the connection pinned, before every request.
 :::
 
 ## Rate limiting and login lockout

@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+### Platform event webhooks (#49)
+
+- Tenant-level webhook subscriptions (`webhook_subscriptions`: url, events, signing secret and headers encrypted at
+  rest, enabled) for `activity.created`, `delivery.sent|delivered|read|failed`,
+  `conversation.created|closed|reopened`, `channel.health_changed|circuit_opened|circuit_closed` and
+  `participant.opted_out`, or `"*"`. Events come from the existing broadcast hooks, after commit.
+- Delivery through Oban (queue `webhooks`) with the shared retry policy and `Retry-After`, the outbound
+  `x-converger-signature` scheme and the SSRF guard of webhook channels; `x-converger-event`,
+  `x-converger-event-id` and `x-converger-delivery-id` headers. Permanent failures and exhausted retries are
+  dead-lettered per subscription and can be redelivered.
+- Event log `webhook_events`, kept 7 days (`WEBHOOK_EVENT_RETENTION_DAYS`, pruned by `PruneWorker`).
+- API: `/api/v1/webhook_subscriptions` (CRUD, `rotate_secret`), `/api/v1/webhook_events` (list, show,
+  `redeliver`), `/api/v1/webhook_event_types`. Portal and admin **Webhooks** pages with recent events and a
+  redeliver button. Audit log: resource types `webhook_subscription` and `webhook_event`, action `redeliver`.
+- `tenants.alert_webhook_url` is migrated to a managed subscription on the channel health and circuit events,
+  kept in sync with the tenant form; it keeps the legacy body but is now signed, retried and logged. The
+  fire-and-forget `Health.send_alert_webhook/3` and circuit alert are removed.
+- `Converger.Channels.OutboundRequest` holds the IP pinning, bounded response body and header rules shared with the
+  webhook adapter.
+- Docs: [Platform event webhooks](docs/platform-webhooks.md), tenant API reference; ADR-0053.
+
 ### Broker channels: Kafka and RabbitMQ (#42)
 
 - New channel types `kafka` and `rabbitmq`: a broker as a first-class channel. Outbound, the pipeline produces the

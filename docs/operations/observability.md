@@ -353,7 +353,7 @@ When a channel's status changes (compared with its previous check):
 1. the change is logged (`Channel health changed: ...`);
 2. `health_changed` is broadcast on the `channel_health` PubSub topic, which the admin dashboard and channel
    list (`/admin`, `/admin/channels`) use for live updates;
-3. if the tenant has `alert_webhook_url`, a JSON alert is posted to it (fire and forget, 10 s timeout):
+3. the `channel.health_changed` [platform event](../platform-webhooks.md) is emitted; the tenant's legacy `alert_webhook_url` (a managed subscription) receives this JSON, signed and retried:
 
 ```json
 {

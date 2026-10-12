@@ -1,6 +1,6 @@
 ---
 title: Tenant API
-description: Reference for the server-to-server tenant API under /api/v1 - conversation tokens, conversations, activities, routing rules and dead-letter deliveries.
+description: Reference for the server-to-server tenant API under /api/v1 - conversation tokens, conversations, activities, routing rules, dead-letter deliveries and platform event webhooks.
 sidebar_position: 2
 ---
 
@@ -25,7 +25,9 @@ Controllers: [`ConvergerWeb.TokenController`](https://github.com/AimTune/converg
 [`ConversationController`](https://github.com/AimTune/converger/blob/main/lib/converger_web/controllers/conversation_controller.ex),
 [`ActivityController`](https://github.com/AimTune/converger/blob/main/lib/converger_web/controllers/activity_controller.ex),
 [`RoutingRuleController`](https://github.com/AimTune/converger/blob/main/lib/converger_web/controllers/routing_rule_controller.ex),
-[`DeliveryController`](https://github.com/AimTune/converger/blob/main/lib/converger_web/controllers/delivery_controller.ex).
+[`DeliveryController`](https://github.com/AimTune/converger/blob/main/lib/converger_web/controllers/delivery_controller.ex),
+[`WebhookSubscriptionController`](https://github.com/AimTune/converger/blob/main/lib/converger_web/controllers/webhook_subscription_controller.ex),
+[`WebhookEventController`](https://github.com/AimTune/converger/blob/main/lib/converger_web/controllers/webhook_event_controller.ex).
 
 ## Endpoints
 
@@ -54,6 +56,16 @@ Controllers: [`ConvergerWeb.TokenController`](https://github.com/AimTune/converg
 | `GET` | `/api/v1/channels/:channel_id/templates` | `x-api-key` or `x-channel-token` | List the provider message templates (WhatsApp HSM) of a channel, cached |
 | `GET` | `/api/v1/channels/:channel_id/outbox` | `x-api-key` or `x-channel-token` | Poll the outbox of an `http_pull` channel; a `watermark` acknowledges the previous page ([HTTP pull](../channels/http-pull.md)) |
 | `POST` | `/api/v1/channels/:channel_id/outbox/ack` | `x-api-key` or `x-channel-token` | Acknowledge an `http_pull` outbox up to a watermark |
+| `GET` | `/api/v1/webhook_event_types` | `x-api-key` only | The [platform event](../platform-webhooks.md) catalog |
+| `GET` | `/api/v1/webhook_subscriptions` | `x-api-key` only | List platform webhook subscriptions |
+| `POST` | `/api/v1/webhook_subscriptions` | `x-api-key` only | Create a subscription (returns its secret once) |
+| `GET` | `/api/v1/webhook_subscriptions/:id` | `x-api-key` only | Get a subscription |
+| `PATCH` / `PUT` | `/api/v1/webhook_subscriptions/:id` | `x-api-key` only | Update a subscription |
+| `DELETE` | `/api/v1/webhook_subscriptions/:id` | `x-api-key` only | Delete a subscription and its event log |
+| `POST` | `/api/v1/webhook_subscriptions/:id/rotate_secret` | `x-api-key` only | Generate a new signing secret (returned once) |
+| `GET` | `/api/v1/webhook_events` | `x-api-key` only | The webhook event log (keyset-paginated, filterable) |
+| `GET` | `/api/v1/webhook_events/:id` | `x-api-key` only | Get an event with its payload |
+| `POST` | `/api/v1/webhook_events/:id/redeliver` | `x-api-key` only | Redeliver a dead-lettered event |
 
 On the routes marked `x-api-key` or `x-channel-token`, only the `x-channel-token` option is deprecated.
 
@@ -918,9 +930,114 @@ the change within the TTL. Failed listings are not cached.
 
 How to send a template is described in [WhatsApp: templates](../channels/whatsapp.md#templates-hsm).
 
+## Platform event webhooks
+
+Tenant-level subscriptions to [platform events](../platform-webhooks.md) (activities, delivery status,
+conversation lifecycle, channel health and circuit breaker, opt-outs) and their event log. These endpoints require
+the tenant API key (`x-api-key`); a channel token gets `403`. Changes are audit-logged
+(`resource_type: "webhook_subscription"`, `"webhook_event"`). Errors follow the shared conventions: `422` with
+`{"errors": {...}}` for validation, `404` for an unknown id or one of another tenant.
+
+### Subscription
+
+```json
+{
+  "id": "6b1c...", "tenant_id": "3f2a...", "url": "https://crm.example.com/converger",
+  "description": "CRM sync", "events": ["delivery.failed", "conversation.closed"], "enabled": true,
+  "header_names": ["authorization"], "managed_by": null,
+  "inserted_at": "2026-10-12T10:00:00.000000Z", "updated_at": "2026-10-12T10:00:00.000000Z"
+}
+```
+
+`secret` is included only in the responses of create and `rotate_secret`. Header values are never returned.
+
+### List the event types
+
+`GET /api/v1/webhook_event_types` returns `{"data": ["activity.created", "delivery.sent", ...]}`.
+
+### Create a subscription
+
+`POST /api/v1/webhook_subscriptions`
+
+```bash
+curl -s -X POST "$CONVERGER/api/v1/webhook_subscriptions" \
+  -H "x-api-key: $API_KEY" -H "content-type: application/json" \
+  -d '{"webhook_subscription": {
+        "url": "https://crm.example.com/converger",
+        "events": ["delivery.failed", "conversation.closed"],
+        "description": "CRM sync",
+        "headers": {"authorization": "Bearer crm-token"}
+      }}'
+```
+
+`201` with the subscription and its `secret` (`whsec_...`). Store the secret: it is not shown again. `url`
+(`http`/`https`, public targets only), `events` (catalog types or `"*"`, at least one), `secret` (optional, at least
+16 characters), `enabled`, `headers` (string values; `host`, `content-length`, `content-type`, hop-by-hop headers and
+`x-converger-*` are reserved) and `description` are accepted. `422` lists invalid fields, for example
+`{"errors": {"events": ["unknown event types: bogus.event"]}}`.
+
+### List, get, update and delete
+
+- `GET /api/v1/webhook_subscriptions`, `GET /api/v1/webhook_subscriptions/:id`
+- `PATCH /api/v1/webhook_subscriptions/:id` with `{"webhook_subscription": {...}}` (same fields as create; a
+  `secret` here is ignored, use `rotate_secret`)
+- `DELETE /api/v1/webhook_subscriptions/:id`: `204`, the subscription's event log goes with it.
+
+The subscription with `managed_by: "alert_webhook_url"` mirrors the tenant's alert URL; the admin tenant form
+overwrites its URL ([details](../platform-webhooks.md#the-legacy-alert_webhook_url)).
+
+### Rotate the secret
+
+`POST /api/v1/webhook_subscriptions/:id/rotate_secret` returns the subscription with a new `secret`. The next
+attempt of every queued event is signed with it.
+
+### List events
+
+`GET /api/v1/webhook_events`
+
+The tenant's events, newest first, keyset-paginated on `(inserted_at, id)`. Events are kept 7 days.
+
+| Param | Meaning |
+| --- | --- |
+| `subscription_id` | Only this subscription's events. |
+| `status` | `pending` (queued or retrying), `delivered` or `failed` (dead-lettered). |
+| `type` | One event type, e.g. `delivery.failed`. |
+| `limit`, `cursor` | [Pagination](overview.md#pagination). |
+
+```json
+{
+  "data": [
+    {
+      "id": "8e7d...", "event_id": "5f0c...", "subscription_id": "6b1c...", "type": "delivery.failed",
+      "status": "failed", "attempts": 5, "last_error": "webhook returned 503: \"\"", "response_status": 503,
+      "payload": { "delivery_id": "1c2d...", "status": "failed" },
+      "delivered_at": null, "redelivered_at": null,
+      "inserted_at": "2026-10-12T10:00:00.000000Z", "updated_at": "2026-10-12T11:21:00.000000Z"
+    }
+  ],
+  "meta": { "next_cursor": null, "has_more": false, "limit": 50 }
+}
+```
+
+`400` for an invalid `status`, `subscription_id` or cursor. `GET /api/v1/webhook_events/:id` returns one event.
+
+### Redeliver an event
+
+`POST /api/v1/webhook_events/:id/redeliver`
+
+Moves a `failed` event back to `pending` with `attempts` reset, enqueues a new delivery job and writes an audit
+entry (`action: "redeliver"`). The receiver gets the same `x-converger-delivery-id`.
+
+| Status | Body | When |
+| --- | --- | --- |
+| `202` | `{"data": {...}}` | Re-enqueued (the event may already show its new outcome) |
+| `404` | `{"errors": {"detail": "Not Found"}}` | Unknown event, or one of another tenant |
+| `409` | `{"error": "not_failed", "detail": "Only failed events can be redelivered"}` | The event is not `failed` |
+
 ## Related
 
 - [REST API overview](overview.md)
+- [Platform event webhooks](../platform-webhooks.md)
 - [Client API](client-api.md)
 - [Inbound webhooks](inbound.md)
 - [Activities](../concepts/activities.md), [conversations](../concepts/conversations.md), [routing rules](../concepts/routing-rules.md), [deliveries](../concepts/deliveries.md)
