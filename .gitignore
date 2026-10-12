@@ -36,3 +36,10 @@ converger-*.tar
 
 # Dialyzer PLTs (cached in CI).
 /priv/plts/
+
+# Node workspace (packages/, examples/typescript/).
+node_modules/
+/packages/*/dist/
+/packages/*/docs-api/
+/packages/*/coverage/
+/examples/typescript/*/dist/
