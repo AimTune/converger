@@ -83,3 +83,7 @@ config :converger, Converger.Vault, key: Base.encode64("converger-dev-cloak-key-
 # METRICS_ALLOWED_IPS, see docs/operations/observability.md.
 config :converger, :metrics,
   allowed_ips: ["127.0.0.0/8", "::1", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]
+
+# Swagger UI at /api/docs and the OpenAPI document at /api/openapi.json
+# (ADR-0050). Off in prod unless API_DOCS_ENABLED=true.
+config :converger, :api_docs, enabled: true

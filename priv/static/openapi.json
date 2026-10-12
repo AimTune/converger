@@ -1,0 +1,4639 @@
+{
+  "components": {
+    "responses": {
+      "BadGateway": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        },
+        "description": "A provider or storage call failed (`upstream_unavailable`)"
+      },
+      "BadRequest": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        },
+        "description": "Malformed request (`bad_request`, `invalid_watermark`, ...)"
+      },
+      "Conflict": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        },
+        "description": "Conflicts with the resource state (`conversation_closed`, `not_failed`)"
+      },
+      "Forbidden": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        },
+        "description": "Not allowed (`forbidden`, `channel_inactive`)"
+      },
+      "InternalError": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        },
+        "description": "Unexpected server error (`internal`)"
+      },
+      "NotFound": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        },
+        "description": "Unknown resource, or one of another tenant or channel (`not_found`)"
+      },
+      "PayloadTooLarge": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        },
+        "description": "A size limit was exceeded (`payload_too_large`)"
+      },
+      "ServiceUnavailable": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        },
+        "description": "Retry later (`unavailable`): draining, database unavailable or delivery enqueue failure",
+        "headers": {
+          "retry-after": {
+            "description": "Seconds to wait before retrying",
+            "schema": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "style": "simple"
+          }
+        }
+      },
+      "TooManyRequests": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        },
+        "description": "Rate limit hit (`rate_limited`); retry after `Retry-After`",
+        "headers": {
+          "retry-after": {
+            "description": "Seconds to wait before retrying",
+            "schema": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "style": "simple"
+          }
+        }
+      },
+      "Unauthorized": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        },
+        "description": "Missing or invalid credential (`unauthorized`, `token_expired`)"
+      },
+      "UnprocessableEntity": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        },
+        "description": "Validation failed (`invalid_message`, `validation_failed`, `unsupported_channel_type`, `invalid_channel_config`); `details` has the errors per field"
+      },
+      "UnsupportedMediaType": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        },
+        "description": "File type not allowed (`unsupported_media_type`)"
+      }
+    },
+    "schemas": {
+      "Activity": {
+        "description": "The canonical activity (tenant API, outbound webhooks, legacy socket).",
+        "properties": {
+          "attachments": {
+            "items": {
+              "$ref": "#/components/schemas/ActivityAttachment"
+            },
+            "type": "array"
+          },
+          "conversation_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "deleted_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "edited_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "idempotency_key": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "inserted_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "reply_to_id": {
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sender": {
+            "type": "string"
+          },
+          "seq": {
+            "description": "Per-conversation sequence number",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "tenant_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "text": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "type": {
+            "$ref": "#/components/schemas/ActivityType"
+          }
+        },
+        "required": [
+          "attachments",
+          "conversation_id",
+          "deleted_at",
+          "edited_at",
+          "id",
+          "idempotency_key",
+          "inserted_at",
+          "metadata",
+          "reply_to_id",
+          "sender",
+          "seq",
+          "tenant_id",
+          "text",
+          "type"
+        ],
+        "title": "Activity",
+        "type": "object"
+      },
+      "ActivityAttachment": {
+        "description": "An attachment of an activity. Keys other than these are dropped.",
+        "properties": {
+          "channelData": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "content": {
+            "description": "Inline content (cards and the like)"
+          },
+          "contentType": {
+            "type": "string"
+          },
+          "contentUrl": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer"
+          },
+          "thumbnailUrl": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "contentType"
+        ],
+        "title": "ActivityAttachment",
+        "type": "object"
+      },
+      "ActivityList": {
+        "description": "A page of activities, oldest first.",
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/Activity"
+            },
+            "type": "array"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/WatermarkPageMeta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ActivityList",
+        "type": "object"
+      },
+      "ActivityResponse": {
+        "description": "One activity.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/Activity"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "ActivityResponse",
+        "type": "object"
+      },
+      "ActivitySet": {
+        "description": "A page of activities and the watermark to resume after them.",
+        "properties": {
+          "activities": {
+            "items": {
+              "$ref": "#/components/schemas/ClientActivity"
+            },
+            "type": "array"
+          },
+          "has_more": {
+            "type": "boolean"
+          },
+          "watermark": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "activities",
+          "watermark",
+          "has_more"
+        ],
+        "title": "ActivitySet",
+        "type": "object"
+      },
+      "ActivityType": {
+        "description": "Activity type. `deliveryReceipt` is created by the server only.",
+        "enum": [
+          "message",
+          "event",
+          "typing",
+          "messageReaction",
+          "messageUpdate",
+          "messageDelete",
+          "conversationUpdate",
+          "endOfConversation",
+          "deliveryReceipt"
+        ],
+        "title": "ActivityType",
+        "type": "string"
+      },
+      "BulkRetryResponse": {
+        "description": "A bulk retry.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/BulkRetryResult"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "BulkRetryResponse",
+        "type": "object"
+      },
+      "BulkRetryResult": {
+        "description": "Dead letters re-enqueued by a bulk retry.",
+        "properties": {
+          "has_more": {
+            "description": "More dead letters remain; call again",
+            "type": "boolean"
+          },
+          "retried": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "retried",
+          "has_more"
+        ],
+        "title": "BulkRetryResult",
+        "type": "object"
+      },
+      "ChannelDeliveryState": {
+        "description": "A channel's circuit breaker, pause and rate limit.",
+        "properties": {
+          "channel_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "circuit_changed_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "circuit_state": {
+            "enum": [
+              "closed",
+              "open",
+              "half_open",
+              "paused"
+            ],
+            "type": "string"
+          },
+          "consecutive_failures": {
+            "type": "integer"
+          },
+          "parked_deliveries": {
+            "type": "integer"
+          },
+          "rate_limit": {
+            "description": "Effective outbound rate limit",
+            "properties": {
+              "limit": {
+                "type": "integer"
+              },
+              "scale_ms": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "limit",
+              "scale_ms"
+            ],
+            "type": [
+              "object",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "channel_id",
+          "circuit_state",
+          "circuit_changed_at",
+          "consecutive_failures",
+          "rate_limit",
+          "parked_deliveries"
+        ],
+        "title": "ChannelDeliveryState",
+        "type": "object"
+      },
+      "ChannelDeliveryStateResponse": {
+        "description": "A channel's delivery state.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ChannelDeliveryState"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "ChannelDeliveryStateResponse",
+        "type": "object"
+      },
+      "ClientActivity": {
+        "description": "An activity as the client API renders it.",
+        "properties": {
+          "attachments": {
+            "items": {
+              "$ref": "#/components/schemas/ActivityAttachment"
+            },
+            "type": "array"
+          },
+          "channelData": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "conversationId": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "deletedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "editedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "from": {
+            "description": "The sender",
+            "properties": {
+              "id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id"
+            ],
+            "type": "object"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "replyToId": {
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "text": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "timestamp": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "type": {
+            "$ref": "#/components/schemas/ActivityType"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "from",
+          "text",
+          "timestamp",
+          "attachments",
+          "conversationId",
+          "channelData",
+          "replyToId",
+          "editedAt",
+          "deletedAt"
+        ],
+        "title": "ClientActivity",
+        "type": "object"
+      },
+      "ClientActivityRequest": {
+        "description": "An activity posted by a client.",
+        "properties": {
+          "attachments": {
+            "items": {
+              "$ref": "#/components/schemas/ActivityAttachment"
+            },
+            "maxItems": 10,
+            "type": "array"
+          },
+          "channelData": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "from": {
+            "description": "The sender; defaults to `user`",
+            "properties": {
+              "id": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "description": "Alias of `channelData`",
+            "type": "object"
+          },
+          "replyToId": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "type": {
+            "$ref": "#/components/schemas/ActivityType"
+          }
+        },
+        "title": "ClientActivityRequest",
+        "type": "object"
+      },
+      "ClientConversation": {
+        "description": "A conversation and a token bound to it.",
+        "properties": {
+          "conversationId": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "expires_in": {
+            "type": "integer"
+          },
+          "streamUrl": {
+            "description": "WebSocket URL to receive activities",
+            "type": "string"
+          },
+          "token": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "conversationId",
+          "token",
+          "expires_in",
+          "streamUrl"
+        ],
+        "title": "ClientConversation",
+        "type": "object"
+      },
+      "ClientConversationStatus": {
+        "description": "A conversation's status after close or reopen.",
+        "properties": {
+          "conversationId": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "active",
+              "closed"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "conversationId",
+          "status"
+        ],
+        "title": "ClientConversationStatus",
+        "type": "object"
+      },
+      "ClientToken": {
+        "description": "A Converger token.",
+        "properties": {
+          "conversationId": {
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "expires_in": {
+            "description": "Seconds",
+            "type": "integer"
+          },
+          "token": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "conversationId",
+          "token",
+          "expires_in"
+        ],
+        "title": "ClientToken",
+        "type": "object"
+      },
+      "ClientTokenRequest": {
+        "description": "Token generation options.",
+        "properties": {
+          "scope": {
+            "enum": [
+              "channel"
+            ],
+            "type": "string"
+          },
+          "user": {
+            "description": "The end user",
+            "properties": {
+              "id": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "title": "ClientTokenRequest",
+        "type": "object"
+      },
+      "Conversation": {
+        "description": "A conversation (tenant API).",
+        "properties": {
+          "channel_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "channels": {
+            "description": "Only on `GET /api/v1/conversations/{id}`",
+            "items": {
+              "$ref": "#/components/schemas/ConversationChannel"
+            },
+            "type": "array"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "inserted_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "origin_channel_id": {
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "participant": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Participant"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "participant_id": {
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "enum": [
+              "active",
+              "closed"
+            ],
+            "type": "string"
+          },
+          "tenant_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "metadata",
+          "channel_id",
+          "origin_channel_id",
+          "tenant_id",
+          "participant_id",
+          "participant",
+          "inserted_at",
+          "updated_at"
+        ],
+        "title": "Conversation",
+        "type": "object"
+      },
+      "ConversationChannel": {
+        "description": "A channel a conversation spans.",
+        "properties": {
+          "channel_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "inserted_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "participant_id": {
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "role": {
+            "enum": [
+              "origin",
+              "target",
+              "member"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "channel_id",
+          "role",
+          "participant_id",
+          "inserted_at"
+        ],
+        "title": "ConversationChannel",
+        "type": "object"
+      },
+      "ConversationList": {
+        "description": "A page of conversations, newest first.",
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/Conversation"
+            },
+            "type": "array"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/CursorPageMeta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ConversationList",
+        "type": "object"
+      },
+      "ConversationResponse": {
+        "description": "One conversation.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/Conversation"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "ConversationResponse",
+        "type": "object"
+      },
+      "CreateActivityRequest": {
+        "description": "An activity posted with the tenant API key. Server fields in the body are ignored.",
+        "properties": {
+          "attachments": {
+            "items": {
+              "$ref": "#/components/schemas/ActivityAttachment"
+            },
+            "maxItems": 10,
+            "type": "array"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "reply_to_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "sender": {
+            "description": "Defaults to `user`",
+            "type": "string"
+          },
+          "text": {
+            "description": "At most 65,536 bytes",
+            "type": "string"
+          },
+          "type": {
+            "$ref": "#/components/schemas/ActivityType"
+          }
+        },
+        "title": "CreateActivityRequest",
+        "type": "object"
+      },
+      "CreateConversationRequest": {
+        "description": "Body of the deprecated `POST /api/v1/conversations`.",
+        "properties": {
+          "metadata": {
+            "additionalProperties": true,
+            "type": "object"
+          }
+        },
+        "title": "CreateConversationRequest",
+        "type": "object"
+      },
+      "CursorPageMeta": {
+        "description": "Keyset pagination: pass `next_cursor` back as `cursor`.",
+        "properties": {
+          "has_more": {
+            "type": "boolean"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "next_cursor",
+          "has_more",
+          "limit"
+        ],
+        "title": "CursorPageMeta",
+        "type": "object"
+      },
+      "Delivery": {
+        "description": "One activity's delivery to one channel.",
+        "properties": {
+          "activity_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "attempts": {
+            "type": "integer"
+          },
+          "channel_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "delivered_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "inserted_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "last_error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "payload": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Activity"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The canonical activity, sensitive keys redacted"
+          },
+          "provider_message_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "read_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "retried_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "retried_by": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "retry_count": {
+            "type": "integer"
+          },
+          "sent_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/DeliveryStatus"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "activity_id",
+          "attempts",
+          "channel_id",
+          "delivered_at",
+          "id",
+          "inserted_at",
+          "last_error",
+          "payload",
+          "provider_message_id",
+          "read_at",
+          "retried_at",
+          "retried_by",
+          "retry_count",
+          "sent_at",
+          "status",
+          "updated_at"
+        ],
+        "title": "Delivery",
+        "type": "object"
+      },
+      "DeliveryList": {
+        "description": "A page of deliveries, most recently changed first.",
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/Delivery"
+            },
+            "type": "array"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/CursorPageMeta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "DeliveryList",
+        "type": "object"
+      },
+      "DeliveryResponse": {
+        "description": "One delivery.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/Delivery"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "DeliveryResponse",
+        "type": "object"
+      },
+      "DeliveryStatus": {
+        "enum": [
+          "pending",
+          "paused",
+          "sent",
+          "delivered",
+          "read",
+          "failed"
+        ],
+        "title": "DeliveryStatus",
+        "type": "string"
+      },
+      "DryRunActivity": {
+        "description": "The activity a dry-run plans for: never stored, so `id`, `seq` and `conversation_id` (for a conversation that does not exist yet) may be null.",
+        "properties": {
+          "attachments": {
+            "items": {
+              "$ref": "#/components/schemas/ActivityAttachment"
+            },
+            "type": "array"
+          },
+          "conversation_id": {
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "deleted_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "edited_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "idempotency_key": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "inserted_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "reply_to_id": {
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sender": {
+            "type": "string"
+          },
+          "seq": {
+            "description": "Per-conversation sequence number",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "tenant_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "text": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "type": {
+            "$ref": "#/components/schemas/ActivityType"
+          }
+        },
+        "required": [
+          "attachments",
+          "conversation_id",
+          "deleted_at",
+          "edited_at",
+          "id",
+          "idempotency_key",
+          "inserted_at",
+          "metadata",
+          "reply_to_id",
+          "sender",
+          "seq",
+          "tenant_id",
+          "text",
+          "type"
+        ],
+        "title": "DryRunActivity",
+        "type": "object"
+      },
+      "DryRunRequest": {
+        "description": "What to dry-run.",
+        "properties": {
+          "activity": {
+            "additionalProperties": true,
+            "description": "The activity: `type`, `text`, `sender`, `metadata`, `attachments`, `reply_to_id`",
+            "properties": {},
+            "type": "object"
+          },
+          "at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "conversation": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "conversation_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "origin_channel_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "participant": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "source_channel_id": {
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "title": "DryRunRequest",
+        "type": "object"
+      },
+      "DryRunResponse": {
+        "description": "A routing dry-run.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/DryRunResult"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "DryRunResponse",
+        "type": "object"
+      },
+      "DryRunResult": {
+        "description": "The routing plan for the activity; nothing is stored or sent.",
+        "properties": {
+          "activity": {
+            "$ref": "#/components/schemas/DryRunActivity"
+          },
+          "at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "direction": {
+            "type": "string"
+          },
+          "matched_rule_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "origin_channel_id": {
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "rule_source_channel_id": {
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "rules": {
+            "items": {
+              "$ref": "#/components/schemas/DryRunRuleEvaluation"
+            },
+            "type": "array"
+          },
+          "source_channel_id": {
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "targets": {
+            "items": {
+              "$ref": "#/components/schemas/DryRunTarget"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "activity",
+          "at",
+          "direction",
+          "matched_rule_ids",
+          "origin_channel_id",
+          "rule_source_channel_id",
+          "rules",
+          "source_channel_id",
+          "targets"
+        ],
+        "title": "DryRunResult",
+        "type": "object"
+      },
+      "DryRunRuleEvaluation": {
+        "description": "A routing rule that was evaluated and its result.",
+        "properties": {
+          "conditions": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "integer"
+          },
+          "result": {
+            "type": "string"
+          },
+          "stop_processing": {
+            "type": "boolean"
+          },
+          "target_channel_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "transformations": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "conditions",
+          "id",
+          "name",
+          "priority",
+          "result",
+          "stop_processing",
+          "target_channel_ids",
+          "transformations"
+        ],
+        "title": "DryRunRuleEvaluation",
+        "type": "object"
+      },
+      "DryRunTarget": {
+        "description": "A candidate channel and what it would get.",
+        "properties": {
+          "channel_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "channel_name": {
+            "type": "string"
+          },
+          "channel_type": {
+            "type": "string"
+          },
+          "detail": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "excluded": {
+            "description": "Why the channel gets nothing (`echo`, `inactive`, `inbound_only`, `not_deliverable`, `unsupported_activity`), `null` when it is a target",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "outcome": {
+            "enum": [
+              "deliver",
+              "excluded",
+              "halted",
+              "skipped"
+            ],
+            "type": "string"
+          },
+          "payload": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DryRunActivity"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "rule_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "channel_id",
+          "channel_name",
+          "channel_type",
+          "detail",
+          "excluded",
+          "outcome",
+          "payload",
+          "reason",
+          "rule_ids"
+        ],
+        "title": "DryRunTarget",
+        "type": "object"
+      },
+      "Error": {
+        "description": "An API error. Every key is always present.",
+        "properties": {
+          "code": {
+            "$ref": "#/components/schemas/ErrorCode"
+          },
+          "details": {
+            "additionalProperties": true,
+            "description": "Code-specific data: errors per field for validation codes, `retry_after_ms`, `supported`, `reason`, ...",
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "message": {
+            "description": "Human-readable message; may change, never parse it",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "The request's `x-request-id`, also on the server log lines",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "details",
+          "request_id"
+        ],
+        "title": "Error",
+        "type": "object"
+      },
+      "ErrorCode": {
+        "description": "Stable machine-readable error code. Codes shared with Converger Protocol v1 are spelled the same.",
+        "enum": [
+          "bad_request",
+          "channel_inactive",
+          "conflict",
+          "conversation_closed",
+          "forbidden",
+          "inbound_not_supported",
+          "internal",
+          "invalid_channel_config",
+          "invalid_message",
+          "invalid_watermark",
+          "method_not_allowed",
+          "not_acceptable",
+          "not_failed",
+          "not_found",
+          "payload_too_large",
+          "rate_limited",
+          "token_expired",
+          "unauthorized",
+          "unavailable",
+          "unsupported_channel_type",
+          "unsupported_media_type",
+          "unsupported_protocol",
+          "upgrade_required",
+          "upstream_unavailable",
+          "validation_failed"
+        ],
+        "title": "ErrorCode",
+        "type": "string"
+      },
+      "ErrorResponse": {
+        "description": "The error envelope of every API error response.",
+        "example": {
+          "error": {
+            "code": "conversation_closed",
+            "details": null,
+            "message": "Conversation is closed",
+            "request_id": "GBHDfGZ0bW5Sl2YAAAEB"
+          }
+        },
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/Error"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "title": "ErrorResponse",
+        "type": "object"
+      },
+      "GenericInboundMessage": {
+        "additionalProperties": true,
+        "description": "Generic webhook message (`webhook` channels). Provider channel types post their provider's own payload.",
+        "properties": {
+          "attachments": {
+            "items": {
+              "$ref": "#/components/schemas/ActivityAttachment"
+            },
+            "type": "array"
+          },
+          "conversation_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "external_id": {
+            "type": "string"
+          },
+          "idempotency_key": {
+            "type": "string"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "reply_to_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "sender": {
+            "description": "Alias: `from`; default `external`",
+            "type": "string"
+          },
+          "text": {
+            "description": "Aliases: `message`, `body`",
+            "type": "string"
+          },
+          "type": {
+            "$ref": "#/components/schemas/ActivityType"
+          }
+        },
+        "title": "GenericInboundMessage",
+        "type": "object"
+      },
+      "GenericStatusUpdate": {
+        "additionalProperties": true,
+        "description": "Generic delivery receipt. Provider channel types post their provider's own payload.",
+        "properties": {
+          "delivery_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "provider_message_id": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "sent",
+              "delivered",
+              "read",
+              "failed"
+            ],
+            "type": "string"
+          },
+          "timestamp": {
+            "description": "ISO 8601 or Unix seconds"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "GenericStatusUpdate",
+        "type": "object"
+      },
+      "InboundAccepted": {
+        "description": "Summary of a handled inbound request.",
+        "properties": {
+          "activity_id": {
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "activity_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "duplicates": {
+            "type": "integer"
+          },
+          "receipts_processed": {
+            "type": "integer"
+          },
+          "rejected": {
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "accepted"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "receipts_processed"
+        ],
+        "title": "InboundAccepted",
+        "type": "object"
+      },
+      "LegacyTokenRequest": {
+        "description": "Body of the deprecated `POST /api/v1/tokens`.",
+        "properties": {
+          "conversation_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "user_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "conversation_id",
+          "user_id"
+        ],
+        "title": "LegacyTokenRequest",
+        "type": "object"
+      },
+      "LegacyTokenResponse": {
+        "description": "A legacy conversation token.",
+        "properties": {
+          "expires_in": {
+            "type": "integer"
+          },
+          "token": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "token",
+          "expires_in"
+        ],
+        "title": "LegacyTokenResponse",
+        "type": "object"
+      },
+      "MessageTemplate": {
+        "additionalProperties": true,
+        "description": "A provider message template (WhatsApp HSM), with the provider's own fields.",
+        "properties": {
+          "category": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "language": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "title": "MessageTemplate",
+        "type": "object"
+      },
+      "MessageTemplateList": {
+        "description": "A channel's message templates.",
+        "properties": {
+          "cached": {
+            "type": "boolean"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/MessageTemplate"
+            },
+            "type": "array"
+          },
+          "fetched_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "data",
+          "cached",
+          "fetched_at"
+        ],
+        "title": "MessageTemplateList",
+        "type": "object"
+      },
+      "OutboxAckRequest": {
+        "description": "Acknowledge the outbox up to a watermark.",
+        "properties": {
+          "watermark": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "watermark"
+        ],
+        "title": "OutboxAckRequest",
+        "type": "object"
+      },
+      "OutboxAckResponse": {
+        "description": "Deliveries acknowledged.",
+        "properties": {
+          "acknowledged": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "acknowledged"
+        ],
+        "title": "OutboxAckResponse",
+        "type": "object"
+      },
+      "OutboxItem": {
+        "description": "A delivery waiting in an `http_pull` channel's outbox.",
+        "properties": {
+          "activity": {
+            "additionalProperties": true,
+            "description": "The payload as the channel would receive it (the canonical activity)",
+            "type": "object"
+          },
+          "delivery_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "queued_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "served_before": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "delivery_id",
+          "activity",
+          "queued_at",
+          "served_before"
+        ],
+        "title": "OutboxItem",
+        "type": "object"
+      },
+      "OutboxPage": {
+        "description": "The next page of the outbox.",
+        "properties": {
+          "acknowledged": {
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/OutboxItem"
+            },
+            "type": "array"
+          },
+          "has_more": {
+            "type": "boolean"
+          },
+          "watermark": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "data",
+          "watermark",
+          "has_more",
+          "acknowledged"
+        ],
+        "title": "OutboxPage",
+        "type": "object"
+      },
+      "Participant": {
+        "description": "The external party of a conversation (for example a WhatsApp number).",
+        "properties": {
+          "display_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "external_id": {
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "opted_out_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "external_id",
+          "display_name",
+          "opted_out_at"
+        ],
+        "title": "Participant",
+        "type": "object"
+      },
+      "ResourceResponse": {
+        "description": "The id of the created activity.",
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "ResourceResponse",
+        "type": "object"
+      },
+      "RoutingRule": {
+        "description": "A routing rule.",
+        "properties": {
+          "conditions": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "inserted_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "integer"
+          },
+          "source_channel_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "stop_processing": {
+            "type": "boolean"
+          },
+          "target_channel_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "tenant_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "transformations": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "source_channel_id",
+          "target_channel_ids",
+          "enabled",
+          "conditions",
+          "transformations",
+          "priority",
+          "stop_processing",
+          "tenant_id",
+          "inserted_at",
+          "updated_at"
+        ],
+        "title": "RoutingRule",
+        "type": "object"
+      },
+      "RoutingRuleInput": {
+        "description": "Writable fields of a routing rule.",
+        "properties": {
+          "conditions": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "integer"
+          },
+          "source_channel_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "stop_processing": {
+            "type": "boolean"
+          },
+          "target_channel_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "transformations": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "title": "RoutingRuleInput",
+        "type": "object"
+      },
+      "RoutingRuleList": {
+        "description": "Every routing rule of the tenant, sorted by name.",
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/RoutingRule"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "RoutingRuleList",
+        "type": "object"
+      },
+      "RoutingRuleRequest": {
+        "description": "Create or update a routing rule.",
+        "properties": {
+          "routing_rule": {
+            "$ref": "#/components/schemas/RoutingRuleInput"
+          }
+        },
+        "required": [
+          "routing_rule"
+        ],
+        "title": "RoutingRuleRequest",
+        "type": "object"
+      },
+      "RoutingRuleResponse": {
+        "description": "One routing rule.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/RoutingRule"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "RoutingRuleResponse",
+        "type": "object"
+      },
+      "UploadRequest": {
+        "description": "A file and, optionally, the activity that carries it.",
+        "properties": {
+          "activity": {
+            "description": "JSON: `type`, `text`, `from`, `channelData`, `replyToId`",
+            "type": "string"
+          },
+          "file": {
+            "format": "binary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "UploadRequest",
+        "type": "object"
+      },
+      "UploadResponse": {
+        "description": "The activity created for the upload and its attachment.",
+        "properties": {
+          "attachments": {
+            "items": {
+              "$ref": "#/components/schemas/UploadedAttachment"
+            },
+            "type": "array"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "attachments"
+        ],
+        "title": "UploadResponse",
+        "type": "object"
+      },
+      "UploadedAttachment": {
+        "description": "A stored attachment.",
+        "properties": {
+          "contentType": {
+            "type": "string"
+          },
+          "contentUrl": {
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "size": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "contentType",
+          "contentUrl",
+          "size"
+        ],
+        "title": "UploadedAttachment",
+        "type": "object"
+      },
+      "WatermarkPageMeta": {
+        "description": "Watermark pagination: pass `watermark` back to continue.",
+        "properties": {
+          "has_more": {
+            "type": "boolean"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "watermark": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "watermark",
+          "has_more",
+          "limit"
+        ],
+        "title": "WatermarkPageMeta",
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "apiKey": {
+        "description": "Tenant API key (server side only)",
+        "in": "header",
+        "name": "x-api-key",
+        "type": "apiKey"
+      },
+      "channelSecret": {
+        "description": "Channel secret (server side only); only for `POST /api/v1/converger/tokens/generate`",
+        "scheme": "bearer",
+        "type": "http"
+      },
+      "channelToken": {
+        "description": "Deprecated channel token (#23); use the tenant API key or a Converger token",
+        "in": "header",
+        "name": "x-channel-token",
+        "type": "apiKey"
+      },
+      "convergerToken": {
+        "bearerFormat": "JWT",
+        "description": "Converger token from `/api/v1/converger/tokens/generate` or `/conversations`",
+        "scheme": "bearer",
+        "type": "http"
+      },
+      "convergerTokenQuery": {
+        "description": "Converger token as a query parameter (Server-Sent Events: EventSource cannot set headers)",
+        "in": "query",
+        "name": "token",
+        "type": "apiKey"
+      },
+      "inboundSignature": {
+        "description": "Generic inbound signature `t=<unix>,v1=<hex HMAC-SHA256>`; provider channel types use their provider's scheme",
+        "in": "header",
+        "name": "x-converger-signature",
+        "type": "apiKey"
+      }
+    }
+  },
+  "info": {
+    "description": "Converger's HTTP API. Three families share the `/api/v1` prefix:\n\n* **Tenant API** (`/api/v1/...`): server to server, authenticated with the tenant API key (`x-api-key`).\n* **Client API** (`/api/v1/converger/...`): end-user clients, authenticated with a Converger token\n  (`Authorization: Bearer`), issued from a channel secret.\n* **Inbound webhooks** (`/api/v1/channels/{channel_id}/inbound|status`): called by providers, verified by signature.\n\nEvery error response uses one envelope:\n`{\"error\": {\"code\", \"message\", \"details\", \"request_id\"}}` (schema `ErrorResponse`). See\n[errors](https://converger.aimtune.dev/api/errors) and the\n[versioning policy](https://converger.aimtune.dev/api/versioning).\n",
+    "title": "Converger API",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/v1/channels/{channel_id}/deliveries/retry": {
+      "post": {
+        "callbacks": {},
+        "description": "Replays up to `limit` failed deliveries of the channel; call again while `has_more`.",
+        "operationId": "retryChannelDeadLetters",
+        "parameters": [
+          {
+            "description": "Channel id",
+            "in": "path",
+            "name": "channel_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Changed at or after",
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Changed at or before",
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only this activity",
+            "in": "query",
+            "name": "activity_id",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size (clamped to the max)",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkRetryResponse"
+                }
+              }
+            },
+            "description": "Re-enqueued"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Retry a channel's dead letters",
+        "tags": [
+          "Deliveries"
+        ]
+      }
+    },
+    "/api/v1/channels/{channel_id}/delivery": {
+      "get": {
+        "callbacks": {},
+        "operationId": "getChannelDeliveryState",
+        "parameters": [
+          {
+            "description": "Channel id",
+            "in": "path",
+            "name": "channel_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChannelDeliveryStateResponse"
+                }
+              }
+            },
+            "description": "The delivery state"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          },
+          {
+            "channelToken": []
+          }
+        ],
+        "summary": "Get a channel's delivery state",
+        "tags": [
+          "Channels"
+        ]
+      }
+    },
+    "/api/v1/channels/{channel_id}/inbound": {
+      "get": {
+        "callbacks": {},
+        "description": "Answers the provider's subscription handshake (Meta echoes `hub.challenge` once `hub.verify_token` matches); `ok` for adapters without one.",
+        "operationId": "verifyInbound",
+        "parameters": [
+          {
+            "description": "Channel id",
+            "in": "path",
+            "name": "channel_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Meta: `subscribe`",
+            "in": "query",
+            "name": "hub.mode",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Meta: the channel's verify token",
+            "in": "query",
+            "name": "hub.verify_token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Meta: echoed back",
+            "in": "query",
+            "name": "hub.challenge",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "The challenge (plain text)"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "inboundSignature": []
+          },
+          {}
+        ],
+        "summary": "Webhook verification handshake",
+        "tags": [
+          "Inbound"
+        ]
+      },
+      "post": {
+        "callbacks": {},
+        "description": "Messages are processed in order, each idempotent by its idempotency key. Generic channels answer 201 when an activity was created; provider channels always 200 once handled (some with a provider-specific body).",
+        "operationId": "receiveInbound",
+        "parameters": [
+          {
+            "description": "Channel id",
+            "in": "path",
+            "name": "channel_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GenericInboundMessage"
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "additionalProperties": true,
+                "type": "object"
+              }
+            },
+            "text/plain": {
+              "schema": {
+                "type": "string"
+              }
+            }
+          },
+          "description": "A generic webhook message, or the provider's own payload (WhatsApp, Slack, Telegram, email, SMS, ...).",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboundAccepted"
+                }
+              }
+            },
+            "description": "Handled"
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboundAccepted"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        },
+        "security": [
+          {
+            "inboundSignature": []
+          },
+          {}
+        ],
+        "summary": "Receive inbound messages",
+        "tags": [
+          "Inbound"
+        ]
+      }
+    },
+    "/api/v1/channels/{channel_id}/outbox": {
+      "get": {
+        "callbacks": {},
+        "description": "Acknowledges up to `watermark`, then returns the next page.",
+        "operationId": "pollChannelOutbox",
+        "parameters": [
+          {
+            "description": "Channel id",
+            "in": "path",
+            "name": "channel_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Acknowledge up to this watermark",
+            "in": "query",
+            "name": "watermark",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size (clamped to the max)",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OutboxPage"
+                }
+              }
+            },
+            "description": "The next page"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          },
+          {
+            "channelToken": []
+          }
+        ],
+        "summary": "Poll an http_pull channel's outbox",
+        "tags": [
+          "Channels"
+        ]
+      }
+    },
+    "/api/v1/channels/{channel_id}/outbox/ack": {
+      "post": {
+        "callbacks": {},
+        "operationId": "ackChannelOutbox",
+        "parameters": [
+          {
+            "description": "Channel id",
+            "in": "path",
+            "name": "channel_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OutboxAckRequest"
+              }
+            }
+          },
+          "description": "The watermark",
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OutboxAckResponse"
+                }
+              }
+            },
+            "description": "Acknowledged"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          },
+          {
+            "channelToken": []
+          }
+        ],
+        "summary": "Acknowledge an http_pull channel's outbox",
+        "tags": [
+          "Channels"
+        ]
+      }
+    },
+    "/api/v1/channels/{channel_id}/pause": {
+      "post": {
+        "callbacks": {},
+        "description": "Parks new and pending deliveries until resumed. Idempotent.",
+        "operationId": "pauseChannelDeliveries",
+        "parameters": [
+          {
+            "description": "Channel id",
+            "in": "path",
+            "name": "channel_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChannelDeliveryStateResponse"
+                }
+              }
+            },
+            "description": "The delivery state"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          },
+          {
+            "channelToken": []
+          }
+        ],
+        "summary": "Pause a channel's deliveries",
+        "tags": [
+          "Channels"
+        ]
+      }
+    },
+    "/api/v1/channels/{channel_id}/resume": {
+      "post": {
+        "callbacks": {},
+        "description": "Closes the breaker and releases parked deliveries. Idempotent.",
+        "operationId": "resumeChannelDeliveries",
+        "parameters": [
+          {
+            "description": "Channel id",
+            "in": "path",
+            "name": "channel_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChannelDeliveryStateResponse"
+                }
+              }
+            },
+            "description": "The delivery state"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          },
+          {
+            "channelToken": []
+          }
+        ],
+        "summary": "Resume a channel's deliveries",
+        "tags": [
+          "Channels"
+        ]
+      }
+    },
+    "/api/v1/channels/{channel_id}/status": {
+      "post": {
+        "callbacks": {},
+        "operationId": "receiveInboundStatus",
+        "parameters": [
+          {
+            "description": "Channel id",
+            "in": "path",
+            "name": "channel_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GenericStatusUpdate"
+              }
+            }
+          },
+          "description": "A receipt, or the provider's own payload",
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboundAccepted"
+                }
+              }
+            },
+            "description": "Handled"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "inboundSignature": []
+          },
+          {}
+        ],
+        "summary": "Receive delivery receipts",
+        "tags": [
+          "Inbound"
+        ]
+      }
+    },
+    "/api/v1/channels/{channel_id}/templates": {
+      "get": {
+        "callbacks": {},
+        "description": "Provider message templates (WhatsApp HSM), proxied and cached per node for 5 minutes.",
+        "operationId": "listChannelTemplates",
+        "parameters": [
+          {
+            "description": "Channel id",
+            "in": "path",
+            "name": "channel_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Skip the cache",
+            "in": "query",
+            "name": "refresh",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageTemplateList"
+                }
+              }
+            },
+            "description": "The templates"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "502": {
+            "$ref": "#/components/responses/BadGateway"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          },
+          {
+            "channelToken": []
+          }
+        ],
+        "summary": "List a channel's message templates",
+        "tags": [
+          "Channels"
+        ]
+      }
+    },
+    "/api/v1/converger/attachments/{id}": {
+      "get": {
+        "callbacks": {},
+        "description": "Local files are streamed; cloud backends answer 302 to a short-lived signed URL. Other tenants', channels' and conversations' attachments are 404.",
+        "operationId": "downloadAttachment",
+        "parameters": [
+          {
+            "description": "Attachment id",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "The file"
+          },
+          "302": {
+            "description": "Redirect to a signed storage URL"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "502": {
+            "$ref": "#/components/responses/BadGateway"
+          }
+        },
+        "security": [
+          {
+            "convergerToken": []
+          }
+        ],
+        "summary": "Download an attachment",
+        "tags": [
+          "Client: Attachments"
+        ]
+      }
+    },
+    "/api/v1/converger/conversations": {
+      "post": {
+        "callbacks": {},
+        "description": "Returns a token bound to the new conversation and its WebSocket `streamUrl`.",
+        "operationId": "startConversation",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientConversation"
+                }
+              }
+            },
+            "description": "Started"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "convergerToken": []
+          }
+        ],
+        "summary": "Start a conversation",
+        "tags": [
+          "Client: Conversations"
+        ]
+      }
+    },
+    "/api/v1/converger/conversations/{conversation_id}/activities": {
+      "get": {
+        "callbacks": {},
+        "description": "Oldest first, after `watermark` (opaque, or a Protocol v1 integer seq). An invalid watermark starts from the beginning.",
+        "operationId": "getActivities",
+        "parameters": [
+          {
+            "description": "Conversation id",
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Resume after this watermark",
+            "in": "query",
+            "name": "watermark",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size (clamped to the max)",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivitySet"
+                }
+              }
+            },
+            "description": "A page"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "convergerToken": []
+          }
+        ],
+        "summary": "List activities",
+        "tags": [
+          "Client: Activities"
+        ]
+      },
+      "post": {
+        "callbacks": {},
+        "description": "Idempotent with `x-idempotency-key`.",
+        "operationId": "postActivity",
+        "parameters": [
+          {
+            "description": "Conversation id",
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Makes the request idempotent per conversation: a repeat returns the original activity",
+            "in": "header",
+            "name": "x-idempotency-key",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClientActivityRequest"
+              }
+            }
+          },
+          "description": "The activity",
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResourceResponse"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        },
+        "security": [
+          {
+            "convergerToken": []
+          }
+        ],
+        "summary": "Post an activity",
+        "tags": [
+          "Client: Activities"
+        ]
+      }
+    },
+    "/api/v1/converger/conversations/{conversation_id}/events": {
+      "get": {
+        "callbacks": {},
+        "description": "Converger Protocol v1 frames as SSE events (event name = frame type, `id` = seq). Resumes after `Last-Event-ID` or `watermark`. Refused with 503 while the node drains.",
+        "operationId": "streamEvents",
+        "parameters": [
+          {
+            "description": "Conversation id",
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Replay after this seq",
+            "in": "query",
+            "name": "watermark",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Sent by a reconnecting EventSource; wins over `watermark`",
+            "in": "header",
+            "name": "Last-Event-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "The event stream"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        },
+        "security": [
+          {
+            "convergerToken": []
+          },
+          {
+            "convergerTokenQuery": []
+          }
+        ],
+        "summary": "Stream events (Server-Sent Events)",
+        "tags": [
+          "Client: Events"
+        ]
+      }
+    },
+    "/api/v1/converger/conversations/{conversation_id}/upload": {
+      "post": {
+        "callbacks": {},
+        "description": "Stores the file (type sniffed and allow-listed) and posts an activity carrying it.",
+        "operationId": "uploadFile",
+        "parameters": [
+          {
+            "description": "Conversation id",
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/UploadRequest"
+              }
+            }
+          },
+          "description": "The file",
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadResponse"
+                }
+              }
+            },
+            "description": "Uploaded"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "502": {
+            "$ref": "#/components/responses/BadGateway"
+          }
+        },
+        "security": [
+          {
+            "convergerToken": []
+          }
+        ],
+        "summary": "Upload a file",
+        "tags": [
+          "Client: Uploads"
+        ]
+      }
+    },
+    "/api/v1/converger/conversations/{id}": {
+      "get": {
+        "callbacks": {},
+        "description": "A fresh conversation-bound token and `streamUrl` (with `watermark` when given).",
+        "operationId": "reconnectConversation",
+        "parameters": [
+          {
+            "description": "Conversation id",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Resume the stream after this watermark",
+            "in": "query",
+            "name": "watermark",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientConversation"
+                }
+              }
+            },
+            "description": "Reconnected"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "convergerToken": []
+          }
+        ],
+        "summary": "Reconnect to a conversation",
+        "tags": [
+          "Client: Conversations"
+        ]
+      }
+    },
+    "/api/v1/converger/conversations/{id}/close": {
+      "post": {
+        "callbacks": {},
+        "operationId": "clientCloseConversation",
+        "parameters": [
+          {
+            "description": "Conversation id",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientConversationStatus"
+                }
+              }
+            },
+            "description": "Closed"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "convergerToken": []
+          }
+        ],
+        "summary": "Close a conversation",
+        "tags": [
+          "Client: Conversations"
+        ]
+      }
+    },
+    "/api/v1/converger/conversations/{id}/reopen": {
+      "post": {
+        "callbacks": {},
+        "operationId": "clientReopenConversation",
+        "parameters": [
+          {
+            "description": "Conversation id",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientConversationStatus"
+                }
+              }
+            },
+            "description": "Reopened"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "convergerToken": []
+          }
+        ],
+        "summary": "Reopen a conversation",
+        "tags": [
+          "Client: Conversations"
+        ]
+      }
+    },
+    "/api/v1/converger/tokens/generate": {
+      "post": {
+        "callbacks": {},
+        "description": "Exchanges the channel secret (server side) for a short-lived, unscoped Converger token for an end user.",
+        "operationId": "generateToken",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClientTokenRequest"
+              }
+            }
+          },
+          "description": "Options",
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientToken"
+                }
+              }
+            },
+            "description": "The token"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "channelSecret": []
+          }
+        ],
+        "summary": "Generate a Converger token",
+        "tags": [
+          "Client: Tokens"
+        ]
+      }
+    },
+    "/api/v1/converger/tokens/refresh": {
+      "post": {
+        "callbacks": {},
+        "description": "A new token with the same claims and a new expiry.",
+        "operationId": "refreshToken",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientToken"
+                }
+              }
+            },
+            "description": "The token"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "convergerToken": []
+          }
+        ],
+        "summary": "Refresh a Converger token",
+        "tags": [
+          "Client: Tokens"
+        ]
+      }
+    },
+    "/api/v1/conversations": {
+      "get": {
+        "callbacks": {},
+        "description": "Newest first, keyset-paginated. Requires the tenant API key (a channel token is answered 403).",
+        "operationId": "listConversations",
+        "parameters": [
+          {
+            "description": "Page size (clamped to the max)",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "`meta.next_cursor` of the previous page",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by status",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "enum": [
+                "active",
+                "closed"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by channel",
+            "in": "query",
+            "name": "channel_id",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by participant external id",
+            "in": "query",
+            "name": "external_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationList"
+                }
+              }
+            },
+            "description": "A page"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "List conversations",
+        "tags": [
+          "Conversations"
+        ]
+      },
+      "post": {
+        "callbacks": {},
+        "deprecated": true,
+        "description": "Deprecated (#23): authenticated with a channel token. Responses carry `Deprecation` and `Link` headers.",
+        "operationId": "createConversation",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateConversationRequest"
+              }
+            }
+          },
+          "description": "Conversation metadata",
+          "required": false
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationResponse"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "channelToken": []
+          }
+        ],
+        "summary": "Create a conversation (deprecated)",
+        "tags": [
+          "Conversations"
+        ]
+      }
+    },
+    "/api/v1/conversations/{conversation_id}/activities": {
+      "get": {
+        "callbacks": {},
+        "description": "Oldest first, paged by watermark.",
+        "operationId": "listActivities",
+        "parameters": [
+          {
+            "description": "Conversation id",
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size (clamped to the max)",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "`meta.watermark` of the previous page",
+            "in": "query",
+            "name": "watermark",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivityList"
+                }
+              }
+            },
+            "description": "A page"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          },
+          {
+            "channelToken": []
+          }
+        ],
+        "summary": "List activities",
+        "tags": [
+          "Activities"
+        ]
+      },
+      "post": {
+        "callbacks": {},
+        "description": "The caller names the `sender` (default `user`). Idempotent with `x-idempotency-key`.",
+        "operationId": "createActivity",
+        "parameters": [
+          {
+            "description": "Conversation id",
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Makes the request idempotent per conversation: a repeat returns the original activity",
+            "in": "header",
+            "name": "x-idempotency-key",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateActivityRequest"
+              }
+            }
+          },
+          "description": "The activity",
+          "required": false
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivityResponse"
+                }
+              }
+            },
+            "description": "Created (or the original, for a repeated idempotency key)"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          },
+          {
+            "channelToken": []
+          }
+        ],
+        "summary": "Post an activity",
+        "tags": [
+          "Activities"
+        ]
+      }
+    },
+    "/api/v1/conversations/{conversation_id}/close": {
+      "post": {
+        "callbacks": {},
+        "operationId": "closeConversation",
+        "parameters": [
+          {
+            "description": "Conversation id",
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationResponse"
+                }
+              }
+            },
+            "description": "The conversation"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          },
+          {
+            "channelToken": []
+          }
+        ],
+        "summary": "Close a conversation",
+        "tags": [
+          "Conversations"
+        ]
+      }
+    },
+    "/api/v1/conversations/{conversation_id}/reopen": {
+      "post": {
+        "callbacks": {},
+        "operationId": "reopenConversation",
+        "parameters": [
+          {
+            "description": "Conversation id",
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationResponse"
+                }
+              }
+            },
+            "description": "The conversation"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          },
+          {
+            "channelToken": []
+          }
+        ],
+        "summary": "Reopen a conversation",
+        "tags": [
+          "Conversations"
+        ]
+      }
+    },
+    "/api/v1/conversations/{id}": {
+      "get": {
+        "callbacks": {},
+        "description": "With its participant and the channels it spans.",
+        "operationId": "getConversation",
+        "parameters": [
+          {
+            "description": "Conversation id",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationResponse"
+                }
+              }
+            },
+            "description": "The conversation"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          },
+          {
+            "channelToken": []
+          }
+        ],
+        "summary": "Get a conversation",
+        "tags": [
+          "Conversations"
+        ]
+      }
+    },
+    "/api/v1/deliveries": {
+      "get": {
+        "callbacks": {},
+        "description": "Most recently changed first, keyset-paginated. `from` / `to` accept ISO 8601 times or dates. Requires the tenant API key.",
+        "operationId": "listDeliveries",
+        "parameters": [
+          {
+            "description": "Filter by status",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/DeliveryStatus"
+            }
+          },
+          {
+            "description": "Filter by channel",
+            "in": "query",
+            "name": "channel_id",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by activity",
+            "in": "query",
+            "name": "activity_id",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Changed at or after",
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Changed at or before",
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size (clamped to the max)",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "`meta.next_cursor` of the previous page",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryList"
+                }
+              }
+            },
+            "description": "A page"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "List deliveries",
+        "tags": [
+          "Deliveries"
+        ]
+      }
+    },
+    "/api/v1/deliveries/{id}/retry": {
+      "post": {
+        "callbacks": {},
+        "description": "Replays one dead letter (status `failed`).",
+        "operationId": "retryDelivery",
+        "parameters": [
+          {
+            "description": "Delivery id",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryResponse"
+                }
+              }
+            },
+            "description": "Re-enqueued"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Retry a delivery",
+        "tags": [
+          "Deliveries"
+        ]
+      }
+    },
+    "/api/v1/routing_rules": {
+      "get": {
+        "callbacks": {},
+        "description": "Not paginated: the whole list, sorted by name, capped at `lookup_limit`.",
+        "operationId": "listRoutingRules",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoutingRuleList"
+                }
+              }
+            },
+            "description": "Routing rules"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          },
+          {
+            "channelToken": []
+          }
+        ],
+        "summary": "List routing rules",
+        "tags": [
+          "Routing rules"
+        ]
+      },
+      "post": {
+        "callbacks": {},
+        "operationId": "createRoutingRule",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RoutingRuleRequest"
+              }
+            }
+          },
+          "description": "The rule",
+          "required": false
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoutingRuleResponse"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          },
+          {
+            "channelToken": []
+          }
+        ],
+        "summary": "Create a routing rule",
+        "tags": [
+          "Routing rules"
+        ]
+      }
+    },
+    "/api/v1/routing_rules/dry_run": {
+      "post": {
+        "callbacks": {},
+        "description": "The matched rules and the payload each target would get, without storing or sending anything.",
+        "operationId": "dryRunRouting",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DryRunRequest"
+              }
+            }
+          },
+          "description": "What to dry-run",
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DryRunResponse"
+                }
+              }
+            },
+            "description": "The routing plan"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          },
+          {
+            "channelToken": []
+          }
+        ],
+        "summary": "Dry-run routing",
+        "tags": [
+          "Routing rules"
+        ]
+      }
+    },
+    "/api/v1/routing_rules/{id}": {
+      "delete": {
+        "callbacks": {},
+        "operationId": "deleteRoutingRule",
+        "parameters": [
+          {
+            "description": "Routing rule id",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          },
+          {
+            "channelToken": []
+          }
+        ],
+        "summary": "Delete a routing rule",
+        "tags": [
+          "Routing rules"
+        ]
+      },
+      "get": {
+        "callbacks": {},
+        "operationId": "getRoutingRule",
+        "parameters": [
+          {
+            "description": "Routing rule id",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoutingRuleResponse"
+                }
+              }
+            },
+            "description": "The rule"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          },
+          {
+            "channelToken": []
+          }
+        ],
+        "summary": "Get a routing rule",
+        "tags": [
+          "Routing rules"
+        ]
+      },
+      "patch": {
+        "callbacks": {},
+        "operationId": "updateRoutingRule",
+        "parameters": [
+          {
+            "description": "Routing rule id",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RoutingRuleRequest"
+              }
+            }
+          },
+          "description": "Fields to change",
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoutingRuleResponse"
+                }
+              }
+            },
+            "description": "Updated"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          },
+          {
+            "channelToken": []
+          }
+        ],
+        "summary": "Update a routing rule",
+        "tags": [
+          "Routing rules"
+        ]
+      },
+      "put": {
+        "callbacks": {},
+        "operationId": "updateRoutingRulePut",
+        "parameters": [
+          {
+            "description": "Routing rule id",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RoutingRuleRequest"
+              }
+            }
+          },
+          "description": "Fields to change",
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoutingRuleResponse"
+                }
+              }
+            },
+            "description": "Updated"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          },
+          {
+            "channelToken": []
+          }
+        ],
+        "summary": "Update a routing rule",
+        "tags": [
+          "Routing rules"
+        ]
+      }
+    },
+    "/api/v1/tokens": {
+      "post": {
+        "callbacks": {},
+        "deprecated": true,
+        "description": "Deprecated (#23): issue Converger tokens with `POST /api/v1/converger/tokens/generate`. Responses carry `Deprecation` and `Link` headers.",
+        "operationId": "createLegacyToken",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LegacyTokenRequest"
+              }
+            }
+          },
+          "description": "Conversation and user",
+          "required": false
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LegacyTokenResponse"
+                }
+              }
+            },
+            "description": "Token issued"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "channelToken": []
+          }
+        ],
+        "summary": "Issue a legacy conversation token",
+        "tags": [
+          "Tokens (legacy)"
+        ]
+      }
+    }
+  },
+  "security": [],
+  "servers": [
+    {
+      "description": "This Converger instance",
+      "url": "/",
+      "variables": {}
+    }
+  ],
+  "tags": [
+    {
+      "description": "Deprecated legacy conversation tokens",
+      "name": "Tokens (legacy)"
+    },
+    {
+      "description": "Tenant API: conversations",
+      "name": "Conversations"
+    },
+    {
+      "description": "Tenant API: activities",
+      "name": "Activities"
+    },
+    {
+      "description": "Tenant API: routing rules and dry-run",
+      "name": "Routing rules"
+    },
+    {
+      "description": "Tenant API: dead-letter inspection and replay",
+      "name": "Deliveries"
+    },
+    {
+      "description": "Tenant API: delivery state, templates, pull outbox",
+      "name": "Channels"
+    },
+    {
+      "description": "Provider webhooks",
+      "name": "Inbound"
+    },
+    {
+      "description": "Client API: Converger tokens",
+      "name": "Client: Tokens"
+    },
+    {
+      "description": "Client API: conversations",
+      "name": "Client: Conversations"
+    },
+    {
+      "description": "Client API: activities",
+      "name": "Client: Activities"
+    },
+    {
+      "description": "Client API: file uploads",
+      "name": "Client: Uploads"
+    },
+    {
+      "description": "Client API: attachment downloads",
+      "name": "Client: Attachments"
+    },
+    {
+      "description": "Client API: Server-Sent Events stream",
+      "name": "Client: Events"
+    }
+  ]
+}

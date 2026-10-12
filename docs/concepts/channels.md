@@ -68,7 +68,7 @@ The mode is the channel's direction. It was introduced by migration [`2026022716
 
 Concretely:
 
-- `POST /api/v1/channels/:id/inbound` with messages on an `outbound` channel returns `400 {"error": "Channel does not accept inbound messages"}`. If the same request also carried status updates, they are applied, and the messages are dropped with a warning. A `new_activity` sent over the client API socket of an `outbound` channel is answered with the error `inbound_not_supported`.
+- `POST /api/v1/channels/:id/inbound` with messages on an `outbound` channel returns `400` `inbound_not_supported` ([errors](../api/errors.md)). If the same request also carried status updates, they are applied, and the messages are dropped with a warning. A `new_activity` sent over the client API socket of an `outbound` channel is answered with the error `inbound_not_supported`.
 - The pipeline delivers only to channels whose mode is `outbound` or `duplex`, both for the conversation's own channel and for routing targets.
 - `RoutingRules` rejects an `outbound` source ("source channel is outbound-only and cannot receive inbound messages") and `inbound` targets.
 - `Channel.changeset/2` rejects a mode the adapter does not support, for example `echo channels only support modes: outbound`.
@@ -136,8 +136,8 @@ Values must be positive integers (or a valid `backoff` name), and unknown keys a
 A channel is `active` or `inactive`. When a channel stops being active:
 
 - its connected client sockets are disconnected (`ConvergerWeb.Sockets.disconnect_channel/1`), and cannot reconnect or rejoin while it stays inactive;
-- inbound webhooks get `400 {"error": "Channel is inactive"}`;
-- client-API requests with its tokens get `403 {"error": {"code": "Forbidden", "message": "Channel not found or inactive"}}`, and `tokens/generate` with its secret fails;
+- inbound webhooks get `400` `channel_inactive`;
+- client-API requests with its tokens get `403` `channel_inactive` ("Channel not found or inactive", [error envelope](../api/errors.md)), and `tokens/generate` with its secret fails;
 - new conversations cannot be created on it through `POST /api/v1/conversations`;
 - it is skipped as a routing rule target.
 

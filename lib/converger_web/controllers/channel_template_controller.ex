@@ -5,13 +5,36 @@ defmodule ConvergerWeb.ChannelTemplateController do
   (`Converger.Channels.Templates`). `?refresh=true` skips the cache.
   """
   use ConvergerWeb, :controller
+  use OpenApiSpex.ControllerSpecs
+
+  import ConvergerWeb.ApiSchemas
 
   alias Converger.Channels
   alias Converger.Channels.Templates
+  alias ConvergerWeb.APIError
 
   plug ConvergerWeb.Plugs.TenantAuth
 
   action_fallback ConvergerWeb.FallbackController
+
+  tags(["Channels"])
+  security([%{"apiKey" => []}, %{"channelToken" => []}])
+
+  operation(:index,
+    summary: "List a channel's message templates",
+    description:
+      "Provider message templates (WhatsApp HSM), proxied and cached per node for 5 minutes.",
+    operation_id: "listChannelTemplates",
+    parameters: [
+      channel_id: path_id("Channel id"),
+      refresh: query(%OpenApiSpex.Schema{type: :boolean}, "Skip the cache")
+    ],
+    responses:
+      with_errors(
+        %{200 => json_schema("The templates", ref("MessageTemplateList"))},
+        [400, 401, 404, 422, 502]
+      )
+  )
 
   def index(conn, %{"channel_id" => id} = params) do
     channel = Channels.get_channel!(id, conn.assigns.tenant.id)
@@ -25,19 +48,17 @@ defmodule ConvergerWeb.ChannelTemplateController do
         })
 
       {:error, :unsupported} ->
-        conn
-        |> put_status(:unprocessable_entity)
-        |> json(%{error: "Channel type #{channel.type} has no message templates"})
+        {:error,
+         APIError.new(
+           :unsupported_channel_type,
+           "Channel type #{channel.type} has no message templates"
+         )}
 
       {:error, {:invalid_config, message}} ->
-        conn
-        |> put_status(:unprocessable_entity)
-        |> json(%{error: message})
+        {:error, APIError.new(:invalid_channel_config, message)}
 
       {:error, message} ->
-        conn
-        |> put_status(:bad_gateway)
-        |> json(%{error: message})
+        {:error, APIError.new(:upstream_unavailable, to_string(message))}
     end
   end
 end

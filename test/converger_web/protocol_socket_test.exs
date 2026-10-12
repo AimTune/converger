@@ -89,7 +89,7 @@ defmodule ConvergerWeb.ProtocolSocketTest do
 
     test "answers a plain GET with 426 Upgrade Required", %{conn: conn} do
       conn = get(conn, "/socket/converger/v1")
-      assert json_response(conn, 426)["error"] =~ "WebSocket"
+      assert assert_api_error(conn, 426, "upgrade_required")["message"] =~ "WebSocket"
     end
   end
 
@@ -481,11 +481,12 @@ defmodule ConvergerWeb.ProtocolSocketTest do
     end
 
     test "an expired token closes with token_expired and 4401", ctx do
-      token = token(ctx.channel, ctx.conversation, expires_in: 1)
+      # Expiry is checked in whole seconds, so 1 s can lapse before the handshake; 2 s leaves 1-2 s.
+      token = token(ctx.channel, ctx.conversation, expires_in: 2)
       {_welcome, client} = join(ctx.port, token)
 
       assert {%{"data" => %{"code" => "token_expired", "retryable" => true}}, client} =
-               Client.recv_type(client, "error", 2_500)
+               Client.recv_type(client, "error", 3_500)
 
       assert {{:close, 4401}, _client} = Client.recv(client)
     end

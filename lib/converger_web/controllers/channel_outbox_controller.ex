@@ -11,13 +11,45 @@ defmodule ConvergerWeb.ChannelOutboxController do
   See `Converger.Channels.Outbox` and `docs/channels/http-pull.md`.
   """
   use ConvergerWeb, :controller
+  use OpenApiSpex.ControllerSpecs
+
+  import ConvergerWeb.ApiSchemas
 
   alias Converger.Channels
   alias Converger.Channels.Outbox
+  alias ConvergerWeb.APIError
 
   plug ConvergerWeb.Plugs.TenantAuth
 
   action_fallback ConvergerWeb.FallbackController
+
+  tags(["Channels"])
+  security([%{"apiKey" => []}, %{"channelToken" => []}])
+
+  operation(:index,
+    summary: "Poll an http_pull channel's outbox",
+    description: "Acknowledges up to `watermark`, then returns the next page.",
+    operation_id: "pollChannelOutbox",
+    parameters: [
+      channel_id: path_id("Channel id"),
+      watermark: query(%OpenApiSpex.Schema{type: :string}, "Acknowledge up to this watermark"),
+      limit: limit_param()
+    ],
+    responses:
+      with_errors(%{200 => json_schema("The next page", ref("OutboxPage"))}, [400, 401, 404, 422])
+  )
+
+  operation(:ack,
+    summary: "Acknowledge an http_pull channel's outbox",
+    operation_id: "ackChannelOutbox",
+    parameters: [channel_id: path_id("Channel id")],
+    request_body: json_schema("The watermark", ref("OutboxAckRequest")),
+    responses:
+      with_errors(
+        %{200 => json_schema("Acknowledged", ref("OutboxAckResponse"))},
+        [400, 401, 404, 422]
+      )
+  )
 
   def index(conn, %{"channel_id" => id} = params) do
     with {:ok, channel} <- pull_channel(conn, id),
@@ -30,7 +62,7 @@ defmodule ConvergerWeb.ChannelOutboxController do
         acknowledged: page.acknowledged
       })
     else
-      {:error, reason} -> error(conn, reason)
+      {:error, reason} -> {:error, api_error(reason)}
     end
   end
 
@@ -39,7 +71,7 @@ defmodule ConvergerWeb.ChannelOutboxController do
          {:ok, count} <- Outbox.acknowledge(channel, params["watermark"]) do
       json(conn, %{acknowledged: count})
     else
-      {:error, reason} -> error(conn, reason)
+      {:error, reason} -> {:error, api_error(reason)}
     end
   end
 
@@ -60,19 +92,15 @@ defmodule ConvergerWeb.ChannelOutboxController do
     end
   end
 
-  defp error(conn, {:not_pull, type}) do
-    conn
-    |> put_status(:unprocessable_entity)
-    |> json(%{error: "Channel type #{type} has no outbox (only http_pull channels do)"})
-  end
+  defp api_error({:not_pull, type}),
+    do:
+      APIError.new(
+        :unsupported_channel_type,
+        "Channel type #{type} has no outbox (only http_pull channels do)"
+      )
 
-  defp error(conn, :invalid_watermark) do
-    conn |> put_status(:bad_request) |> json(%{error: "Invalid watermark"})
-  end
+  defp api_error(:invalid_watermark), do: APIError.new(:invalid_watermark)
 
-  defp error(conn, :invalid_limit) do
-    conn
-    |> put_status(:bad_request)
-    |> json(%{error: "limit must be an integer from 1 to #{Outbox.max_limit()}"})
-  end
+  defp api_error(:invalid_limit),
+    do: APIError.new(:bad_request, "limit must be an integer from 1 to #{Outbox.max_limit()}")
 end

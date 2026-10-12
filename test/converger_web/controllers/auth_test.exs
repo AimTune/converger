@@ -22,7 +22,9 @@ defmodule ConvergerWeb.AuthenticationTest do
     } do
       # GET /api/v1/conversations/:id is protected by TenantAuth
       conn = get(conn, ~p"/api/v1/conversations/#{conversation.id}")
-      assert json_response(conn, 401)["error"] == "Unauthorized: Missing authentication headers"
+
+      assert assert_api_error(conn, 401, "unauthorized")["message"] ==
+               "Missing authentication headers"
     end
 
     test "returns 401 if invalid api key on protected route", %{
@@ -31,7 +33,9 @@ defmodule ConvergerWeb.AuthenticationTest do
     } do
       conn = conn |> put_req_header("x-api-key", "invalid")
       conn = get(conn, ~p"/api/v1/conversations/#{conversation.id}")
-      assert json_response(conn, 401)["error"] == "Unauthorized: Invalid or inactive API Key"
+
+      assert assert_api_error(conn, 401, "unauthorized")["message"] ==
+               "Invalid or inactive API Key"
     end
   end
 
@@ -61,7 +65,9 @@ defmodule ConvergerWeb.AuthenticationTest do
       }
 
       conn = post(conn, ~p"/api/v1/tokens", params)
-      assert json_response(conn, 400)["error"] == "Missing x-channel-token header"
+
+      assert assert_api_error(conn, 400, "bad_request")["message"] ==
+               "Missing x-channel-token header"
     end
 
     test "returns forbidden if channel token does not match conversation", %{
@@ -82,7 +88,7 @@ defmodule ConvergerWeb.AuthenticationTest do
       }
 
       conn = post(conn, ~p"/api/v1/tokens", params)
-      assert json_response(conn, 403)["errors"]["detail"] == "Forbidden"
+      assert_api_error(conn, 403, "forbidden")
     end
   end
 
@@ -107,8 +113,10 @@ defmodule ConvergerWeb.AuthenticationTest do
       for token <- tokens do
         conn = put_req_header(conn, "x-channel-token", token)
 
-        assert json_response(get(conn, ~p"/api/v1/routing_rules"), 401)["error"] ==
-                 "Unauthorized: Invalid token"
+        assert assert_api_error(get(conn, ~p"/api/v1/routing_rules"), 401, "unauthorized")[
+                 "message"
+               ] ==
+                 "Invalid token"
 
         assert json_response(get(conn, ~p"/api/v1/conversations/#{conversation.id}"), 401)
       end

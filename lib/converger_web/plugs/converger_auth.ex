@@ -1,9 +1,9 @@
 defmodule ConvergerWeb.Plugs.ConvergerAuth do
   import Plug.Conn
-  import Phoenix.Controller
 
   alias Converger.Auth.ConvergerToken
   alias Converger.Channels.Channel
+  alias ConvergerWeb.APIError
 
   require Logger
 
@@ -63,9 +63,16 @@ defmodule ConvergerWeb.Plugs.ConvergerAuth do
 
       {:error, reason} ->
         Logger.warning("Converger token verification failed: #{inspect(reason)}")
-        unauthorized(conn, "Invalid or expired token")
+
+        if expired?(reason),
+          do: unauthorized(conn, "Token expired", "token_expired"),
+          else: unauthorized(conn, "Invalid or expired token")
     end
   end
+
+  # Joken reports a failed claim validation as `[message: _, claim: "exp", ...]`.
+  defp expired?(reason) when is_list(reason), do: Keyword.get(reason, :claim) == "exp"
+  defp expired?(_reason), do: false
 
   defp verify_channel_enabled(channel_id) do
     case Converger.Repo.get(Channel, channel_id) do
@@ -82,17 +89,11 @@ defmodule ConvergerWeb.Plugs.ConvergerAuth do
     end
   end
 
-  defp unauthorized(conn, message) do
-    conn
-    |> put_status(:unauthorized)
-    |> json(%{error: %{code: "Unauthorized", message: message}})
-    |> halt()
+  defp unauthorized(conn, message, code \\ "unauthorized") do
+    APIError.send_error(conn, code, message)
   end
 
   defp forbidden(conn, message) do
-    conn
-    |> put_status(:forbidden)
-    |> json(%{error: %{code: "Forbidden", message: message}})
-    |> halt()
+    APIError.send_error(conn, APIError.new(:channel_inactive, message, nil, status: 403))
   end
 end

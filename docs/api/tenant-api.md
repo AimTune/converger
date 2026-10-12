@@ -61,7 +61,7 @@ The inbound webhook routes `/api/v1/channels/:channel_id/inbound` and `/status` 
 called by providers, not by tenants; see [inbound webhooks](inbound.md).
 
 Every resource is tenant-scoped. A conversation, routing rule or channel that belongs to another tenant is reported as `404`,
-exactly like one that does not exist. A malformed UUID in the path returns `400 {"errors": {"detail": "Bad Request"}}`.
+exactly like one that does not exist. A malformed UUID in the path returns `400 bad_request`.
 
 The examples use these shell variables:
 
@@ -244,14 +244,14 @@ curl -s -X POST "$CONVERGER/api/v1/tokens" \
 { "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...", "expires_in": 3600 }
 ```
 
-| Status | Body | Cause |
+| Status | Error (`code: message`) | Cause |
 | --- | --- | --- |
-| `400` | `{"error": "Missing x-channel-token header"}` | No channel token |
-| `400` | `{"errors": {"detail": "Bad Request"}}` | `conversation_id` or `user_id` missing, or `conversation_id` not a UUID |
-| `401` | `{"errors": {"detail": "Unauthorized"}}` | Channel token invalid or expired, or not a channel token (for example a conversation token or Converger API token) |
-| `403` | `{"errors": {"detail": "Forbidden"}}` | Token's channel differs from the conversation's channel, or tenant not active |
-| `404` | `{"errors": {"detail": "Not Found"}}` | Unknown conversation |
-| `429` | rate limit body | See [rate limiting](overview.md#rate-limiting) |
+| `400` | `bad_request: Missing x-channel-token header` | No channel token |
+| `400` | `bad_request` | `conversation_id` or `user_id` missing, or `conversation_id` not a UUID |
+| `401` | `unauthorized` | Channel token invalid or expired, or not a channel token (for example a conversation token or Converger API token) |
+| `403` | `forbidden` | Token's channel differs from the conversation's channel, or tenant not active |
+| `404` | `not_found` | Unknown conversation |
+| `429` | `rate_limited` | See [rate limiting](overview.md#rate-limiting) |
 
 ## Conversations
 
@@ -297,11 +297,11 @@ curl -s -X POST "$CONVERGER/api/v1/conversations" \
 }
 ```
 
-| Status | Body | Cause |
+| Status | Error (`code: message`) | Cause |
 | --- | --- | --- |
-| `400` | `{"error": "Missing x-channel-token header"}` | No channel token |
-| `400` | `{"error": "Channel is inactive"}` | The token's channel is disabled |
-| `401` | `{"errors": {"detail": "Unauthorized"}}` | Invalid or expired token, channel not found for the tenant, or an invalid body (for example an unknown `status`); the controller currently maps every other failure to `401` |
+| `400` | `bad_request: Missing x-channel-token header` | No channel token |
+| `400` | `channel_inactive` | The token's channel is disabled |
+| `401` | `unauthorized` | Invalid or expired token, channel not found for the tenant, or an invalid body (for example an unknown `status`); the controller currently maps every other failure to `401` |
 
 ### List conversations
 
@@ -318,7 +318,7 @@ end users' conversations.
 | `limit` | Default `50`, max `500` |
 | `cursor` | `meta.next_cursor` of the previous page |
 | `status` | `active` or `closed` |
-| `channel_id` | UUID; anything else returns `400 {"error": "Invalid channel_id"}` |
+| `channel_id` | UUID; anything else returns `400 bad_request: Invalid channel_id` |
 | `external_id` | The participant's provider id on the conversation's channel, for example a WhatsApp number |
 
 ```bash
@@ -349,12 +349,12 @@ curl -s "$CONVERGER/api/v1/conversations?status=active&external_id=16505551234&l
 
 To fetch the next page, repeat the request with `cursor=<meta.next_cursor>` and the same filters.
 
-| Status | Body | Cause |
+| Status | Error (`code: message`) | Cause |
 | --- | --- | --- |
-| `400` | `{"error": "Invalid cursor"}` | Malformed `cursor` |
-| `400` | `{"error": "Invalid channel_id"}` | `channel_id` is not a UUID |
-| `401` | `{"error": "Unauthorized: ..."}` | No or invalid credentials |
-| `403` | `{"errors": {"detail": "Forbidden"}}` | Authenticated with `x-channel-token` instead of `x-api-key` |
+| `400` | `bad_request: Invalid cursor` | Malformed `cursor` |
+| `400` | `bad_request: Invalid channel_id` | `channel_id` is not a UUID |
+| `401` | `unauthorized` | No or invalid credentials |
+| `403` | `forbidden` | Authenticated with `x-channel-token` instead of `x-api-key` |
 
 ### Get a conversation
 
@@ -478,22 +478,22 @@ curl -s -X POST "$CONVERGER/api/v1/conversations/3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7
 }
 ```
 
-| Status | Body | Cause |
+| Status | Error (`code: message`) | Cause |
 | --- | --- | --- |
-| `404` | `{"errors": {"detail": "Not Found"}}` | Unknown or foreign conversation |
-| `409` | `{"error": "conversation_closed", "detail": "Conversation is closed"}` | Conversation is closed |
-| `422` | `{"errors": {"type": ["is invalid"]}}` | Validation failed: unknown or internal `type`, `text` over 65,536 bytes, too many or too large attachments, an attachment without `contentType`, `metadata` too large, an invalid `reply_to_id` (unknown, in another conversation, editing someone else's message) |
-| `429` | rate limit body | Tenant's `activity_create` limit exceeded |
-| `503` | `{"error": "Activity could not be accepted, please retry"}` | Deliveries could not be enqueued; nothing was stored. Retry with the same idempotency key. |
+| `404` | `not_found` | Unknown or foreign conversation |
+| `409` | `conversation_closed` | Conversation is closed |
+| `422` | `invalid_message` with `details` `{"type": ["is invalid"]}` | Validation failed: unknown or internal `type`, `text` over 65,536 bytes, too many or too large attachments, an attachment without `contentType`, `metadata` too large, an invalid `reply_to_id` (unknown, in another conversation, editing someone else's message) |
+| `429` | `rate_limited` | Tenant's `activity_create` limit exceeded |
+| `503` | `unavailable` | Deliveries could not be enqueued; nothing was stored. Retry with the same idempotency key. |
 
 Example `422` bodies:
 
 ```json
-{ "errors": { "text": ["should be at most 65536 byte(s)"] } }
+{ "error": { "code": "invalid_message", "message": "Invalid message", "details": { "text": ["should be at most 65536 byte(s)"] }, "request_id": "GBHDfGZ0bW5Sl2YAAAEB" } }
 ```
 
 ```json
-{ "errors": { "attachments": ["attachment 0 is 4112 bytes, max is 4096"] } }
+{ "error": { "code": "invalid_message", "message": "Invalid message", "details": { "attachments": ["attachment 0 is 4112 bytes, max is 4096"] }, "request_id": "GBHDfGZ0bW5Sl2YAAAEB" } }
 ```
 
 ### List activities
@@ -558,10 +558,10 @@ curl -s "$CONVERGER/api/v1/conversations/3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10/ac
 Continue with `?watermark=c2VxOjI` until `has_more` is `false`. When there is nothing new, `data` is empty and
 `meta.watermark` echoes the watermark you sent (`null` if you sent none), so the same request can be used to poll.
 
-| Status | Body | Cause |
+| Status | Error (`code: message`) | Cause |
 | --- | --- | --- |
-| `400` | `{"error": "Invalid watermark"}` | Malformed watermark |
-| `404` | `{"errors": {"detail": "Not Found"}}` | Unknown or foreign conversation |
+| `400` | `invalid_watermark` | Malformed watermark |
+| `404` | `not_found` | Unknown or foreign conversation |
 
 ## Routing rules
 
@@ -637,7 +637,7 @@ curl -s -X POST "$CONVERGER/api/v1/routing_rules" \
 `201 Created` with `{"data": <routing rule>}`. Validation errors return `422`:
 
 ```json
-{ "errors": { "target_channel_ids": ["would create a routing cycle"] } }
+{ "error": { "code": "validation_failed", "message": "Validation failed", "details": { "target_channel_ids": ["would create a routing cycle"] }, "request_id": "GBHDfGZ0bW5Sl2YAAAEB" } }
 ```
 
 ### Update a routing rule
@@ -733,8 +733,8 @@ curl -s -X POST "$CONVERGER/api/v1/routing_rules/dry_run" \
 | `targets[].reason` | `origin`, `reply_back`, `source_hub` (a replying `websocket` channel), or `rule` (with `rule_ids`) |
 | `targets[].outcome` | `deliver` (with `payload`: the canonical activity after the type downgrade, the channel's middleware and the rules' transformations), `halted` (a middleware halted, `detail` says why), `skipped` (the channel cannot take the type), or `excluded` (`excluded` is `echo`, `inactive`, `inbound_only`, `not_deliverable` or `unsupported_activity`) |
 
-Errors: `400 {"error": "activity is required"}`, `400 {"error": "source_channel_id or conversation_id is required"}`,
-`400 {"error": "at must be an ISO 8601 date-time"}`, `404` for an unknown or foreign channel or conversation, `422`
+Errors: `400 bad_request: activity is required`, `400 bad_request: source_channel_id or conversation_id is required`,
+`400 bad_request: at must be an ISO 8601 date-time`, `404` for an unknown or foreign channel or conversation, `422`
 for an invalid activity.
 
 ## Deliveries
@@ -771,7 +771,7 @@ curl -s "$CONVERGER/api/v1/deliveries?status=failed&channel_id=0d2f4b6a-8c0e-4a2
 }
 ```
 
-An invalid filter returns `400 {"error": "Invalid <param>"}`.
+An invalid filter returns `400 bad_request: Invalid <param>`.
 
 ### Retry a delivery
 
@@ -792,9 +792,9 @@ the conversation.
 | Status | Body | When |
 | --- | --- | --- |
 | `202` | `{"data": {...}}` | Re-enqueued |
-| `400` | `{"error": "Channel is inactive"}` | The delivery's channel is disabled; enable it first |
-| `404` | `{"errors": {"detail": "Not Found"}}` | Unknown delivery, or one of another tenant |
-| `409` | `{"error": "not_failed", "detail": "Only failed deliveries can be retried"}` | The delivery is not (or no longer) `failed` |
+| `400` | `channel_inactive` | The delivery's channel is disabled; enable it first |
+| `404` | `not_found` | Unknown delivery, or one of another tenant |
+| `409` | `not_failed` | The delivery is not (or no longer) `failed` |
 
 ### Retry a channel's dead letters
 
@@ -908,13 +908,13 @@ The list is cached per node for 5 minutes (`config :converger, Converger.Channel
 a template was approved. Updating the channel clears its cache on the node that handled the update; other nodes pick up
 the change within the TTL. Failed listings are not cached.
 
-| Status | Body | Cause |
+| Status | Error (`code: message`) | Cause |
 | --- | --- | --- |
 | `200` | the list above | |
-| `404` | `{"errors": {"detail": "Not Found"}}` | Unknown channel, or a channel of another tenant |
-| `422` | `{"error": "Channel type echo has no message templates"}` | The channel's adapter does not list templates |
-| `422` | `{"error": "whatsapp_meta config 'waba_id' (WhatsApp Business Account id) is required to list templates"}` | `whatsapp_meta` channel without `waba_id` |
-| `502` | `{"error": "WhatsApp API returned 401: ..."}` | The provider call failed (expired token, wrong account, timeout) |
+| `404` | `not_found` | Unknown channel, or a channel of another tenant |
+| `422` | `unsupported_channel_type: Channel type echo has no message templates` | The channel's adapter does not list templates |
+| `422` | `invalid_channel_config: whatsapp_meta config 'waba_id' (WhatsApp Business Account id) is required to list templates` | `whatsapp_meta` channel without `waba_id` |
+| `502` | `upstream_unavailable: WhatsApp API returned 401: ...` | The provider call failed (expired token, wrong account, timeout) |
 
 How to send a template is described in [WhatsApp: templates](../channels/whatsapp.md#templates-hsm).
 

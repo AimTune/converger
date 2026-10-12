@@ -55,9 +55,8 @@ defmodule ConvergerWeb.DbPressureTest do
         |> put_req_header("authorization", "Bearer #{ctx.token}")
         |> get("/api/v1/converger/conversations/#{ctx.conversation.id}/activities")
 
-      assert json_response(conn, 503) == %{
-               "errors" => %{"detail" => "Service Unavailable", "code" => "database_unavailable"}
-             }
+      assert %{"details" => %{"reason" => "database_unavailable"}} =
+               assert_api_error(conn, 503, "unavailable")
 
       assert [retry_after] = get_resp_header(conn, "retry-after")
       assert String.to_integer(retry_after) in 1..2

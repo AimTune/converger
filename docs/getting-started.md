@@ -327,7 +327,7 @@ curl -s -X POST "http://localhost:4000/api/v1/converger/conversations/$CONV/acti
 { "id": "0e7d4c1a-8b2f-4f6e-a1c3-7d9e2b4f6a80" }
 ```
 
-The response comes back after the activity **and** its delivery job have been committed in the same transaction. If the job could not be enqueued, nothing is committed and you get `503` with `{"error": "Activity could not be accepted, please retry"}`. Send the same request again with the same `x-idempotency-key`: it returns the same `id` and creates no second activity.
+The response comes back after the activity **and** its delivery job have been committed in the same transaction. If the job could not be enqueued, nothing is committed and you get `503` `unavailable` with the message "Activity could not be accepted, please retry" and `details.reason` `delivery_enqueue_failed`. Send the same request again with the same `x-idempotency-key`: it returns the same `id` and creates no second activity.
 
 Client-settable fields are `type`, `text`, `attachments` and `channelData` (stored as `metadata`). `from.id` becomes the activity's `sender`. The server sets everything else, including timestamps ([activities](concepts/activities.md), [ADR-0005](adr/0005-separate-client-and-system-changesets.md)).
 
@@ -420,23 +420,32 @@ Open **Admin, Conversations** and select the conversation. The transcript shows 
 To close the conversation, run `POST /api/v1/converger/conversations/$CONV/close` (bearer token) or `POST /api/v1/conversations/$CONV/close` (`x-api-key`). The server then emits a `conversationUpdate` activity, and further posts are rejected with `409`:
 
 ```json
-{ "error": "conversation_closed", "detail": "Conversation is closed" }
+{
+  "error": {
+    "code": "conversation_closed",
+    "message": "Conversation is closed",
+    "details": null,
+    "request_id": "F8n2kQx1c9ZQAAAB"
+  }
+}
 ```
 
 `.../reopen` opens it again ([conversations](concepts/conversations.md)).
 
 ### Common errors
 
-| Status | Body | Cause |
+Every error response uses the same envelope, `{"error": {"code", "message", "details", "request_id"}}`, like the `409` above. Branch on `code`; `details` holds extra data such as the per-field errors of a `422` (for example `{"text": ["should be at most 65536 byte(s)"]}`). The full list of codes is in [errors](api/errors.md).
+
+| Status | Code | Cause |
 | --- | --- | --- |
-| `401` | `{"error": {"code": "Unauthorized", "message": "Missing or malformed Authorization header"}}` | No `authorization: Bearer ...` header on a `/api/v1/converger` route. |
-| `401` | `{"error": {"code": "Unauthorized", "message": "Invalid or expired token"}}` | Expired token, a channel secret used where a token is required, or a token from another installation. |
-| `403` | `{"error": {"code": "Forbidden", "message": "Channel not found or inactive"}}` | The channel was disabled or deleted. |
-| `403` | `{"errors": {"detail": "Forbidden"}}` | A conversation-scoped token used for another conversation. |
-| `401` | `{"error": "Unauthorized: Invalid or inactive API Key"}` | Wrong `x-api-key`, or the tenant is inactive (`/api/v1` routes). |
-| `409` | `{"error": "conversation_closed", "detail": "Conversation is closed"}` | The conversation is closed or expired. |
-| `422` | `{"errors": {"text": ["should be at most 65536 byte(s)"]}}` | Validation failed (size limits, unknown `type`, ...). |
-| `429` | `{"error": "Too many requests. Please try again later."}` and a `Retry-After` header | Rate limit exceeded ([deployment](deployment.md#rate-limiting)). |
+| `401` | `unauthorized` ("Missing or malformed Authorization header") | No `authorization: Bearer ...` header on a `/api/v1/converger` route. |
+| `401` | `unauthorized` or `token_expired` | Expired token, a channel secret used where a token is required, or a token from another installation. |
+| `403` | `channel_inactive` ("Channel not found or inactive") | The channel was disabled or deleted. |
+| `403` | `forbidden` | A conversation-scoped token used for another conversation. |
+| `401` | `unauthorized` ("Invalid or inactive API Key") | Wrong `x-api-key`, or the tenant is inactive (`/api/v1` routes). |
+| `409` | `conversation_closed` | The conversation is closed or expired. |
+| `422` | `invalid_message`, field errors in `details` | Validation failed (size limits, unknown `type`, ...). |
+| `429` | `rate_limited`, with `details.retry_after_ms` and a `Retry-After` header | Rate limit exceeded ([deployment](deployment.md#rate-limiting)). |
 
 ## Next steps
 

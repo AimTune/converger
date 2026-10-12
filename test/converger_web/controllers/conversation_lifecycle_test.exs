@@ -34,7 +34,7 @@ defmodule ConvergerWeb.ConversationLifecycleTest do
         |> tenant_conn()
         |> post(~p"/api/v1/conversations/#{conversation.id}/activities", %{"text" => "hi"})
 
-      assert %{"error" => "conversation_closed"} = json_response(conn, 409)
+      assert_api_error(conn, 409, "conversation_closed")
     end
 
     test "close and reopen endpoints", %{tenant: tenant, conversation: conversation} do
@@ -87,7 +87,7 @@ defmodule ConvergerWeb.ConversationLifecycleTest do
           "text" => "hi"
         })
 
-      assert %{"error" => "conversation_closed"} = json_response(conn, 409)
+      assert_api_error(conn, 409, "conversation_closed")
 
       upload = %Plug.Upload{
         path: Path.join(System.tmp_dir!(), "never-read-#{System.unique_integer([:positive])}"),
@@ -100,7 +100,7 @@ defmodule ConvergerWeb.ConversationLifecycleTest do
         |> api_conn(conversation)
         |> post("/api/v1/converger/conversations/#{conversation.id}/upload", %{"file" => upload})
 
-      assert %{"error" => "conversation_closed"} = json_response(conn, 409)
+      assert_api_error(conn, 409, "conversation_closed")
 
       conn =
         channel
@@ -150,7 +150,7 @@ defmodule ConvergerWeb.ConversationLifecycleTest do
           "conversation_id" => conversation.id
         })
 
-      assert %{"error" => "conversation_closed"} = json_response(conn, 409)
+      assert_api_error(conn, 409, "conversation_closed")
     end
   end
 

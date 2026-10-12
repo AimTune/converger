@@ -19,7 +19,7 @@ defmodule ConvergerWeb.InboundModeTest do
           "sender" => "user1"
         })
 
-      assert json_response(conn, 400)["error"] =~ "inbound"
+      assert assert_api_error(conn, 400, "inbound_not_supported")["message"] =~ "inbound"
     end
 
     test "accepts inbound to duplex channel", %{tenant: tenant} do
@@ -54,7 +54,7 @@ defmodule ConvergerWeb.InboundModeTest do
           "sender" => "user1"
         })
 
-      assert json_response(conn, 422)["error"] =~ "no text"
+      assert assert_api_error(conn, 422, "invalid_message")["message"] =~ "no text"
     end
   end
 end

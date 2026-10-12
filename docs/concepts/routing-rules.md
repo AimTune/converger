@@ -285,5 +285,5 @@ curl -s -X POST http://localhost:4000/api/v1/routing_rules \
 ```
 
 `tenant_id` always comes from the API key. Validation errors return
-`422 {"errors": {"target_channel_ids": ["would create a routing cycle"]}}`. Rule changes made through the API are
+`422` `validation_failed` with `details` `{"target_channel_ids": ["would create a routing cycle"]}` ([errors](../api/errors.md)). Rule changes made through the API are
 audit-logged with actor type `tenant_api`.
