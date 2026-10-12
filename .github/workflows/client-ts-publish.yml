@@ -1,0 +1,53 @@
+name: client-ts publish
+
+# Publishes @converger/client to npm when a tag client-ts-vX.Y.Z is pushed.
+# The tag must match packages/client-ts/package.json "version". Needs the
+# NPM_TOKEN repository secret; the package is published with provenance.
+
+on:
+  push:
+    tags: ["client-ts-v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publish @converger/client
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write # npm provenance
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+
+      - run: pnpm install --frozen-lockfile --filter @converger/client...
+
+      - name: Tag matches package version
+        working-directory: packages/client-ts
+        shell: bash
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if [ "client-ts-v${version}" != "${GITHUB_REF_NAME}" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} does not match package version ${version}"
+            exit 1
+          fi
+
+      - run: pnpm --filter @converger/client typecheck
+      - run: pnpm --filter @converger/client test
+      - run: pnpm --filter @converger/client build
+
+      - name: Publish
+        run: pnpm --filter @converger/client publish --no-git-checks --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_PROVENANCE: "true"
