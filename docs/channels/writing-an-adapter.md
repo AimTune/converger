@@ -438,7 +438,7 @@ The example above checks `base_url` but, for brevity, does not pin the connectio
 - If the provider cannot sign at all, do not implement the callback: senders then use the generic `x-converger-signature` header with the channel `secret`, or the channel must be created with `require_signature: false`.
 - If the provider's scheme needs a secret, declare it with `required: :with_signature` in `config_schema/0`, as `whatsapp_meta` does for `app_secret`: channels with `require_signature: true` cannot be saved without it.
 - If the provider verifies the webhook URL with a `GET` handshake, implement `verify_subscription/2`. If it posts the handshake to the webhook URL itself, implement `inbound_challenge/2` (see `slack.ex`).
-- If the provider expects a particular body in the answer to a webhook (Twilio flags any non-TwiML response), implement `inbound_response/1` returning `{content_type, body}` (see `sms_twilio.ex`).
+- If the provider expects a particular body in the answer to a webhook (Twilio flags any non-TwiML response), implement `inbound_response/1` returning `{content_type, body}` (see `sms_twilio.ex`). When the answer depends on the request (a Discord interaction response, a Teams invoke response), implement `inbound_response/2`, which also gets the params and may return `:default` (see `discord.ex`).
 - If the signature covers the request URL (Twilio), note that the adapter does not see it: rebuild the candidate URLs from the channel id and the server URL, as `sms_twilio.ex` does.
 
 ## 9. Tests

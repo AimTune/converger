@@ -44,6 +44,8 @@ defmodule Converger.Application do
           {Task.Supervisor, name: Converger.TaskSupervisor},
           # Per-node cache of provider message templates (WhatsApp HSM).
           Converger.Channels.Templates,
+          # Per-node cache of provider tokens and signing keys (Bot Framework).
+          Converger.Channels.TokenCache,
           Converger.RateLimit.Supervisor,
           # Broker channels (kafka, rabbitmq): per-channel publishers, started
           # on first delivery, so before Oban runs delivery jobs.

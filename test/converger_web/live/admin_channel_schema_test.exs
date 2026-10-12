@@ -39,6 +39,47 @@ defmodule ConvergerWeb.Admin.ChannelSchemaTest do
     refute html =~ ~s(name="channel[config][headers]")
   end
 
+  test "the #44 adapters get their config forms and create channels", %{conn: conn} do
+    tenant = Converger.TenantsFixtures.tenant_fixture()
+    {:ok, view, html} = live(conn, ~p"/admin/channels")
+
+    for type <- ~w(messenger instagram viber discord teams http_pull),
+        do: assert(html =~ ~s(<option value="#{type}"))
+
+    for {type, field, secret} <- [
+          {"messenger", "page_id", "page_access_token"},
+          {"instagram", "account_id", "access_token"},
+          {"viber", "sender_name", "auth_token"},
+          {"discord", "public_key", "bot_token"},
+          {"teams", "app_id", "app_password"}
+        ] do
+      html = render_change(view, "form_changed", %{"channel" => %{"type" => type}})
+      assert html =~ ~s(name="channel[config][#{field}]")
+      assert html =~ ~r/type="password"[^>]*name="channel\[config\]\[#{secret}\]"/
+    end
+
+    render_change(view, "form_changed", %{"channel" => %{"type" => "teams"}})
+
+    assert view
+           |> form("form",
+             channel: %{
+               name: "Teams bot",
+               tenant_id: tenant.id,
+               type: "teams",
+               mode: "duplex",
+               config: %{
+                 app_id: "6d3c8a2e-1f4b-4c7a-9e2d-0b5a7c9e1f3d",
+                 app_password: "pw-secret"
+               }
+             }
+           )
+           |> render_submit() =~ "Channel created"
+
+    channel = Enum.find(Channels.list_channels(), &(&1.name == "Teams bot"))
+    assert channel.config["app_password"] == "pw-secret"
+    refute render(view) =~ "pw-secret"
+  end
+
   test "a configured adapter appears in the type list and gets its form", %{conn: conn} do
     previous = Application.get_env(:converger, :adapters)
     Application.put_env(:converger, :adapters, [Converger.TestSmsAdapter])

@@ -37,7 +37,12 @@ Which channel types accept which requests:
 | `email` | yes (modes `inbound`, `duplex`) | per inbound provider: SNS signature and topic (`ses`), payload signature (`mailgun`), basic auth or `x-converger-signature` (others); see [Email](../channels/email.md) |
 | `sms_twilio` | yes (modes `inbound`, `duplex`); form-encoded, answered with an empty TwiML `<Response>` | `x-twilio-signature` (auth token over the URL and the sorted parameters); see [SMS](../channels/sms.md) |
 | `sms_vonage` | yes (modes `inbound`, `duplex`) | `Authorization: Bearer` JWT (signature secret) with the body hash; see [SMS](../channels/sms.md) |
-| `echo`, `websocket`, `kafka`, `rabbitmq` | no: `400` with the adapter's message (broker channels consume their topic or queue, see [Broker channels](../channels/brokers.md)) | `x-converger-signature` |
+| `messenger`, `instagram` | yes (modes `inbound`, `duplex`) | `x-hub-signature-256` (Meta app secret); see [Messenger](../channels/messenger.md) |
+| `viber` | yes (modes `inbound`, `duplex`) | `x-viber-content-signature` (auth token; a missing or wrong header is always `401`); see [Viber](../channels/viber.md) |
+| `discord` | yes (modes `inbound`, `duplex`); `PING` is answered with `PONG`, interactions with an interaction response | `x-signature-ed25519` and `x-signature-timestamp` (application public key; always required); see [Discord](../channels/discord.md) |
+| `teams` | yes (modes `inbound`, `duplex`) | `Authorization: Bearer` Bot Framework JWT (always required); see [Microsoft Teams](../channels/teams.md) |
+| `kafka`, `rabbitmq` | no: `400` with the adapter's message (broker channels consume their topic or queue, see [Broker channels](../channels/brokers.md)) | `x-converger-signature` |
+| `echo`, `websocket`, `http_pull` | no: `400` with the adapter's message | `x-converger-signature` |
 
 A channel in `outbound` mode answers messages with `400 {"error": "Channel does not accept inbound messages"}`.
 If the same request also carried status updates, those are applied and the request is acknowledged with `200`,
@@ -230,7 +235,7 @@ Status codes:
 | Status | When |
 | --- | --- |
 | `201 Created` | Generic channel types, at least one new activity created |
-| `200 OK` | Generic channel types with only duplicates; `whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram`, `email`, `sms_twilio` and `sms_vonage` always, once the request has been handled (also when messages were rejected), because those providers retry any non-200 response |
+| `200 OK` | Generic channel types with only duplicates; `whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram`, `email`, `sms_twilio`, `sms_vonage`, `messenger`, `instagram`, `viber`, `discord` and `teams` always, once the request has been handled (also when messages were rejected), because those providers retry any non-200 response |
 | `200 OK` with only `status` and `receipts_processed` | Status-only request |
 | `422` | Generic channel types where every message was rejected: the first rejection's changeset errors, for example `{"errors": {"type": ["is invalid"]}}`; or the empty-message error above |
 | `503` | A transient failure (delivery jobs could not be enqueued): `{"error": "Activity could not be accepted, please retry"}`. The provider should re-deliver. |
@@ -306,6 +311,10 @@ Idempotency keys:
 | `email` | The `Message-ID` header, without angle brackets |
 | `sms_twilio` | `MessageSid` |
 | `sms_vonage` | `message_uuid` |
+| `messenger`, `instagram` | The message `mid`; edits, unsends and reactions have their own keys, see [Messenger](../channels/messenger.md#inbound) |
+| `viber` | `message_token` |
+| `discord` | `interaction:<id>` |
+| `teams` | `"<conversation hash>:<activity id>"`, see [Microsoft Teams](../channels/teams.md#activity-mapping) |
 | `webhook` | The optional `idempotency_key` body field. Without it, a re-delivered request creates a second activity. |
 
 Re-sending the same generic message with the same `idempotency_key` returns `200` (instead of `201`) with

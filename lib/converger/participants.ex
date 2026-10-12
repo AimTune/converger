@@ -38,7 +38,9 @@ defmodule Converger.Participants do
 
   @doc """
   Insert the participant `(channel, attrs["external_id"])` or return the
-  existing one. A non-nil `display_name` overwrites the stored one.
+  existing one. A non-nil `display_name` overwrites the stored one, and the
+  keys of `metadata` are merged over the stored ones (e.g. the Bot Framework
+  `service_url` a Teams reply must go to, which can change).
   """
   def upsert_participant(channel, attrs) do
     on_conflict =
@@ -46,6 +48,7 @@ defmodule Converger.Participants do
         update: [
           set: [
             display_name: fragment("COALESCE(EXCLUDED.display_name, ?)", p.display_name),
+            metadata: fragment("? || EXCLUDED.metadata", p.metadata),
             updated_at: fragment("EXCLUDED.updated_at")
           ]
         ]
@@ -227,4 +230,21 @@ defmodule Converger.Participants do
   end
 
   def recipient_for(_activity, _channel_id), do: nil
+
+  @doc """
+  The participant of the activity's conversation, when that participant
+  belongs to `channel_id`, or nil. Like `recipient_for/2`, for adapters that
+  need more than the external id (e.g. the stored Bot Framework service URL).
+  """
+  def participant_for(%{conversation_id: conversation_id}, channel_id)
+      when is_binary(conversation_id) and is_binary(channel_id) do
+    from(c in Conversation,
+      join: p in assoc(c, :participant),
+      where: c.id == ^conversation_id and p.channel_id == ^channel_id,
+      select: p
+    )
+    |> Repo.one()
+  end
+
+  def participant_for(_activity, _channel_id), do: nil
 end
