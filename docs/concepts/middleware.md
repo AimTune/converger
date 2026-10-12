@@ -42,7 +42,7 @@ The chain is the channel's `transformations` field: an ordered JSON array of map
 
 Steps run in array order, and each step receives the output of the previous one. `Channel.changeset/2` validates the chain with `Middleware.validate_chain/1`. An unknown type (`unknown middleware type: foo`) or invalid options (`add_prefix: requires "prefix" (string)`) reject the save with an error on `transformations`.
 
-In the admin panel, the channel form has a **Middleware Pipeline** section ("+ Add Step"). Two types use friendlier inputs there that are converted on save: `set_metadata` takes one `key=value` per line, and `content_filter` takes comma-separated patterns. There is no REST endpoint for channel configuration yet ([#51](https://github.com/AimTune/converger/issues/51)). Per-rule transformations on routing rules are Planned ([#43](https://github.com/AimTune/converger/issues/43)).
+In the admin panel, the channel form has a **Middleware Pipeline** section ("+ Add Step"). Two types use friendlier inputs there that are converted on save: `set_metadata` takes one `key=value` per line, and `content_filter` takes comma-separated patterns. There is no REST endpoint for channel configuration yet ([#51](https://github.com/AimTune/converger/issues/51)). Routing rules can carry their own `transformations` in the same format; they run after the target channel's chain, only for that rule's targets (see [Routing rules](routing-rules.md#per-rule-transformations)).
 
 ## Built-in middleware
 
