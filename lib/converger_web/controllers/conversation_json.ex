@@ -39,7 +39,8 @@ defmodule ConvergerWeb.ConversationJSON do
     %{
       id: participant.id,
       external_id: participant.external_id,
-      display_name: participant.display_name
+      display_name: participant.display_name,
+      opted_out_at: participant.opted_out_at
     }
   end
 

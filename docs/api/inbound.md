@@ -34,6 +34,8 @@ Which channel types accept which requests:
 | `whatsapp_infobip` | yes (modes `inbound`, `duplex`) | `x-converger-signature` |
 | `slack` | yes (modes `inbound`, `duplex`); `url_verification` is answered with its `challenge` | `x-slack-signature` (signing secret, 5 minute window) |
 | `email` | yes (modes `inbound`, `duplex`) | per inbound provider: SNS signature and topic (`ses`), payload signature (`mailgun`), basic auth or `x-converger-signature` (others); see [Email](../channels/email.md) |
+| `sms_twilio` | yes (modes `inbound`, `duplex`); form-encoded, answered with an empty TwiML `<Response>` | `x-twilio-signature` (auth token over the URL and the sorted parameters); see [SMS](../channels/sms.md) |
+| `sms_vonage` | yes (modes `inbound`, `duplex`) | `Authorization: Bearer` JWT (signature secret) with the body hash; see [SMS](../channels/sms.md) |
 | `echo`, `websocket` | no: `400` with the adapter's message | `x-converger-signature` |
 
 A channel in `outbound` mode answers messages with `400 {"error": "Channel does not accept inbound messages"}`.
@@ -227,7 +229,7 @@ Status codes:
 | Status | When |
 | --- | --- |
 | `201 Created` | Generic channel types, at least one new activity created |
-| `200 OK` | Generic channel types with only duplicates; `whatsapp_meta`, `whatsapp_infobip`, `slack` and `email` always, once the request has been handled (also when messages were rejected), because those providers retry any non-200 response |
+| `200 OK` | Generic channel types with only duplicates; `whatsapp_meta`, `whatsapp_infobip`, `slack`, `email`, `sms_twilio` and `sms_vonage` always, once the request has been handled (also when messages were rejected), because those providers retry any non-200 response |
 | `200 OK` with only `status` and `receipts_processed` | Status-only request |
 | `422` | Generic channel types where every message was rejected: the first rejection's changeset errors, for example `{"errors": {"type": ["is invalid"]}}`; or the empty-message error above |
 | `503` | A transient failure (delivery jobs could not be enqueued): `{"error": "Activity could not be accepted, please retry"}`. The provider should re-deliver. |
@@ -300,6 +302,8 @@ Idempotency keys:
 | `whatsapp_infobip` | `messageId` |
 | `slack` | `"<channel>:<ts>"` for messages (so a `message` and an `app_mention` of the same message are one activity); edits, deletes and reactions have their own keys, see [Slack](../channels/slack.md#message-mapping) |
 | `email` | The `Message-ID` header, without angle brackets |
+| `sms_twilio` | `MessageSid` |
+| `sms_vonage` | `message_uuid` |
 | `webhook` | The optional `idempotency_key` body field. Without it, a re-delivered request creates a second activity. |
 
 Re-sending the same generic message with the same `idempotency_key` returns `200` (instead of `201`) with

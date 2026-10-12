@@ -238,6 +238,23 @@ defmodule Converger.Pipeline do
   defp attempt_delivery(delivery, activity, channel) do
     alias Converger.Deliveries
 
+    # A participant who opted out (an SMS STOP) gets nothing on this channel:
+    # failed fast, without calling the provider or counting against its
+    # circuit, and not retried.
+    case Converger.Participants.opted_out_recipient(activity, channel.id) do
+      nil ->
+        plan_delivery(delivery, activity, channel)
+
+      recipient ->
+        reason = "recipient #{recipient} opted out"
+        Deliveries.mark_dead(delivery, reason)
+        {:error, {:halted, reason}}
+    end
+  end
+
+  defp plan_delivery(delivery, activity, channel) do
+    alias Converger.Deliveries
+
     # Re-planned at delivery time: the channel config may have changed since
     # the delivery was enqueued.
     case Downgrade.plan(activity, channel) do
