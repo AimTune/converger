@@ -162,10 +162,29 @@ defmodule Converger.Participants do
           true -> DateTime.utc_now()
         end
 
-      participant
-      |> Ecto.Changeset.change(opted_out_at: opted_out_at)
-      |> Repo.update()
+      result =
+        participant
+        |> Ecto.Changeset.change(opted_out_at: opted_out_at)
+        |> Repo.update()
+
+      with {:ok, updated} <- result,
+           true <- is_nil(participant.opted_out_at) and not is_nil(updated.opted_out_at) do
+        emit_opted_out(updated)
+      end
+
+      result
     end
+  end
+
+  # Platform event webhooks (ADR-0053): only the transition to opted out.
+  defp emit_opted_out(participant) do
+    Converger.Webhooks.emit(participant.tenant_id, "participant.opted_out", %{
+      participant_id: participant.id,
+      channel_id: participant.channel_id,
+      external_id: participant.external_id,
+      display_name: participant.display_name,
+      opted_out_at: participant.opted_out_at
+    })
   end
 
   @doc "Whether the participant `(channel_id, external_id)` has opted out."

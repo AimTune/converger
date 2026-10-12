@@ -111,11 +111,16 @@ defmodule Converger.Pipeline do
   metadata and type.
   """
   def broadcast(activity) do
+    canonical = Converger.Activities.Serializer.canonical(activity)
+
     ConvergerWeb.Endpoint.broadcast!(
       "conversation:#{activity.conversation_id}",
       "new_activity",
-      Converger.Activities.Serializer.canonical(activity)
+      canonical
     )
+
+    # Platform event webhooks (ADR-0053): the same after-commit hook.
+    Converger.Webhooks.emit(activity.tenant_id, "activity.created", canonical)
 
     :ok
   end

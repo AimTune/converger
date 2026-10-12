@@ -849,8 +849,38 @@ defmodule Converger.Deliveries do
           updated_at: delivery.updated_at
         }
       )
+
+      emit_delivery_event(delivery)
     end
   end
+
+  # Platform event webhooks (ADR-0053): every status broadcast above is a
+  # status change; `pending` and `paused` (retries, parking) are not events.
+  @webhook_statuses ~w(sent delivered read failed)
+
+  defp emit_delivery_event(%Delivery{status: status} = delivery)
+       when status in @webhook_statuses do
+    Converger.Webhooks.emit(
+      delivery.tenant_id || delivery.activity.tenant_id,
+      "delivery." <> status,
+      %{
+        delivery_id: delivery.id,
+        activity_id: delivery.activity_id,
+        conversation_id: delivery.activity.conversation_id,
+        channel_id: delivery.channel_id,
+        status: status,
+        attempts: delivery.attempts,
+        last_error: delivery.last_error,
+        provider_message_id: delivery.provider_message_id,
+        sent_at: delivery.sent_at,
+        delivered_at: delivery.delivered_at,
+        read_at: delivery.read_at,
+        updated_at: delivery.updated_at
+      }
+    )
+  end
+
+  defp emit_delivery_event(_delivery), do: :ok
 
   defp parse_provider_timestamp(nil), do: DateTime.utc_now()
 

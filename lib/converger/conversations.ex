@@ -167,8 +167,12 @@ defmodule Converger.Conversations do
     end)
     |> Repo.transaction()
     |> case do
-      {:ok, %{conversation: conversation}} -> {:ok, conversation}
-      {:error, :conversation, changeset, _} -> {:error, changeset}
+      {:ok, %{conversation: conversation}} ->
+        emit_webhook(conversation, "conversation.created", %{})
+        {:ok, conversation}
+
+      {:error, :conversation, changeset, _} ->
+        {:error, changeset}
     end
   end
 
@@ -335,6 +339,10 @@ defmodule Converger.Conversations do
       }
     }
 
+    emit_webhook(conversation, "conversation.#{event_name(conversation.status)}", %{
+      reason: to_string(reason)
+    })
+
     case Converger.Activities.create_activity(attrs, allow_closed: true) do
       {:ok, _activity} ->
         :ok
@@ -352,6 +360,27 @@ defmodule Converger.Conversations do
 
   defp event_name(@closed), do: "closed"
   defp event_name(@open), do: "reopened"
+
+  # Platform event webhooks (ADR-0053).
+  defp emit_webhook(%Conversation{} = conversation, type, extra) do
+    Converger.Webhooks.emit(
+      conversation.tenant_id,
+      type,
+      Map.merge(
+        %{
+          conversation_id: conversation.id,
+          status: conversation.status,
+          channel_id: conversation.channel_id,
+          origin_channel_id: conversation.origin_channel_id,
+          participant_id: conversation.participant_id,
+          metadata: conversation.metadata || %{},
+          inserted_at: conversation.inserted_at,
+          updated_at: conversation.updated_at
+        },
+        extra
+      )
+    )
+  end
 
   @doc """
   Deletes a conversation. Its activities and their deliveries (partitioned

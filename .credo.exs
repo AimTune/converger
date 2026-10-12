@@ -219,6 +219,7 @@ baseline_alias_usage = [
              metadata_keys: [
                :action,
                :activity_id,
+               :attempt,
                :attempts,
                :cap,
                :channel_id,
@@ -228,9 +229,11 @@ baseline_alias_usage = [
                :count,
                :counts,
                :data,
+               :dead_lettered,
                :delivery_id,
                :error,
                :errors,
+               :event_type,
                :legacy,
                :month,
                :partition,
@@ -241,8 +244,10 @@ baseline_alias_usage = [
                :signal,
                :source,
                :status,
+               :subscription_id,
                :tenant_id,
-               :total
+               :total,
+               :webhook_event_id
              ]
            ]},
           {Credo.Check.Warning.OperationOnSameValues, []},

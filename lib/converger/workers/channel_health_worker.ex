@@ -1,8 +1,9 @@
 defmodule Converger.Workers.ChannelHealthWorker do
   @moduledoc """
   Periodic Oban worker that computes health metrics for all active channels.
-  Runs every 5 minutes via cron. Detects status changes, broadcasts via PubSub,
-  and sends webhook alerts to tenants with configured alert URLs. A channel
+  Runs every 5 minutes via cron. Detects status changes, broadcasts them via
+  PubSub and emits the `channel.health_changed` platform event (which also
+  serves the legacy tenant alert URL, ADR-0053). A channel
   turning `unhealthy` opens its delivery circuit breaker
   (`Converger.Channels.Circuit`).
   """
@@ -25,7 +26,6 @@ defmodule Converger.Workers.ChannelHealthWorker do
       )
 
       Health.broadcast_health_change(channel, health_check, previous_status)
-      Health.send_alert_webhook(channel, health_check, previous_status)
 
       # Act on the transition only: a breaker closed by a successful probe is
       # not re-opened while the rolling window still shows old failures.

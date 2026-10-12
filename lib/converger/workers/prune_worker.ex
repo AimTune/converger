@@ -1,6 +1,7 @@
 defmodule Converger.Workers.PruneWorker do
   @moduledoc """
-  Daily time-based pruning of `channel_health_checks` and `audit_logs`
+  Daily time-based pruning of `channel_health_checks`, `audit_logs` and
+  `webhook_events`
   (`Converger.Retention.prune/1`).
   """
   use Oban.Worker,
