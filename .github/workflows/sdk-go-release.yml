@@ -1,0 +1,48 @@
+name: Release Go SDK
+
+# Go modules are released by tags alone. The module lives in a subdirectory,
+# so its tags are packages/client-go/vX.Y.Z. This workflow tests the tagged
+# commit, asks the Go module proxy to fetch the new version and creates a
+# GitHub release for it.
+
+on:
+  push:
+    tags: ["packages/client-go/v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Test and announce
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version: stable
+          cache-dependency-path: packages/client-go/go.sum
+      - name: Tag matches the SDK version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version=$(sed -n 's/^const Version = "\(.*\)"/\1/p' packages/client-go/client.go)
+          test "packages/client-go/v${version}" = "$TAG" || { echo "tag $TAG does not match Version $version"; exit 1; }
+      - name: Test
+        working-directory: packages/client-go
+        run: go vet ./... && go test -race -count=1 ./...
+      - name: Warm the module proxy
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          cd "$(mktemp -d)"
+          go mod init warm
+          GOPROXY=https://proxy.golang.org go list -m "github.com/AimTune/converger/packages/client-go@${TAG#packages/client-go/}"
+      - name: GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="${TAG#packages/client-go/}"
+          gh release create "$TAG" --title "Go SDK ${version}" \
+            --notes "go get github.com/AimTune/converger/packages/client-go@${version}"

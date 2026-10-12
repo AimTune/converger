@@ -51,7 +51,29 @@ channel `secret`.
    received, before any JSON parsing.
 4. Compare with `v1` in constant time.
 
-### Test vector
+Details that matter for an exact match with the server:
+
+- The header may carry several `v1` values (secret rotation); one match is enough. Parts are trimmed, unknown
+  parts are ignored, and the order of `t` and `v1` does not matter.
+- `t` is an integer (digits with an optional sign). A header without `t` or `v1`, or with a non-integer `t`, is
+  malformed. Outbound webhooks never use the legacy `sha256=<hex>` form, so reject it.
+- The boundary is inclusive: `|now - t| = 300` is accepted, 301 is not.
+- `v1` is lowercase hex and is compared as sent; an uppercase hex value does not match.
+
+### SDK helpers
+
+The server-side SDKs implement exactly these rules, with constant-time comparison and secret lists for rotation:
+
+| SDK | Call |
+| --- | --- |
+| Python | `converger.verify_signature(headers, raw_body, secret)` raises `WebhookSignatureError(reason)` ([Python SDK](sdk/python.md#webhook-signature-verification), with FastAPI and Flask examples) |
+| Go | `converger.VerifySignature(r.Header, body, secret)` returns a `*SignatureError` ([Go SDK](sdk/go.md#webhook-signature-verification)) |
+| Elixir | `ConvergerClient.Webhook.verify_signature(conn.req_headers, raw_body, secret)` returns `:ok` or `{:error, reason}` ([Elixir client](sdk/elixir.md#webhook-signature-verification)) |
+
+The failure reasons are the same everywhere: `missing_signature`, `no_secret`, `malformed_signature`,
+`timestamp_out_of_tolerance`, `invalid_signature`.
+
+### Test vectors
 
 ```
 secret:  whsec_test_secret
@@ -59,6 +81,16 @@ t:       1700000000
 body:    {"id":"9b2f6c1e-0000-4000-8000-000000000001","text":"hello"}
 header:  t=1700000000,v1=c8945aa2aa4e6d043cdd46907fdf4ab1d4cedd12737ea10bb6f246ed39533a8a
 ```
+
+The full set is
+[`packages/conformance/webhook-signatures.json`](https://github.com/AimTune/converger/blob/main/packages/conformance/webhook-signatures.json):
+`sign` vectors (secret, timestamp, body, expected header; including a realistic activity body, non-ASCII UTF-8, an
+empty body and significant whitespace) and `verify` vectors (headers, body, secret or secret list, a fixed `now`,
+an optional `tolerance`, and the expected result or failure reason). The file is generated from the server's own
+signer (`Converger.Channels.InboundSignature.sign/3`) by
+`mix run --no-start packages/conformance/scripts/generate_signature_vectors.exs`, and
+`test/converger/channels/webhook_signature_vectors_test.exs` fails if the signer and the file disagree. Every SDK
+runs all of the vectors; use them to test your own verifier too.
 
 ### Node.js
 
