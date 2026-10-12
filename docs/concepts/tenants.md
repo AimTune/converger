@@ -40,7 +40,7 @@ The migration [`20261008100001_hash_tenant_api_keys`](https://github.com/AimTune
 
 ### Authentication
 
-Server-to-server routes under `/api/v1` (conversations, activities, routing rules) authenticate with the `x-api-key` header through `ConvergerWeb.Plugs.TenantAuth`. The presented key is hashed and looked up by `api_key_hash`, or by `previous_api_key_hash` while `previous_api_key_expires_at` is in the future. The tenant must have `status: "active"`. Otherwise the response is `401` with `{"error": "Unauthorized: Invalid or inactive API Key"}`.
+Server-to-server routes under `/api/v1` (conversations, activities, routing rules) authenticate with the `x-api-key` header through `ConvergerWeb.Plugs.TenantAuth`. The presented key is hashed and looked up by `api_key_hash`, or by `previous_api_key_hash` while `previous_api_key_expires_at` is in the future. The tenant must have `status: "active"`. Otherwise the response is `401` `unauthorized` with the message "Invalid or inactive API Key" ([errors](../api/errors.md)).
 
 The same plug also accepts a channel token in `x-channel-token`, and then resolves the tenant from the token's `tenant_id` claim. Only channel tokens are accepted there: end-user tokens (legacy conversation tokens and Converger API tokens) are refused with `401` `Unauthorized: Invalid token`. `x-channel-token` is deprecated; `x-api-key` is not (see [migrating from the legacy surfaces](../api/migrating-from-legacy.md)). Listing conversations (`GET /api/v1/conversations`) requires the API key specifically, because it exposes other end users' conversations. See the [tenant API](../api/tenant-api.md).
 

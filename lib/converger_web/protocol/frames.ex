@@ -34,6 +34,9 @@ defmodule ConvergerWeb.Protocol.Frames do
     "replay_unavailable" => {9002, true}
   }
 
+  @doc "The Protocol v1 error codes (section 12.2); the REST API shares their spelling."
+  def error_codes, do: @errors |> Map.keys() |> Enum.sort()
+
   @doc """
   The persistent frame for an activity, as seen by the end user `user_id`.
 
@@ -254,9 +257,9 @@ defmodule ConvergerWeb.Protocol.Frames do
 
   @doc """
   Validation errors of a changeset, per field, for `error.data.details`: the
-  same map the REST API returns as `errors` (HTTP 422).
+  same map the REST API returns as `error.details` (HTTP 422).
   """
   def changeset_details(%Ecto.Changeset{} = changeset) do
-    ConvergerWeb.ErrorJSON.render("error.json", %{changeset: changeset}).errors
+    ConvergerWeb.APIError.changeset_details(changeset)
   end
 end

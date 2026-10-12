@@ -48,6 +48,25 @@ defmodule ConvergerWeb.Router do
     plug :require_tenant_user
   end
 
+  # API documentation (ADR-0050): Swagger UI and the OpenAPI 3.1 document.
+  # On in dev/test, off in prod unless API_DOCS_ENABLED=true (404 otherwise).
+  pipeline :api_docs do
+    plug ConvergerWeb.Plugs.ApiDocs
+  end
+
+  scope "/api" do
+    pipe_through :api_docs
+
+    get "/docs", OpenApiSpex.Plug.SwaggerUI,
+      path: "/api/openapi.json",
+      title: "Converger API",
+      persist_authorization: true,
+      display_operation_id: true,
+      csp_nonce_assign_key: %{script: :csp_nonce}
+
+    get "/openapi.json", ConvergerWeb.ApiDocsController, :spec
+  end
+
   scope "/api/v1", ConvergerWeb do
     pipe_through :api
 

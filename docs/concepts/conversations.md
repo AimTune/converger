@@ -149,7 +149,7 @@ When no row is updated and the conversation exists, `Activities.create_activity/
 
 | Path | Result |
 | --- | --- |
-| REST (`/api/v1`, `/api/v1/converger`) | `409 {"error": "conversation_closed", "detail": "Conversation is closed"}` |
+| REST (`/api/v1`, `/api/v1/converger`) | `409` `conversation_closed`, message "Conversation is closed" ([errors](../api/errors.md)) |
 | WebSocket `postActivity` push (Converger API socket) | error reply with reason `conversation_closed` |
 | WebSocket `new_activity` push (legacy socket, deprecated) | error reply with reason `conversation_closed` |
 | Echo adapter replying into a conversation closed meanwhile | the reply is dropped, and the delivery counts as successful |
@@ -184,7 +184,7 @@ Before resolution, a message whose provider id (`idempotency_key`) already exist
 | Query param | Description |
 | --- | --- |
 | `limit` | Page size. Default 50, maximum 500 (`PAGINATION_DEFAULT_LIMIT`, `PAGINATION_MAX_LIMIT`). |
-| `cursor` | `meta.next_cursor` from the previous page. An invalid cursor returns `400 {"error": "Invalid cursor"}`. |
+| `cursor` | `meta.next_cursor` from the previous page. An invalid cursor returns `400` `bad_request` with the message "Invalid cursor". |
 | `status` | `active` or `closed`. |
 | `channel_id` | UUID (`400` if malformed). |
 | `external_id` | The participant's provider id, for example a phone number. |

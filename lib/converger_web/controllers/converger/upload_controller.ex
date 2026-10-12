@@ -1,7 +1,11 @@
 defmodule ConvergerWeb.ConvergerAPI.UploadController do
   use ConvergerWeb, :controller
+  use OpenApiSpex.ControllerSpecs
+
+  import ConvergerWeb.ApiSchemas
 
   alias Converger.{Activities, Conversations, Uploads}
+  alias ConvergerWeb.APIError
 
   import ConvergerWeb.Helpers.Authorization,
     only: [authorize_channel: 2, authorize_conversation: 2]
@@ -11,6 +15,23 @@ defmodule ConvergerWeb.ConvergerAPI.UploadController do
   plug ConvergerWeb.Plugs.RateLimit, bucket: :upload, scope: :tenant
 
   action_fallback ConvergerWeb.FallbackController
+
+  tags(["Client: Uploads"])
+  security([%{"convergerToken" => []}])
+
+  operation(:create,
+    summary: "Upload a file",
+    description:
+      "Stores the file (type sniffed and allow-listed) and posts an activity carrying it.",
+    operation_id: "uploadFile",
+    parameters: [conversation_id: path_id("Conversation id")],
+    request_body: {"The file", "multipart/form-data", ref("UploadRequest")},
+    responses:
+      with_errors(
+        %{200 => json_schema("Uploaded", ref("UploadResponse"))},
+        [400, 401, 403, 404, 409, 413, 415, 422, 429, 502]
+      )
+  )
 
   def create(conn, %{"conversation_id" => conversation_id} = params) do
     claims = conn.assigns.converger_claims
@@ -75,14 +96,16 @@ defmodule ConvergerWeb.ConvergerAPI.UploadController do
       {:error, :too_large} ->
         max_mb = Float.round(Uploads.max_file_size() / (1024 * 1024), 1)
 
-        conn
-        |> put_status(:request_entity_too_large)
-        |> json(%{error: "File too large (max #{max_mb}MB)"})
+        {:error,
+         APIError.new(:payload_too_large, "File too large (max #{max_mb}MB)", %{
+           max_bytes: Uploads.max_file_size()
+         })}
 
       {:error, {:unsupported_type, type}} ->
-        conn
-        |> put_status(:unsupported_media_type)
-        |> json(%{error: "File type #{type} is not allowed"})
+        {:error,
+         APIError.new(:unsupported_media_type, "File type #{type} is not allowed", %{
+           content_type: type
+         })}
 
       {:error, message} when is_binary(message) ->
         {:error, message}
@@ -96,10 +119,7 @@ defmodule ConvergerWeb.ConvergerAPI.UploadController do
 
       {:error, reason} ->
         Logger.error("Attachment upload failed: #{inspect(reason)}")
-
-        conn
-        |> put_status(:bad_gateway)
-        |> json(%{error: "File could not be stored, please retry"})
+        {:error, APIError.new(:upstream_unavailable, "File could not be stored, please retry")}
     end
   end
 

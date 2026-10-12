@@ -10,8 +10,9 @@ defmodule ConvergerWeb.Plugs.DbUnavailable do
   other exception is re-raised untouched, as is a database error raised after
   the response was sent (a streamed export), which cannot be answered again.
 
-  The body is `{"errors": {"detail": "Service Unavailable", "code":
-  "database_unavailable"}}`; `Retry-After` is in whole seconds
+  The body is the API error envelope (`ConvergerWeb.APIError`) with code
+  `unavailable` and `details: {"reason": "database_unavailable",
+  "retry_after_ms": N}`; `Retry-After` is in whole seconds
   (`Converger.Repo.Pressure.retry_after_ms/0`, rounded up).
   """
 
@@ -20,6 +21,7 @@ defmodule ConvergerWeb.Plugs.DbUnavailable do
   import Plug.Conn
 
   alias Converger.Repo.Pressure
+  alias ConvergerWeb.APIError
 
   @already_sent {:plug_conn, :sent}
 
@@ -40,16 +42,16 @@ defmodule ConvergerWeb.Plugs.DbUnavailable do
   end
 
   defp unavailable(conn) do
-    retry_after_s = div(Pressure.retry_after_ms() + 999, 1_000)
-
-    body = %{errors: %{detail: "Service Unavailable", code: "database_unavailable"}}
+    retry_after_ms = Pressure.retry_after_ms()
+    retry_after_s = div(retry_after_ms + 999, 1_000)
 
     conn
-    |> put_resp_content_type("application/json")
     |> put_resp_header("retry-after", Integer.to_string(retry_after_s))
     |> put_resp_header("cache-control", "no-store")
-    |> send_resp(503, Jason.encode_to_iodata!(body))
-    |> halt()
+    |> APIError.send_error("unavailable", "The database is unavailable, please retry", %{
+      reason: "database_unavailable",
+      retry_after_ms: retry_after_ms
+    })
   end
 
   # The adapter tells the owner process when a response went out (the same

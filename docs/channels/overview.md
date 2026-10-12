@@ -247,13 +247,13 @@ A receipts-only request returns `{"status": "accepted", "receipts_processed": 2}
 | --- | --- |
 | `201` | Generic channel (`webhook`), at least one activity created. |
 | `200` | Duplicates only, receipts only, or any handled request on a channel whose adapter has `:provider_ack` (`whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram`, `email`, `sms_twilio`, `sms_vonage`, `messenger`, `instagram`, `viber`, `discord`, `teams`). These channels always get `200` once the request was handled, even when every message was rejected permanently, because the provider would otherwise retry for days. |
-| `400` | Channel inactive (`{"error": "Channel is inactive"}`), channel mode `outbound` with messages (`{"error": "Channel does not accept inbound messages"}`), or the adapter could not parse the body (`{"error": "unable to parse WhatsApp Meta webhook payload"}` and similar). |
+| `400` | Channel inactive (`channel_inactive`), channel mode `outbound` with messages (`inbound_not_supported`), or the adapter could not parse the body (`bad_request`, message "unable to parse WhatsApp Meta webhook payload" and similar). Bodies use the [error envelope](../api/errors.md). |
 | `401` | Signature missing (on a `require_signature` channel), legacy, invalid, malformed or outside the time window. |
 | `404` | Unknown channel id, or an unknown `conversation_id` for the channel's tenant. |
 | `409` | The explicit `conversation_id` refers to a closed conversation. |
 | `422` | Generic channel and every message was invalid (changeset errors), or the message has neither text nor attachments. |
 | `429` | Rate limit exceeded, with a `Retry-After` header. Default: 500 requests per second per channel (`inbound` bucket), overridable per tenant. |
-| `503` | The activity could not be accepted because its delivery jobs could not be enqueued. Retry; idempotency keys make that safe. |
+| `503` | `unavailable`: the activity could not be accepted because its delivery jobs could not be enqueued (`details.reason` is `delivery_enqueue_failed`). Retry; idempotency keys make that safe. |
 
 ### Conversation resolution
 

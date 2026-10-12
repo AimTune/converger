@@ -154,7 +154,14 @@ HTTP/1.1 429 Too Many Requests
 retry-after: 1
 content-type: application/json
 
-{"error": "Too many requests. Please try again later."}
+{
+  "error": {
+    "code": "rate_limited",
+    "message": "Too many requests. Please try again later.",
+    "details": {"retry_after_ms": 1000},
+    "request_id": "F8n2kQx1c9ZQAAAB"
+  }
+}
 ```
 
 `retry-after` is the remaining time of the current window in whole seconds, rounded up, at least 1. No

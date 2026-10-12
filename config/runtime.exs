@@ -166,6 +166,14 @@ if metrics_config != [], do: config(:converger, :metrics, metrics_config)
 # Configurable CORS origins and admin IP whitelist.
 # CORS origins are read per request by ConvergerWeb.Endpoint, so this takes
 # effect on releases without recompiling.
+# Swagger UI at /api/docs and the OpenAPI document at /api/openapi.json
+# (ADR-0050); off by default in prod.
+case System.get_env("API_DOCS_ENABLED") do
+  value when value in ~w(true 1) -> config :converger, :api_docs, enabled: true
+  value when value in ~w(false 0) -> config :converger, :api_docs, enabled: false
+  _ -> :ok
+end
+
 if cors_origins = System.get_env("CORS_ORIGINS") do
   config :converger,
     cors_origins:

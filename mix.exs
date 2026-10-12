@@ -76,6 +76,7 @@ defmodule Converger.MixProject do
       {:gen_smtp, "~> 1.3"},
       {:mail, "~> 0.5.2"},
       {:req, "~> 0.7"},
+      {:open_api_spex, "~> 3.22"},
       {:telemetry_metrics, "~> 1.0"},
       {:telemetry_poller, "~> 1.0"},
       {:jason, "~> 1.2"},
@@ -130,6 +131,10 @@ defmodule Converger.MixProject do
       "ecto.setup": ["ecto.create", "ecto.migrate", "run priv/repo/seeds.exs"],
       "ecto.reset": ["ecto.drop", "ecto.setup"],
       test: ["ecto.create --quiet", "ecto.migrate --quiet", "test"],
+      # The committed OpenAPI 3.1 document, priv/static/openapi.json (ADR-0050).
+      # `--check` fails on drift (CI). Replaces open_api_spex's own task,
+      # which writes OpenAPI 3.0.
+      "openapi.spec.json": ["converger.openapi"],
       # Mirrors the CI "lint" and "test" jobs (.github/workflows/ci.yml), but
       # fixes formatting / unused lock entries instead of only checking them.
       # Dialyzer is slow, so it is a separate step: `mix dialyzer`.

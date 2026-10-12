@@ -27,6 +27,9 @@ defmodule ConvergerWeb.ConvergerAPI.EventStreamController do
   """
 
   use ConvergerWeb, :controller
+  use OpenApiSpex.ControllerSpecs
+
+  import ConvergerWeb.ApiSchemas
 
   import ConvergerWeb.Helpers.Authorization, only: [authorize_conversation: 2]
 
@@ -49,6 +52,30 @@ defmodule ConvergerWeb.ConvergerAPI.EventStreamController do
   plug :put_format, "json"
 
   action_fallback ConvergerWeb.FallbackController
+
+  tags(["Client: Events"])
+  security([%{"convergerToken" => []}, %{"convergerTokenQuery" => []}])
+
+  operation(:stream,
+    summary: "Stream events (Server-Sent Events)",
+    description:
+      "Converger Protocol v1 frames as SSE events (event name = frame type, `id` = seq). Resumes after `Last-Event-ID` or `watermark`. Refused with 503 while the node drains.",
+    operation_id: "streamEvents",
+    parameters: [
+      conversation_id: path_id("Conversation id"),
+      watermark: query(%OpenApiSpex.Schema{type: :string}, "Replay after this seq"),
+      "Last-Event-ID": [
+        in: :header,
+        schema: %OpenApiSpex.Schema{type: :string},
+        description: "Sent by a reconnecting EventSource; wins over `watermark`"
+      ]
+    ],
+    responses:
+      with_errors(
+        %{200 => {"The event stream", "text/event-stream", %OpenApiSpex.Schema{type: :string}}},
+        [401, 403, 404, 503]
+      )
+  )
 
   def stream(conn, params) do
     if Drain.draining?() do

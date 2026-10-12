@@ -1,5 +1,8 @@
 defmodule ConvergerWeb.ConvergerAPI.ActivityController do
   use ConvergerWeb, :controller
+  use OpenApiSpex.ControllerSpecs
+
+  import ConvergerWeb.ApiSchemas
 
   alias Converger.{Activities, Conversations}
   alias Converger.ConvergerAPI.Watermark
@@ -13,6 +16,38 @@ defmodule ConvergerWeb.ConvergerAPI.ActivityController do
        when action in [:create]
 
   action_fallback ConvergerWeb.FallbackController
+
+  tags(["Client: Activities"])
+  security([%{"convergerToken" => []}])
+
+  operation(:create,
+    summary: "Post an activity",
+    description: "Idempotent with `x-idempotency-key`.",
+    operation_id: "postActivity",
+    parameters: [
+      conversation_id: path_id("Conversation id"),
+      "x-idempotency-key": idempotency_key()
+    ],
+    request_body: json_schema("The activity", ref("ClientActivityRequest")),
+    responses:
+      with_errors(
+        %{200 => json_schema("Accepted", ref("ResourceResponse"))},
+        [401, 403, 404, 409, 422, 429, 503]
+      )
+  )
+
+  operation(:index,
+    summary: "List activities",
+    description:
+      "Oldest first, after `watermark` (opaque, or a Protocol v1 integer seq). An invalid watermark starts from the beginning.",
+    operation_id: "getActivities",
+    parameters: [
+      conversation_id: path_id("Conversation id"),
+      watermark: query(%OpenApiSpex.Schema{type: :string}, "Resume after this watermark"),
+      limit: limit_param()
+    ],
+    responses: with_errors(%{200 => json_schema("A page", ref("ActivitySet"))}, [401, 403, 404])
+  )
 
   def create(conn, %{"conversation_id" => conversation_id} = params) do
     claims = conn.assigns.converger_claims

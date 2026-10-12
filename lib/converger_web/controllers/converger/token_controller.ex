@@ -1,5 +1,8 @@
 defmodule ConvergerWeb.ConvergerAPI.TokenController do
   use ConvergerWeb, :controller
+  use OpenApiSpex.ControllerSpecs
+
+  import ConvergerWeb.ApiSchemas
 
   alias Converger.Auth.ConvergerToken
 
@@ -9,6 +12,28 @@ defmodule ConvergerWeb.ConvergerAPI.TokenController do
   plug ConvergerWeb.Plugs.RateLimit, bucket: :token_generate, scope: :channel
 
   action_fallback ConvergerWeb.FallbackController
+
+  tags(["Client: Tokens"])
+
+  operation(:generate,
+    summary: "Generate a Converger token",
+    description:
+      "Exchanges the channel secret (server side) for a short-lived, unscoped Converger token for an end user.",
+    operation_id: "generateToken",
+    security: [%{"channelSecret" => []}],
+    request_body: json_schema("Options", ref("ClientTokenRequest")),
+    responses:
+      with_errors(%{200 => json_schema("The token", ref("ClientToken"))}, [400, 401, 403, 429])
+  )
+
+  operation(:refresh,
+    summary: "Refresh a Converger token",
+    description: "A new token with the same claims and a new expiry.",
+    operation_id: "refreshToken",
+    security: [%{"convergerToken" => []}],
+    responses:
+      with_errors(%{200 => json_schema("The token", ref("ClientToken"))}, [401, 403, 429])
+  )
 
   def generate(conn, params) do
     case conn.assigns do

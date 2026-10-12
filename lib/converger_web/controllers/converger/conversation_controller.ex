@@ -1,5 +1,8 @@
 defmodule ConvergerWeb.ConvergerAPI.ConversationController do
   use ConvergerWeb, :controller
+  use OpenApiSpex.ControllerSpecs
+
+  import ConvergerWeb.ApiSchemas
 
   alias Converger.{Conversations, Channels, Auth.ConvergerToken}
 
@@ -7,6 +10,53 @@ defmodule ConvergerWeb.ConvergerAPI.ConversationController do
     only: [authorize_channel: 2, authorize_conversation: 2]
 
   action_fallback ConvergerWeb.FallbackController
+
+  tags(["Client: Conversations"])
+  security([%{"convergerToken" => []}])
+
+  operation(:create,
+    summary: "Start a conversation",
+    description: "Returns a token bound to the new conversation and its WebSocket `streamUrl`.",
+    operation_id: "startConversation",
+    responses:
+      with_errors(%{201 => json_schema("Started", ref("ClientConversation"))}, [401, 403, 422])
+  )
+
+  operation(:show,
+    summary: "Reconnect to a conversation",
+    description:
+      "A fresh conversation-bound token and `streamUrl` (with `watermark` when given).",
+    operation_id: "reconnectConversation",
+    parameters: [
+      id: path_id("Conversation id"),
+      watermark:
+        query(%OpenApiSpex.Schema{type: :string}, "Resume the stream after this watermark")
+    ],
+    responses:
+      with_errors(%{200 => json_schema("Reconnected", ref("ClientConversation"))}, [401, 403, 404])
+  )
+
+  operation(:close,
+    summary: "Close a conversation",
+    operation_id: "clientCloseConversation",
+    parameters: [id: path_id("Conversation id")],
+    responses:
+      with_errors(
+        %{200 => json_schema("Closed", ref("ClientConversationStatus"))},
+        [401, 403, 404]
+      )
+  )
+
+  operation(:reopen,
+    summary: "Reopen a conversation",
+    operation_id: "clientReopenConversation",
+    parameters: [id: path_id("Conversation id")],
+    responses:
+      with_errors(
+        %{200 => json_schema("Reopened", ref("ClientConversationStatus"))},
+        [401, 403, 404]
+      )
+  )
 
   def create(conn, _params) do
     claims = conn.assigns.converger_claims

@@ -85,7 +85,7 @@ Every attachment written through any entry point is validated and normalised by 
 | `content` | object or array | Optional. Inline payload for structured attachments. |
 | `channelData` | object | Optional. Provider passthrough (for example a WhatsApp `providerMediaId`). |
 
-Other keys are dropped; nil values are omitted. An attachment without `contentType` is rejected with `422` (`{"errors": {"attachments": ["attachment 0: contentType can't be blank"]}}`).
+Other keys are dropped; nil values are omitted. An attachment without `contentType` is rejected with `422` `invalid_message`, with `details` `{"attachments": ["attachment 0: contentType can't be blank"]}` ([errors](../api/errors.md)).
 
 Well-known content types:
 
@@ -101,7 +101,7 @@ Validation applies to new writes only. Attachments stored before it (possibly wi
 
 ## References: replies, reactions, edits and deletes
 
-`reply_to_id` names another activity **of the same conversation**; a reference to an unknown activity, or to one in another conversation, is rejected with `422` (`{"errors": {"reply_to_id": ["does not exist in this conversation"]}}`). The check runs in the insert transaction, after the `seq` is allocated under the conversation row lock, and a rejected activity rolls its `seq` back. There is no database foreign key (`activities` is partitioned by month, [ADR-0034](../adr/0034-monthly-partitioning-and-per-tenant-retention.md)), so once retention drops the month holding an original, later activities may still name it in `reply_to_id`: clients must treat an unknown `replyToId` as "original unavailable".
+`reply_to_id` names another activity **of the same conversation**; a reference to an unknown activity, or to one in another conversation, is rejected with `422` `invalid_message`, with `details` `{"reply_to_id": ["does not exist in this conversation"]}`. The check runs in the insert transaction, after the `seq` is allocated under the conversation row lock, and a rejected activity rolls its `seq` back. There is no database foreign key (`activities` is partitioned by month, [ADR-0034](../adr/0034-monthly-partitioning-and-per-tenant-retention.md)), so once retention drops the month holding an original, later activities may still name it in `reply_to_id`: clients must treat an unknown `replyToId` as "original unavailable".
 
 | Type | `reply_to_id` | Target | Who may send it |
 | --- | --- | --- | --- |
@@ -192,7 +192,7 @@ Clients resume with an opaque **watermark**, the position of the last activity t
 
 | Endpoint | Watermark | Response |
 | --- | --- | --- |
-| `GET /api/v1/conversations/:id/activities?watermark=&limit=` | invalid: `400 {"error": "Invalid watermark"}` | `{"data": [...], "meta": {"watermark", "has_more", "limit"}}` |
+| `GET /api/v1/conversations/:id/activities?watermark=&limit=` | invalid: `400` `invalid_watermark` | `{"data": [...], "meta": {"watermark", "has_more", "limit"}}` |
 | `GET /api/v1/converger/conversations/:id/activities?watermark=&limit=` | invalid: starts from the beginning | `{"activities": [...], "watermark", "has_more"}` |
 | WebSocket join (`watermark` param) | replays at most `ws_replay_limit` (100) activities. The rest come over REST. | frames |
 

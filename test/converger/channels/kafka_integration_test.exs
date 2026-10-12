@@ -127,7 +127,8 @@ defmodule Converger.Channels.KafkaIntegrationTest do
 
   defp fetch_all(hosts, topic) do
     for partition <- 0..(@partitions - 1),
-        {:ok, {_hw, messages}} = :brod.fetch(hosts, topic, partition, 0),
+        # A topic created a moment ago can answer not_leader_for_partition; skip it so `eventually` retries.
+        {:ok, {_hw, messages}} <- [:brod.fetch(hosts, topic, partition, 0)],
         message <- messages do
       %{
         partition: partition,

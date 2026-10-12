@@ -2,6 +2,7 @@ defmodule ConvergerWeb.PaginationApiTest do
   use ConvergerWeb.ChannelCase, async: false
   import Phoenix.ConnTest, except: [connect: 2, connect: 3]
   import Plug.Conn
+  import ConvergerWeb.ConnCase, only: [assert_api_error: 3]
 
   @endpoint ConvergerWeb.Endpoint
 
@@ -130,7 +131,7 @@ defmodule ConvergerWeb.PaginationApiTest do
 
     test "rejects an invalid watermark", %{tenant: tenant, conversation: c} do
       conn = tenant_get(tenant, "/api/v1/conversations/#{c.id}/activities?watermark=%%%")
-      assert json_response(conn, 400)["error"] == "Invalid watermark"
+      assert_api_error(conn, 400, "invalid_watermark")
     end
   end
 

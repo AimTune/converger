@@ -92,8 +92,12 @@ defmodule ConvergerWeb.RoutingRuleControllerTest do
         }
       }
 
-      assert %{"errors" => %{"conditions" => [message]}} =
-               conn |> post(~p"/api/v1/routing_rules", body) |> json_response(422)
+      error =
+        conn
+        |> post(~p"/api/v1/routing_rules", body)
+        |> assert_api_error(422, "validation_failed")
+
+      assert %{"conditions" => [message]} = error["details"]
 
       assert message =~ "does not compile"
     end
@@ -272,39 +276,39 @@ defmodule ConvergerWeb.RoutingRuleControllerTest do
     test "errors", %{conn: conn, origin: origin} do
       foreign = channel_fixture(tenant_fixture())
 
-      assert conn
-             |> post(~p"/api/v1/routing_rules/dry_run", %{
-               "source_channel_id" => foreign.id,
-               "activity" => %{"text" => "x"}
-             })
-             |> json_response(404)
+      conn
+      |> post(~p"/api/v1/routing_rules/dry_run", %{
+        "source_channel_id" => foreign.id,
+        "activity" => %{"text" => "x"}
+      })
+      |> assert_api_error(404, "not_found")
 
-      assert %{"error" => "activity is required"} =
+      assert %{"message" => "activity is required"} =
                conn
                |> post(~p"/api/v1/routing_rules/dry_run", %{"source_channel_id" => origin.id})
-               |> json_response(400)
+               |> assert_api_error(400, "bad_request")
 
-      assert %{"error" => "source_channel_id or conversation_id is required"} =
+      assert %{"message" => "source_channel_id or conversation_id is required"} =
                conn
                |> post(~p"/api/v1/routing_rules/dry_run", %{"activity" => %{}})
-               |> json_response(400)
+               |> assert_api_error(400, "bad_request")
 
-      assert %{"errors" => %{"type" => _}} =
+      assert %{"details" => %{"type" => _}} =
                conn
                |> post(~p"/api/v1/routing_rules/dry_run", %{
                  "source_channel_id" => origin.id,
                  "activity" => %{"type" => "bogus"}
                })
-               |> json_response(422)
+               |> assert_api_error(422, "invalid_message")
 
-      assert %{"error" => "at must be an ISO 8601 date-time"} =
+      assert %{"message" => "at must be an ISO 8601 date-time"} =
                conn
                |> post(~p"/api/v1/routing_rules/dry_run", %{
                  "source_channel_id" => origin.id,
                  "at" => "yesterday",
                  "activity" => %{}
                })
-               |> json_response(400)
+               |> assert_api_error(400, "bad_request")
     end
   end
 end

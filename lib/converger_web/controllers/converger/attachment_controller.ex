@@ -8,16 +8,37 @@ defmodule ConvergerWeb.ConvergerAPI.AttachmentController do
   backends redirect (302) to a short-lived signed storage or CDN URL.
   """
   use ConvergerWeb, :controller
+  use OpenApiSpex.ControllerSpecs
+
+  import ConvergerWeb.ApiSchemas
 
   alias Converger.{Conversations, Uploads}
   alias Converger.Uploads.Attachment
+  alias ConvergerWeb.APIError
   alias ConvergerWeb.Helpers.Authorization
 
-  defp not_found(conn) do
-    conn
-    |> put_status(:not_found)
-    |> json(%{errors: %{detail: "Not Found"}})
-  end
+  tags(["Client: Attachments"])
+  security([%{"convergerToken" => []}])
+
+  operation(:show,
+    summary: "Download an attachment",
+    description:
+      "Local files are streamed; cloud backends answer 302 to a short-lived signed URL. Other tenants', channels' and conversations' attachments are 404.",
+    operation_id: "downloadAttachment",
+    parameters: [id: path_id("Attachment id")],
+    responses:
+      with_errors(
+        %{
+          200 =>
+            {"The file", "application/octet-stream",
+             %OpenApiSpex.Schema{type: :string, format: :binary}},
+          302 => "Redirect to a signed storage URL"
+        },
+        [401, 403, 404, 502]
+      )
+  )
+
+  defp not_found(conn), do: APIError.send_error(conn, "not_found")
 
   def show(conn, %{"id" => id}) do
     claims = conn.assigns.converger_claims
@@ -74,9 +95,7 @@ defmodule ConvergerWeb.ConvergerAPI.AttachmentController do
   defp send_attachment(conn, _attachment, {:error, :not_found}), do: not_found(conn)
 
   defp send_attachment(conn, _attachment, {:error, _reason}) do
-    conn
-    |> put_status(:bad_gateway)
-    |> json(%{error: "Attachment storage unavailable"})
+    APIError.send_error(conn, "upstream_unavailable", "Attachment storage unavailable")
   end
 
   # The content type was sniffed and allow-listed at upload time

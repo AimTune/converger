@@ -11,10 +11,7 @@ defmodule ConvergerWeb.Plugs.AdminAuth do
   (see `ConvergerWeb.Plugs.TrustedProxies`).
   """
 
-  import Plug.Conn
-  import Phoenix.Controller
-
-  alias ConvergerWeb.IpMatcher
+  alias ConvergerWeb.{APIError, IpMatcher}
 
   def init(opts), do: opts
 
@@ -27,10 +24,7 @@ defmodule ConvergerWeb.Plugs.AdminAuth do
     if IpMatcher.member?(conn.remote_ip, whitelist) do
       conn
     else
-      conn
-      |> put_status(:forbidden)
-      |> text("Forbidden")
-      |> halt()
+      APIError.send_error(conn, "forbidden", "Your IP address is not allowed")
     end
   end
 end
