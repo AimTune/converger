@@ -108,13 +108,13 @@ curl -s -X POST "$CONVERGER/api/v1/converger/tokens/generate" \
 { "conversationId": null, "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...", "expires_in": 1800 }
 ```
 
-| Status | Body | Cause |
+| Status | Error (`code: message`) | Cause |
 | --- | --- | --- |
-| `400` | `{"error": "Token generation requires channel secret, not a token"}` | A converger token was sent instead of the secret |
-| `400` | `{"error": "scope must be one of: channel"}` | Unknown `scope` value |
-| `401` | `{"error": {"code": "Unauthorized", "message": "Missing or malformed Authorization header"}}` | No `Bearer` header |
-| `401` | `{"error": {"code": "Unauthorized", "message": "Invalid or expired token"}}` | Unknown secret, or the channel is inactive |
-| `429` | rate limit body | Channel's `token_generate` limit exceeded |
+| `400` | `bad_request: Token generation requires channel secret, not a token` | A converger token was sent instead of the secret |
+| `400` | `bad_request: scope must be one of: channel` | Unknown `scope` value |
+| `401` | `unauthorized: Missing or malformed Authorization header` | No `Bearer` header |
+| `401` | `unauthorized: Invalid or expired token` | Unknown secret, or the channel is inactive |
+| `429` | `rate_limited` | Channel's `token_generate` limit exceeded |
 
 ### Refresh a token
 
@@ -196,10 +196,10 @@ curl -s "$CONVERGER/api/v1/converger/conversations/$CONV?watermark=c2VxOjQy" \
 
 The conversation's status is not checked here: a closed conversation can still be reconnected to and read.
 
-| Status | Body | Cause |
+| Status | Error (`code: message`) | Cause |
 | --- | --- | --- |
-| `403` | `{"errors": {"detail": "Forbidden"}}` | Token bound to another conversation |
-| `404` | `{"errors": {"detail": "Not Found"}}` | Unknown conversation, or one of another tenant |
+| `403` | `forbidden` | Token bound to another conversation |
+| `404` | `not_found` | Unknown conversation, or one of another tenant |
 
 ### Close and reopen
 
@@ -307,14 +307,14 @@ The same activity can also be sent over the socket with the `postActivity` event
 `activity_create` bucket and replies with `id`, `seq` and `watermark`; see
 [WebSocket](../websocket.md#6-send-activities-over-the-socket).
 
-| Status | Body | Cause |
+| Status | Error (`code: message`) | Cause |
 | --- | --- | --- |
-| `403` | `{"errors": {"detail": "Forbidden"}}` | Token bound to another conversation |
-| `404` | `{"errors": {"detail": "Not Found"}}` | Unknown or foreign conversation |
-| `409` | `{"error": "conversation_closed", "detail": "Conversation is closed"}` | Conversation is closed |
-| `422` | `{"errors": {"type": ["is invalid"]}}` | Validation failed: unknown type, sizes, an attachment without `contentType` (`{"errors": {"attachments": ["attachment 0: contentType can't be blank"]}}`), or a bad reference (`{"errors": {"reply_to_id": ["does not exist in this conversation"]}}`). Error keys use the stored field names. |
-| `429` | rate limit body | Tenant's `activity_create` limit exceeded |
-| `503` | `{"error": "Activity could not be accepted, please retry"}` | Delivery jobs could not be enqueued; nothing stored. Retry with the same idempotency key. |
+| `403` | `forbidden` | Token bound to another conversation |
+| `404` | `not_found` | Unknown or foreign conversation |
+| `409` | `conversation_closed` | Conversation is closed |
+| `422` | `invalid_message` with `details` `{"type": ["is invalid"]}` | Validation failed: unknown type, sizes, an attachment without `contentType` (`invalid_message` with `details` `{"attachments": ["attachment 0: contentType can't be blank"]}`), or a bad reference (`invalid_message` with `details` `{"reply_to_id": ["does not exist in this conversation"]}`). Error keys use the stored field names. |
+| `429` | `rate_limited` | Tenant's `activity_create` limit exceeded |
+| `503` | `unavailable` | Delivery jobs could not be enqueued; nothing stored. Retry with the same idempotency key. |
 
 ### List activities
 
@@ -479,18 +479,18 @@ curl -s -X POST "$CONVERGER/api/v1/converger/conversations/$CONV/upload" \
 defaults to `""`. `contentUrl` is built from the endpoint's configured URL (`PHX_HOST` in production), not from the
 request.
 
-| Status | Body | Cause |
+| Status | Error (`code: message`) | Cause |
 | --- | --- | --- |
-| `400` | `{"error": "Missing file in upload"}` | No `file` part |
-| `403` | `{"errors": {"detail": "Forbidden"}}` | Token bound to another conversation |
-| `404` | `{"errors": {"detail": "Not Found"}}` | Unknown or foreign conversation |
-| `409` | `{"error": "conversation_closed", "detail": "Conversation is closed"}` | Conversation is closed |
-| `413` | `{"error": "File too large (max 10.0MB)"}` | File over `max_file_size` |
-| `413` | `{"errors": {"detail": "Request Entity Too Large"}}` | Whole multipart body over `max_file_size` + 1 MB |
-| `415` | `{"error": "File type application/octet-stream is not allowed"}` | Sniffed type not in the allowlist |
-| `422` | `{"errors": {...}}` | The activity failed validation (for example an unknown `type`); the stored file is deleted |
-| `429` | rate limit body | Tenant's `upload` limit exceeded |
-| `502` | `{"error": "File could not be stored, please retry"}` | Storage backend error |
+| `400` | `bad_request: Missing file in upload` | No `file` part |
+| `403` | `forbidden` | Token bound to another conversation |
+| `404` | `not_found` | Unknown or foreign conversation |
+| `409` | `conversation_closed` | Conversation is closed |
+| `413` | `payload_too_large: File too large (max 10.0MB)` | File over `max_file_size` |
+| `413` | `payload_too_large` | Whole multipart body over `max_file_size` + 1 MB |
+| `415` | `unsupported_media_type: File type application/octet-stream is not allowed` | Sniffed type not in the allowlist |
+| `422` | `invalid_message` | The activity failed validation (for example an unknown `type`); the stored file is deleted |
+| `429` | `rate_limited` | Tenant's `upload` limit exceeded |
+| `502` | `upstream_unavailable: File could not be stored, please retry` | Storage backend error |
 
 ## Attachments
 
@@ -537,18 +537,18 @@ etag: "<sha256 of the file>"
 The signed URL itself carries no Converger authentication, so with `curl` use `-L` to follow it. Browsers follow
 the redirect automatically; for cross-origin storage, the bucket's own CORS settings apply.
 
-| Status | Body | Cause |
+| Status | Error (`code: message`) | Cause |
 | --- | --- | --- |
-| `401` | `{"error": {"code": "Unauthorized", ...}}` | Missing or invalid token |
-| `403` | `{"error": {"code": "Forbidden", ...}}` | Token's channel inactive |
-| `404` | `{"errors": {"detail": "Not Found"}}` | Unknown, malformed, foreign, or missing from storage |
-| `502` | `{"error": "Attachment storage unavailable"}` | Storage backend error |
+| `401` | `unauthorized` or `token_expired` | Missing, invalid or expired token |
+| `403` | `channel_inactive` | Token's channel inactive |
+| `404` | `not_found` | Unknown, malformed, foreign, or missing from storage |
+| `502` | `upstream_unavailable: Attachment storage unavailable` | Storage backend error |
 
 ## Closed conversations
 
 | Operation on a closed conversation | Result |
 | --- | --- |
-| `POST .../activities` | `409 {"error": "conversation_closed", "detail": "Conversation is closed"}` |
+| `POST .../activities` | `409 conversation_closed` |
 | `POST .../upload` | `409`, same body, before anything is stored |
 | Same idempotency key as an activity accepted before the close | `200` with the original id |
 | `GET .../activities`, `GET /conversations/:id` | Allowed |

@@ -7,10 +7,12 @@ defmodule ConvergerWeb.Plugs.TenantAuth do
   """
 
   import Plug.Conn
-  import Phoenix.Controller
 
   alias Converger.Auth.Token
   alias Converger.{Channels, Tenants}
+  alias ConvergerWeb.APIError
+
+  require Logger
 
   def init(opts), do: opts
 
@@ -58,12 +60,7 @@ defmodule ConvergerWeb.Plugs.TenantAuth do
   end
 
   defp unauthorized(conn, message) do
-    require Logger
     Logger.warning("Authentication failure: #{message}")
-
-    conn
-    |> put_status(:unauthorized)
-    |> json(%{error: "Unauthorized: #{message}"})
-    |> halt()
+    APIError.send_error(conn, "unauthorized", message)
   end
 end

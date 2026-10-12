@@ -18,8 +18,8 @@ How each channel type parses its payload is covered in [channels](../channels/ov
 | `POST` | `/api/v1/channels/:channel_id/inbound` | Messages, and status updates sent to the same URL | `inbound` bucket |
 | `POST` | `/api/v1/channels/:channel_id/status` | Delivery and read receipts only | `inbound` bucket |
 
-`:channel_id` is the channel's UUID; a malformed id returns `400 {"errors": {"detail": "Bad Request"}}`. The
-channel must exist (`404`) and be `active` (`400 {"error": "Channel is inactive"}`).
+`:channel_id` is the channel's UUID; a malformed id returns `400 bad_request`. The
+channel must exist (`404`) and be `active` (`400 channel_inactive`).
 
 **Rate limit:** `inbound`, 500 requests per second per channel by default, counted on the path's `channel_id`
 before the channel is loaded or the signature is checked, so a flood is rejected cheaply. Tenants can override it
@@ -44,7 +44,7 @@ Which channel types accept which requests:
 | `kafka`, `rabbitmq` | no: `400` with the adapter's message (broker channels consume their topic or queue, see [Broker channels](../channels/brokers.md)) | `x-converger-signature` |
 | `echo`, `websocket`, `http_pull` | no: `400` with the adapter's message | `x-converger-signature` |
 
-A channel in `outbound` mode answers messages with `400 {"error": "Channel does not accept inbound messages"}`.
+A channel in `outbound` mode answers messages with `400 inbound_not_supported`.
 If the same request also carried status updates, those are applied and the request is acknowledged with `200`,
 dropping the messages. The `/status` endpoint works for every mode, so outbound-only channels can still receive
 receipts.
@@ -115,7 +115,7 @@ panel).
 A rejected signature returns:
 
 ```json
-{ "errors": { "detail": "Unauthorized" } }
+{ "error": { "code": "unauthorized", "message": "Unauthorized", "details": null, "request_id": "GBHDfGZ0bW5Sl2YAAAEB" } }
 ```
 
 `require_signature: false` exists for channels created before signatures were enforced. Unsigned requests will be
@@ -132,7 +132,7 @@ and `hub.challenge`. For a `whatsapp_meta` channel, Converger compares `hub.veri
 | Case | Response |
 | --- | --- |
 | Token matches | `200`, body is the `hub.challenge` value verbatim (plain text) |
-| Token missing or different | `403`, body `Verification failed` |
+| Token missing or different | `403` `forbidden: Verification failed` |
 | Any other channel type | `200`, body `ok` |
 
 ```bash
@@ -186,7 +186,7 @@ curl -s -X POST "$CONVERGER/api/v1/channels/$CHANNEL_ID/inbound" \
 For each message, in order of precedence:
 
 1. An explicit `conversation_id` in the request (tenant-scoped). Unknown: `404`. Closed:
-   `409 {"error": "conversation_closed", "detail": "Conversation is closed"}`.
+   `409 conversation_closed`.
 2. A participant (`external_id` for generic webhooks; the sender's phone number for WhatsApp): the participant's
    active conversation on this channel, or a new one. A closed conversation is never reused; the next message starts
    a new conversation for the same participant. See [ADR-0016](../adr/0016-participant-based-conversation-resolution.md)
@@ -201,7 +201,7 @@ For each message, in order of precedence:
 Meta also `statuses` alongside them. The sender is the phone number, the provider message id (`wamid...` for Meta,
 `messageId` for Infobip) becomes the activity's idempotency key, and media arrive as attachment stubs. Field mapping
 is documented per adapter in [WhatsApp](../channels/whatsapp.md). A body the adapter cannot parse at all returns
-`400` with a message such as `{"error": "unable to parse WhatsApp Meta webhook payload"}`. A well-formed body
+`400` with a message such as `bad_request: unable to parse WhatsApp Meta webhook payload`. A well-formed body
 without messages (for example a statuses-only Meta webhook) is acknowledged with `200`.
 
 `email` channels accept the inbound mail webhooks of Amazon SES (through SNS), SendGrid Inbound Parse, Mailgun
@@ -237,8 +237,8 @@ Status codes:
 | `201 Created` | Generic channel types, at least one new activity created |
 | `200 OK` | Generic channel types with only duplicates; `whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram`, `email`, `sms_twilio`, `sms_vonage`, `messenger`, `instagram`, `viber`, `discord` and `teams` always, once the request has been handled (also when messages were rejected), because those providers retry any non-200 response |
 | `200 OK` with only `status` and `receipts_processed` | Status-only request |
-| `422` | Generic channel types where every message was rejected: the first rejection's changeset errors, for example `{"errors": {"type": ["is invalid"]}}`; or the empty-message error above |
-| `503` | A transient failure (delivery jobs could not be enqueued): `{"error": "Activity could not be accepted, please retry"}`. The provider should re-deliver. |
+| `422` | Generic channel types where every message was rejected: the first rejection's changeset errors, for example `invalid_message` with `details` `{"type": ["is invalid"]}`; or the empty-message error above |
+| `503` | A transient failure (delivery jobs could not be enqueued): `unavailable`. The provider should re-deliver. |
 
 ## Status updates
 
@@ -322,19 +322,19 @@ Re-sending the same generic message with the same `idempotency_key` returns `200
 
 ## Errors
 
-| Status | Body | Cause |
+| Status | Error (`code: message`) | Cause |
 | --- | --- | --- |
-| `400` | `{"errors": {"detail": "Bad Request"}}` | `channel_id` is not a UUID |
-| `400` | `{"error": "Channel is inactive"}` | Channel disabled |
-| `400` | `{"error": "Channel does not accept inbound messages"}` | Channel mode is `outbound` |
-| `400` | `{"error": "<adapter message>"}` | Payload not parseable by the channel type, or a channel type without inbound support |
-| `401` | `{"errors": {"detail": "Unauthorized"}}` | Signature invalid, or missing / legacy on a `require_signature` channel |
-| `403` | `Verification failed` (text) | Meta handshake with a wrong `hub.verify_token` |
-| `404` | `{"errors": {"detail": "Not Found"}}` | Unknown channel, or unknown `conversation_id` |
-| `409` | `{"error": "conversation_closed", "detail": "Conversation is closed"}` | Explicit `conversation_id` of a closed conversation |
-| `422` | `{"error": "Inbound message has no text and no attachments"}` or changeset errors | Invalid generic message |
-| `429` | `{"error": "Too many requests. Please try again later."}` + `retry-after` | Channel's `inbound` limit exceeded |
-| `503` | `{"error": "Activity could not be accepted, please retry"}` | Transient failure; re-deliver |
+| `400` | `bad_request` | `channel_id` is not a UUID |
+| `400` | `channel_inactive` | Channel disabled |
+| `400` | `inbound_not_supported` | Channel mode is `outbound` |
+| `400` | `bad_request: <adapter message>` | Payload not parseable by the channel type, or a channel type without inbound support |
+| `401` | `unauthorized` | Signature invalid, or missing / legacy on a `require_signature` channel |
+| `403` | `forbidden: Verification failed` | Meta handshake with a wrong `hub.verify_token` |
+| `404` | `not_found` | Unknown channel, or unknown `conversation_id` |
+| `409` | `conversation_closed` | Explicit `conversation_id` of a closed conversation |
+| `422` | `invalid_message: Inbound message has no text and no attachments` or changeset errors | Invalid generic message |
+| `429` | `rate_limited` + `retry-after` | Channel's `inbound` limit exceeded |
+| `503` | `unavailable` | Transient failure; re-deliver |
 
 ## Related
 

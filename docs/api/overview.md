@@ -14,11 +14,10 @@ error bodies, rate limiting, pagination, idempotency and CORS. The endpoint refe
 - [Inbound webhooks](inbound.md): provider-facing endpoints under `/api/v1/channels/:channel_id`, called by WhatsApp, Infobip or your own systems.
 
 :::info OpenAPI
-There is no OpenAPI / Swagger description today: the repository has no `open_api_spex` dependency, no generated
-spec and no `/api/docs` route. A machine-readable spec, Swagger UI and a single error envelope are
-Planned ([#45](https://github.com/AimTune/converger/issues/45)). Until then, these pages and the controller tests
-under [`test/converger_web/controllers`](https://github.com/AimTune/converger/tree/main/test/converger_web/controllers)
-are the reference.
+The API is described by an OpenAPI 3.1 document, committed as
+[`priv/static/openapi.json`](https://github.com/AimTune/converger/blob/main/priv/static/openapi.json) and served at
+`/api/openapi.json`, with Swagger UI at `/api/docs` (on in dev, opt-in in prod). See [OpenAPI and Swagger UI](openapi.md).
+Changes follow the [versioning policy](versioning.md).
 :::
 
 ## Base URLs
@@ -88,13 +87,13 @@ checks, in this order:
    Converger client tokens (which end-user browsers hold) are rejected with `Invalid token`, even though they carry
    a `tenant_id`.
 
-Failures return `401` with a flat string error:
+Failures return `401` with code `unauthorized` ([error envelope](errors.md)):
 
 ```json
-{ "error": "Unauthorized: Invalid or inactive API Key" }
+{ "error": { "code": "unauthorized", "message": "Invalid or inactive API Key", "details": null, "request_id": "..." } }
 ```
 
-| Message suffix | Cause |
+| `message` | Cause |
 | --- | --- |
 | `Missing authentication headers` | Neither header present |
 | `Invalid or inactive API Key` | Unknown key, expired previous key, or tenant not `active` |
@@ -117,17 +116,18 @@ reads `Authorization: Bearer <value>` and runs in one of two modes:
 - **Token mode** (all other client routes): the value must be a valid converger token (signature, `exp`,
   `type: "converger"`), and the channel in its `channel_id` claim must still exist and be `active`.
 
-Errors use a nested object:
+Errors use the [error envelope](errors.md):
 
 ```json
-{ "error": { "code": "Unauthorized", "message": "Invalid or expired token" } }
+{ "error": { "code": "unauthorized", "message": "Invalid or expired token", "details": null, "request_id": "..." } }
 ```
 
 | Status | `code` | `message` |
 | --- | --- | --- |
-| `401` | `Unauthorized` | `Missing or malformed Authorization header` |
-| `401` | `Unauthorized` | `Invalid or expired token` |
-| `403` | `Forbidden` | `Channel not found or inactive` (token valid, channel disabled or deleted) |
+| `401` | `unauthorized` | `Missing or malformed Authorization header` |
+| `401` | `unauthorized` | `Invalid or expired token` (bad signature, wrong token type) |
+| `401` | `token_expired` | `Token expired` (refresh before `exp`, or issue a new token) |
+| `403` | `channel_inactive` | `Channel not found or inactive` (token valid, channel disabled or deleted) |
 
 A disabled channel therefore invalidates every outstanding converger token for it immediately, even before `exp`.
 
@@ -150,7 +150,7 @@ on any other channel are reported as `404`, even within the same tenant. A conve
 (`GET /conversations/:id`) conversations of its channel, but cannot join a conversation over the WebSocket; the
 socket needs the conversation token those endpoints return. A token with `conversation_id` is
 **conversation-bound**: requests for any other conversation id are answered `403`
-(`{"errors": {"detail": "Forbidden"}}`), and attachments of other conversations are reported as `404`.
+`forbidden`, and attachments of other conversations are reported as `404`.
 `user_id` is copied from `user.id` at generation time and carried through refreshes; it identifies the end user's
 socket (see [ADR-0020](../adr/0020-per-subject-socket-ids-and-presence.md)).
 
@@ -159,48 +159,43 @@ displayed.
 
 ## Error responses
 
-The error body shape currently depends on where the error is raised. A single envelope is Planned
-([#45](https://github.com/AimTune/converger/issues/45)); until then, clients should handle these shapes:
+Every error response, on every family, uses one envelope ([errors](errors.md),
+[ADR-0050](../adr/0050-openapi-spec-error-envelope-and-api-versioning.md)):
 
-| Shape | Example | Raised by |
-| --- | --- | --- |
-| Flat string | `{"error": "Missing x-channel-token header"}` | `FallbackController` (string reasons), `TenantAuth`, rate limiter, upload and inbound specifics |
-| Phoenix detail | `{"errors": {"detail": "Not Found"}}` | `FallbackController` for `:not_found` / `:unauthorized` / `:forbidden`, and Phoenix for exceptions (`ErrorJSON`) |
-| Changeset errors | `{"errors": {"text": ["should be at most 65536 byte(s)"]}}` | Validation failures (`422`) |
-| Coded object | `{"error": {"code": "Unauthorized", "message": "..."}}` | `ConvergerAuth` (client API) |
-| Closed conversation | `{"error": "conversation_closed", "detail": "Conversation is closed"}` | Any activity write to a closed conversation (`409`) |
+```json
+{ "error": { "code": "conversation_closed", "message": "Conversation is closed", "details": null, "request_id": "GBHDfGZ0bW5Sl2YAAAEB" } }
+```
+
+Branch on `code`, never on `message`. `details` carries the errors per field for `422` (`invalid_message`,
+`validation_failed`) and `retry_after_ms` for `429` / `503`. `request_id` is the request's `x-request-id`.
 
 ### Status codes
 
-Mapped in [`ConvergerWeb.FallbackController`](https://github.com/AimTune/converger/blob/main/lib/converger_web/controllers/fallback_controller.ex)
-and [`ConvergerWeb.ErrorJSON`](https://github.com/AimTune/converger/blob/main/lib/converger_web/controllers/error_json.ex):
-
-| Status | Body | When |
+| Status | Codes | When |
 | --- | --- | --- |
-| `400` | `{"error": "<message>"}` | Request-level problem reported as a string, e.g. `Missing x-channel-token header`, `Invalid cursor`, `Invalid watermark`, `Invalid channel_id`, `Missing file in upload` |
-| `400` | `{"error": "Channel is inactive"}` | The addressed channel is disabled |
-| `400` | `{"error": "Channel does not accept inbound messages"}` | Inbound message to an outbound-only channel |
-| `400` | `{"errors": {"detail": "Bad Request"}}` | Malformed UUID in a path or lookup (`Ecto.Query.CastError`), or missing required body params (`Phoenix.ActionClauseError`) |
-| `401` | `{"errors": {"detail": "Unauthorized"}}` | Invalid channel token, invalid inbound signature |
-| `403` | `{"errors": {"detail": "Forbidden"}}` | Authenticated but not allowed (wrong conversation for the token, channel token where an API key is required) |
-| `404` | `{"errors": {"detail": "Not Found"}}` | Unknown resource, or a resource of another tenant (tenant isolation never reveals existence), unknown route |
-| `409` | `{"error": "conversation_closed", "detail": "Conversation is closed"}` | Activity posted to a closed conversation ([ADR-0017](../adr/0017-conversation-lifecycle-enforced-under-the-seq-lock.md)) |
-| `409` | `{"error": "not_failed", "detail": "Only failed deliveries can be retried"}` | Replay of a delivery that is not `failed` ([tenant API](tenant-api.md#retry-a-delivery)) |
-| `413` | `{"error": "File too large (max 10.0MB)"}` or `{"errors": {"detail": "Request Entity Too Large"}}` | Upload over the size limit (the second form when the whole multipart body exceeds the limit plus 1 MB) |
-| `415` | `{"error": "File type application/octet-stream is not allowed"}` | Upload whose sniffed type is not allow-listed |
-| `422` | `{"errors": {"<field>": ["<message>"]}}` | Changeset validation failed |
-| `422` | `{"error": "Inbound message has no text and no attachments"}` | Empty generic inbound message |
-| `429` | `{"error": "Too many requests. Please try again later."}` | Rate limit exceeded |
-| `500` | `{"errors": {"detail": "Internal Server Error"}}` | Unhandled exception |
-| `502` | `{"error": "File could not be stored, please retry"}` / `{"error": "Attachment storage unavailable"}` | Storage backend failure on upload / download |
-| `503` | `{"error": "Activity could not be accepted, please retry"}` | The activity was rolled back because its delivery jobs could not be enqueued (transactional outbox, [ADR-0001](../adr/0001-transactional-outbox-with-oban.md)); safe to retry with an idempotency key |
+| `400` | `bad_request`, `invalid_watermark`, `channel_inactive`, `inbound_not_supported` | A request-level problem (`Missing x-channel-token header`, `Invalid cursor`, `Invalid channel_id`, `Missing file in upload`, malformed JSON or UUID, missing required body params), a bad watermark, a disabled channel, inbound to an outbound-only channel |
+| `401` | `unauthorized`, `token_expired` | Missing or invalid credential, invalid inbound signature, expired Converger token |
+| `403` | `forbidden`, `channel_inactive` | Authenticated but not allowed (wrong conversation for the token, channel token where an API key is required); the token's channel is disabled |
+| `404` | `not_found` | Unknown resource, or a resource of another tenant (tenant isolation never reveals existence), unknown route |
+| `406` | `not_acceptable` | The `Accept` header excludes JSON |
+| `409` | `conversation_closed`, `not_failed` | Activity posted to a closed conversation ([ADR-0017](../adr/0017-conversation-lifecycle-enforced-under-the-seq-lock.md)); replay of a delivery that is not `failed` ([tenant API](tenant-api.md#retry-a-delivery)) |
+| `413` | `payload_too_large` | Upload over the size limit (`File too large (max 10.0MB)`), or a raw inbound body over the limit |
+| `415` | `unsupported_media_type` | Upload whose sniffed type is not allow-listed |
+| `422` | `invalid_message`, `validation_failed`, `unsupported_channel_type`, `invalid_channel_config` | Validation failed (`details` per field), or the channel cannot do the operation |
+| `429` | `rate_limited` | Rate limit exceeded |
+| `500` | `internal` | Unhandled exception (no exception text is returned) |
+| `502` | `upstream_unavailable` | Storage backend or provider failure (`File could not be stored, please retry`, `Attachment storage unavailable`) |
+| `503` | `unavailable` | The activity was rolled back because its delivery jobs could not be enqueued (transactional outbox, [ADR-0001](../adr/0001-transactional-outbox-with-oban.md); `details.reason: "delivery_enqueue_failed"`, safe to retry with an idempotency key), the database is unavailable, or the node is draining |
+
+The endpoint references show an error as `code` or `code: message`; the body is always the envelope above.
 
 Every response carries an `x-request-id` header (`Plug.RequestId`), which is also attached to the server log lines of
 that request. Quote it when reporting a problem.
 
 Responses to deprecated requests (`POST /api/v1/tokens` and any request authenticated with `x-channel-token`) also
 carry the RFC 9745 header `Deprecation: @<unix time>` and
-`Link: <https://converger.aimtune.dev/api/migrating-from-legacy>; rel="deprecation"`.
+`Link: <https://converger.aimtune.dev/api/migrating-from-legacy>; rel="deprecation"`. See the
+[versioning and deprecation policy](versioning.md) (`Sunset` headers, 12-month support window).
 
 ## Rate limiting
 
@@ -228,12 +223,12 @@ HTTP/1.1 429 Too Many Requests
 retry-after: 1
 content-type: application/json; charset=utf-8
 
-{"error":"Too many requests. Please try again later."}
+{"error":{"code":"rate_limited","message":"Too many requests. Please try again later.","details":{"retry_after_ms":830},"request_id":"GBHDfGZ0bW5Sl2YAAAEB"}}
 ```
 
 `retry-after` is in whole seconds (at least `1`) until the current window ends. No `X-RateLimit-*` headers are
-sent. `retry-after` is not in the CORS exposed headers, so browser code on another origin cannot read it; back off
-with your own delay there.
+sent. `retry-after` is not in the CORS exposed headers, so browser code on another origin cannot read it; use
+`error.details.retry_after_ms` from the body instead.
 
 ## Pagination
 
@@ -249,7 +244,7 @@ of the previous page, so rows inserted meanwhile never shift pages.
 | Param | Meaning |
 | --- | --- |
 | `limit` | Page size. Default `50`, capped at `500`. Missing, non-numeric or non-positive values use the default. |
-| `cursor` | The previous response's `meta.next_cursor`. Omit (or send empty) for the first page. A malformed cursor returns `400 {"error": "Invalid cursor"}`. |
+| `cursor` | The previous response's `meta.next_cursor`. Omit (or send empty) for the first page. A malformed cursor returns `400 bad_request: Invalid cursor`. |
 
 ```json
 {

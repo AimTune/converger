@@ -52,7 +52,7 @@ defmodule ConvergerWeb.ConversationControllerTest do
     test "returns error when channel token is invalid", %{conn: conn, channel: _channel} do
       conn = conn |> put_req_header("x-channel-token", "invalid")
       conn = post(conn, ~p"/api/v1/conversations", %{})
-      assert json_response(conn, 401)["errors"]["detail"] == "Unauthorized"
+      assert_api_error(conn, 401, "unauthorized")
     end
   end
 

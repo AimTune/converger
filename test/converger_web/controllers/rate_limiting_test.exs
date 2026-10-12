@@ -34,7 +34,7 @@ defmodule ConvergerWeb.RateLimitingTest do
 
       assert json_response(post_activity.(), 201)
       limited = post_activity.()
-      assert json_response(limited, 429)["error"] =~ "Too many requests"
+      assert assert_api_error(limited, 429, "rate_limited")["message"] =~ "Too many requests"
       assert [_seconds] = get_resp_header(limited, "retry-after")
     end
 

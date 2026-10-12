@@ -4,12 +4,49 @@ defmodule ConvergerWeb.ChannelDeliveryController do
   pause/resume and rate limit (see `Converger.Channels.Circuit`).
   """
   use ConvergerWeb, :controller
+  use OpenApiSpex.ControllerSpecs
+
+  import ConvergerWeb.ApiSchemas
 
   alias Converger.Channels
 
   plug ConvergerWeb.Plugs.TenantAuth
 
   action_fallback ConvergerWeb.FallbackController
+
+  tags(["Channels"])
+  security([%{"apiKey" => []}, %{"channelToken" => []}])
+
+  @state_responses with_errors(
+                     %{
+                       200 =>
+                         json_schema("The delivery state", ref("ChannelDeliveryStateResponse"))
+                     },
+                     [400, 401, 404]
+                   )
+
+  operation(:show,
+    summary: "Get a channel's delivery state",
+    operation_id: "getChannelDeliveryState",
+    parameters: [channel_id: path_id("Channel id")],
+    responses: @state_responses
+  )
+
+  operation(:pause,
+    summary: "Pause a channel's deliveries",
+    description: "Parks new and pending deliveries until resumed. Idempotent.",
+    operation_id: "pauseChannelDeliveries",
+    parameters: [channel_id: path_id("Channel id")],
+    responses: @state_responses
+  )
+
+  operation(:resume,
+    summary: "Resume a channel's deliveries",
+    description: "Closes the breaker and releases parked deliveries. Idempotent.",
+    operation_id: "resumeChannelDeliveries",
+    parameters: [channel_id: path_id("Channel id")],
+    responses: @state_responses
+  )
 
   def show(conn, %{"channel_id" => id}) do
     channel = Channels.get_channel!(id, conn.assigns.tenant.id)

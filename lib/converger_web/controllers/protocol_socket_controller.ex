@@ -13,7 +13,7 @@ defmodule ConvergerWeb.ProtocolSocketController do
 
   use ConvergerWeb, :controller
 
-  alias ConvergerWeb.{Drain, SocketGuard}
+  alias ConvergerWeb.{APIError, Drain, SocketGuard}
   alias ConvergerWeb.Protocol.Codec
 
   # While the node drains (shutdown), new connections are refused with 503 and
@@ -45,19 +45,15 @@ defmodule ConvergerWeb.ProtocolSocketController do
         |> halt()
 
       {:error, :unsupported_subprotocol} ->
-        conn
-        |> put_status(:bad_request)
-        |> json(%{
-          error: "unsupported WebSocket subprotocol",
+        APIError.send_error(conn, "unsupported_protocol", nil, %{
           supported: Codec.subprotocols()
         })
     end
   rescue
     WebSockAdapter.UpgradeError ->
       conn
-      |> put_status(:upgrade_required)
       |> put_resp_header("upgrade", "websocket")
-      |> json(%{error: "this endpoint only accepts WebSocket upgrades"})
+      |> APIError.send_error("upgrade_required", "This endpoint only accepts WebSocket upgrades")
   end
 
   defp maybe_put_subprotocol(conn, nil), do: conn

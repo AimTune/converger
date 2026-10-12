@@ -39,7 +39,9 @@ defmodule ConvergerWeb.RichActivityApiTest do
 
     test "an unknown type is rejected with 422", %{channel: channel, conversation: conversation} do
       conn = post_activity(channel, conversation, %{"type" => "sticker", "text" => "hi"})
-      assert %{"errors" => %{"type" => ["is invalid"]}} = json_response(conn, 422)
+
+      assert %{"details" => %{"type" => ["is invalid"]}} =
+               assert_api_error(conn, 422, "invalid_message")
     end
 
     test "internal types cannot be sent by clients", %{
@@ -47,7 +49,9 @@ defmodule ConvergerWeb.RichActivityApiTest do
       conversation: conversation
     } do
       conn = post_activity(channel, conversation, %{"type" => "deliveryReceipt"})
-      assert %{"errors" => %{"type" => ["is invalid"]}} = json_response(conn, 422)
+
+      assert %{"details" => %{"type" => ["is invalid"]}} =
+               assert_api_error(conn, 422, "invalid_message")
     end
 
     test "an attachment without contentType is rejected with 422", %{
@@ -60,8 +64,8 @@ defmodule ConvergerWeb.RichActivityApiTest do
           "attachments" => [%{"contentUrl" => "https://example.com/a.png"}]
         })
 
-      assert %{"errors" => %{"attachments" => ["attachment 0: contentType can't be blank"]}} =
-               json_response(conn, 422)
+      assert %{"details" => %{"attachments" => ["attachment 0: contentType can't be blank"]}} =
+               assert_api_error(conn, 422, "invalid_message")
     end
 
     test "replyToId round-trips, edits and deletes are listed with markers", %{
@@ -87,8 +91,8 @@ defmodule ConvergerWeb.RichActivityApiTest do
 
       missing_target = post_activity(channel, conversation, %{"type" => "messageDelete"})
 
-      assert %{"errors" => %{"reply_to_id" => ["is required for messageDelete"]}} =
-               json_response(missing_target, 422)
+      assert %{"details" => %{"reply_to_id" => ["is required for messageDelete"]}} =
+               assert_api_error(missing_target, 422, "invalid_message")
 
       conn =
         channel
@@ -153,7 +157,8 @@ defmodule ConvergerWeb.RichActivityApiTest do
         |> tenant_conn()
         |> post(~p"/api/v1/conversations/#{conversation.id}/activities", %{"type" => "nope"})
 
-      assert %{"errors" => %{"type" => ["is invalid"]}} = json_response(conn, 422)
+      assert %{"details" => %{"type" => ["is invalid"]}} =
+               assert_api_error(conn, 422, "invalid_message")
     end
   end
 

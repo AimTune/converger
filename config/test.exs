@@ -116,3 +116,6 @@ config :converger, :repo_faults, true
 # Readiness `pool` check off by default: a loaded test machine must not flip
 # /health/ready to `degraded`. Tests that need it set degraded_queue_ms.
 config :converger, Converger.Repo.Pressure, degraded_queue_ms: 0
+
+# Swagger UI and /api/openapi.json are served in tests (ADR-0050).
+config :converger, :api_docs, enabled: true

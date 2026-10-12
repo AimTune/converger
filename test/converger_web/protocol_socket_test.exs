@@ -89,7 +89,7 @@ defmodule ConvergerWeb.ProtocolSocketTest do
 
     test "answers a plain GET with 426 Upgrade Required", %{conn: conn} do
       conn = get(conn, "/socket/converger/v1")
-      assert json_response(conn, 426)["error"] =~ "WebSocket"
+      assert assert_api_error(conn, 426, "upgrade_required")["message"] =~ "WebSocket"
     end
   end
 

@@ -45,6 +45,10 @@ config :converger, ConvergerWeb.Protocol,
   # frames replayed per handshake or `sync`; beyond it `replayTruncated`
   replay_max: 10_000
 
+# API documentation routes (/api/docs, /api/openapi.json, ADR-0050): off
+# unless enabled per environment (dev.exs, test.exs) or with API_DOCS_ENABLED.
+config :converger, :api_docs, enabled: false
+
 # Tokens travel in query strings (`?token=` on sockets and the SSE stream):
 # keep them out of request logs.
 config :phoenix, :filter_parameters, ["password", "token", "secret"]

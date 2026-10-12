@@ -163,7 +163,10 @@ defmodule ConvergerWeb.ConvergerAPI.AttachmentControllerTest do
     } do
       exe = "MZ" <> <<0x90, 0, 3, 0, 0, 0>> <> :binary.copy(<<0>>, 32)
       conn = upload(conn, token, conversation.id, upload_file("totally.png", exe))
-      assert json_response(conn, 415)["error"] =~ "application/octet-stream"
+
+      assert assert_api_error(conn, 415, "unsupported_media_type")["message"] =~
+               "application/octet-stream"
+
       assert Converger.Repo.aggregate(Attachment, :count) == 0
     end
 
@@ -177,7 +180,7 @@ defmodule ConvergerWeb.ConvergerAPI.AttachmentControllerTest do
         Converger.Tenants.update_tenant(tenant, %{allowed_upload_types: ["application/pdf"]})
 
       conn1 = upload(conn, token, conversation.id, upload_file("a.png", @png))
-      assert json_response(conn1, 415)
+      assert_api_error(conn1, 415, "unsupported_media_type")
 
       conn2 = upload(recycle(conn1), token, conversation.id, upload_file("a.pdf", "%PDF-1.4\n"))
       assert json_response(conn2, 200)
@@ -186,7 +189,7 @@ defmodule ConvergerWeb.ConvergerAPI.AttachmentControllerTest do
     test "max size is configurable", %{conn: conn, token: token, conversation: conversation} do
       with_upload_config(max_file_size: 32)
       conn = upload(conn, token, conversation.id, upload_file("a.png", @png))
-      assert json_response(conn, 413)["error"] =~ "File too large"
+      assert assert_api_error(conn, 413, "payload_too_large")["message"] =~ "File too large"
     end
 
     test "missing file", %{conn: conn, token: token, conversation: conversation} do
@@ -195,7 +198,7 @@ defmodule ConvergerWeb.ConvergerAPI.AttachmentControllerTest do
         |> put_req_header("authorization", "Bearer #{token}")
         |> post(~p"/api/v1/converger/conversations/#{conversation.id}/upload", %{})
 
-      assert json_response(conn, 400)["error"] == "Missing file in upload"
+      assert assert_api_error(conn, 400, "bad_request")["message"] == "Missing file in upload"
     end
   end
 

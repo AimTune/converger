@@ -14,6 +14,9 @@ defmodule ConvergerWeb.DeliveryController do
   deliveries expose every conversation's payloads.
   """
   use ConvergerWeb, :controller
+  use OpenApiSpex.ControllerSpecs
+
+  import ConvergerWeb.ApiSchemas
 
   alias Converger.Channels.Channel
   alias Converger.Deliveries
@@ -21,6 +24,59 @@ defmodule ConvergerWeb.DeliveryController do
   plug ConvergerWeb.Plugs.TenantAuth
 
   action_fallback ConvergerWeb.FallbackController
+
+  tags(["Deliveries"])
+  security([%{"apiKey" => []}])
+
+  @date_time %OpenApiSpex.Schema{type: :string, format: :"date-time"}
+
+  operation(:index,
+    summary: "List deliveries",
+    description:
+      "Most recently changed first, keyset-paginated. `from` / `to` accept ISO 8601 times or dates. Requires the tenant API key.",
+    operation_id: "listDeliveries",
+    parameters: [
+      status: query(ref("DeliveryStatus"), "Filter by status"),
+      channel_id: query(%OpenApiSpex.Schema{type: :string, format: :uuid}, "Filter by channel"),
+      activity_id: query(%OpenApiSpex.Schema{type: :string, format: :uuid}, "Filter by activity"),
+      from: query(@date_time, "Changed at or after"),
+      to: query(@date_time, "Changed at or before"),
+      limit: limit_param(),
+      cursor: query(%OpenApiSpex.Schema{type: :string}, "`meta.next_cursor` of the previous page")
+    ],
+    responses: with_errors(%{200 => json_schema("A page", ref("DeliveryList"))}, [400, 401, 403])
+  )
+
+  operation(:retry,
+    summary: "Retry a delivery",
+    description: "Replays one dead letter (status `failed`).",
+    operation_id: "retryDelivery",
+    parameters: [id: path_id("Delivery id")],
+    responses:
+      with_errors(
+        %{202 => json_schema("Re-enqueued", ref("DeliveryResponse"))},
+        [400, 401, 403, 404, 409]
+      )
+  )
+
+  operation(:bulk_retry,
+    summary: "Retry a channel's dead letters",
+    description:
+      "Replays up to `limit` failed deliveries of the channel; call again while `has_more`.",
+    operation_id: "retryChannelDeadLetters",
+    parameters: [
+      channel_id: path_id("Channel id"),
+      from: query(@date_time, "Changed at or after"),
+      to: query(@date_time, "Changed at or before"),
+      activity_id: query(%OpenApiSpex.Schema{type: :string, format: :uuid}, "Only this activity"),
+      limit: limit_param()
+    ],
+    responses:
+      with_errors(
+        %{202 => json_schema("Re-enqueued", ref("BulkRetryResponse"))},
+        [400, 401, 403, 404]
+      )
+  )
 
   def index(conn, params) do
     tenant = conn.assigns.tenant
@@ -52,9 +108,6 @@ defmodule ConvergerWeb.DeliveryController do
       conn
       |> put_status(:accepted)
       |> render(:show, delivery: Converger.Repo.preload(delivery, :activity))
-    else
-      {:error, :not_failed} -> not_failed(conn)
-      other -> other
     end
   end
 
@@ -96,14 +149,15 @@ defmodule ConvergerWeb.DeliveryController do
     end
   end
 
-  defp not_failed(conn) do
-    conn
-    |> put_status(:conflict)
-    |> json(%{error: "not_failed", detail: "Only failed deliveries can be retried"})
-  end
-
   defp require_api_key(conn) do
-    if get_req_header(conn, "x-api-key") == [], do: {:error, :forbidden}, else: :ok
+    if get_req_header(conn, "x-api-key") == [],
+      do:
+        {:error,
+         ConvergerWeb.APIError.new(
+           :forbidden,
+           "This endpoint requires the tenant API key (x-api-key)"
+         )},
+      else: :ok
   end
 
   defp build_actor(conn), do: %{type: "tenant_api", id: conn.assigns.tenant.id}

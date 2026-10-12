@@ -72,7 +72,7 @@ error into a retryable answer on every interactive path:
 
 | Path | Answer |
 | --- | --- |
-| HTTP (REST, inbound webhooks, admin) | `503 Service Unavailable`, `Retry-After: <s>`, body `{"errors": {"detail": "Service Unavailable", "code": "database_unavailable"}}`. No `500`, no crash report. |
+| HTTP (REST, inbound webhooks, admin) | `503 Service Unavailable`, `Retry-After: <s>`, code `unavailable`, message "The database is unavailable, please retry", `details` `{"reason": "database_unavailable", "retry_after_ms": N}` ([errors](../api/errors.md)). No `500`, no crash report. |
 | WebSocket upgrade (`/socket/converger`) | `503` with `Retry-After`, as while draining; the `phoenix` client reconnects with backoff. |
 | Phoenix binding join (`converger:conversation:*`, `converger:channel:*`) | Join error `{"reason": "unavailable", "retry_after_ms": N}`. |
 | Phoenix binding replay on join, gap fill | Still joined; event `error` `{"code": "replay_unavailable", "watermark": ..., "retry_after_ms": N}`. Live activities keep flowing. |

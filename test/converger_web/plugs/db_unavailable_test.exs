@@ -49,7 +49,12 @@ defmodule ConvergerWeb.Plugs.DbUnavailableTest do
       assert conn.halted
       assert [retry_after] = get_resp_header(conn, "retry-after")
       assert String.to_integer(retry_after) >= 1
-      assert Jason.decode!(conn.resp_body)["errors"]["code"] == "database_unavailable"
+
+      assert %{"error" => %{"code" => "unavailable", "details" => details}} =
+               Jason.decode!(conn.resp_body)
+
+      assert %{"reason" => "database_unavailable", "retry_after_ms" => ms} = details
+      assert is_integer(ms)
     end
   end
 
