@@ -36,7 +36,7 @@ From a checkout: `helm install converger deploy/helm/converger ...`.
 | `image.tag` / `image.digest` | chart `appVersion` / empty | A digest wins over the tag |
 | `existingSecret` | `converger-env` | Secret with `DATABASE_URL`, `SECRET_KEY_BASE`, `CLOAK_KEY`, `RELEASE_COOKIE`, optional `METRICS_TOKEN` |
 | `secret.create` | `false` | Render the Secret from `secret.*` instead (values end up in the release; a pre-install hook when migrations are on) |
-| `env` | `PHX_HOST`, `TRUSTED_PROXIES`, `FORCE_SSL`, `POOL_SIZE`, `METRICS_ALLOWED_IPS` | Non-secret settings, rendered into the ConfigMap |
+| `env` | `PHX_HOST`, `TRUSTED_PROXIES`, `FORCE_SSL`, `POOL_SIZE`, `BACKGROUND_POOL_SIZE`, `METRICS_ALLOWED_IPS` | Non-secret settings, rendered into the ConfigMap |
 | `extraEnv`, `extraEnvFrom` | `[]` | More env entries / sources (for example `MAILGUN_API_KEY` from another Secret) |
 | `cluster.strategy` | `kubernetes_dns` | `none` runs independent nodes (one replica only) |
 | `cluster.nodeBasename` | `converger` | Nodes are named `<basename>@<pod IP>` |

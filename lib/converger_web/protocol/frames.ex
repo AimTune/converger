@@ -30,7 +30,8 @@ defmodule ConvergerWeb.Protocol.Frames do
     "conversation_not_found" => {4001, false},
     "bot_unavailable" => {5004, true},
     "internal" => {9000, true},
-    "unavailable" => {9001, true}
+    "unavailable" => {9001, true},
+    "replay_unavailable" => {9002, true}
   }
 
   @doc """

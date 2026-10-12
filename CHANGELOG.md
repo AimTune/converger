@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+### Graceful degradation under database pressure (#35)
+
+- **Two pools.** Oban (its own queries and every job) runs on a background pool of the same repo
+  (`Converger.Repo.Background`, `BACKGROUND_POOL_SIZE`, default 10), so background work cannot starve requests.
+  **Upgrade note:** each node now opens up to `POOL_SIZE + BACKGROUND_POOL_SIZE + 1` connections (21 instead of 11
+  with the defaults); check Postgres `max_connections`, or set `BACKGROUND_POOL_SIZE=0` to keep one shared pool.
+- Per-pool `queue_target`, `queue_interval` and `timeout`: `DB_QUEUE_TARGET_MS`, `DB_QUEUE_INTERVAL_MS`,
+  `DB_TIMEOUT_MS` and their `BACKGROUND_DB_*` counterparts.
+- A request that cannot reach the database (pool saturated, query timed out, connection lost) is answered
+  `503` with `Retry-After` and the code `database_unavailable` instead of `500` and a crash report. WebSocket
+  upgrades get `503` + `Retry-After` too.
+- WebSockets: a join or event answers `{"reason": "unavailable", "retry_after_ms": N}`; a **replay that fails no
+  longer fails the join**: the socket pushes `error {code: "replay_unavailable", watermark}`. Protocol v1: new
+  retryable error `replay_unavailable` (9002, `details.watermark`, then `sync`), `unavailable` for frames, close
+  1013 for a `hello` that cannot be served. SSE streams end with `unavailable` and reconnect.
+- `GET /health/ready` has a `pool` check and answers `503 degraded` while the interactive pool's average wait is
+  above `READY_DB_QUEUE_MS` (200 ms; `0` disables).
+- Metrics `converger_repo_pool_queue_time_ms`, `converger_background_repo_query_queue_time`,
+  `converger_db_unavailable_count{source}`.
+- Chaos harness: `CHAOS_MODE=db_pause` pauses Postgres for 10 s under load (nightly next to the kill mode).
+- Docs: [Database pools and pressure](docs/operations/database.md). ADR-0044.
+
 ### Adapter behaviour v2: capabilities, config schemas, registry (#36)
 
 - Adapters `use Converger.Channels.Adapter, type: "..."` and declare `capabilities/0` and `config_schema/0`.

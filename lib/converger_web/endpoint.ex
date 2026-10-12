@@ -97,7 +97,9 @@ defmodule ConvergerWeb.Endpoint do
   plug Plug.MethodOverride
   plug Plug.Head
   plug Plug.Session, @session_options
-  plug ConvergerWeb.Router
+  # The router, with requests that fail because the database is unavailable
+  # answered 503 + Retry-After instead of 500 (issue #35).
+  plug ConvergerWeb.Plugs.DbUnavailable, ConvergerWeb.Router
 
   @doc """
   Returns the allowed CORS origins, read from the `:cors_origins` application

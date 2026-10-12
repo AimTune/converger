@@ -76,7 +76,31 @@ config :converger, :channel_health, probe_idle_channels: true
 # Requires a session-mode connection (not PgBouncer transaction pooling).
 config :converger, Converger.Repo,
   migration_lock: :pg_advisory_lock,
-  migration_advisory_lock_retry_interval_ms: 1_000
+  migration_advisory_lock_retry_interval_ms: 1_000,
+  # Interactive pool (HTTP, WebSocket, LiveView). A checkout that waits longer
+  # than queue_target for a whole queue_interval fails fast with
+  # DBConnection.ConnectionError, answered with 503 (ConvergerWeb.Plugs.
+  # DbUnavailable). See docs/operations/database.md.
+  queue_target: 50,
+  queue_interval: 1_000,
+  timeout: 15_000
+
+# Bulkhead: Oban jobs (and Oban itself) use a second pool of the same repo, so
+# a burst of background work cannot starve requests (Converger.Repo.Pools).
+# `false` keeps a single shared pool; config/dev.exs and config/runtime.exs
+# enable it.
+config :converger, Converger.Repo.Pools, background: false
+
+# Behaviour under database pressure (Converger.Repo.Pressure):
+#   * retry_after_ms - base of the Retry-After / retryAfterMs hint (jittered
+#     up to twice the value) sent when the database is unavailable;
+#   * queue_window_ms - window of the average pool wait time;
+#   * degraded_queue_ms - readiness reports `degraded` (503) while the average
+#     wait of the interactive pool is at least this long; 0 disables.
+config :converger, Converger.Repo.Pressure,
+  retry_after_ms: 1_000,
+  queue_window_ms: 5_000,
+  degraded_queue_ms: 200
 
 # File uploads / attachments. Backends, CDN options and env vars are
 # documented in docs/storage.md; production values come from runtime.exs.

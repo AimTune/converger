@@ -108,6 +108,9 @@ Telemetry metric names are converted to Prometheus names by replacing `.` with `
 | `phoenix.socket_connected.count`, `phoenix.channel_joined.count` | counter | | Connects and joins (cumulative, not currently open connections) |
 | `converger.repo.query.total_time`, `.decode_time`, `.query_time`, `.queue_time`, `.idle_time` | last value (ms) | | Ecto queries |
 | `converger.repo.query_count` | counter | | Ecto queries |
+| `converger.background_repo.query.queue_time` | last value (ms) | | Wait for a background pool connection (Oban jobs; [Database pools](database.md)) |
+| `converger.repo.pool.queue_time_ms` | last value (ms) | | Average interactive pool wait over the last `DB_QUEUE_WINDOW_MS`; readiness reports `degraded` above `READY_DB_QUEUE_MS` |
+| `converger.db.unavailable.count` | counter | `source` | Answers turned into retryable errors (`503`, `unavailable`, `replay_unavailable`) because the database was unavailable: `http`, `socket`, `channel`, `protocol`, `sse` |
 | `vm.memory.total` | last value (KB) | | VM |
 | `vm.total_run_queue_lengths.total`, `.cpu`, `.io` | last value | | Scheduler run queues |
 | `oban.job.exception.duration` | last value (ms) | | Failed Oban job executions |
@@ -121,8 +124,8 @@ Telemetry metric names are converted to Prometheus names by replacing `.` with `
 | `converger.socket.limit.count` | counter | `reason` | WebSocket limit hits: `rate_limited`, `payload_too_large`, `frame_too_large`, `too_many_joins`, `slow_consumer`, `ephemeral_dropped`, `draining` (see [WebSocket limits](websocket-limits.md)) |
 
 Most timings are `last_value` gauges, which show the latest sample rather than a distribution. Use them for
-"is anything wrong" checks, and use traces for latency analysis. `converger.repo.query.queue_time` growing is
-the signal to raise `POOL_SIZE` (see [Capacity guidance](../deployment.md#capacity-guidance)).
+"is anything wrong" checks, and use traces for latency analysis. `converger.repo.pool.queue_time_ms` growing is
+the signal to raise `POOL_SIZE` (see [Database pools and pressure](database.md#sizing)).
 
 ### Telemetry events without a metric
 
@@ -204,7 +207,7 @@ plain HTTP:
 | Endpoint | Answers | Use it for |
 | --- | --- | --- |
 | `GET /health/live` | always `200 {"status":"ok"}` while the VM runs and the endpoint accepts requests | liveness / startup probes. It never touches the database, so a database outage does not restart every replica. |
-| `GET /health/ready` | `200 {"status":"ready","checks":{...}}` when every check passes, otherwise `503` with `"status":"draining"` (the node is shutting down) or `"unavailable"` (any other failed check) | readiness probes and load balancer health checks |
+| `GET /health/ready` | `200 {"status":"ready","checks":{...}}` when every check passes, otherwise `503` with `"status":"draining"` (the node is shutting down), `"degraded"` (only the `pool` check failed: the database pool is saturated) or `"unavailable"` (any other failed check) | readiness probes and load balancer health checks |
 
 Readiness checks (`Converger.Health.readiness/0`):
 
@@ -214,10 +217,11 @@ Readiness checks (`Converger.Health.readiness/0`):
 | `oban` | the Oban supervisor is not running | `oban not running` |
 | `draining` | the node is shutting down (`ConvergerWeb.Drain.draining?/0`) | `draining` |
 | `migrations` | a migration shipped with this release is not in `schema_migrations` (reads the table directly, so it does not wait for the migration lock while `bin/migrate` runs; cached once everything is applied) | `migrations pending: N` |
+| `pool` | the interactive pool's average wait over the last `DB_QUEUE_WINDOW_MS` (5 s) is at least `READY_DB_QUEUE_MS` (200 ms; `0` disables), see [Database pools and pressure](database.md#readiness) | `database pool saturated` |
 
 ```json
 {"status": "unavailable", "reasons": ["migrations pending: 1"],
- "checks": {"database": "ok", "oban": "ok", "draining": "ok", "migrations": "error"}}
+ "checks": {"database": "ok", "oban": "ok", "draining": "ok", "migrations": "error", "pool": "ok"}}
 ```
 
 The response only carries short reasons; details such as connection errors are logged
@@ -274,7 +278,8 @@ Health check rows older than 7 days are pruned by the same job.
 With the current metrics, reasonable starting alerts are:
 
 - `rate(phoenix_http_request_count{status=~"5.."}[5m])` above your baseline;
-- `converger_repo_query_queue_time` consistently above a few milliseconds (pool saturation);
+- `converger_repo_pool_queue_time_ms` consistently above a few milliseconds (pool saturation), and
+  `rate(converger_db_unavailable_count[5m]) > 0` (requests answered `503` because the database was unavailable);
 - `rate(converger_rate_limit_exceeded_count[5m])` by `bucket` (abuse, or limits set too low);
 - `rate(converger_socket_limit_count{reason="slow_consumer"}[5m])` (clients on slow networks, or a node too busy to
   write to its sockets) and the other `reason`s (abusive clients, or WebSocket limits set too low);

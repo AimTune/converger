@@ -31,6 +31,7 @@ defmodule ConvergerWeb.ConvergerAPI.EventStreamController do
   import ConvergerWeb.Helpers.Authorization, only: [authorize_conversation: 2]
 
   alias Converger.{Channels, Conversations}
+  alias Converger.Repo.Pressure
   alias ConvergerWeb.{ConversationSignals, Drain, Protocol, ProtocolConnections, SocketGuard}
   alias ConvergerWeb.Protocol.{Feed, Frames}
 
@@ -124,14 +125,14 @@ defmodule ConvergerWeb.ConvergerAPI.EventStreamController do
     user_id = claims["user_id"] || string(params["userId"])
     feed = Feed.new(conversation_id, user_id)
 
-    {frames, feed} =
+    {frames, feed, live?} =
       case position(conn, params) do
         {:seq, seq} when seq > head ->
           message = "watermark #{seq} is above the head #{head}"
-          {[Frames.error("invalid_watermark", message)], Feed.seek(feed, head)}
+          {[Frames.error("invalid_watermark", message)], Feed.seek(feed, head), true}
 
         position ->
-          Feed.replay(feed, position, head)
+          replay(feed, position, head)
       end
 
     presence =
@@ -148,6 +149,11 @@ defmodule ConvergerWeb.ConvergerAPI.EventStreamController do
       |> send_chunked(200)
 
     case chunk(conn, ["retry: 3000\n\n" | Enum.map(frames ++ presence, &event/1)]) do
+      # The replay failed: the stream ends and the client reconnects with
+      # Last-Event-ID to retry it.
+      {:ok, conn} when not live? ->
+        conn
+
       {:ok, conn} ->
         state = %{
           feed: feed,
@@ -166,8 +172,10 @@ defmodule ConvergerWeb.ConvergerAPI.EventStreamController do
   defp loop(conn, state) do
     receive do
       %Phoenix.Socket.Broadcast{event: "new_activity", payload: activity} ->
-        {frames, feed} = Feed.live(state.feed, activity)
-        send_frames(conn, frames, %{state | feed: feed})
+        case live(state.feed, activity) do
+          {:ok, frames, feed} -> send_frames(conn, frames, %{state | feed: feed})
+          :unavailable -> finish(conn, [db_unavailable()])
+        end
 
       %Phoenix.Socket.Broadcast{event: event, payload: payload}
       when event in ~w(delivery_status typing read presence_diff) ->
@@ -217,6 +225,33 @@ defmodule ConvergerWeb.ConvergerAPI.EventStreamController do
       {:ok, conn} -> loop(conn, state)
       {:error, _closed} -> conn
     end
+  end
+
+  # Database pressure (issue #35): a replay or gap fill that cannot read the
+  # database ends the stream with a retryable `unavailable` frame; the client
+  # reconnects after `retry` with Last-Event-ID, the last seq it received.
+  defp replay(feed, position, head) do
+    {frames, feed} = Feed.replay(feed, position, head)
+    {frames, feed, true}
+  rescue
+    error in DBConnection.ConnectionError ->
+      Pressure.report(:sse, error)
+      {[db_unavailable()], feed, false}
+  end
+
+  # Only the database read is guarded: the receive loop must stay tail-recursive.
+  defp live(feed, activity) do
+    {frames, feed} = Feed.live(feed, activity)
+    {:ok, frames, feed}
+  rescue
+    error in DBConnection.ConnectionError ->
+      Pressure.report(:sse, error)
+      :unavailable
+  end
+
+  defp db_unavailable do
+    message = "the database is unavailable, reconnect"
+    Frames.error("unavailable", message, retry_after_ms: Pressure.retry_after_ms())
   end
 
   defp finish(conn, frames) do

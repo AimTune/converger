@@ -46,6 +46,12 @@ const stats = {
   ws_disconnects: 0,
   ws_timeouts: 0,
   ws_rejected: 0,
+  // REST responses by HTTP status ("timeout" / "network" when there was none).
+  rest_status: {},
+};
+
+const countStatus = (key) => {
+  stats.rest_status[key] = (stats.rest_status[key] || 0) + 1;
 };
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -87,6 +93,7 @@ async function restSend(msg) {
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
       const body = await res.text();
+      countStatus(String(res.status));
       if (res.status >= 200 && res.status < 300) {
         const json = JSON.parse(body);
         msg.acked = true;
@@ -100,8 +107,9 @@ async function restSend(msg) {
         return;
       }
       stats.rest_errors += 1;
-    } catch (_e) {
+    } catch (e) {
       stats.rest_errors += 1;
+      countStatus(e && e.name === "TimeoutError" ? "timeout" : "network");
     }
     await sleep(backoff);
     backoff = Math.min(backoff * 2, 1000);
@@ -182,6 +190,7 @@ function runSession(ws, conv, pending, nextMessage, sending) {
     let ref = 1;
     let joined = false;
     let finished = false;
+    let pauseUntil = 0; // after a retryable error reply (database unavailable, rate limited)
     const inflight = new Map(); // ref -> {msg, timer}
 
     const send = (arr) => ws.send(JSON.stringify(arr));
@@ -217,7 +226,7 @@ function runSession(ws, conv, pending, nextMessage, sending) {
     };
 
     const fill = () => {
-      if (!joined || finished) return;
+      if (!joined || finished || now() < pauseUntil) return;
       while (inflight.size < WS_WINDOW) {
         if (pending.length > 0) push(pending.shift());
         else if (sending()) push(nextMessage());
@@ -263,6 +272,11 @@ function runSession(ws, conv, pending, nextMessage, sending) {
         if (payload.status === "ok") {
           msg.acked = true;
           msg.activity_id = (payload.response && payload.response.id) || null;
+        } else if (payload.response && ["unavailable", "rate_limited"].includes(payload.response.reason)) {
+          // Retryable (issue #35): resend the same clientId after the hint.
+          stats.ws_retryable = (stats.ws_retryable || 0) + 1;
+          pending.unshift(msg);
+          pauseUntil = now() + (payload.response.retry_after_ms || 1000);
         } else {
           stats.ws_rejected += 1;
           msg.rejected = JSON.stringify(payload.response);

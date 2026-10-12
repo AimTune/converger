@@ -101,6 +101,15 @@ defmodule ConvergerWeb.SocketGuard do
     |> Plug.Conn.send_resp(503, "")
   end
 
+  # The database is unavailable (issue #35): retryable, like draining.
+  def handle_error(conn, :database_unavailable) do
+    retry_after_s = div(Converger.Repo.Pressure.retry_after_ms() + 999, 1000)
+
+    conn
+    |> Plug.Conn.put_resp_header("retry-after", to_string(retry_after_s))
+    |> Plug.Conn.send_resp(503, "")
+  end
+
   def handle_error(conn, _reason), do: Plug.Conn.send_resp(conn, 403, "")
 
   @doc false

@@ -57,6 +57,8 @@ services:
       CHAOS_DRAIN_S: ${CHAOS_DRAIN_S:-180}
       CHAOS_REST_WORKERS_PER_CONVERSATION: ${CHAOS_REST_WORKERS_PER_CONVERSATION:-2}
       CHAOS_WS_WINDOW: ${CHAOS_WS_WINDOW:-4}
+      # kill | db_pause; verify.js applies the db_pause checks (issue #35).
+      CHAOS_MODE: ${CHAOS_MODE:-kill}
     volumes:
       - ./test/chaos:/chaos:ro
       - ./test/chaos/.run/out:/out

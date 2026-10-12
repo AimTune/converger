@@ -95,3 +95,11 @@ config :converger, Converger.Partitions,
 # Forward typing indicators and read receipts to external channels inline
 # (Converger.Channels.Signals), so tests see the provider calls synchronously.
 config :converger, :channel_signals_async, false
+
+# Converger.RepoFaults (test/support) can make chosen queries raise
+# DBConnection.ConnectionError, as under database pressure (issue #35).
+config :converger, :repo_faults, true
+
+# Readiness `pool` check off by default: a loaded test machine must not flip
+# /health/ready to `degraded`. Tests that need it set degraded_queue_ms.
+config :converger, Converger.Repo.Pressure, degraded_queue_ms: 0

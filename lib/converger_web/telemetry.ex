@@ -96,6 +96,19 @@ defmodule ConvergerWeb.Telemetry do
         description:
           "The time the connection spent waiting before being checked out for the query"
       ),
+      last_value("converger.background_repo.query.queue_time",
+        unit: {:native, :millisecond},
+        description: "The time Oban jobs spent waiting for a background pool connection"
+      ),
+      # Database pressure (Converger.Repo.Pressure, issue #35)
+      last_value("converger.repo.pool.queue_time_ms",
+        description: "Average wait for an interactive pool connection over the last window"
+      ),
+      counter("converger.db.unavailable.count",
+        tags: [:source],
+        description:
+          "Requests, joins and frames answered as retryable because the database was unavailable"
+      ),
 
       # VM Metrics
       last_value("vm.memory.total", unit: {:byte, :kilobyte}),
