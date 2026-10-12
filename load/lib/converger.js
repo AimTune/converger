@@ -87,9 +87,11 @@ export class Subscriber {
     this.failures = 0; // consecutive failed connects, for the backoff
     this.maxSeen = 0; // highest seq received
     this.ahead = new Set(); // seqs received beyond a hole
-    // A sync or resume replays everything after our position; repeats of seqs up
-    // to the highest one seen when it was sent are expected, not duplicates.
-    this.resyncUpTo = 0;
+    // The server delivers each seq once per connection (from `hello`) unless the
+    // client asks for a replay with `sync`; across connections, and after a
+    // sync, repeats are expected. Tracked per connection to check exactly that.
+    this.connSeen = new Set();
+    this.connSynced = false;
     this.syncTimer = null;
     this.pendingReplay = false; // replay_unavailable: sync even without a hole
   }
@@ -106,13 +108,16 @@ export class Subscriber {
     this.welcomed = false;
 
     ws.onopen = () => {
-      this.resyncUpTo = Math.max(this.resyncUpTo, this.maxSeen);
+      this.connSeen = new Set();
+      this.connSynced = false;
       const hello = { type: "hello", protocol: "converger/1" };
       if (this.lastSeq > 0) hello.watermark = this.lastSeq;
       ws.send(JSON.stringify(hello));
     };
 
-    ws.onmessage = (event) => this.onFrame(JSON.parse(event.data));
+    // A replaced connection may still deliver frames while it closes; the new
+    // one resumes from our position, so they are ignored.
+    ws.onmessage = (event) => this.ws === ws && this.onFrame(JSON.parse(event.data));
 
     ws.onerror = () => {
       if (!this.welcomed) metrics.connectErrors.add(1);
@@ -204,12 +209,9 @@ export class Subscriber {
   onPersistent(frame) {
     const seq = frame.seq;
     metrics.framesReceived.add(1);
-    if (seq <= this.lastSeq || this.ahead.has(seq)) {
-      // Frames we already have are expected while a sync replays; otherwise
-      // the server delivered a frame twice.
-      if (seq > this.resyncUpTo) metrics.duplicates.add(1);
-      return;
-    }
+    if (this.connSeen.has(seq) && !this.connSynced) metrics.duplicates.add(1);
+    this.connSeen.add(seq);
+    if (seq <= this.lastSeq || this.ahead.has(seq)) return; // already have it
 
     // Live frames are new highs; anything else is replay or gap fill.
     const live = seq > this.maxSeen && seq > this.headAtWelcome;
@@ -233,7 +235,7 @@ export class Subscriber {
   }
 
   sync() {
-    this.resyncUpTo = Math.max(this.resyncUpTo, this.maxSeen);
+    this.connSynced = true;
     this.send({ type: "sync", watermark: this.lastSeq });
   }
 

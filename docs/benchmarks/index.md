@@ -75,7 +75,9 @@ When the sending stops, each subscriber sends a `ping` and reads the conversatio
 `heartbeat`. While it is behind the head it syncs and asks again, for up to 60 s. The harness counts:
 
 - `lost_acked_messages`: `headSeq` minus the last contiguous `seq` at the end, so every message that never arrived;
-- `seq_duplicates`: a frame delivered again outside of a `sync` or resume (where repeats are expected);
+- `seq_duplicates`: a frame delivered twice on the same connection that did not ask for a replay with `sync`. The
+  protocol promises each frame once per connection from `hello`; repeats across a reconnect or after a `sync` are
+  expected, and frames still arriving on a replaced connection are ignored;
 - `subscribers_unverified`: subscribers that could not reach the server for the final check;
 - for information, `seq_gaps_resynced` (holes the client recovered with `sync`) and `replay_unavailable` (the
   server's errors). They show the server under pressure, not loss.

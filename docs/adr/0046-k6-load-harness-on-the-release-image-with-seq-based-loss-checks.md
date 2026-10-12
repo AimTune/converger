@@ -75,7 +75,7 @@ Details of the decision:
   load). Clients use the native Protocol v1 endpoint, the recommended one.
 - **Loss detection by `seq`.** Every subscriber socket is read-only and must end with every `seq` of its conversation
   up to the head it learns from a final `ping`/`heartbeat`. Everything above its last contiguous `seq` is a lost
-  acked message, and a frame repeated outside a resync is a duplicate. Like a real client, it recovers holes the
+  acked message, and a frame repeated on one connection without a `sync` is a duplicate. Like a real client, it recovers holes the
   server reports it could not replay under database pressure (`replay_unavailable`, ADR-0044) with `sync`; those
   are reported, not counted as loss. This is exact because `seq` is gap-free per conversation
   ([ADR-0006](0006-per-conversation-seq-and-opaque-watermarks.md)) and the server already fills gaps and drops
