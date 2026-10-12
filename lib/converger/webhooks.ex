@@ -86,6 +86,24 @@ defmodule Converger.Webhooks do
     end)
   end
 
+  @doc """
+  Re-encrypts every subscription's `secret` and `headers` with the current
+  default key (`Converger.Release.reencrypt_secrets/0`). Returns the count.
+  """
+  def reencrypt_all do
+    Subscription
+    |> Repo.all()
+    |> Enum.reduce(0, fn subscription, count ->
+      subscription
+      |> Ecto.Changeset.change()
+      |> Ecto.Changeset.force_change(:secret, subscription.secret)
+      |> Ecto.Changeset.force_change(:headers, subscription.headers)
+      |> Repo.update!()
+
+      count + 1
+    end)
+  end
+
   @doc "A changeset for forms."
   def change_subscription(%Subscription{} = subscription, attrs \\ %{}),
     do: Subscription.changeset(subscription, attrs)

@@ -61,15 +61,15 @@ defmodule Converger.Release do
   def reencrypt_secrets do
     load_app()
 
-    {:ok, count, _} =
+    {:ok, {channels, subscriptions}, _} =
       Ecto.Migrator.with_repo(Converger.Repo, fn _repo ->
         {:ok, _} = Application.ensure_all_started(:cloak)
         start_vault()
-        Converger.Channels.reencrypt_all()
+        {Converger.Channels.reencrypt_all(), Converger.Webhooks.reencrypt_all()}
       end)
 
-    IO.puts("Re-encrypted #{count} channel(s)")
-    count
+    IO.puts("Re-encrypted #{channels} channel(s) and #{subscriptions} webhook subscription(s)")
+    channels + subscriptions
   end
 
   defp start_vault do

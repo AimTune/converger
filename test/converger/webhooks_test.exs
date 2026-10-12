@@ -114,6 +114,23 @@ defmodule Converger.WebhooksTest do
       assert errors_on(changeset).events != []
     end
 
+    test "reencrypt_all/0 rewrites secrets and headers", %{tenant: tenant} do
+      subscription = subscribe(tenant, ["*"], %{"headers" => %{"authorization" => "Bearer x"}})
+
+      assert Webhooks.reencrypt_all() >= 1
+      reloaded = Repo.get!(Subscription, subscription.id)
+      assert reloaded.secret == subscription.secret
+      assert reloaded.headers == %{"authorization" => "Bearer x"}
+    end
+
+    test "the documented signature test vector" do
+      body =
+        ~s({"id":"5f0c1d2e-0000-4000-8000-00000000e001","type":"delivery.failed","created_at":"2026-10-12T10:00:00.000000Z","tenant_id":"7a1b2c3d-0000-4000-8000-0000000000aa","data":{"delivery_id":"1c2d3e4f-0000-4000-8000-0000000000d1","status":"failed"}})
+
+      assert InboundSignature.sign("whsec_test_secret", body, 1_760_263_200) ==
+               "t=1760263200,v1=872ae23fc46fdd161ee57bef17465a858512ed24dd3e70d131d2ea2729f4c206"
+    end
+
     test "update and delete", %{tenant: tenant} do
       subscription = subscribe(tenant, ["*"])
 
