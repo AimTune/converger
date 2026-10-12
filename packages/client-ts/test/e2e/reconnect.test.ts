@@ -19,6 +19,13 @@ import {
 import { ConvergerServer, mixAvailable, prepareDatabase, serverOptions } from "./server.js";
 import { waitFor } from "../support/helpers.js";
 
+// Progress lines with timestamps, so a hang in CI shows where it stopped.
+const t0 = Date.now();
+function step(message: string): void {
+  process.stdout.write(`[e2e +${((Date.now() - t0) / 1000).toFixed(1)}s] ${message}
+`);
+}
+
 const enabled = process.env["E2E_SKIP"] !== "1" && mixAvailable();
 
 /** Counts outgoing text frames per clientId, and can keep the client offline. */
@@ -95,8 +102,13 @@ describe.skipIf(!enabled)("e2e against mix phx.server", () => {
     const activities: ActivityFrame[] = [];
     const states: ConnectionStateChange[] = [];
     conversation.on("activity", (frame) => activities.push(frame));
-    conversation.on("connectionState", (change) => states.push(change));
+    conversation.on("connectionState", (change) => {
+      states.push(change);
+      step(`state ${change.state} (attempt ${change.attempt}, delay ${change.delayMs ?? "-"}, close ${change.close?.code ?? "-"} ${change.close?.reason ?? ""})`);
+    });
+    conversation.on("error", (error) => step(`error ${error.code}: ${error.message}`));
 
+    step("start");
     const welcome = await conversation.start();
     const conversationId = welcome.conversationId;
     expect(conversationId).toMatch(/^[0-9a-f-]{36}$/);
@@ -108,7 +120,9 @@ describe.skipIf(!enabled)("e2e against mix phx.server", () => {
 
     // Crash the server mid-session.
     ws.setBlocked(true);
+    step("killing the server");
     await server.kill();
+    step(`killed; client state ${conversation.state}`);
     await waitFor(() => conversation.state === "reconnecting", { timeout: 20_000, message: "reconnecting" });
 
     // A message sent while the server is down waits in the outbox.
@@ -116,7 +130,9 @@ describe.skipIf(!enabled)("e2e against mix phx.server", () => {
     expect(conversation.pending.map((e) => e.frame.data.text)).toEqual(["sent while the server was down"]);
 
     // Restart the server and post activities the client cannot see yet.
+    step("restarting the server");
     await server.start();
+    step("restarted; posting missed activities");
     const agentToken = (await generateToken({ baseUrl, secret, userId: "agent-1" })).token;
     const agent = new RestClient({ baseUrl, getToken: () => agentToken });
     await agent.postActivity(conversationId, { text: "missed 1", from: { id: "agent-1" } });
@@ -124,7 +140,15 @@ describe.skipIf(!enabled)("e2e against mix phx.server", () => {
 
     // Let the client back in.
     ws.setBlocked(false);
-    const result = await offline;
+    step(`unblocked; client state ${conversation.state}`);
+    const result = await Promise.race([
+      offline,
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error(`no ack after 60 s; state ${conversation.state}
+${server.output}`)), 60_000),
+      ),
+    ]);
+    step("offline message acknowledged");
     expect(result.duplicate).toBe(false);
     expect(result.seq).toBe(4);
     await waitFor(() => activities.length >= 2, { timeout: 20_000, message: "missed activities" });

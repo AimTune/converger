@@ -109,7 +109,7 @@ export class ConvergerServer {
     for (;;) {
       if (child.exitCode !== null) throw new Error(`mix phx.server exited (${child.exitCode}):\n${this.output}`);
       try {
-        const response = await fetch(`${this.baseUrl}/health/live`);
+        const response = await fetch(`${this.baseUrl}/health/live`, { signal: AbortSignal.timeout(2_000) });
         if (response.ok) return;
       } catch {
         // not up yet
@@ -141,7 +141,7 @@ export class ConvergerServer {
     // Wait until the port is free again.
     for (let i = 0; i < 100; i += 1) {
       try {
-        await fetch(`${this.baseUrl}/health/live`);
+        await fetch(`${this.baseUrl}/health/live`, { signal: AbortSignal.timeout(2_000) });
       } catch {
         return;
       }
