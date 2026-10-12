@@ -9,7 +9,7 @@ description: Tenant subscriptions to a fixed event catalog; events are emitted f
 | **Status** | Accepted |
 | **Date** | 2026-10-12 |
 | **Issue** | [#49](https://github.com/AimTune/converger/issues/49) |
-| **Pull request** | To be linked when merged |
+| **Pull request** | [#143](https://github.com/AimTune/converger/pull/143) |
 | **Related** | [ADR-0001](0001-transactional-outbox-with-oban.md), [ADR-0012](0012-secrets-at-rest-and-audit-redaction.md), [ADR-0014](0014-webhook-ssrf-guard-and-outbound-signing.md), [ADR-0019](0019-per-channel-retry-policy-delivery-error-and-lifeline.md), [ADR-0028](0028-dead-letter-replay-in-place-through-oban.md), [ADR-0031](0031-per-channel-circuit-breaker-rate-limit-and-tier-queues.md), [ADR-0034](0034-monthly-partitioning-and-per-tenant-retention.md) |
 
 ## Context and problem statement
