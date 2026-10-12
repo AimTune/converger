@@ -45,7 +45,7 @@ For example, 3 replicas with the defaults use 3 x 21 + 1 = 64 connections, comfo
 
 - Raise `POOL_SIZE` when the interactive wait (`converger_repo_pool_queue_time_ms`) is often above a few milliseconds
   under normal load, not only during incidents.
-- Raise `BACKGROUND_POOL_SIZE` when deliveries lag and `converger_background_repo_query_queue_time` is high. More
+- Raise `BACKGROUND_POOL_SIZE` when deliveries lag and the background wait (`converger_background_repo_query_queue_time_bucket`) is high. More
   connections only help while Postgres has CPU and I/O to spare; otherwise lower the Oban queue limits instead.
 - More connections than Postgres can serve make every query slower. Prefer more replicas behind PgBouncer to very
   large pools.
@@ -119,8 +119,8 @@ has nowhere to send traffic. Kubernetes then removes every endpoint from the Ser
 | Metric | Meaning |
 | --- | --- |
 | `converger_repo_pool_queue_time_ms` | Average interactive pool wait over the last window (what readiness checks). |
-| `converger_repo_query_queue_time` | Wait of the last interactive query. |
-| `converger_background_repo_query_queue_time` | Wait of the last background (Oban) query. |
+| `converger_repo_query_queue_time_bucket` | Histogram of interactive query waits (`histogram_quantile` for p95). |
+| `converger_background_repo_query_queue_time_bucket` | Histogram of background (Oban) query waits. |
 | `converger_db_unavailable_count` | Answers turned into retryable errors, by `source`. |
 
 See [Observability](observability.md) for scraping.

@@ -1,7 +1,9 @@
 apiVersion: 1
 
 datasources:
+  # Fixed uid: the provisioned dashboards reference the data source by it.
   - name: Prometheus
+    uid: Prometheus
     type: prometheus
     url: http://prometheus:9090
     isDefault: true

@@ -159,9 +159,7 @@ defmodule ConvergerWeb.InboundController do
   defp process_status_updates(conn, channel, status_updates) do
     processed = apply_status_updates(channel, status_updates)
 
-    conn
-    |> put_status(:ok)
-    |> json(%{status: "accepted", receipts_processed: processed})
+    send_accepted(conn, channel, :ok, %{status: "accepted", receipts_processed: processed})
   end
 
   defp apply_status_updates(_channel, []), do: 0
@@ -209,9 +207,7 @@ defmodule ConvergerWeb.InboundController do
           count: length(messages)
         )
 
-        conn
-        |> put_status(:ok)
-        |> json(%{status: "accepted", receipts_processed: receipts})
+        send_accepted(conn, channel, :ok, %{status: "accepted", receipts_processed: receipts})
 
       true ->
         {:error, :inbound_not_supported}
@@ -238,9 +234,7 @@ defmodule ConvergerWeb.InboundController do
       # Generic webhooks keep 201 Created; providers get the 200 they expect.
       status = if created > 0 and not provider_ack?, do: :created, else: :ok
 
-      conn
-      |> put_status(status)
-      |> json(%{
+      send_accepted(conn, channel, status, %{
         status: "accepted",
         activity_id: accepted |> List.first() |> then(&(&1 && &1.id)),
         activity_ids: Enum.map(accepted, & &1.id),
@@ -248,6 +242,23 @@ defmodule ConvergerWeb.InboundController do
         rejected: length(rejected),
         receipts_processed: receipts
       })
+    end
+  end
+
+  # A handled request: the body the adapter's provider expects (e.g. TwiML),
+  # else the JSON summary. 201 answers (generic webhooks) are always JSON.
+  # sobelow_skip ["XSS.SendResp", "XSS.ContentType"]
+  defp send_accepted(conn, channel, status, summary) do
+    case status == :ok and Adapter.inbound_response(channel) do
+      {content_type, body} ->
+        conn
+        |> put_resp_content_type(content_type, nil)
+        |> send_resp(200, body)
+
+      _ ->
+        conn
+        |> put_status(status)
+        |> json(summary)
     end
   end
 

@@ -72,7 +72,7 @@ defmodule Converger.Repo.PressureTest do
     end
 
     test "a short wait is not degraded, and 0 disables the check" do
-    put_env(Pressure, degraded_queue_ms: 200)
+      put_env(Pressure, degraded_queue_ms: 200)
       Pressure.record(1_000)
       Pressure.flush()
       refute Pressure.degraded?()

@@ -32,7 +32,16 @@ defmodule ConvergerWeb.ConvergerAPI.EventStreamController do
 
   alias Converger.{Channels, Conversations}
   alias Converger.Repo.Pressure
-  alias ConvergerWeb.{ConversationSignals, Drain, Protocol, ProtocolConnections, SocketGuard}
+
+  alias ConvergerWeb.{
+    ClientConnections,
+    ConversationSignals,
+    Drain,
+    Protocol,
+    ProtocolConnections,
+    SocketGuard
+  }
+
   alias ConvergerWeb.Protocol.{Feed, Frames}
 
   # Refusals are JSON (the pipeline has no `accepts`: EventSource asks for
@@ -85,6 +94,7 @@ defmodule ConvergerWeb.ConvergerAPI.EventStreamController do
     ConversationSignals.subscribe(conversation_id, presence?)
     if presence?, do: ConversationSignals.track_presence(conversation_id, participant)
     ProtocolConnections.register()
+    ClientConnections.connected("protocol", "sse")
     {:ok, heartbeat} = :timer.send_interval(Protocol.config(:heartbeat_interval_ms), :heartbeat)
     expiry = schedule_expiry(claims)
 
@@ -95,6 +105,7 @@ defmodule ConvergerWeb.ConvergerAPI.EventStreamController do
       })
     after
       ProtocolConnections.unregister()
+      ClientConnections.disconnected("protocol", "sse")
       ConversationSignals.unsubscribe(conversation_id, participant)
       :timer.cancel(heartbeat)
       if expiry, do: Process.cancel_timer(expiry)

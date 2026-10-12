@@ -183,6 +183,8 @@ cookie) is configured by `rel/env.sh.eex` when the release starts.
 | `METRICS_TOKEN` | unset | all | Bearer token for `GET /metrics` on the main port (`Authorization: Bearer <token>`). See [Observability](observability.md#prometheus-endpoint). |
 | `METRICS_ALLOWED_IPS` | unset (dev: loopback and private ranges) | all | Comma-separated IPs/CIDRs allowed to read `/metrics` without a token (client IP after `TRUSTED_PROXIES`). With neither variable set, `/metrics` answers `404`. |
 | `PROMETHEUS_PORT` | unset | all | Starts the old separate, **unauthenticated** metrics listener on this port (`/metrics`). Only for scrapers that cannot send a token; never expose it publicly. |
+| `METRICS_TENANT_LABEL` | `false` | all | `true` (or `1`) adds a `tenant_id` label to the delivery, pipeline-lag and inbound series. One series per tenant and channel type: leave it off with many tenants. See [Observability](observability.md#delivery-and-pipeline-metrics). |
+| `METRICS_POLL_INTERVAL_MS` | `15000` | all | How often every node reads the database-backed gauges (Oban queue depth, dead letters, open circuit breakers). |
 
 `GET /health/live` and `GET /health/ready` need no configuration. How long a stopping node keeps serving after
 readiness turns `draining` is `WS_DRAIN_DELAY_MS` (see [WebSocket limits and draining](#websocket-limits-and-draining)).
@@ -433,9 +435,11 @@ PgBouncer transaction pooling). See [Migrations and maintenance windows](migrati
 | `:pagination` | see [Pagination](#pagination) | Page size defaults and caps. |
 | `:dead_letters` | `bulk_retry_limit: 10_000`, `export_limit: 10_000` | Max deliveries replayed by one bulk retry call, and max rows in one Deliveries CSV export. See [Replaying dead letters](../delivery.md#replaying-dead-letters). |
 | `:circuit_breaker` | `failure_threshold: 5`, `cooldown_ms: 30_000`, `park_seconds: 600`, `replay_dead_letters_on_close: false`, `replay_window_ms: 3_600_000` | Per-channel delivery circuit breaker and opt-in dead-letter replay on close. See [Circuit breaker](../delivery.md#circuit-breaker). |
-| `:adapters` | `[]` | Channel adapter modules registered after the built-in ones (`echo`, `webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram`, `email`). One with a built-in type replaces it. Checked at boot. See [Writing an adapter](../channels/writing-an-adapter.md#2-register-the-type). |
+| `:adapters` | `[]` | Channel adapter modules registered after the built-in ones (`echo`, `webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram`, `email`, `sms_twilio`, `sms_vonage`). One with a built-in type replaces it. Checked at boot. See [Writing an adapter](../channels/writing-an-adapter.md#2-register-the-type). |
 | `:channel_health` | `probe_idle_channels: true`; `false` in test | Call the adapter's `health_probe/1` for channels without deliveries in the health window. See [Health probes](../channels/overview.md#health-probes). |
-| `:metrics` | `[]` (dev: `allowed_ips` with loopback and private ranges) | `token:` and `allowed_ips:` for `GET /metrics`; see `METRICS_TOKEN`. |
+| `Converger.Channels.MediaDownload` | `timeout_ms: 10_000` | Receive timeout of each inbound media download (WhatsApp images, voice notes, documents). See [inbound media download](../channels/whatsapp.md#inbound-media-download). |
+| `Converger.Channels.Templates` | `ttl_ms: 300_000` | How long a channel's provider templates are cached per node. See [channel message templates](../api/tenant-api.md#channel-message-templates). |
+| `:metrics` | `tenant_label: false`, `poll_interval_ms: 15_000` (`false` in test); dev adds `allowed_ips` with loopback and private ranges | `token:` and `allowed_ips:` for `GET /metrics` (see `METRICS_TOKEN`); `tenant_label:` and `poll_interval_ms:` (see `METRICS_TENANT_LABEL`, `METRICS_POLL_INTERVAL_MS`; `poll_interval_ms: false` turns the database-backed gauges off). |
 | `:prometheus_port` | unset | Port of the optional unauthenticated metrics listener (`PROMETHEUS_PORT`). |
 | `Converger.Health` | `db_timeout_ms: 1000` | Readiness database timeout. |
 | `Converger.Repo.Pools` | `background: false`; dev `[pool_size: 10]`; prod from `BACKGROUND_*` | The background pool (keyword list of repo options) or `false` for one shared pool. See [Database pools and pressure](database.md). |
@@ -443,7 +447,7 @@ PgBouncer transaction pooling). See [Migrations and maintenance windows](migrati
 | `:force_ssl` | unset outside prod | Keyword list of `Plug.SSL` options, built from the TLS variables in prod; `false` disables. |
 | `:webhook` | `[]` | `allowed_targets`, `allow_private_targets`, `resolver` (SSRF guard), and installation defaults for `connect_timeout` (5000 ms), `receive_timeout` (10000 ms), `max_response_bytes` (1 MiB). |
 | `:channel_signals_async` | `true`; `false` in test | Forward typing indicators and read receipts to external channels (`Converger.Channels.Signals`) in a task under `Converger.TaskSupervisor`. `false` runs them inline in the WebSocket channel process. |
-| `:webhook_req_options`, `:whatsapp_req_options`, `:slack_req_options`, `:telegram_req_options`, `:email_req_options` | `[]` | Extra `Req` options merged into adapter requests (tests use them for `Req.Test` plugs). `:email_req_options` applies to the SNS certificate and subscription requests of `email` channels. |
+| `:webhook_req_options`, `:whatsapp_req_options`, `:slack_req_options`, `:telegram_req_options`, `:email_req_options`, `:sms_req_options` | `[]` | Extra `Req` options merged into adapter requests (tests use them for `Req.Test` plugs). `:email_req_options` applies to the SNS certificate and subscription requests of `email` channels. |
 | `:email_swoosh_adapter` | `nil` | A Swoosh adapter module used instead of the provider adapter of every `email` channel. The test config sets `Swoosh.Adapters.Test`. See [Email](../channels/email.md). |
 | `Converger.Channels.Adapters.WhatsappMeta`, `graph_api_version:` | `"v26.0"` | Default Graph API version when the channel config has none. |
 | `Converger.Channels.Adapters.Telegram`, `api_base_url:` | `"https://api.telegram.org"` | Bot API base URL for every `telegram` channel, for a self-hosted Bot API server. Not a channel setting: the URL receives the bot token. |
