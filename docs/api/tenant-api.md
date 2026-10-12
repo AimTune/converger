@@ -44,6 +44,7 @@ Controllers: [`ConvergerWeb.TokenController`](https://github.com/AimTune/converg
 | `POST` | `/api/v1/routing_rules` | `x-api-key` or `x-channel-token` | Create a routing rule |
 | `PATCH` / `PUT` | `/api/v1/routing_rules/:id` | `x-api-key` or `x-channel-token` | Update a routing rule |
 | `DELETE` | `/api/v1/routing_rules/:id` | `x-api-key` or `x-channel-token` | Delete a routing rule |
+| `POST` | `/api/v1/routing_rules/dry_run` | `x-api-key` or `x-channel-token` | Dry-run routing for an activity (nothing is stored or sent) |
 | `GET` | `/api/v1/deliveries` | `x-api-key` only | List deliveries, e.g. the dead-letter queue (keyset-paginated, filterable) |
 | `POST` | `/api/v1/deliveries/:id/retry` | `x-api-key` only | Replay one dead letter |
 | `POST` | `/api/v1/channels/:channel_id/deliveries/retry` | `x-api-key` only | Replay a channel's dead letters |
@@ -82,6 +83,7 @@ Rendered by [`ConvergerWeb.ConversationJSON`](https://github.com/AimTune/converg
   "status": "active",
   "metadata": {},
   "channel_id": "9b1f3a52-6c0d-4e2b-8f7a-1d2c3b4a5e6f",
+  "origin_channel_id": "9b1f3a52-6c0d-4e2b-8f7a-1d2c3b4a5e6f",
   "tenant_id": "c2a4e6f8-1b3d-4f5a-9c7e-2d4f6a8b0c1e",
   "participant_id": "5e7a9c1b-3d5f-4a7c-9e1b-3d5f7a9c1b3d",
   "participant": {
@@ -99,6 +101,8 @@ Rendered by [`ConvergerWeb.ConversationJSON`](https://github.com/AimTune/converg
 | --- | --- |
 | `status` | `active` (open, accepts activities) or `closed` |
 | `metadata` | Free-form JSON object |
+| `origin_channel_id` | The channel the conversation started on. Activities written from another channel (an agent console) go back to it ([reply-back routing](../concepts/routing-rules.md#how-activities-fan-out)). |
+| `channels` | Only on `GET /api/v1/conversations/:id`: the channels the conversation spans, `[{"channel_id", "role", "participant_id", "inserted_at"}]`, role `origin`, `target` or `member` ([Conversations](../concepts/conversations.md#channels-of-a-conversation)). |
 | `participant_id`, `participant` | The external party (for example a WhatsApp number), set by inbound participant resolution ([ADR-0016](../adr/0016-participant-based-conversation-resolution.md)). `participant` is `null` when there is none, and also in responses that do not load it (create, close, reopen). `participant.opted_out_at` is set while the participant has opted out (an SMS `STOP`, see [Participants](../concepts/participants.md#opt-out)). |
 | `updated_at` | Bumped by every new activity; the inactivity expiry uses it as the last-activity time |
 
@@ -152,6 +156,10 @@ Rendered by [`ConvergerWeb.RoutingRuleJSON`](https://github.com/AimTune/converge
   "source_channel_id": "9b1f3a52-6c0d-4e2b-8f7a-1d2c3b4a5e6f",
   "target_channel_ids": ["0d2f4b6a-8c0e-4a2c-9e4b-6d8f0a2c4e6b"],
   "enabled": true,
+  "conditions": {"all": [{"field": "type", "op": "eq", "value": "message"}]},
+  "transformations": [],
+  "priority": 100,
+  "stop_processing": false,
   "tenant_id": "c2a4e6f8-1b3d-4f5a-9c7e-2d4f6a8b0c1e",
   "inserted_at": "2026-10-09T12:00:00Z",
   "updated_at": "2026-10-09T12:00:00Z"
@@ -416,9 +424,10 @@ unknown or foreign conversation.
 `POST /api/v1/conversations/:conversation_id/activities`
 
 Persists an activity and enqueues its deliveries in the same transaction (transactional outbox,
-[ADR-0001](../adr/0001-transactional-outbox-with-oban.md)), then broadcasts it to connected clients. The activity is
-routed to the conversation's channel and to the targets of matching routing rules; see
-[activity flow](../architecture/activity-flow.md).
+[ADR-0001](../adr/0001-transactional-outbox-with-oban.md)), then broadcasts it to connected clients. The activity has no
+source channel, so it is routed in the inbound direction: to the conversation's origin channel and to the targets of
+the origin channel's matching routing rules ([routing rules](../concepts/routing-rules.md#how-activities-fan-out),
+[activity flow](../architecture/activity-flow.md)).
 
 **Rate limit:** `activity_create`, 100 per second per tenant (shared with the client API).
 
@@ -556,8 +565,10 @@ Continue with `?watermark=c2VxOjI` until `has_more` is `false`. When there is no
 
 ## Routing rules
 
-A routing rule copies the activities of a source channel's conversations to one or more target channels. Changes
-made through this API are recorded in the audit log with actor type `tenant_api`.
+A routing rule copies the activities of a source channel's conversations to one or more target channels, optionally
+only when its conditions match, in priority order, with its own transformations; see
+[Routing rules](../concepts/routing-rules.md). Changes made through this API are recorded in the audit log with actor
+type `tenant_api`.
 
 ### Validation
 
@@ -571,12 +582,15 @@ made through this API are recorded in the audit log with actor type `tenant_api`
 | The source channel can receive (`inbound` or `duplex` mode) | `source_channel_id: source channel is outbound-only and cannot receive inbound messages` |
 | No target is `inbound`-only | `target_channel_ids: these target channels are inbound-only and cannot deliver outbound: <names>` |
 | Enabled rules form no cycle | `target_channel_ids: would create a routing cycle` |
+| Valid conditions | `conditions: <path>: <reason>`, for example `conditions.all[0]: unknown field channel (use ...)` or `conditions: regex is longer than 256 bytes` |
+| Valid transformations | `transformations: unknown middleware type: foo` |
+| Priority from -1,000,000 to 1,000,000 | `priority: must be less than or equal to 1000000` |
 
 ### List routing rules
 
 `GET /api/v1/routing_rules`
 
-Returns all of the tenant's rules sorted by name, without pagination (hard cap: `lookup_limit`, default 1000).
+Returns all of the tenant's rules sorted by name (evaluation order is by `priority`, see [Routing rules](../concepts/routing-rules.md#priority-and-stop_processing)), without pagination (hard cap: `lookup_limit`, default 1000).
 
 ```bash
 curl -s "$CONVERGER/api/v1/routing_rules" -H "x-api-key: $API_KEY"
@@ -602,6 +616,10 @@ The attributes must be wrapped in a `routing_rule` object; a body without it ret
 | `source_channel_id` | UUID | yes | |
 | `target_channel_ids` | array of UUIDs | yes | 1 to 20 |
 | `enabled` | boolean | no | Default `true` |
+| `conditions` | object or array | no | Default `{}` (every activity). A predicate, an `all` / `any` / `not` group, or an array (shorthand for `all`); see [Conditions](../concepts/routing-rules.md#conditions) |
+| `transformations` | array | no | Default `[]`. Middleware chain for this rule's targets, run after the target channel's own ([middleware](../concepts/middleware.md)) |
+| `priority` | integer | no | Default `100`; lower is evaluated first |
+| `stop_processing` | boolean | no | Default `false`; when this rule matches, later rules are not evaluated |
 
 ```bash
 curl -s -X POST "$CONVERGER/api/v1/routing_rules" \
@@ -648,6 +666,76 @@ curl -s -X DELETE "$CONVERGER/api/v1/routing_rules/7c9e1a3b-5d7f-4b9d-8f1a-3c5e7
 ```
 
 `204 No Content` with an empty body; `404` for an unknown or foreign rule.
+
+### Dry-run routing
+
+`POST /api/v1/routing_rules/dry_run`
+
+Shows which rules match an activity and what each target channel would receive, without storing or sending anything.
+It runs the same planning and transformation code as a real delivery ([Dry-run](../concepts/routing-rules.md#dry-run)).
+The body is not wrapped:
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `activity` | object | Required. `type` (default `message`), `text`, `sender` (default `user`), `metadata`, `attachments`, `reply_to_id`; validated like a posted activity (`422` on errors) |
+| `source_channel_id` | UUID | The channel the activity arrives on. Required without `conversation_id`; defaults to the conversation's origin |
+| `conversation_id` | UUID | Optional: an existing conversation, whose origin, metadata and participant are used |
+| `origin_channel_id` | UUID | Without `conversation_id`: the origin of the new conversation (default: the source channel). A different channel makes the activity a reply |
+| `conversation` | object | Without `conversation_id`: `{"metadata": {...}}` for `conversation.metadata.*` conditions |
+| `participant` | object | Without `conversation_id`: `{"external_id", "display_name", "metadata"}`, the participant on the origin channel |
+| `at` | string | ISO 8601 time for `time.*` conditions (default: now) |
+
+```bash
+curl -s -X POST "$CONVERGER/api/v1/routing_rules/dry_run" \
+  -H "content-type: application/json" \
+  -H "x-api-key: $API_KEY" \
+  -d '{
+    "source_channel_id": "9b1f3a52-6c0d-4e2b-8f7a-1d2c3b4a5e6f",
+    "activity": {"text": "upgrade me", "sender": "16505551234", "metadata": {"vip": true}}
+  }'
+```
+
+`200 OK`:
+
+```json
+{
+  "data": {
+    "direction": "inbound",
+    "origin_channel_id": "9b1f3a52-6c0d-4e2b-8f7a-1d2c3b4a5e6f",
+    "source_channel_id": "9b1f3a52-6c0d-4e2b-8f7a-1d2c3b4a5e6f",
+    "rule_source_channel_id": "9b1f3a52-6c0d-4e2b-8f7a-1d2c3b4a5e6f",
+    "at": "2026-10-12T09:30:00.000000Z",
+    "activity": { "type": "message", "text": "upgrade me", "sender": "16505551234", "metadata": {"vip": true}, "...": "..." },
+    "rules": [
+      {"id": "7c9e...", "name": "vip", "priority": 10, "stop_processing": true, "result": "matched",
+       "conditions": {"field": "metadata.vip", "op": "eq", "value": true},
+       "target_channel_ids": ["0d2f..."], "transformations": [{"type": "add_prefix", "prefix": "[VIP] "}]},
+      {"id": "1a3c...", "name": "everything", "priority": 100, "stop_processing": false, "result": "skipped",
+       "conditions": {}, "target_channel_ids": ["4b6d..."], "transformations": []}
+    ],
+    "matched_rule_ids": ["7c9e..."],
+    "targets": [
+      {"channel_id": "9b1f...", "channel_name": "wa-support", "channel_type": "whatsapp_meta", "reason": "origin",
+       "rule_ids": [], "excluded": "echo", "outcome": "excluded", "detail": null, "payload": null},
+      {"channel_id": "0d2f...", "channel_name": "vip-alerts", "channel_type": "webhook", "reason": "rule",
+       "rule_ids": ["7c9e..."], "excluded": null, "outcome": "deliver", "detail": null,
+       "payload": {"text": "[VIP] upgrade me", "metadata": {"vip": true}, "...": "..."}}
+    ]
+  }
+}
+```
+
+| Field | Notes |
+| --- | --- |
+| `direction` | `inbound` (arrives on the origin channel) or `reply` (arrives on another channel: goes back to the origin) |
+| `rule_source_channel_id` | The channel whose rules were evaluated: the origin for `inbound`, the arrival channel for `reply` |
+| `rules[].result` | `matched`, `not_matched`, or `skipped` (after a matching `stop_processing` rule) |
+| `targets[].reason` | `origin`, `reply_back`, `source_hub` (a replying `websocket` channel), or `rule` (with `rule_ids`) |
+| `targets[].outcome` | `deliver` (with `payload`: the canonical activity after the type downgrade, the channel's middleware and the rules' transformations), `halted` (a middleware halted, `detail` says why), `skipped` (the channel cannot take the type), or `excluded` (`excluded` is `echo`, `inactive`, `inbound_only`, `not_deliverable` or `unsupported_activity`) |
+
+Errors: `400 {"error": "activity is required"}`, `400 {"error": "source_channel_id or conversation_id is required"}`,
+`400 {"error": "at must be an ISO 8601 date-time"}`, `404` for an unknown or foreign channel or conversation, `422`
+for an invalid activity.
 
 ## Deliveries
 

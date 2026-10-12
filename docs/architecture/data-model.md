@@ -27,6 +27,8 @@ erDiagram
     conversations ||--o{ activities : contains
     conversations |o--o{ attachments : "uploaded to"
     conversations ||--o{ conversation_reads : "read up to"
+    conversations ||--o{ conversation_channels : spans
+    channels ||--o{ conversation_channels : "part of"
     activities ||--o{ deliveries : "delivered as"
     activities |o--o{ attachments : references
 
@@ -63,10 +65,19 @@ erDiagram
         uuid id PK
         uuid tenant_id FK
         uuid channel_id FK
+        uuid origin_channel_id
         uuid participant_id FK
         text status
         bigint last_seq
         jsonb metadata
+    }
+    conversation_channels {
+        uuid id PK
+        uuid conversation_id FK
+        uuid channel_id FK
+        uuid tenant_id FK
+        text role
+        uuid participant_id FK
     }
     conversation_reads {
         uuid id PK
@@ -100,6 +111,7 @@ erDiagram
         uuid reply_to_id
         timestamp edited_at
         timestamp deleted_at
+        uuid source_channel_id
     }
     deliveries {
         uuid id PK
@@ -119,6 +131,10 @@ erDiagram
         uuid source_channel_id FK
         uuid_array target_channel_ids
         boolean enabled
+        jsonb conditions
+        jsonb transformations
+        integer priority
+        boolean stop_processing
     }
     attachments {
         uuid id PK
@@ -210,6 +226,7 @@ Indexes: unique `(tenant_id, name)`, `(mode)`, `(tenant_id, mode, status)`, uniq
 | Column | Type | Notes |
 | --- | --- | --- |
 | `tenant_id`, `channel_id` | uuid, not null | Cascade on delete. |
+| `origin_channel_id` | uuid, nullable | The channel the conversation started on (set from `channel_id` on insert, backfilled by migration `20261012200200`). No foreign key: deleting the channel deletes the conversation through `channel_id`. Read through `Conversation.origin_channel_id/1`, which falls back to `channel_id` ([ADR-0046](../adr/0046-conditional-routing-rules-and-reply-back-routing.md)). |
 | `participant_id` | uuid, nullable | The external party; `ON DELETE SET NULL`. |
 | `status` | text, not null | `"active"` (open) or `"closed"`. |
 | `last_seq` | bigint, not null, default `0` | Last allocated activity `seq`. Incremented under the row lock for every activity. |
@@ -223,6 +240,10 @@ Indexes: `(tenant_id)`, `(channel_id)`, `(participant_id, status)` for resolving
 An external party (phone number, chat id, e-mail) on a channel. Inbound messages without a `conversation_id` resolve their conversation through it, and outbound adapters read the recipient from it ([ADR-0016](../adr/0016-participant-based-conversation-resolution.md)).
 
 Columns: `tenant_id`, `channel_id`, `external_id` (not null), `display_name`, `metadata` (jsonb, default `{}`), `opted_out_at` (set while the participant has opted out, for example with an SMS `STOP`; the pipeline does not deliver to them, see [SMS](../channels/sms.md#opt-out-stop--start)). Indexes: unique `(channel_id, external_id)`, `(tenant_id)`.
+
+### conversation_channels
+
+The channels a conversation spans: its origin, the channels the pipeline delivered it to, and channels that wrote into it ([Conversations](../concepts/conversations.md#channels-of-a-conversation), [ADR-0046](../adr/0046-conditional-routing-rules-and-reply-back-routing.md)). Columns: `conversation_id`, `channel_id`, `tenant_id` (all cascade on delete), `role` (`origin`, `target` or `member`), `participant_id` (the conversation's participant on the `origin` row, `ON DELETE SET NULL`), timestamps. Written with `INSERT ... ON CONFLICT DO NOTHING` by `Converger.Conversations.record_channels/2`. Indexes: unique `(conversation_id, channel_id)`, `(channel_id)`, `(tenant_id)`, partial `(participant_id) WHERE participant_id IS NOT NULL`.
 
 ### conversation_reads
 
@@ -246,6 +267,7 @@ Partitioned by month on `inserted_at` (see [Partitioning and retention](#partiti
 | `idempotency_key` | text, nullable | From `x-idempotency-key` or the provider message id. |
 | `reply_to_id` | uuid, nullable | No foreign key (enforced in `Activities.create_activity/2`: same conversation). A threaded reply, or the target of a reaction, edit or delete; may dangle after retention ([ADR-0036](../adr/0036-rich-activity-model.md)). |
 | `edited_at`, `deleted_at` | utc_datetime_usec, nullable | Stamped on the original when a `messageUpdate` / `messageDelete` for it is accepted. |
+| `source_channel_id` | uuid, nullable | The channel the activity came in on (inbound webhook, WebSocket, client API token); `NULL` for the tenant API, system events and rows stored before migration `20261012200100`. No foreign key. Decides inbound versus reply-back routing ([ADR-0046](../adr/0046-conditional-routing-rules-and-reply-back-routing.md)). |
 
 Indexes and constraints:
 
@@ -280,7 +302,7 @@ Indexes: unique `(activity_id, channel_id, activity_inserted_at)` (equivalent to
 
 ### routing_rules
 
-Fan-out from a source channel to additional target channels. Columns: `tenant_id`, `name` (unique per tenant), `source_channel_id` (FK, cascade), `target_channel_ids` (uuid[], not null, default `{}`, no FK, so targets are re-validated at delivery time), `enabled` (default `true`). Timestamps are `utc_datetime` (second precision). Indexes: `(tenant_id)`, `(source_channel_id)`, unique `(tenant_id, name)`.
+Fan-out from a source channel to additional target channels. Columns: `tenant_id`, `name` (unique per tenant), `source_channel_id` (FK, cascade), `target_channel_ids` (uuid[], not null, default `{}`, no FK, so targets are re-validated at delivery time), `enabled` (default `true`), `conditions` (jsonb, default `{}`, predicates validated by `Converger.RoutingRules.Conditions`), `transformations` (jsonb, default `[]`, a middleware chain), `priority` (integer, default `100`, lowest evaluated first) and `stop_processing` (boolean, default `false`) ([Routing rules](../concepts/routing-rules.md), [ADR-0046](../adr/0046-conditional-routing-rules-and-reply-back-routing.md)). Timestamps are `utc_datetime` (second precision). Indexes: `(tenant_id)`, `(source_channel_id)`, `(source_channel_id, priority)`, unique `(tenant_id, name)`.
 
 ### attachments
 
