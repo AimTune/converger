@@ -156,7 +156,7 @@ See [ADR-0009](../adr/0009-inbound-signature-scheme-and-per-channel-enforcement.
 ### Closed conversations reject activities
 
 [#84](https://github.com/AimTune/converger/pull/84). Posting to a closed conversation now returns `409`
-`{"error": "conversation_closed"}` on REST, uploads and inbound webhooks, and an error reply on the WebSocket.
+`conversation_closed` on REST (in the [error envelope](../api/errors.md) since [#45](https://github.com/AimTune/converger/issues/45)), uploads and inbound webhooks, and an error reply on the WebSocket.
 Close and reopen emit a `conversationUpdate` activity. Migration `20261009170000` moves `updated_at` forward so
 the expiration job does not close active conversations after the upgrade.
 

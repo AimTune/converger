@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### OpenAPI 3.1, Swagger UI, one error envelope, versioning policy (#45)
+
+- **Breaking for error bodies (statuses unchanged):** every HTTP API error is now
+  `{"error": {"code", "message", "details", "request_id"}}`, from controllers, auth and rate-limit plugs, the
+  database-pressure plug, refused socket connections and the exception handlers. Field errors move to `details`;
+  client-API auth codes are now `unauthorized`, `token_expired` (new) and `channel_inactive`; the admin IP allowlist
+  answers JSON instead of plain text. Code list and migration table: [errors](docs/api/errors.md).
+- OpenAPI 3.1 document generated from `open_api_spex` controller annotations, committed as
+  `priv/static/openapi.json` (`mix openapi.spec.json`; CI fails on drift and lints it), served at `/api/openapi.json`
+  with Swagger UI at `/api/docs` (dev/test; prod with `API_DOCS_ENABLED=true`).
+- Versioning and deprecation policy: URL versions for breaking changes, `Deprecation` / `Sunset` headers
+  (`ConvergerWeb.Plugs.Deprecated`), 12-month support window ([versioning](docs/api/versioning.md)).
+- New dependency: `open_api_spex`. ADR-0050.
+
 ### Broker channels: Kafka and RabbitMQ (#42)
 
 - New channel types `kafka` and `rabbitmq`: a broker as a first-class channel. Outbound, the pipeline produces the
