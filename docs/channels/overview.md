@@ -83,8 +83,10 @@ The channel types are the registered adapters: the built-ins (`echo`, `webhook`,
 | `:typing` | Forwards typing indicators | `whatsapp_meta`, `telegram` |
 | `:lifecycle_events` | Receives conversation close and reopen events | `webhook`, `websocket` |
 | `:provider_ack` | Handled inbound requests always get `200` | `whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram`, `email` |
-| `:media`, `:edits` | Native outbound files, and edits / deletes of posted messages | `slack`; `telegram` and `email` have `:media` (Telegram sends photos and documents, email attaches stored uploads) |
-| `:templates`, `:reactions` | Native outbound content (planned, [#37](https://github.com/AimTune/converger/issues/37)) | none yet |
+| `:media` | Native outbound files | `whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram` (photos and documents), `email` (stored uploads are attached) |
+| `:templates` | Sends provider message templates (WhatsApp HSM) ([WhatsApp](whatsapp.md#templates-hsm)) | `whatsapp_meta`, `whatsapp_infobip` |
+| `:edits` | Edits and deletes of posted messages | `slack` |
+| `:reactions` | Native outbound reactions (descriptive) | none yet |
 
 ### `deliver_activity/2`
 
@@ -142,8 +144,8 @@ Status progression is monotonic (`pending` < `sent` < `delivered` < `read`): a `
 | Type | Modes | Outbound delivery | Native activity types | Inbound webhook | Status receipts | Inbound signature | Batches | Typing / read receipts out |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `webhook` | inbound, outbound, duplex | Canonical activity JSON to the configured URL, signed with `x-converger-signature` | all | One message per request | Yes: `delivery_id` or `provider_message_id` plus `status` | Generic `x-converger-signature` | No (one message per request) | No |
-| `whatsapp_meta` | inbound, outbound, duplex | Text messages through the Graph API | `message` | Yes (Cloud API webhook) | Yes (`statuses`) | Meta `X-Hub-Signature-256` keyed with `app_secret` | Yes: every `entry` / `changes` / `messages` / `statuses` item | Yes: typing indicator and mark as read |
-| `whatsapp_infobip` | inbound, outbound, duplex | Text messages through the Infobip API | `message` | Yes (`results`) | Yes (delivery reports in `results`) | Generic `x-converger-signature` (no Infobip-native check) | Yes: every item of `results` | No |
+| `whatsapp_meta` | inbound, outbound, duplex | Text, media, template, interactive, location and contacts messages through the Graph API | `message` | Yes (Cloud API webhook) | Yes (`statuses`) | Meta `X-Hub-Signature-256` keyed with `app_secret` | Yes: every `entry` / `changes` / `messages` / `statuses` item | Yes: typing indicator and mark as read |
+| `whatsapp_infobip` | inbound, outbound, duplex | Text, media, template, interactive, location and contacts messages through the Infobip API | `message` | Yes (`results`) | Yes (delivery reports in `results`) | Generic `x-converger-signature` (no Infobip-native check) | Yes: every item of `results` | No |
 | `slack` | inbound, outbound, duplex | `chat.postMessage` (cards as Block Kit, files through `files.uploadV2`), `chat.update`, `chat.delete` | `message`, `messageUpdate`, `messageDelete` | Yes (Events API and card button interactions) | No | Slack `X-Slack-Signature` keyed with `signing_secret`, 5 minute window | One event per request | No |
 | `telegram` | inbound, outbound, duplex | Text, photos and documents through the Bot API; card buttons as inline keyboards | `message` | Yes (one `Update` per request: messages, edits, button presses, reactions, media) | No (the Bot API has none) | `X-Telegram-Bot-Api-Secret-Token` against `secret_token` | Not applicable (one update per request) | Typing only (`sendChatAction`) |
 | `email` | inbound, outbound, duplex | Email through Swoosh: SMTP, Amazon SES, SendGrid, Mailgun or Postmark ([Email](email.md)) | `message` | Yes: SES (SNS), SendGrid Inbound Parse, Mailgun routes, Postmark inbound, raw `message/rfc822` | Yes: delivered, opened, bounced and complained events; bounce mails | SES: SNS signature and topic; Mailgun: payload signature; others: basic auth or `x-converger-signature` | One email per request (SendGrid events: an array) | No |
@@ -156,7 +158,7 @@ Notes:
 - Conversation lifecycle events (close, reopen) are delivered only to channels whose adapter has `:lifecycle_events` (`webhook` and `websocket`).
 - Activity types outside an adapter's native types (the `activity_types:` entry of `capabilities/0`) are downgraded to a text `message` (for example `messageReaction` becomes `"user reacted with 👍"`) or skipped, as set by the channel config key `unsupported_activities` (`downgrade`, the default, or `skip`). `typing` and the internal `deliveryReceipt` never reach messaging adapters. See [activities](../concepts/activities.md#delivery-to-channels).
 - An inbound message is never delivered back to its author: not to the conversation participant's own channel, and not to any target channel on which the sender is a participant (an email reply in a web chat conversation), unless it is a `websocket` channel (its other sockets need it).
-- Outbound WhatsApp media, templates and interactive messages are planned ([#37](https://github.com/AimTune/converger/issues/37)). `capabilities/0` drives pipeline delivery (`:outbound`), health checks (`:external_delivery`), lifecycle events, the inbound `200` policy (`:provider_ack`) and, with its `activity_types:` entry, the downgrade of unsupported activity types ([#28](https://github.com/AimTune/converger/issues/28)).
+- WhatsApp channels send media, templates, interactive messages, locations and contacts, and download inbound media into Converger storage ([WhatsApp](whatsapp.md#what-is-sent), [ADR-0039](../adr/0039-whatsapp-rich-outbound-and-inbound-media-download.md)). `capabilities/0` drives pipeline delivery (`:outbound`), health checks (`:external_delivery`), lifecycle events, the inbound `200` policy (`:provider_ack`) and, with its `activity_types:` entry, the downgrade of unsupported activity types ([#28](https://github.com/AimTune/converger/issues/28)).
 
 ## Inbound endpoints
 

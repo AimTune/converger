@@ -91,6 +91,8 @@ Well-known content types:
 | `contentType` | `content` |
 | --- | --- |
 | `application/vnd.converger.card.*` (for example `application/vnd.converger.card.hero`) | Required, an object: the card. Renderers that do not know the card type show the activity `text`. |
+| `application/vnd.converger.card.buttons` | `{body?, header?, footer?, buttons: [{id?, title}]}`: reply buttons. WhatsApp channels send them as an interactive message ([WhatsApp](../channels/whatsapp.md#interactive-messages)). |
+| `application/vnd.converger.card.list` | `{body?, header?, footer?, button, sections: [{title?, rows: [{id?, title, description?}]}]}`: a list picker, sent to WhatsApp as an interactive list. |
 | `application/vnd.converger.location` | `{latitude, longitude, name?, address?, url?}` |
 | `application/vnd.converger.contacts` | `[{name, phones}]` |
 

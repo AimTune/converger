@@ -247,6 +247,8 @@ Callback checklist:
 | `health_probe/1` | no | Check the provider account (for example a "me" endpoint) for channels without recent deliveries; see [health probe](#health-probe). |
 | `send_typing/2` | no | Show (or clear) a typing indicator to the channel's participant when a WebSocket participant types. Return `:ok` or `{:error, reason}`. |
 | `send_read_receipt/2` | no | Tell the provider the participant's messages were read when a WebSocket participant sends `read`. Return `:ok` or `{:error, reason}`. |
+| `fetch_media/2` | no | Download the file behind an inbound media stub that `parse_inbound/2` returned (an attachment with a provider media id or URL in `channelData` and no `contentUrl`). Return `{:ok, %{data: binary, filename: name_or_nil}}`, `:skip` (nothing to download) or `{:error, reason}`. Converger stores the file and sets `contentUrl`; on error the stub is kept. See [inbound media](#inbound-media). |
+| `list_templates/1` | no | List the provider message templates of the channel's account (`{:ok, [map]}`), served and cached by `GET /api/v1/channels/:id/templates`. Return `{:error, {:invalid_config, message}}` (`422`) when the config lacks what the call needs, `{:error, message}` (`502`) when the provider fails. |
 
 ### Capabilities
 
@@ -261,7 +263,7 @@ Callback checklist:
 | `:typing` | Forwards typing indicators (`send_typing/2`). |
 | `:lifecycle_events` | Receives conversation close and reopen events, which carry no message content. Leave it out for messaging providers, which would send an empty message. |
 | `:provider_ack` | The provider retries every non-`2xx` inbound response (for days, in Meta's case), so a handled request is always answered `200`, even when its messages were rejected permanently. |
-| `:media`, `:templates`, `:reactions`, `:edits` | Outbound content the adapter renders natively (descriptive today, used by [#37](https://github.com/AimTune/converger/issues/37) and [#68](https://github.com/AimTune/converger/issues/68)). |
+| `:media`, `:templates`, `:reactions`, `:edits` | Outbound content the adapter renders natively (descriptive: nothing in Converger branches on them yet; the WhatsApp adapters declare `:media` and `:templates`, see [#68](https://github.com/AimTune/converger/issues/68) for typed messages). |
 | `activity_types: [...]` | The activity types `deliver_activity/2` renders natively; see [capabilities and downgrade](#capabilities-and-downgrade). |
 
 `Converger.Channels.Adapter.types_with/1` lists the registered types with a capability, and `capability?/2` checks one type.
@@ -350,10 +352,20 @@ Channel types are plain strings, never atoms created from input. Unknown types f
 - **Set `idempotency_key`** to a stable provider message id. The controller checks it across all conversations of the channel before creating an activity, so a re-delivered webhook produces duplicates, not new activities. Use an id that is unique per channel; prefixing it (`"acme:" <> id`) is optional but makes the origin obvious. Never derive it from a timestamp or from the body hash of a whole batch.
 - **Set `participant.external_id`** to the sender's address (phone number, chat id) so messages from the same party share their active conversation and replies can find the recipient through `Participants.recipient_for/2` ([ADR-0016](../adr/0016-participant-based-conversation-resolution.md)).
 - **Keep unknown message types** as activities (empty text, `metadata` with the provider type) rather than dropping them.
-- Map media to attachment stubs: `contentType` (required, a MIME type; use a wildcard such as `image/*` when the provider does not say) plus provider fields under `channelData` (`provider`, `providerMediaId`). Attachments are validated, so keys outside the [attachment schema](../concepts/activities.md#attachments) are dropped. Do not download media in the request.
+- Map media to attachment stubs: `contentType` (required, a MIME type; use a wildcard such as `image/*` when the provider does not say) plus provider fields under `channelData` (`provider`, `providerMediaId`). Attachments are validated, so keys outside the [attachment schema](../concepts/activities.md#attachments) are dropped. Do not download media in `parse_inbound/2`; implement `fetch_media/2` instead (below).
 - Map reactions to `messageReaction` (`text` is the emoji) and replies to `message`, and set `reply_to_provider_id` to the provider id of the referenced message; the controller resolves it to `reply_to_id` and keeps an unresolvable reaction as an `event`.
 - Only client fields of the parsed message (`type`, `text`, `attachments`, `metadata`, `reply_to_id`) end up on the activity; `sender` and `idempotency_key` are passed by the controller as server-controlled attributes.
 - Receipts: normalize `status` to one of `sent`, `delivered`, `read`, `failed`. Any other value is silently ignored by `Deliveries.advance_status/2` (it has no rank), so map unknown provider states explicitly, as both WhatsApp adapters map them to `sent`.
+
+### Inbound media
+
+When the adapter implements `fetch_media/2`, `Converger.Inbound.Media` calls it for every attachment of a parsed message that has no `contentUrl`, after the duplicate check and before the activity is created. It stores the returned bytes through `Converger.Uploads` (size limit, sniffed type, tenant allowlist), links the file to the activity, and rewrites the attachment with `contentUrl`, `contentType` and `size`. On `{:error, reason}` the stub is kept with `channelData.downloadError`; the message is never dropped. Channels opt out with the config key `download_media: false`.
+
+- Use `Converger.Channels.MediaDownload.get/2`: it streams the body and stops at the upload size limit, with a 10 s default timeout.
+- Treat URLs from the webhook body as untrusted. Send credentials only to the provider's own host (the Infobip adapter requires the media URL host to equal the channel's `base_url` host) and keep the SSRF guard ([section 7](#7-http-and-user-supplied-urls)).
+- Return `:skip` for attachments that have nothing to download (locations, contacts).
+
+See [ADR-0039](../adr/0039-whatsapp-rich-outbound-and-inbound-media-download.md).
 
 ### Capabilities and downgrade
 
