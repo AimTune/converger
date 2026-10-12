@@ -206,10 +206,10 @@ defmodule ConvergerWeb.ProtocolSocket do
   rescue
     error in DBConnection.ConnectionError ->
       Pressure.report(:protocol, error)
-      type = if is_map(frame) and is_binary(frame["type"]), do: frame["type"]
+      type = if is_binary(frame["type"]), do: frame["type"]
       opts = [frame_type: type, retry_after_ms: Pressure.retry_after_ms()]
       unavailable = error("unavailable", "the database is unavailable, retry", opts)
-      unavailable = if is_map(frame), do: with_client_id(unavailable, frame), else: unavailable
+      unavailable = with_client_id(unavailable, frame)
 
       case state.phase do
         :ready -> reply([unavailable], state)
