@@ -18,13 +18,13 @@ This page is the map. The pages below go into detail:
 
 ## Supervision tree
 
-The application callback is [`Converger.Application`](https://github.com/AimTune/converger/blob/main/lib/converger/application.ex). Before starting any child it attaches the OpenTelemetry instrumentations (`OpentelemetryPhoenix.setup(adapter: :bandit)`, `OpentelemetryEcto.setup([:converger, :repo])`, `OpentelemetryOban.setup()`). It then starts the following children under `Converger.Supervisor` with the `:one_for_one` strategy, in this order:
+The application callback is [`Converger.Application`](https://github.com/AimTune/converger/blob/main/lib/converger/application.ex). Before starting any child it attaches the OpenTelemetry instrumentations (`OpentelemetryPhoenix.setup(adapter: :bandit)`, `OpentelemetryEcto.setup([:converger, :repo])` and `[:converger, :background_repo]`, `OpentelemetryOban.setup()`) and routes Oban jobs to the background pool (`Converger.Repo.Pools.attach/0`). It then starts the following children under `Converger.Supervisor` with the `:one_for_one` strategy, in this order:
 
 | # | Child | Role |
 | --- | --- | --- |
 | 1 | `ConvergerWeb.Telemetry` | Supervisor for `:telemetry_poller` (10 s period) and the `TelemetryMetricsPrometheus.Core` registry served at `GET /metrics` on the main port (plus the unauthenticated listener on `PROMETHEUS_PORT` only when that variable is set). |
 | 2 | `Converger.Vault` | Cloak vault (AES-256-GCM) that encrypts channel secrets and configs at rest. Must be up before anything reads a channel. |
-| 3 | `Converger.Repo` | Ecto repository (PostgreSQL via Postgrex). |
+| 3 | `Converger.Repo`, `Converger.Repo.Background`, `Converger.Repo.Pressure` | Ecto repository (PostgreSQL via Postgrex): the interactive pool, the background pool used by Oban (a second instance of the repo, absent when `BACKGROUND_POOL_SIZE=0`) and the pool wait monitor behind the readiness `pool` check. See [Database pools and pressure](../operations/database.md). |
 | 4 | `Cluster.Supervisor` (`Converger.ClusterSupervisor`) | libcluster node discovery built by `Converger.Cluster` from `CLUSTER_STRATEGY`; not started when the strategy is `none`. See [Clustering](../operations/clustering.md). |
 | 5 | `Phoenix.PubSub` (`Converger.PubSub`) | Cluster-wide pub/sub used by the endpoint, channels, LiveViews, presence and the rate limiter. |
 | 6 | `ConvergerWeb.SocketPresence` | `Phoenix.Presence` tracker of joined client sockets per channel (used for channel-wide disconnects). |
@@ -42,6 +42,8 @@ flowchart TD
     TEL --> PROM["TelemetryMetricsPrometheus.Core (/metrics)"]
     SUP --> VAULT["Converger.Vault"]
     SUP --> REPO["Converger.Repo"]
+    SUP --> BGREPO["Converger.Repo.Background (Oban)"]
+    SUP --> PRESSURE["Converger.Repo.Pressure"]
     SUP --> DNS["Cluster.Supervisor (libcluster, if CLUSTER_STRATEGY)"]
     SUP --> PS["Phoenix.PubSub (Converger.PubSub)"]
     SUP --> PRES["ConvergerWeb.SocketPresence"]

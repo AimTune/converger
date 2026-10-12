@@ -76,7 +76,7 @@ Argo CD, run the migration as a pre-upgrade / PreSync hook instead (the chart do
 | --- | --- | --- | --- |
 | startup | `/health/live` | every 2 s, up to 120 s | covers VM boot; liveness only starts afterwards |
 | liveness | `/health/live` | every 10 s, 6 failures | restarts a hung VM; never fails because of the database |
-| readiness | `/health/ready` | every 5 s, 2 failures | removes the pod from the Service when the database is unreachable, Oban is down, migrations are pending or the pod is draining |
+| readiness | `/health/ready` | every 5 s, 2 failures | removes the pod from the Service when the database is unreachable, its connection pool is saturated (`degraded`, see [Database pools and pressure](database.md#readiness)), Oban is down, migrations are pending or the pod is draining |
 
 The probes hit the pod IP over plain HTTP. `/health/*` is served before `ForceSSL`, so no
 `FORCE_SSL_EXCLUDE_PATHS` entry is needed.

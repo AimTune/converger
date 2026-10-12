@@ -4,8 +4,8 @@ title: Chaos testing
 
 # Chaos testing
 
-The chaos test kills the Converger node with `SIGKILL` while clients send
-messages over REST and WebSocket. It then checks that **no message the server
+The chaos test kills the Converger node with `SIGKILL` (or, in mode `db_pause`, freezes Postgres) while clients
+send messages over REST and WebSocket. It then checks that **no message the server
 acknowledged was lost**, none was stored twice, the per-conversation `seq` has
 no gaps, and every acknowledged message reached its outbound webhook. This is
 the exit criterion of the v2.5 hardening epic (#57).
@@ -75,14 +75,16 @@ dumps.
 | `CHAOS_APP_PORT` | `14000` | Host port of the app. |
 | `CHAOS_SKIP_BUILD` | `0` | `1` reuses the existing image. |
 | `CHAOS_KEEP` | `0` | `1` leaves the stack running after the run. |
+| `CHAOS_MODE` | `kill` | `kill`, or `db_pause` to pause Postgres instead (see [Database pause](#database-pause)). |
+| `CHAOS_DB_PAUSES` / `CHAOS_DB_PAUSE_S` | `1` / `10` | Number and length of the pauses in `db_pause` mode (the first starts at `CHAOS_FIRST_KILL_S`). |
 
 ### In CI
 
 [`.github/workflows/chaos.yml`](https://github.com/AimTune/converger/blob/main/.github/workflows/chaos.yml) runs the
 same script on `ubuntu-latest`: on demand (`workflow_dispatch`, with the
 number of kills and the duration as inputs), nightly, and on pull requests
-that change the harness. The results directory is uploaded as the
-`chaos-results` artifact. It is not part of the regular CI workflow because it
+that change the harness. It runs both modes (`kill` and `db_pause`) as a matrix; a manual run can pick one with the `mode` input. The
+results directory of each is uploaded as the `chaos-results-<mode>` artifact. It is not part of the regular CI workflow because it
 builds the release image.
 
 ## What counts as acknowledged
@@ -183,6 +185,41 @@ takes at most about 90 s. A rescued job may re-send a request that the
 receiver already got before the crash (8 such redeliveries in the 5-kill
 run), which is why receivers must de-duplicate by `x-converger-delivery-id`.
 
+## Database pause
+
+In mode `db_pause` ([#35](https://github.com/AimTune/converger/issues/35)) the app is not killed: the Postgres
+container is frozen with `docker pause` for `CHAOS_DB_PAUSE_S` (10 s) while the driver keeps sending. Connections stay
+open but nothing answers, so queries hang, both pools fill up and new checkouts are dropped. The app must answer with
+retryable errors and recover on its own ([Database pools and pressure](operations/database.md)):
+
+```bash
+CHAOS_MODE=db_pause test/chaos/run.sh
+```
+
+On top of the checks above, `verify.js` fails the run in this mode when
+
+- any REST answer was a `5xx` other than `503` (`rest_server_errors`; `rest_unavailable` counts the `503`s);
+- any message was never acknowledged: every refusal is retryable, and the driver retries WebSocket replies
+  `unavailable` / `rate_limited` after their `retry_after_ms`;
+- the app container restarted (`timing.app_restarts`).
+
+`timing.json` also reports `ready_after_unpause_s` (until `/health/ready` is `200` again),
+`readiness_non_200_probes` (from `readiness.log`, one probe per second) and `app_db_error_logs` (error-level log
+lines about database connection errors, which should be 0).
+
+Measured on 2026-10-12 on Docker Desktop (Windows 11, WSL2), one 10 s pause after 10 s of a 60 s run:
+
+| Run | Sent | Acked | Lost | Duplicates | `503` | Other `5xx` | WS retried after `unavailable` | Crash logs | Restarts | Ready after unpause |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Before the socket-connect fix | 7,041 | 7,035 | 0 | 0 | 55 | 0 | 6 (counted as rejected by the old driver) | 14 (WebSocket upgrades) | 0 | 3 s |
+| Final | 5,456 | 5,456 | 0 | 0 | 70 | 0 | 6 | 0 | 0 | 7 s |
+
+The first run found two problems: WebSocket upgrades (`ConvergerSocket.connect/3` reads the channel) still crashed
+with `DBConnection.ConnectionError`, which is now answered `503` with `Retry-After`, and the driver treated the
+retryable `unavailable` reply as a permanent rejection. The REST requests that hit the 5 s client timeout while
+Postgres was frozen (13) were retried and acknowledged.
+
+The nightly workflow runs both modes.
 ## Alert rules chaos test
 
 `test/chaos/alerts.sh` checks that the delivery [alert rules](operations/observability.md#alert-rules) fire
@@ -216,8 +253,8 @@ The rules themselves are unit tested with `promtool test rules docker/prometheus
 
 ## Not covered
 
-- Killing Postgres. The test assumes a durable database; see
-  [backups and restore](deployment.md#backups-and-restore).
+- Killing Postgres (losing it): the test assumes a durable database; see
+  [backups and restore](deployment.md#backups-and-restore). A *paused* database is covered by `db_pause`.
 - Several app nodes behind a load balancer (the run uses one node that is
   killed and restarted).
 - The Converger API WebSocket (`/socket/converger`). It only delivers
