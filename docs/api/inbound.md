@@ -37,7 +37,7 @@ Which channel types accept which requests:
 | `email` | yes (modes `inbound`, `duplex`) | per inbound provider: SNS signature and topic (`ses`), payload signature (`mailgun`), basic auth or `x-converger-signature` (others); see [Email](../channels/email.md) |
 | `sms_twilio` | yes (modes `inbound`, `duplex`); form-encoded, answered with an empty TwiML `<Response>` | `x-twilio-signature` (auth token over the URL and the sorted parameters); see [SMS](../channels/sms.md) |
 | `sms_vonage` | yes (modes `inbound`, `duplex`) | `Authorization: Bearer` JWT (signature secret) with the body hash; see [SMS](../channels/sms.md) |
-| `echo`, `websocket` | no: `400` with the adapter's message | `x-converger-signature` |
+| `echo`, `websocket`, `kafka`, `rabbitmq` | no: `400` with the adapter's message (broker channels consume their topic or queue, see [Broker channels](../channels/brokers.md)) | `x-converger-signature` |
 
 A channel in `outbound` mode answers messages with `400 {"error": "Channel does not accept inbound messages"}`.
 If the same request also carried status updates, those are applied and the request is acknowledged with `200`,

@@ -120,7 +120,9 @@ call (not the bookkeeping around it).
 | `converger.deliveries.dead_lettered.count` | counter | | Deliveries dead-lettered. |
 | `converger.deliveries.retried.count` | counter (sum) | | Dead letters replayed ([Replaying dead letters](../delivery.md#replaying-dead-letters)). |
 | `converger.deliveries.dead_letters.size` | gauge, polled | `channel_type` | Dead-lettered deliveries currently stored (`status = failed`). |
-| `converger.inbound.received.count` | counter | `channel_type`, `outcome` | Messages received on a channel (inbound webhook or a `websocket` channel's client): `created`, `duplicate` (idempotency key seen before), `rejected` (invalid), `error`. |
+| `converger.inbound.received.count` | counter | `channel_type`, `outcome` | Messages received on a channel (inbound webhook, a `websocket` channel's client or a [broker channel](../channels/brokers.md) consumer): `created`, `duplicate` (idempotency key seen before), `rejected` (invalid), `error`. |
+| `converger.broker.dead_lettered.count` | counter | `channel_type`, `reason` | Consumed broker messages written to the channel's dead-letter topic or queue: `reason` is `poison` (never acceptable) or `retries_exhausted` ([broker channels](../channels/brokers.md#poison-messages-and-retries)). |
+| `converger.broker.retry.count` | counter | `channel_type` | Consumed broker messages retried in place after a transient failure. |
 | `converger.circuit.state_change.count` | counter | `channel_type`, `to`, `reason` | Circuit breaker transitions (`to`: `open`, `half_open`, `closed`, `paused`). |
 | `converger.channels.circuit.count` | gauge, polled | `channel_type`, `state` | Channels whose breaker is `open`, `half_open` or `paused`. |
 | `converger.oban.queue.depth` | gauge, polled | `queue`, `state` | Oban jobs per queue in `available`, `scheduled`, `retryable` and `executing`. Parked deliveries and retry backoffs are `scheduled`. |
@@ -191,6 +193,8 @@ The events behind the metrics above, for custom handlers (`:telemetry.attach/4`)
 | `[:converger, :delivery, :exception]` | `duration` (native) | as `:attempt`, plus `kind`, `reason` |
 | `[:converger, :pipeline, :lag]` | `duration` (ms) | as `:attempt`, plus `status` (`sent`, `pending`) |
 | `[:converger, :inbound, :received]` | `count` | `channel_id`, `channel_type`, `tenant_id`, `outcome` |
+| `[:converger, :broker, :dead_lettered]` | `count` | `channel_id`, `channel_type`, `tenant_id`, `reason` (`:poison`, `:retries_exhausted`) |
+| `[:converger, :broker, :retry]` | `count` | `channel_id`, `channel_type` |
 | `[:converger, :ws, :connected]`, `[:converger, :ws, :disconnected]` | `count` | `socket`, `transport` |
 | `[:converger, :ws, :frame]` | `count` | `socket`, `transport`, `direction` |
 | `[:converger, :ws, :connections]` | `count` (polled) | `socket`, `transport` |

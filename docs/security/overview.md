@@ -215,7 +215,7 @@ through `Converger.Secrets.redact/1`, which replaces values **recursively**, inc
 
 - keys `access_token`, `api_key`, `secret`, `token`, `password`, `password_hash`, `verify_token`, `app_secret`,
   `authorization`, `x-api-key`, `x-channel-token` (case-insensitive), and
-- any key ending in `_secret`, `_token` or `_hash`.
+- any key ending in `_secret`, `_token`, `_hash` or `_password` (the broker channels' `sasl_password`).
 
 Values become `"[REDACTED]"`; `nil` stays `nil`. Audit logs are browsable at `/admin/audit_logs`.
 

@@ -17,7 +17,7 @@ Table `channels`:
 | `id` | uuid | | Primary key. |
 | `tenant_id` | uuid | | Owner. `(tenant_id, name)` is unique. |
 | `name` | text | | Required. |
-| `type` | string | `"webhook"` | Adapter: `echo`, `webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram`, `email`, `sms_twilio`, `sms_vonage`. |
+| `type` | string | `"webhook"` | Adapter: `echo`, `webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram`, `email`, `sms_twilio`, `sms_vonage`, `kafka`, `rabbitmq`. |
 | `mode` | text | `"duplex"` | `inbound`, `outbound` or `duplex`. Must be supported by the type. |
 | `secret` | encrypted binary | generated | Encrypted at rest. Generated (32 random bytes, Base64) when not given. |
 | `secret_hash` | binary | | SHA-256 of `secret`, unique, used for lookups. |
@@ -48,6 +48,8 @@ Each type maps to a module implementing the `Converger.Channels.Adapter` behavio
 | `email` | `inbound`, `outbound`, `duplex` | `provider` (`smtp`, `ses`, `sendgrid`, `mailgun`, `postmark`), `from`, the provider credentials, plus `ses_topic_arn` or `mailgun_signing_secret` for those inbound providers | Email through Swoosh, threaded with `Message-ID` / `In-Reply-To` | [Email](../channels/email.md) |
 | `sms_twilio` | `inbound`, `outbound`, `duplex` | `account_sid`, `auth_token`, and `from` or `messaging_service_sid`. Optional: `webhook_base_url`, `default_country_code`, `max_segments` | Twilio Programmable Messaging (SMS, MMS), status callbacks | [SMS](../channels/sms.md) |
 | `sms_vonage` | `inbound`, `outbound`, `duplex` | `from`, and `api_key` + `api_secret` or `application_id` + `private_key`, plus `signature_secret` when `require_signature` is true. Optional: `default_country_code`, `max_segments` | Vonage Messages API (SMS), status webhooks | [SMS](../channels/sms.md) |
+| `kafka` | `inbound`, `outbound`, `duplex` | `brokers`, plus `topic_in` (inbound, duplex) and `topic_out` (outbound, duplex). Optional: `group_id`, `start_offset`, `dlq_topic`, `concurrency`, SASL (`sasl_mechanism`, `sasl_username`, `sasl_password`), TLS (`tls`, `tls_verify`, `tls_ca_cert`) | Produces the activity envelope to `topic_out` keyed by conversation; consumes `topic_in` ([broker channel](../channels/brokers.md)) | [Kafka](../channels/kafka.md) |
+| `rabbitmq` | `inbound`, `outbound`, `duplex` | `url`, plus `queue` (inbound, duplex) and `routing_key` (outbound, duplex). Optional: `username`, `password`, `exchange`, `dlq_queue`, `declare`, `prefetch_count`, `concurrency`, `tls_verify`, `tls_ca_cert` | Publishes the activity envelope with publisher confirms; consumes `queue` ([broker channel](../channels/brokers.md)) | [RabbitMQ](../channels/rabbitmq.md) |
 | `echo` | `outbound` | none | Writes a reply activity from `"bot"` into the same conversation (testing) | [Echo](../channels/echo.md) |
 
 See the [channels overview](../channels/overview.md) for provider setup, and [writing an adapter](../channels/writing-an-adapter.md) to add a type. Each type is one adapter module: the type list, the config validation above and the admin form all come from the adapters' `capabilities/0` and `config_schema/0` ([ADR-0038](../adr/0038-adapter-behaviour-v2-and-config-driven-registry.md)).
@@ -81,7 +83,7 @@ Every channel has a secret, shown **once** when the channel is created in the ad
 
 ## Config and encryption at rest
 
-`config` is a map with string keys, validated by the adapter's `validate_config/1`. Both `secret` and `config` are `Cloak.Ecto` encrypted fields. Migration [`20261008100000_encrypt_channel_secrets`](https://github.com/AimTune/converger/blob/main/priv/repo/migrations/20261008100000_encrypt_channel_secrets.exs) encrypted existing rows in place and dropped the plaintext columns (issue [#12](https://github.com/AimTune/converger/issues/12)). In the admin UI and the audit logs, sensitive keys (`access_token`, `api_key`, `secret`, `token`, `password`, `verify_token`, `app_secret`, `authorization`, and keys ending in `_secret`, `_token` or `_hash`) are masked or redacted.
+`config` is a map with string keys, validated by the adapter's `validate_config/1`. Both `secret` and `config` are `Cloak.Ecto` encrypted fields. Migration [`20261008100000_encrypt_channel_secrets`](https://github.com/AimTune/converger/blob/main/priv/repo/migrations/20261008100000_encrypt_channel_secrets.exs) encrypted existing rows in place and dropped the plaintext columns (issue [#12](https://github.com/AimTune/converger/issues/12)). In the admin UI and the audit logs, sensitive keys (`access_token`, `api_key`, `secret`, `token`, `password`, `verify_token`, `app_secret`, `authorization`, and keys ending in `_secret`, `_token`, `_hash` or `_password`) are masked or redacted.
 
 After rotating `CLOAK_KEY`, move the old key to `CLOAK_RETIRED_KEYS` and run `bin/converger eval "Converger.Release.reencrypt_secrets()"`. See [ADR-0012](../adr/0012-secrets-at-rest-and-audit-redaction.md) and [security](../security.md).
 
@@ -143,7 +145,7 @@ Deleting a channel also disconnects its sockets, and cascades to its conversatio
 
 ## Health checks
 
-`Converger.Workers.ChannelHealthWorker` runs every 5 minutes (Oban cron). For each **active** channel of type `webhook`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram`, `email`, `sms_twilio` or `sms_vonage`, it computes the delivery failure rate over the last 60 minutes and stores a row in `channel_health_checks`:
+`Converger.Workers.ChannelHealthWorker` runs every 5 minutes (Oban cron). For each **active** channel of type `webhook`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram`, `email`, `sms_twilio`, `sms_vonage`, `kafka` or `rabbitmq`, it computes the delivery failure rate over the last 60 minutes and stores a row in `channel_health_checks`:
 
 | Status | Failure rate (failed / total deliveries in window) |
 | --- | --- |

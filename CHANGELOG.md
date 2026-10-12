@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+### Broker channels: Kafka and RabbitMQ (#42)
+
+- New channel types `kafka` and `rabbitmq`: a broker as a first-class channel. Outbound, the pipeline produces the
+  canonical activity JSON plus `channel_id` (Kafka: to `topic_out`, keyed by `conversation_id`; RabbitMQ: to
+  `exchange` / `routing_key` with publisher confirms). Inbound, a Broadway consumer per channel reads `topic_in` /
+  `queue` and passes each message to `Converger.Inbound`, so routing rules, middleware and deliveries apply.
+- Consumers run under `Converger.Channels.Consumers` (a `DynamicSupervisor`), one per channel in the cluster
+  (`:global`), spread over the nodes, started, restarted and stopped as channels change, and reconciled every 30 s.
+  `BROKER_CONSUMERS=false` keeps them off a node; `BROKER_RECONCILE_INTERVAL_MS` sets the interval.
+- At-least-once inbound with idempotent activity creation: the idempotency key is the envelope's `idempotency_key`
+  or the broker message id (`kafka:topic/partition/offset`, `rabbitmq:<message_id>`). Poison messages go to a
+  per-channel dead-letter topic / queue; transient failures are retried in place, then dead-lettered.
+- Adapter behaviour: new `:consumer` capability and `Converger.Channels.Broker` behaviour; config fields can be
+  `required: :inbound` / `required: :outbound` (required only in a matching channel mode).
+- New metrics `converger.broker.dead_lettered.count` and `converger.broker.retry.count`.
+- Config keys ending in `_password` are redacted in audit logs.
+- New dependencies: `broadway_kafka`, `brod`, `broadway_rabbitmq`, `amqp` (and `ranch` moves to 2.2.0, required by
+  `rabbit_common`). The Docker build stage installs `cmake` (for the Kafka client's CRC32C NIF). Kafka channels do
+  not work on Windows hosts (the NIF is not built there).
+- Docs: [Broker channels](docs/channels/brokers.md) (pipeline transport versus broker channel), Kafka and RabbitMQ
+  pages; ADR-0047. NATS JetStream and Redis Streams channels are planned (#42).
+
 ### Delivery SLO telemetry, dashboards and alert rules (#33)
 
 - New telemetry (`Converger.Telemetry`): `[:converger, :delivery, :attempt | :stop | :exception]` around the
