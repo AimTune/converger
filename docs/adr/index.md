@@ -76,7 +76,7 @@ supersedes the old one and both are linked. Read
 
 | ADR | Decision | Status | Issue / PR |
 | --- | --- | --- | --- |
-| [0051](0051-typescript-sdk-transport-abstraction-and-outbox.md) | TypeScript SDK `@converger/client`: one session core over native / Phoenix / SSE transports, a persistent clientId outbox resent once after the replay, hand-written types in a generator-compatible shape until #45 | Accepted | [#46](https://github.com/AimTune/converger/issues/46) |
+| [0051](0051-typescript-sdk-transport-abstraction-and-outbox.md) | TypeScript SDK `@converger/client`: one session core over native / Phoenix / SSE transports, a persistent clientId outbox resent once after the replay, hand-written types in a generator-compatible shape until #45 | Accepted | [#46](https://github.com/AimTune/converger/issues/46) / [#142](https://github.com/AimTune/converger/pull/142) |
 
 ### Security
 

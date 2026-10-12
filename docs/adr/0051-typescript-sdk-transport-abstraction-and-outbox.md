@@ -9,7 +9,7 @@ description: "@converger/client is a dependency-free pnpm workspace package. One
 | **Status** | Accepted |
 | **Date** | 2026-10-12 |
 | **Issue** | [#46](https://github.com/AimTune/converger/issues/46) |
-| **Pull request** | to be linked when merged |
+| **Pull request** | [#142](https://github.com/AimTune/converger/pull/142) |
 | **Related** | [ADR-0006](0006-per-conversation-seq-and-opaque-watermarks.md), [ADR-0024](0024-converger-protocol-v1-as-superset-of-mekik-1.md), [ADR-0027](0027-websocket-limits-backpressure-and-draining.md), [ADR-0029](0029-websocket-sends-acked-on-the-phoenix-binding.md), [ADR-0030](0030-native-websocket-endpoint-and-fallback-transports.md) |
 
 ## Context and problem statement
