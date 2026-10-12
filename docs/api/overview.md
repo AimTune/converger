@@ -21,6 +21,12 @@ under [`test/converger_web/controllers`](https://github.com/AimTune/converger/tr
 are the reference.
 :::
 
+:::tip SDKs
+Server-side SDKs for [Python](../sdk/python.md), [Go](../sdk/go.md) and [Elixir](../sdk/elixir.md) wrap the client
+and tenant APIs, normalize every error shape below into one error type, and verify webhook signatures. See
+[Server-side SDKs](../sdk/server-sdks.md).
+:::
+
 ## Base URLs
 
 | Environment | Base URL | Notes |

@@ -72,6 +72,12 @@ supersedes the old one and both are linked. Read
 | [0047](0047-broker-channels-kafka-and-rabbitmq.md) | Broker channels: `kafka` and `rabbitmq` channel types, one Broadway consumer per channel in the cluster (`:global` plus a reconciling manager), broker-message-id idempotency, per-channel dead-letter topic / queue; the Broadway pipeline transport stays internal | Accepted | [#42](https://github.com/AimTune/converger/issues/42) / [#141](https://github.com/AimTune/converger/pull/141) |
 | [0048](0048-additional-adapters-shared-meta-code-bot-framework-jwt-and-pull-outbox.md) | Discord, Teams, Messenger, Instagram, Viber and HTTP pull: shared Meta Graph code, cached Bot Framework JWT validation with a service URL allowlist, users as participants with reply targets in metadata, `inbound_response/2`, a pull outbox acknowledged by served-only watermarks | Accepted | [#44](https://github.com/AimTune/converger/issues/44) / [#139](https://github.com/AimTune/converger/pull/139) |
 
+### Clients and SDKs
+
+| ADR | Decision | Status | Issue / PR |
+| --- | --- | --- | --- |
+| [0052](0052-server-side-sdks-in-the-monorepo-with-a-shared-conformance-suite.md) | Server-side SDKs (Python, Go, Elixir) in `packages/` of this repository, a shared conformance suite (REST, errors, protocol resume state machine, webhook signature vectors generated from the server signer), generator-shaped hand-written models until #45, per-language tag releases | Accepted | [#47](https://github.com/AimTune/converger/issues/47) |
+
 ### Security
 
 | ADR | Decision | Status | Issue / PR |
