@@ -9,7 +9,7 @@ description: Twilio and Vonage SMS channels share E.164 normalisation, segment l
 | **Status** | Accepted |
 | **Date** | 2026-10-12 |
 | **Issue** | [#41](https://github.com/AimTune/converger/issues/41) |
-| **Pull request** | to be linked |
+| **Pull request** | [#136](https://github.com/AimTune/converger/pull/136) |
 | **Related** | [ADR-0009](0009-inbound-signature-scheme-and-per-channel-enforcement.md), [ADR-0016](0016-participant-based-conversation-resolution.md), [ADR-0019](0019-per-channel-retry-policy-delivery-error-and-lifeline.md), [ADR-0031](0031-per-channel-circuit-breaker-rate-limit-and-tier-queues.md), [ADR-0038](0038-adapter-behaviour-v2-and-config-driven-registry.md) |
 
 ## Context and problem statement
