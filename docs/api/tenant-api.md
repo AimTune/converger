@@ -51,6 +51,8 @@ Controllers: [`ConvergerWeb.TokenController`](https://github.com/AimTune/converg
 | `POST` | `/api/v1/channels/:channel_id/pause` | `x-api-key` or `x-channel-token` | Pause outbound deliveries of a channel |
 | `POST` | `/api/v1/channels/:channel_id/resume` | `x-api-key` or `x-channel-token` | Resume deliveries (also closes an open breaker) |
 | `GET` | `/api/v1/channels/:channel_id/templates` | `x-api-key` or `x-channel-token` | List the provider message templates (WhatsApp HSM) of a channel, cached |
+| `GET` | `/api/v1/channels/:channel_id/outbox` | `x-api-key` or `x-channel-token` | Poll the outbox of an `http_pull` channel; a `watermark` acknowledges the previous page ([HTTP pull](../channels/http-pull.md)) |
+| `POST` | `/api/v1/channels/:channel_id/outbox/ack` | `x-api-key` or `x-channel-token` | Acknowledge an `http_pull` outbox up to a watermark |
 
 On the routes marked `x-api-key` or `x-channel-token`, only the `x-channel-token` option is deprecated.
 

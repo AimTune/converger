@@ -72,6 +72,10 @@ defmodule ConvergerWeb.Router do
     # Provider message templates (WhatsApp HSM), cached
     get "/channels/:channel_id/templates", ChannelTemplateController, :index
 
+    # Outbox of http_pull channels: poll with a watermark, acknowledge
+    get "/channels/:channel_id/outbox", ChannelOutboxController, :index
+    post "/channels/:channel_id/outbox/ack", ChannelOutboxController, :ack
+
     # Dead-letter inspection and replay
     get "/deliveries", DeliveryController, :index
     post "/deliveries/:id/retry", DeliveryController, :retry
