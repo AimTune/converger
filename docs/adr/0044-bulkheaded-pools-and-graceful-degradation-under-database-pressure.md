@@ -9,7 +9,7 @@ description: Oban runs on a second pool of the same repo, every interactive path
 | **Status** | Accepted |
 | **Date** | 2026-10-12 |
 | **Issue** | [#35](https://github.com/AimTune/converger/issues/35) |
-| **Pull request** | to be opened |
+| **Pull request** | [#137](https://github.com/AimTune/converger/pull/137) |
 | **Related** | [ADR-0001](0001-transactional-outbox-with-oban.md), [ADR-0027](0027-websocket-limits-backpressure-and-draining.md), [ADR-0030](0030-native-websocket-endpoint-and-fallback-transports.md), [ADR-0037](0037-libcluster-clustering-health-endpoints-and-metrics-on-the-main-port.md) |
 
 The operator documentation is [Database pools and pressure](../operations/database.md); the client-facing behaviour
