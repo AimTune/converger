@@ -17,7 +17,7 @@ Table `channels`:
 | `id` | uuid | | Primary key. |
 | `tenant_id` | uuid | | Owner. `(tenant_id, name)` is unique. |
 | `name` | text | | Required. |
-| `type` | string | `"webhook"` | Adapter: `echo`, `webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `email`, `sms_twilio`, `sms_vonage`. |
+| `type` | string | `"webhook"` | Adapter: `echo`, `webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram`, `email`, `sms_twilio`, `sms_vonage`. |
 | `mode` | text | `"duplex"` | `inbound`, `outbound` or `duplex`. Must be supported by the type. |
 | `secret` | encrypted binary | generated | Encrypted at rest. Generated (32 random bytes, Base64) when not given. |
 | `secret_hash` | binary | | SHA-256 of `secret`, unique, used for lookups. |
@@ -44,6 +44,7 @@ Each type maps to a module implementing the `Converger.Channels.Adapter` behavio
 | `whatsapp_meta` | `inbound`, `outbound`, `duplex` | `phone_number_id`, `access_token`, `verify_token`, plus `app_secret` when `require_signature` is true | WhatsApp Cloud API (Graph) | [WhatsApp](../channels/whatsapp.md) |
 | `whatsapp_infobip` | `inbound`, `outbound`, `duplex` | `base_url`, `api_key`, `sender` | Infobip WhatsApp API | [WhatsApp](../channels/whatsapp.md) |
 | `slack` | `inbound`, `outbound`, `duplex` | `bot_token`, `signing_secret`. Optional: `channel`, `app_id`, `conversation_scope` (`thread`, `channel`, `user`), `download_files` | Slack Web API (`chat.postMessage`, `chat.update`, `chat.delete`, file uploads); Events API inbound | [Slack](../channels/slack.md) |
+| `telegram` | `inbound`, `outbound`, `duplex` | `bot_token`, plus `secret_token` when `require_signature` is true. Optional: `parse_mode`, `allowed_updates` | Telegram Bot API (`sendMessage`, `sendPhoto`, `sendDocument`) | [Telegram](../channels/telegram.md) |
 | `email` | `inbound`, `outbound`, `duplex` | `provider` (`smtp`, `ses`, `sendgrid`, `mailgun`, `postmark`), `from`, the provider credentials, plus `ses_topic_arn` or `mailgun_signing_secret` for those inbound providers | Email through Swoosh, threaded with `Message-ID` / `In-Reply-To` | [Email](../channels/email.md) |
 | `sms_twilio` | `inbound`, `outbound`, `duplex` | `account_sid`, `auth_token`, and `from` or `messaging_service_sid`. Optional: `webhook_base_url`, `default_country_code`, `max_segments` | Twilio Programmable Messaging (SMS, MMS), status callbacks | [SMS](../channels/sms.md) |
 | `sms_vonage` | `inbound`, `outbound`, `duplex` | `from`, and `api_key` + `api_secret` or `application_id` + `private_key`, plus `signature_secret` when `require_signature` is true. Optional: `default_country_code`, `max_segments` | Vonage Messages API (SMS), status webhooks | [SMS](../channels/sms.md) |
@@ -142,7 +143,7 @@ Deleting a channel also disconnects its sockets, and cascades to its conversatio
 
 ## Health checks
 
-`Converger.Workers.ChannelHealthWorker` runs every 5 minutes (Oban cron). For each **active** channel of type `webhook`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `email`, `sms_twilio` or `sms_vonage`, it computes the delivery failure rate over the last 60 minutes and stores a row in `channel_health_checks`:
+`Converger.Workers.ChannelHealthWorker` runs every 5 minutes (Oban cron). For each **active** channel of type `webhook`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram`, `email`, `sms_twilio` or `sms_vonage`, it computes the delivery failure rate over the last 60 minutes and stores a row in `channel_health_checks`:
 
 | Status | Failure rate (failed / total deliveries in window) |
 | --- | --- |

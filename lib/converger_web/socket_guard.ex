@@ -24,6 +24,10 @@ defmodule ConvergerWeb.SocketGuard do
       Channels send ephemeral frames (typing, presence) with
       `push_ephemeral/3`, which drops them above `:ephemeral_drop_queue_len`.
 
+  It also counts the connection in `ConvergerWeb.ClientConnections` once
+  established, and every frame in (`handle_in`) and pushed out
+  (`[:converger, :ws, :frame]`, see `Converger.Telemetry`).
+
   Limits come from `config :converger, :websocket`. Every rejection emits
   `[:converger, :socket, :limit]` with `%{count: 1}` and
   `%{reason: reason, socket: module}`.
@@ -31,6 +35,7 @@ defmodule ConvergerWeb.SocketGuard do
 
   require Logger
 
+  alias ConvergerWeb.ClientConnections
   alias Phoenix.Socket.Reply
 
   @rate_key {__MODULE__, :rate}
@@ -42,7 +47,14 @@ defmodule ConvergerWeb.SocketGuard do
 
   defmacro __using__(_opts) do
     quote do
-      defoverridable connect: 1, handle_in: 2, handle_info: 2, terminate: 2
+      defoverridable connect: 1, init: 1, handle_in: 2, handle_info: 2, terminate: 2
+
+      @doc false
+      def init(state) do
+        result = super(state)
+        ConvergerWeb.SocketGuard.connected(result, __MODULE__)
+        result
+      end
 
       @doc false
       def connect(map) do
@@ -72,7 +84,7 @@ defmodule ConvergerWeb.SocketGuard do
 
       @doc false
       def terminate(reason, state) do
-        ConvergerWeb.SocketGuard.terminated(reason, __MODULE__)
+        ConvergerWeb.SocketGuard.terminated(reason, state, __MODULE__)
         super(reason, state)
       end
     end
@@ -105,6 +117,8 @@ defmodule ConvergerWeb.SocketGuard do
 
   @doc false
   def check_in({payload, opts}, {phx_state, socket} = state, handler) do
+    Converger.Telemetry.ws_frame(socket_label(handler), transport(socket), :in)
+
     cond do
       (retry_after = rate_limited()) != nil ->
         reject(payload, opts, state, handler, :rate_limited, %{
@@ -124,11 +138,12 @@ defmodule ConvergerWeb.SocketGuard do
   end
 
   @doc false
-  def check_info({:socket_push, _opcode, _payload}, state, handler) do
+  def check_info({:socket_push, _opcode, _payload}, {_phx_state, socket} = state, handler) do
     if queue_len(self()) > config(:slow_consumer_queue_len) do
       emit(:slow_consumer, handler)
       close(@close_slow_consumer, "slow_consumer", state)
     else
+      Converger.Telemetry.ws_frame(socket_label(handler), transport(socket), :out)
       :cont
     end
   end
@@ -139,12 +154,34 @@ defmodule ConvergerWeb.SocketGuard do
   def check_info(_message, _state, _handler), do: :cont
 
   @doc false
-  def terminated({:error, :max_frame_size_exceeded}, handler) do
+  # After the socket's own init/1: counts the connection (ConvergerWeb.ClientConnections).
+  # Phoenix.ChannelTest sockets (transport `{Phoenix.ChannelTest, pid}`) are
+  # not connections.
+  def connected({:ok, {_phx_state, %{transport: transport} = socket}}, handler)
+      when is_atom(transport),
+      do: ClientConnections.connected(socket_label(handler), transport(socket))
+
+  def connected(_result, _handler), do: :ok
+
+  @doc false
+  def terminated(reason, {_phx_state, socket}, handler) do
+    ClientConnections.disconnected(socket_label(handler), transport(socket))
+    terminated(reason, handler)
+  end
+
+  defp terminated({:error, :max_frame_size_exceeded}, handler) do
     emit(:frame_too_large, handler)
     Logger.info("WebSocket closed with 1009: frame above max_frame_size (#{inspect(handler)})")
   end
 
-  def terminated(_reason, _handler), do: :ok
+  defp terminated(_reason, _handler), do: :ok
+
+  # The `socket` label of the connection metrics (ConvergerWeb.ClientConnections).
+  defp socket_label(ConvergerWeb.UserSocket), do: "user"
+  defp socket_label(ConvergerWeb.ConvergerSocket), do: "converger"
+  defp socket_label(handler), do: inspect(handler)
+
+  defp transport(%Phoenix.Socket{transport: transport}), do: Atom.to_string(transport)
 
   @doc false
   def emit(reason, handler) do

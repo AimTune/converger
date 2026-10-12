@@ -53,6 +53,10 @@ config :converger, pipeline: [backend: Converger.Pipeline.Inline]
 # No health probes against real providers in tests (tests enable them per case)
 config :converger, :channel_health, probe_idle_channels: false
 
+# No database-backed metric polling (queue depth, dead letters): the poller
+# process has no sandbox connection.
+config :converger, :metrics, poll_interval_ms: false
+
 # Store test uploads in a temp dir (per partition)
 config :converger, Converger.Uploads,
   storage: Converger.Uploads.LocalStorage,
@@ -75,6 +79,12 @@ config :converger, :webhook,
   resolver: {Converger.TestDnsResolver, :resolve},
   connect_timeout: 200,
   receive_timeout: 1_000
+
+# Every Telegram Bot API call goes to a Req.Test stub named after the adapter;
+# tests stub it per process (Req.Test follows $callers into tasks).
+config :converger, :telegram_req_options,
+  plug: {Req.Test, Converger.Channels.Adapters.Telegram},
+  retry: false
 
 # Deterministic encryption key for tests only.
 config :converger, Converger.Vault, key: Base.encode64("converger-tst-cloak-key-32bytes!")
