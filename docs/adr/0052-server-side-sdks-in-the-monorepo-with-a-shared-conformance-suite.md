@@ -9,7 +9,7 @@ description: The Python, Go and Elixir SDKs live in packages/ of the server repo
 | **Status** | Accepted |
 | **Date** | 2026-10-12 |
 | **Issue** | [#47](https://github.com/AimTune/converger/issues/47) |
-| **Pull request** | [#47 PR](https://github.com/AimTune/converger/issues/47) |
+| **Pull request** | [#144](https://github.com/AimTune/converger/pull/144) |
 | **Related** | [ADR-0014](0014-webhook-ssrf-guard-and-outbound-signing.md), [ADR-0024](0024-converger-protocol-v1-as-superset-of-mekik-1.md), [ADR-0030](0030-native-websocket-endpoint-and-fallback-transports.md), [ADR-0006](0006-per-conversation-seq-and-opaque-watermarks.md) |
 
 ## Context and problem statement

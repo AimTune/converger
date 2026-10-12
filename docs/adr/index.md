@@ -76,7 +76,7 @@ supersedes the old one and both are linked. Read
 
 | ADR | Decision | Status | Issue / PR |
 | --- | --- | --- | --- |
-| [0052](0052-server-side-sdks-in-the-monorepo-with-a-shared-conformance-suite.md) | Server-side SDKs (Python, Go, Elixir) in `packages/` of this repository, a shared conformance suite (REST, errors, protocol resume state machine, webhook signature vectors generated from the server signer), generator-shaped hand-written models until #45, per-language tag releases | Accepted | [#47](https://github.com/AimTune/converger/issues/47) |
+| [0052](0052-server-side-sdks-in-the-monorepo-with-a-shared-conformance-suite.md) | Server-side SDKs (Python, Go, Elixir) in `packages/` of this repository, a shared conformance suite (REST, errors, protocol resume state machine, webhook signature vectors generated from the server signer), generator-shaped hand-written models until #45, per-language tag releases | Accepted | [#47](https://github.com/AimTune/converger/issues/47) / [#144](https://github.com/AimTune/converger/pull/144) |
 
 ### Security
 
