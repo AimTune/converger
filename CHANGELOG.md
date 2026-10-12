@@ -2,6 +2,47 @@
 
 ## Unreleased
 
+### Conditional routing rules, reply-back routing and dry-run (#43)
+
+- Routing rules have `conditions` (JSON predicates over `type`, `sender`, `text`, `metadata.*`,
+  `conversation.metadata.*`, `participant.*` and `time.*` with `eq`, `neq`, `in`, `contains`, `regex`, `exists`,
+  `gt`, `lt` and `all` / `any` / `not` groups, validated on save; regexes at most 256 bytes, compiled on save, run
+  under a PCRE match limit), `transformations` (run after the target channel's middleware, for that rule's targets),
+  `priority` (default 100, lowest first) and `stop_processing` (first match). Existing rules keep matching everything.
+- **Reply-back routing (behaviour change):** activities record the channel they came in on and conversations their
+  origin channel. An activity written from another channel (for example an agent on a routed `websocket` console)
+  goes back to the origin channel and its participant, plus the replying websocket hub, and no longer to the origin
+  channel's other rule targets. Add a rule with the replying channel as source to copy replies elsewhere. Activities
+  posted with the tenant API have no source channel and fan out as before.
+- Conversations span channels: new `conversation_channels` table (`origin`, `target`, `member`), shown with
+  `origin_channel_id` on `GET /api/v1/conversations/:id`.
+- Dry-run: `POST /api/v1/routing_rules/dry_run` and the admin page `/admin/routing_rules/dry_run` show the matched
+  rules and the payload per target without storing or sending anything. The admin rule form can edit rules,
+  conditions, transformations, priority and stop processing.
+- Migrations `20261012200000`, `20261012200100` (metadata-only) and `20261012200200` (new table, batched backfill);
+  all safe for a rolling deploy. Docs: [Routing rules](docs/concepts/routing-rules.md). ADR-0046.
+
+### Graceful degradation under database pressure (#35)
+
+- **Two pools.** Oban (its own queries and every job) runs on a background pool of the same repo
+  (`Converger.Repo.Background`, `BACKGROUND_POOL_SIZE`, default 10), so background work cannot starve requests.
+  **Upgrade note:** each node now opens up to `POOL_SIZE + BACKGROUND_POOL_SIZE + 1` connections (21 instead of 11
+  with the defaults); check Postgres `max_connections`, or set `BACKGROUND_POOL_SIZE=0` to keep one shared pool.
+- Per-pool `queue_target`, `queue_interval` and `timeout`: `DB_QUEUE_TARGET_MS`, `DB_QUEUE_INTERVAL_MS`,
+  `DB_TIMEOUT_MS` and their `BACKGROUND_DB_*` counterparts.
+- A request that cannot reach the database (pool saturated, query timed out, connection lost) is answered
+  `503` with `Retry-After` and the code `database_unavailable` instead of `500` and a crash report. WebSocket
+  upgrades get `503` + `Retry-After` too.
+- WebSockets: a join or event answers `{"reason": "unavailable", "retry_after_ms": N}`; a **replay that fails no
+  longer fails the join**: the socket pushes `error {code: "replay_unavailable", watermark}`. Protocol v1: new
+  retryable error `replay_unavailable` (9002, `details.watermark`, then `sync`), `unavailable` for frames, close
+  1013 for a `hello` that cannot be served. SSE streams end with `unavailable` and reconnect.
+- `GET /health/ready` has a `pool` check and answers `503 degraded` while the interactive pool's average wait is
+  above `READY_DB_QUEUE_MS` (200 ms; `0` disables).
+- Metrics `converger_repo_pool_queue_time_ms`, `converger_background_repo_query_queue_time`,
+  `converger_db_unavailable_count{source}`.
+- Chaos harness: `CHAOS_MODE=db_pause` pauses Postgres for 10 s under load (nightly next to the kill mode).
+- Docs: [Database pools and pressure](docs/operations/database.md). ADR-0044.
 ### Delivery SLO telemetry, dashboards and alert rules (#33)
 
 - New telemetry (`Converger.Telemetry`): `[:converger, :delivery, :attempt | :stop | :exception]` around the

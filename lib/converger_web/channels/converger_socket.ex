@@ -25,6 +25,11 @@ defmodule ConvergerWeb.ConvergerSocket do
     else
       _ -> :error
     end
+  rescue
+    # Refused with 503 + Retry-After (ConvergerWeb.SocketGuard.handle_error/2).
+    error in DBConnection.ConnectionError ->
+      Converger.Repo.Pressure.report(:socket, error)
+      {:error, :database_unavailable}
   end
 
   def connect(_params, _socket, _connect_info), do: :error

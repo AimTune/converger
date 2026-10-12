@@ -62,12 +62,21 @@ defmodule ConvergerWeb.ConvergerChannel do
   alias Converger.ConvergerAPI.Watermark
   alias Converger.Pagination
   alias Converger.Pipeline
+  alias Converger.Repo.Pressure
   alias ConvergerWeb.ConvergerAPI.ActivityJSON
   alias ConvergerWeb.{ConversationSignals, SocketGuard}
   alias ConvergerWeb.Protocol.{Frames, InFlight, Send}
 
   @impl true
-  def join("converger:conversation:" <> conversation_id, payload, socket) do
+  def join(topic, payload, socket) do
+    do_join(topic, payload, socket)
+  rescue
+    error in DBConnection.ConnectionError ->
+      Pressure.report(:channel, error)
+      {:error, %{reason: "unavailable", retry_after_ms: Pressure.retry_after_ms()}}
+  end
+
+  defp do_join("converger:conversation:" <> conversation_id, payload, socket) do
     claims = socket.assigns.converger_claims
 
     with {:ok, channel} <- Channels.get_active_channel(claims["channel_id"], claims["tenant_id"]),
@@ -108,7 +117,7 @@ defmodule ConvergerWeb.ConvergerChannel do
     end
   end
 
-  def join("converger:channel:" <> channel_id, _payload, socket) do
+  defp do_join("converger:channel:" <> channel_id, _payload, socket) do
     claims = socket.assigns.converger_claims
 
     with %{"scope" => "channel", "channel_id" => ^channel_id} <- claims,
@@ -128,10 +137,23 @@ defmodule ConvergerWeb.ConvergerChannel do
     end
   end
 
-  def join(_, _, _), do: {:error, %{reason: "invalid_topic"}}
+  defp do_join(_, _, _), do: {:error, %{reason: "invalid_topic"}}
 
   # `clientId` syntax of Protocol v1 (docs/protocol/v1.md, section 7).
   @client_id_format ~r/\A[A-Za-z0-9._:~-]{1,128}\z/
+
+  # A client event that fails because the database is unavailable is answered
+  # with a retryable error; the channel stays joined (issue #35).
+  @impl true
+  def handle_in(event, payload, socket) do
+    do_handle_in(event, payload, socket)
+  rescue
+    error in DBConnection.ConnectionError ->
+      Pressure.report(:channel, error)
+
+      {:reply, {:error, %{reason: "unavailable", retry_after_ms: Pressure.retry_after_ms()}},
+       socket}
+  end
 
   # `postActivity`: send an activity over the socket, the WebSocket
   # equivalent of `POST /api/v1/converger/conversations/:id/activities`.
@@ -153,8 +175,7 @@ defmodule ConvergerWeb.ConvergerChannel do
   #
   # The reply carries the activity's `id`, `seq` and `watermark`, so the
   # client can match its send to the `activitySet` that follows.
-  @impl true
-  def handle_in("postActivity", payload, socket) when is_map(payload) do
+  defp do_handle_in("postActivity", payload, socket) when is_map(payload) do
     claims = socket.assigns.converger_claims
     sender = sender(claims, payload)
 
@@ -177,12 +198,12 @@ defmodule ConvergerWeb.ConvergerChannel do
     end
   end
 
-  def handle_in("postActivity", _payload, socket) do
+  defp do_handle_in("postActivity", _payload, socket) do
     {:reply, {:error, %{reason: "invalid_activity"}}, socket}
   end
 
   # `ack {watermark}`: the client received everything up to the watermark.
-  def handle_in("ack", %{"watermark" => watermark} = payload, socket) do
+  defp do_handle_in("ack", %{"watermark" => watermark} = payload, socket) do
     %{channel: channel} = socket.assigns
 
     with {:ok, conversation_id} <- ack_conversation(socket, payload),
@@ -201,15 +222,15 @@ defmodule ConvergerWeb.ConvergerChannel do
   # --- Client frames ---
 
   # Typing, read receipts and v1 sends belong to one conversation.
-  def handle_in(event, _payload, %{assigns: %{source: :channel}} = socket)
-      when event in ["typing", "read", "frame"],
-      do: bad_request(socket)
+  defp do_handle_in(event, _payload, %{assigns: %{source: :channel}} = socket)
+       when event in ["typing", "read", "frame"],
+       do: bad_request(socket)
 
   # `frame`: a Converger Protocol v1 client frame (docs/protocol/v1.md,
   # sections 2.2 and 7). The protocol answer is pushed as a `frame` event;
   # the Phoenix reply only says the frame arrived. Typing and read receipts
   # have their own events on this binding.
-  def handle_in("frame", %{} = frame, socket) do
+  defp do_handle_in("frame", %{} = frame, socket) do
     case Send.kind(frame["type"]) do
       :text ->
         send_frame(frame, socket)
@@ -239,14 +260,14 @@ defmodule ConvergerWeb.ConvergerChannel do
     end
   end
 
-  def handle_in("frame", _payload, socket) do
+  defp do_handle_in("frame", _payload, socket) do
     push_frames(socket, [Frames.error("bad_request", "a frame must be a JSON object")])
     {:reply, :ok, socket}
   end
 
   # `typing {isTyping}`: relayed to the conversation's other connections and,
   # when the adapter supports it, to the external channel. Never stored.
-  def handle_in("typing", %{"isTyping" => is_typing}, socket) when is_boolean(is_typing) do
+  defp do_handle_in("typing", %{"isTyping" => is_typing}, socket) when is_boolean(is_typing) do
     %{conversation_id: conversation_id, participant: participant, typing: typing} =
       socket.assigns
 
@@ -254,11 +275,11 @@ defmodule ConvergerWeb.ConvergerChannel do
     {:reply, :ok, assign(socket, :typing, typing)}
   end
 
-  def handle_in("typing", _payload, socket), do: bad_request(socket)
+  defp do_handle_in("typing", _payload, socket), do: bad_request(socket)
 
   # `read {watermark}`: the connection's participant has read everything up
   # to `watermark`. The stored position never moves backwards.
-  def handle_in("read", %{"watermark" => watermark}, socket) do
+  defp do_handle_in("read", %{"watermark" => watermark}, socket) do
     %{conversation_id: conversation_id, participant: participant} = socket.assigns
 
     case ConversationSignals.read(conversation_id, participant, watermark) do
@@ -268,11 +289,11 @@ defmodule ConvergerWeb.ConvergerChannel do
     end
   end
 
-  def handle_in("read", _payload, socket),
+  defp do_handle_in("read", _payload, socket),
     do: {:reply, {:error, %{reason: "invalid_watermark"}}, socket}
 
   # A malformed known event or an unknown event: answered, the channel stays joined.
-  def handle_in(_event, _payload, socket), do: bad_request(socket)
+  defp do_handle_in(_event, _payload, socket), do: bad_request(socket)
 
   defp bad_request(socket), do: {:reply, {:error, %{reason: "bad_request"}}, socket}
 
@@ -420,6 +441,17 @@ defmodule ConvergerWeb.ConvergerChannel do
           )
         ]
     end
+  rescue
+    error in DBConnection.ConnectionError ->
+      Pressure.report(:channel, error)
+
+      [
+        Frames.error("unavailable", "the database is unavailable, retry",
+          frame_type: "text",
+          client_id: valid_client_id(frame),
+          retry_after_ms: Pressure.retry_after_ms()
+        )
+      ]
   end
 
   defp send_result({tag, _activity}, nil) when tag in [:created, :duplicate], do: []
@@ -654,6 +686,10 @@ defmodule ConvergerWeb.ConvergerChannel do
     end
   end
 
+  # When the database is unavailable the replay is skipped: the socket stays
+  # joined, keeps its position and pushes `error {code: "replay_unavailable"}`;
+  # the client fetches the range after `watermark` again later (rejoin or
+  # REST). A gap replay is retried by the next live activity (issue #35).
   defp replay(socket, position) do
     {activities, has_more} =
       Activities.page_activities_since(socket.assigns.conversation_id, position,
@@ -661,6 +697,24 @@ defmodule ConvergerWeb.ConvergerChannel do
       )
 
     push_activities(socket, activities, has_more)
+  rescue
+    error in DBConnection.ConnectionError ->
+      Pressure.report(:channel, error)
+      push(socket, "error", replay_unavailable(position))
+      socket
+  end
+
+  defp replay_unavailable(position) do
+    payload = %{
+      code: "replay_unavailable",
+      message: "the database is unavailable, fetch the missed activities again",
+      retry_after_ms: Pressure.retry_after_ms()
+    }
+
+    case position do
+      {:seq, seq} -> Map.put(payload, :watermark, Watermark.encode(seq))
+      _ -> payload
+    end
   end
 
   # One activitySet for activities read from the database (in seq order).

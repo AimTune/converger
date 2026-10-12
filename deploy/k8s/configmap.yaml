@@ -16,6 +16,7 @@ data:
   TRUSTED_PROXIES: 10.0.0.0/8
   FORCE_SSL: "true"
   POOL_SIZE: "10"
+  BACKGROUND_POOL_SIZE: "10"
   # Clustering: libcluster resolves the headless Service and connects to
   # converger@<pod IP> (RELEASE_NODE is derived from POD_IP by
   # rel/env.sh.eex). A short name is resolved through the pod's DNS search

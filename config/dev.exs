@@ -10,6 +10,9 @@ config :converger, Converger.Repo,
   show_sensitive_data_on_connection_error: true,
   pool_size: 20
 
+# Background pool for Oban jobs (Converger.Repo.Pools).
+config :converger, Converger.Repo.Pools, background: [pool_size: 10]
+
 # For development, we disable any cache and enable
 # debugging and code reloading.
 #

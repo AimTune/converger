@@ -120,7 +120,7 @@
         "slow_consumer",
         "conversation_closed", "conversation_not_found",
         "busy", "interrupted", "not_interrupted", "incomplete_resume", "bot_unavailable",
-        "internal", "unavailable"
+        "internal", "unavailable", "replay_unavailable"
       ]
     },
     "aiChunk": {
