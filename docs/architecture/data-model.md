@@ -83,6 +83,7 @@ erDiagram
         text external_id
         text display_name
         jsonb metadata
+        timestamptz opted_out_at
     }
     activities {
         uuid id PK
@@ -188,7 +189,7 @@ A connection to one messaging surface (a webhook, a WhatsApp number, a WebSocket
 
 | Column | Type | Notes |
 | --- | --- | --- |
-| `type` | string, default `"webhook"` | `echo`, `webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `email`. |
+| `type` | string, default `"webhook"` | `echo`, `webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram`, `email`, `sms_twilio`, `sms_vonage`. |
 | `mode` | text, default `"duplex"` | `inbound`, `outbound` or `duplex`. Only `outbound` and `duplex` channels receive deliveries. |
 | `status` | text | `"active"` or not. Deactivating disconnects the channel's sockets. |
 | `secret` | binary, not null, **encrypted** | Channel secret (Converger API `Bearer` secret, inbound signature key). Cloak `Converger.Encrypted.Binary`. |
@@ -221,7 +222,7 @@ Indexes: `(tenant_id)`, `(channel_id)`, `(participant_id, status)` for resolving
 
 An external party (phone number, chat id, e-mail) on a channel. Inbound messages without a `conversation_id` resolve their conversation through it, and outbound adapters read the recipient from it ([ADR-0016](../adr/0016-participant-based-conversation-resolution.md)).
 
-Columns: `tenant_id`, `channel_id`, `external_id` (not null), `display_name`, `metadata` (jsonb, default `{}`). Indexes: unique `(channel_id, external_id)`, `(tenant_id)`.
+Columns: `tenant_id`, `channel_id`, `external_id` (not null), `display_name`, `metadata` (jsonb, default `{}`), `opted_out_at` (set while the participant has opted out, for example with an SMS `STOP`; the pipeline does not deliver to them, see [SMS](../channels/sms.md#opt-out-stop--start)). Indexes: unique `(channel_id, external_id)`, `(tenant_id)`.
 
 ### conversation_reads
 
@@ -287,11 +288,11 @@ Uploaded files ([storage](../storage.md)). Columns: `tenant_id` (not null), `con
 
 ### audit_logs
 
-Append-only (`updated_at` disabled) trail of administrative changes. Columns: `tenant_id` (nullable, `ON DELETE SET NULL` so the trail outlives the tenant), `actor_type`, `actor_id`, `action`, `resource_type`, `resource_id`, `changes` (jsonb, with secrets redacted, [ADR-0012](../adr/0012-secrets-at-rest-and-audit-redaction.md)). Actions: `create`, `update`, `delete`, `toggle_status`, `toggle_enabled`, `rotate_api_key`, `retry` (dead-letter replay). Resource types: `tenant`, `channel`, `routing_rule`, `admin_user`, `tenant_user`, `delivery`. Indexes: `(tenant_id)`, `(resource_type, resource_id)`, `(actor_type, actor_id)`, `(action)`, `(inserted_at)`, `(inserted_at, id)`. Rows older than 365 days (`AUDIT_LOG_RETENTION_DAYS`, `0` keeps them forever) are pruned daily by `PruneWorker`.
+Append-only (`updated_at` disabled) trail of administrative changes. Columns: `tenant_id` (nullable, `ON DELETE SET NULL` so the trail outlives the tenant), `actor_type`, `actor_id`, `action`, `resource_type`, `resource_id`, `changes` (jsonb, with secrets redacted, [ADR-0012](../adr/0012-secrets-at-rest-and-audit-redaction.md)). Actions: `create`, `update`, `delete`, `toggle_status`, `toggle_enabled`, `rotate_api_key`, `retry` (dead-letter replay), `pause_deliveries`, `resume_deliveries`, `register_webhook` (provider webhook registration, for example Telegram `setWebhook`). Resource types: `tenant`, `channel`, `routing_rule`, `admin_user`, `tenant_user`, `delivery`. Indexes: `(tenant_id)`, `(resource_type, resource_id)`, `(actor_type, actor_id)`, `(action)`, `(inserted_at)`, `(inserted_at, id)`. Rows older than 365 days (`AUDIT_LOG_RETENTION_DAYS`, `0` keeps them forever) are pruned daily by `PruneWorker`.
 
 ### channel_health_checks
 
-Written by `ChannelHealthWorker` every 5 minutes per active `webhook`, `whatsapp_meta`, `whatsapp_infobip`, `slack` and `email` channel: `status` (`healthy`, `degraded`, `unhealthy`, `unknown`), `total_deliveries`, `failed_deliveries`, `failure_rate`, `checked_at`. Rows older than 7 days (`HEALTH_CHECK_RETENTION_DAYS`) are pruned daily by `PruneWorker`. Indexes: `(channel_id)`, `(channel_id, checked_at)`, `(checked_at)`.
+Written by `ChannelHealthWorker` every 5 minutes per active `webhook`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram`, `email`, `sms_twilio` and `sms_vonage` channel: `status` (`healthy`, `degraded`, `unhealthy`, `unknown`), `total_deliveries`, `failed_deliveries`, `failure_rate`, `checked_at`. Rows older than 7 days (`HEALTH_CHECK_RETENTION_DAYS`) are pruned daily by `PruneWorker`. Indexes: `(channel_id)`, `(channel_id, checked_at)`, `(checked_at)`.
 
 ### archive_parts
 

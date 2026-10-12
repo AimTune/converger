@@ -233,6 +233,15 @@ defmodule Converger.Channels.Adapter do
   @callback inbound_challenge(channel, params :: map()) :: {:ok, map()} | :none
 
   @doc """
+  The body the provider expects in answer to a handled inbound request, as
+  `{content_type, body}` (e.g. an empty TwiML `<Response/>` for Twilio, which
+  flags any other content type as an error). Only used for `200` answers;
+  adapters that do not implement it get the JSON summary
+  (`activity_ids`, `receipts_processed`, ...).
+  """
+  @callback inbound_response(channel) :: {String.t(), iodata()}
+
+  @doc """
   Adapter-specific retry policy defaults (e.g. `%{timeout_ms: 10_000}`), merged
   over the global defaults and under the channel's own `retry_policy`. See
   `Converger.Pipeline.RetryPolicy`.
@@ -300,19 +309,53 @@ defmodule Converger.Channels.Adapter do
   """
   @callback send_read_receipt(channel, signal) :: :ok | {:error, term()}
 
+  @doc """
+  Download the file behind an inbound media attachment stub (one returned by
+  `c:parse_inbound/2` with a provider media id or URL in `channelData` and no
+  `contentUrl`), so it can be stored in Converger. Called by
+  `Converger.Inbound.Media` before the activity is created.
+
+  Returns `{:ok, %{data: binary, filename: name_or_nil}}`, `:skip` when the
+  attachment has nothing to download, or `{:error, reason}`; on error the
+  stub is kept and the message is still accepted.
+  """
+  @callback fetch_media(channel, attachment :: map()) ::
+              {:ok, %{required(:data) => binary(), optional(:filename) => String.t() | nil}}
+              | :skip
+              | {:error, term()}
+
+  @doc """
+  List the provider's message templates (WhatsApp HSM) of the channel's
+  account, each a map with at least `"name"`, `"language"` and `"status"`.
+  Served, cached, by `GET /api/v1/channels/:id/templates`
+  (`Converger.Channels.Templates`).
+  """
+  @callback list_templates(channel) :: {:ok, [map()]} | {:error, term()}
+
+  @doc """
+  Point the provider's webhook at the channel's inbound URL (e.g. Telegram's
+  `setWebhook`). The admin channel list shows a "Register webhook" button for
+  adapters that implement it.
+  """
+  @callback register_webhook(channel, inbound_url :: String.t()) :: :ok | {:error, term()}
+
   @optional_callbacks [
+    register_webhook: 2,
     config_schema: 0,
     parse_status_update: 2,
     verify_inbound_signature: 3,
     verify_subscription: 2,
     inbound_challenge: 2,
+    inbound_response: 1,
     retry_policy: 0,
     normalize_error: 1,
     capabilities: 0,
     rate_limit: 0,
     health_probe: 1,
     send_typing: 2,
-    send_read_receipt: 2
+    send_read_receipt: 2,
+    fetch_media: 2,
+    list_templates: 1
   ]
 
   @default_capabilities [:inbound, :outbound]
@@ -370,7 +413,10 @@ defmodule Converger.Channels.Adapter do
     Converger.Channels.Adapters.WhatsAppMeta,
     Converger.Channels.Adapters.WhatsAppInfobip,
     Converger.Channels.Adapters.Slack,
-    Converger.Channels.Adapters.Email
+    Converger.Channels.Adapters.Telegram,
+    Converger.Channels.Adapters.Email,
+    Converger.Channels.Adapters.SmsTwilio,
+    Converger.Channels.Adapters.SmsVonage
   ]
 
   @required_functions [type: 0, supported_modes: 0, deliver_activity: 2, parse_inbound: 2]
@@ -618,6 +664,14 @@ defmodule Converger.Channels.Adapter do
     do: call_optional(type, :inbound_challenge, [channel, params], :none)
 
   @doc """
+  The provider's expected answer to a handled inbound request
+  (`c:inbound_response/1`); `:default` (the JSON summary) when the adapter
+  does not implement one.
+  """
+  def inbound_response(%{type: type} = channel),
+    do: call_optional(type, :inbound_response, [channel], :default)
+
+  @doc """
   Forward a typing signal with the channel's adapter. `:unsupported` when the
   adapter does not implement `c:send_typing/2`.
   """
@@ -632,11 +686,33 @@ defmodule Converger.Channels.Adapter do
     do: call_optional(type, :send_read_receipt, [channel, signal], :unsupported)
 
   @doc """
+  Download an inbound media attachment with the channel's adapter
+  (`c:fetch_media/2`). `:unsupported` when the adapter does not implement it.
+  """
+  def fetch_media(%{type: type} = channel, attachment),
+    do: call_optional(type, :fetch_media, [channel, attachment], :unsupported)
+
+  @doc """
+  List the provider templates of the channel with its adapter
+  (`c:list_templates/1`). `:unsupported` when the adapter does not implement it.
+  """
+  def list_templates(%{type: type} = channel),
+    do: call_optional(type, :list_templates, [channel], :unsupported)
+
+  @doc """
   Probe the channel's provider with its adapter (`c:health_probe/1`).
   `:unsupported` when the adapter does not implement one.
   """
   def health_probe(%{type: type} = channel),
     do: call_optional(type, :health_probe, [channel], :unsupported)
+
+  @doc """
+  Register the provider webhook of the channel with its adapter
+  (`c:register_webhook/2`). `:unsupported` when the adapter does not
+  implement it.
+  """
+  def register_webhook(%{type: type} = channel, inbound_url),
+    do: call_optional(type, :register_webhook, [channel, inbound_url], :unsupported)
 
   @doc "Whether the adapter for `type` implements the optional callback `name/arity`."
   def supports?(type, name, arity), do: optional(type, name, arity) != :error

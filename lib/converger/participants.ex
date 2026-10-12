@@ -144,6 +144,57 @@ defmodule Converger.Participants do
   end
 
   @doc """
+  Mark the participant `(channel, external_id)` opted out (`true`, e.g. an
+  SMS `STOP`) or opted in again (`false`, `START`). The participant is
+  created when it does not exist yet. Opting out an already opted-out
+  participant keeps the original time.
+  """
+  def set_opted_out(channel, external_id, opted_out?)
+      when is_binary(external_id) and is_boolean(opted_out?) do
+    with {:ok, participant} <- upsert_participant(channel, %{"external_id" => external_id}) do
+      opted_out_at =
+        cond do
+          not opted_out? -> nil
+          participant.opted_out_at -> participant.opted_out_at
+          true -> DateTime.utc_now()
+        end
+
+      participant
+      |> Ecto.Changeset.change(opted_out_at: opted_out_at)
+      |> Repo.update()
+    end
+  end
+
+  @doc "Whether the participant `(channel_id, external_id)` has opted out."
+  def opted_out?(channel_id, external_id) when is_binary(channel_id) and is_binary(external_id) do
+    from(p in Participant,
+      where:
+        p.channel_id == ^channel_id and p.external_id == ^external_id and
+          not is_nil(p.opted_out_at)
+    )
+    |> Repo.exists?()
+  end
+
+  def opted_out?(_channel_id, _external_id), do: false
+
+  @doc """
+  The external id of an opted-out recipient of `activity` on `channel_id`,
+  or nil: the conversation's participant when it belongs to the channel, and
+  an explicit recipient in the activity metadata (`"to"`,
+  `"recipient_phone"`).
+  """
+  def opted_out_recipient(activity, channel_id) when is_binary(channel_id) do
+    metadata = Map.get(activity, :metadata) || %{}
+
+    [recipient_for(activity, channel_id), metadata["to"], metadata["recipient_phone"]]
+    |> Enum.filter(&(is_binary(&1) and &1 != ""))
+    |> Enum.uniq()
+    |> Enum.find(&opted_out?(channel_id, &1))
+  end
+
+  def opted_out_recipient(_activity, _channel_id), do: nil
+
+  @doc """
   The ids of the channels among `channel_ids` that have a participant with
   `external_id` (e.g. the channels an inbound message must not be echoed
   back to).

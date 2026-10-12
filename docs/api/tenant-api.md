@@ -50,6 +50,7 @@ Controllers: [`ConvergerWeb.TokenController`](https://github.com/AimTune/converg
 | `GET` | `/api/v1/channels/:channel_id/delivery` | `x-api-key` or `x-channel-token` | Channel delivery state (circuit breaker, rate limit) |
 | `POST` | `/api/v1/channels/:channel_id/pause` | `x-api-key` or `x-channel-token` | Pause outbound deliveries of a channel |
 | `POST` | `/api/v1/channels/:channel_id/resume` | `x-api-key` or `x-channel-token` | Resume deliveries (also closes an open breaker) |
+| `GET` | `/api/v1/channels/:channel_id/templates` | `x-api-key` or `x-channel-token` | List the provider message templates (WhatsApp HSM) of a channel, cached |
 
 On the routes marked `x-api-key` or `x-channel-token`, only the `x-channel-token` option is deprecated.
 
@@ -84,7 +85,8 @@ Rendered by [`ConvergerWeb.ConversationJSON`](https://github.com/AimTune/converg
   "participant": {
     "id": "5e7a9c1b-3d5f-4a7c-9e1b-3d5f7a9c1b3d",
     "external_id": "16505551234",
-    "display_name": "Sheena"
+    "display_name": "Sheena",
+    "opted_out_at": null
   },
   "inserted_at": "2026-10-09T12:00:00.123456Z",
   "updated_at": "2026-10-09T12:05:41.004512Z"
@@ -95,7 +97,7 @@ Rendered by [`ConvergerWeb.ConversationJSON`](https://github.com/AimTune/converg
 | --- | --- |
 | `status` | `active` (open, accepts activities) or `closed` |
 | `metadata` | Free-form JSON object |
-| `participant_id`, `participant` | The external party (for example a WhatsApp number), set by inbound participant resolution ([ADR-0016](../adr/0016-participant-based-conversation-resolution.md)). `participant` is `null` when there is none, and also in responses that do not load it (create, close, reopen). |
+| `participant_id`, `participant` | The external party (for example a WhatsApp number), set by inbound participant resolution ([ADR-0016](../adr/0016-participant-based-conversation-resolution.md)). `participant` is `null` when there is none, and also in responses that do not load it (create, close, reopen). `participant.opted_out_at` is set while the participant has opted out (an SMS `STOP`, see [Participants](../concepts/participants.md#opt-out)). |
 | `updated_at` | Bumped by every new activity; the inactivity expiry uses it as the last-activity time |
 
 ### Activity
@@ -326,7 +328,7 @@ curl -s "$CONVERGER/api/v1/conversations?status=active&external_id=16505551234&l
       "channel_id": "9b1f3a52-6c0d-4e2b-8f7a-1d2c3b4a5e6f",
       "tenant_id": "c2a4e6f8-1b3d-4f5a-9c7e-2d4f6a8b0c1e",
       "participant_id": "5e7a9c1b-3d5f-4a7c-9e1b-3d5f7a9c1b3d",
-      "participant": { "id": "5e7a9c1b-3d5f-4a7c-9e1b-3d5f7a9c1b3d", "external_id": "16505551234", "display_name": "Sheena" },
+      "participant": { "id": "5e7a9c1b-3d5f-4a7c-9e1b-3d5f7a9c1b3d", "external_id": "16505551234", "display_name": "Sheena", "opted_out_at": null },
       "inserted_at": "2026-10-09T12:00:00.123456Z",
       "updated_at": "2026-10-09T12:05:41.004512Z"
     }
@@ -773,6 +775,58 @@ curl -s -X POST "$CONVERGER/api/v1/channels/$CHANNEL_ID/resume" -H "x-api-key: $
 
 Both return `200 OK` with the delivery state above, are idempotent, and are written to the audit log as
 `pause_deliveries` / `resume_deliveries` (actor `tenant_api`). An unknown or foreign channel returns `404`.
+
+## Channel message templates
+
+`GET /api/v1/channels/:channel_id/templates`
+
+Lists the message templates (WhatsApp HSM) the channel's provider account has, so a bot can pick an approved template
+for a message outside WhatsApp's 24-hour window. Converger proxies the provider's own list
+([ADR-0039](../adr/0039-whatsapp-rich-outbound-and-inbound-media-download.md)):
+
+| Channel type | Provider call | Needs |
+| --- | --- | --- |
+| `whatsapp_meta` | `GET https://graph.facebook.com/<version>/<waba_id>/message_templates`, following `paging.next` for up to 10 pages of 100 | the channel config key `waba_id` |
+| `whatsapp_infobip` | `GET <base_url>/whatsapp/2/senders/<sender>/templates` | |
+
+```bash
+curl -s "$CONVERGER/api/v1/channels/$CHANNEL_ID/templates" -H "x-api-key: $API_KEY"
+```
+
+```json
+{
+  "data": [
+    {
+      "id": "1234567890",
+      "name": "order_update",
+      "language": "en_US",
+      "status": "APPROVED",
+      "category": "UTILITY",
+      "components": [{"type": "BODY", "text": "Your order {{1}} has shipped."}]
+    }
+  ],
+  "cached": false,
+  "fetched_at": "2026-10-11T12:00:00.000000Z"
+}
+```
+
+Each entry keeps the provider's field values: Meta templates have `id`, `name`, `language`, `status`, `category` and
+`components`; Infobip templates have `id`, `name`, `language`, `status`, `category` and `structure`.
+
+The list is cached per node for 5 minutes (`config :converger, Converger.Channels.Templates, ttl_ms: 300_000`);
+`cached` says whether this response came from the cache. Add `?refresh=true` to skip the cache, for example right after
+a template was approved. Updating the channel clears its cache on the node that handled the update; other nodes pick up
+the change within the TTL. Failed listings are not cached.
+
+| Status | Body | Cause |
+| --- | --- | --- |
+| `200` | the list above | |
+| `404` | `{"errors": {"detail": "Not Found"}}` | Unknown channel, or a channel of another tenant |
+| `422` | `{"error": "Channel type echo has no message templates"}` | The channel's adapter does not list templates |
+| `422` | `{"error": "whatsapp_meta config 'waba_id' (WhatsApp Business Account id) is required to list templates"}` | `whatsapp_meta` channel without `waba_id` |
+| `502` | `{"error": "WhatsApp API returned 401: ..."}` | The provider call failed (expired token, wrong account, timeout) |
+
+How to send a template is described in [WhatsApp: templates](../channels/whatsapp.md#templates-hsm).
 
 ## Related
 

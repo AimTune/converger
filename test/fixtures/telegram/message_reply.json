@@ -1,0 +1,17 @@
+{
+  "update_id": 912345602,
+  "message": {
+    "message_id": 43,
+    "from": {"id": 123456789, "is_bot": false, "first_name": "Ada", "language_code": "en"},
+    "chat": {"id": 123456789, "first_name": "Ada", "type": "private"},
+    "date": 1760140860,
+    "reply_to_message": {
+      "message_id": 41,
+      "from": {"id": 123456789, "is_bot": false, "first_name": "Ada"},
+      "chat": {"id": 123456789, "first_name": "Ada", "type": "private"},
+      "date": 1760140800,
+      "text": "Where is my order?"
+    },
+    "text": "Any news?"
+  }
+}

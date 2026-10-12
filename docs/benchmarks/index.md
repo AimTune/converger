@@ -9,7 +9,7 @@ sidebar_position: 1
 Converger's performance numbers come from a load harness that drives the **production release** over HTTP and
 WebSocket, the same way clients and providers do. Each run records the hardware it ran on, and it fails if any
 message the server acknowledged is lost. The decision and its trade-offs are in
-[ADR-0043](../adr/0043-k6-load-harness-on-the-release-image-with-seq-based-loss-checks.md).
+[ADR-0046](../adr/0046-k6-load-harness-on-the-release-image-with-seq-based-loss-checks.md).
 
 ## Published results
 
@@ -51,7 +51,7 @@ with the same idempotency key until it is acknowledged, so a restart delays mess
 | Sustained msgs/s | Messages acknowledged by the server divided by the sending time. |
 | WebSocket connections | `welcome` frames received (`ws_connected`). |
 | CPU and RSS per node | `docker stats`, streamed about once a second for every node and Postgres. |
-| DB pool wait | `converger_repo_query_queue_time` (the last Ecto queue time) from each node's `/metrics`, sampled every second; the report shows the highest value seen. |
+| DB pool wait | The `converger_repo_query_queue_time` histogram (time waiting for a pool connection) from each node's `/metrics`, read every second: the mean wait of the queries in each interval. The report shows the highest interval mean. Runs before #33 (such as the first published one) used the last queue time instead. |
 | Oban queue depth | Open jobs (`available`, `scheduled`, `executing`, `retryable`) in `oban_jobs`, every second. |
 | Recovery time after a restart or kill (s) | From the restart or `SIGKILL` until `GET /health/ready` answers 200 again. |
 | Reconnect time (ms) | From a socket closing to the `welcome` of its next connection. |

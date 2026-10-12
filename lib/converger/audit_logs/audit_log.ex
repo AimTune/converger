@@ -20,7 +20,7 @@ defmodule Converger.AuditLogs.AuditLog do
   @valid_actor_types ~w(admin tenant_api tenant_user system)
   @valid_actions ~w(
     create update delete toggle_status toggle_enabled rotate_api_key retry
-    pause_deliveries resume_deliveries
+    pause_deliveries resume_deliveries register_webhook
   )
   @valid_resource_types ~w(tenant channel routing_rule admin_user tenant_user delivery)
 

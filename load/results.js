@@ -45,7 +45,8 @@ const exitCodes = Object.fromEntries(lines("exit_codes.csv").map(([s, c]) => [s,
 const restarts = lines("restarts.csv").map(([scenario, node, ms]) => ({ scenario, node, ms: Number(ms) }));
 
 // samples.csv: "<ts>;stats;<container>;<cpu %>;<used> / <limit>",
-// "<ts>;oban;<open jobs>", "<ts>;queue;<node>;<metric line>".
+// "<ts>;oban;<open jobs>", "<ts>;queue;<node>;hist;<sum ms>;<count>" (or
+// ";last;<ms>" before #33 made the queue time a histogram).
 const bytes = (s) => {
   const m = /([\d.]+)\s*([KMGT]?i?B)/.exec(s || "");
   if (!m) return null;
@@ -53,6 +54,7 @@ const bytes = (s) => {
   return Number(m[1]) * (unit || 1);
 };
 const samples = { stats: [], oban: [], queue: [] };
+const queuePrev = {};
 for (const row of lines("samples.csv")) {
   const ts = Number(row[0]);
   if (row[1] === "stats") {
@@ -60,9 +62,18 @@ for (const row of lines("samples.csv")) {
     samples.stats.push({ ts, node, cpu: parseFloat(row[3]), rss: bytes(row[4]) });
   } else if (row[1] === "oban" && row[2] !== "") {
     samples.oban.push({ ts, depth: Number(row[2]) });
-  } else if (row[1] === "queue") {
-    const value = parseFloat(row[3].trim().split(/\s+/).pop());
-    if (!Number.isNaN(value)) samples.queue.push({ ts, node: row[2], ms: value });
+  } else if (row[1] === "queue" && row[3] === "hist") {
+    // Histogram: the mean wait of the queries since the previous sample.
+    // A restarted node starts its counters again; skip that interval.
+    const sum = Number(row[4]);
+    const n = Number(row[5]);
+    const prev = queuePrev[row[2]];
+    queuePrev[row[2]] = { sum, n };
+    if (prev && n >= prev.n && sum >= prev.sum) {
+      samples.queue.push({ ts, node: row[2], ms: n > prev.n ? (sum - prev.sum) / (n - prev.n) : 0 });
+    }
+  } else if (row[1] === "queue" && row[3] === "last") {
+    samples.queue.push({ ts, node: row[2], ms: Number(row[4]) });
   }
 }
 

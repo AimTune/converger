@@ -1,8 +1,9 @@
 defmodule Converger.Channels.Adapters.WhatsAppMeta do
   use Converger.Channels.Adapter, type: "whatsapp_meta"
 
-  alias Converger.Channels.{DeliveryError, InboundSignature}
-  alias Converger.Participants
+  alias Converger.Channels.{DeliveryError, InboundSignature, MediaDownload}
+  alias Converger.Channels.WhatsApp.Outbound
+  alias Converger.{Participants, Uploads}
   alias Converger.Pipeline.RetryPolicy
 
   require Logger
@@ -11,9 +12,10 @@ defmodule Converger.Channels.Adapters.WhatsAppMeta do
   # with `graph_api_version` or globally in config.
   @default_graph_api_version "v26.0"
 
-  # Outbound messages are sent as WhatsApp text. Native outbound reactions,
-  # media and interactive messages are planned (#37); other activity types are
-  # downgraded to text or skipped (Converger.Activities.Downgrade).
+  # `message` activities are sent as text, media, template, interactive,
+  # location and contacts messages (Converger.Channels.WhatsApp.Outbound).
+  # Native outbound reactions and edits are not implemented; other activity
+  # types are downgraded to text or skipped (Converger.Activities.Downgrade).
   @impl true
   def capabilities do
     [
@@ -23,6 +25,8 @@ defmodule Converger.Channels.Adapters.WhatsAppMeta do
       :receipts,
       :typing,
       :provider_ack,
+      :media,
+      :templates,
       activity_types: ~w(message)
     ]
   end
@@ -69,6 +73,19 @@ defmodule Converger.Channels.Adapters.WhatsAppMeta do
         type: :string,
         label: "Graph API version",
         placeholder: @default_graph_api_version
+      },
+      %{
+        name: "waba_id",
+        type: :string,
+        label: "WhatsApp Business Account ID",
+        placeholder: "Needed to list templates",
+        help: "Used by GET /api/v1/channels/:id/templates"
+      },
+      %{
+        name: "download_media",
+        type: :boolean,
+        label: "Download inbound media",
+        help: "Store inbound images, audio and documents in Converger (default true)"
       }
     ]
   end
@@ -80,9 +97,6 @@ defmodule Converger.Channels.Adapters.WhatsAppMeta do
 
   @impl true
   def deliver_activity(channel, activity) do
-    phone_number_id = channel.config["phone_number_id"]
-    access_token = channel.config["access_token"]
-
     recipient =
       activity.metadata["recipient_phone"] || activity.metadata["to"] ||
         Participants.recipient_for(activity, Map.get(channel, :id))
@@ -93,37 +107,299 @@ defmodule Converger.Channels.Adapters.WhatsAppMeta do
          "no recipient: set activity metadata 'recipient_phone' or 'to', or reply in a conversation with a participant on this channel"
        )}
     else
-      url = "https://graph.facebook.com/#{graph_api_version(channel)}/#{phone_number_id}/messages"
+      with {:ok, parts} <- Outbound.parts(activity) do
+        send_parts(channel, recipient, parts)
+      end
+    end
+  end
 
-      payload = %{
+  # One WhatsApp message per part, in order. The first message id is the
+  # delivery's provider_message_id (receipts are matched against it); every
+  # id is kept in whatsapp_message_ids. A failure after the first part makes
+  # the retry send the earlier parts again (at-least-once).
+  defp send_parts(channel, recipient, parts) do
+    result =
+      Enum.reduce_while(parts, [], fn part, ids ->
+        with {:ok, content} <- render(channel, part),
+             {:ok, id} <- post_message(channel, recipient, content) do
+          {:cont, [id | ids]}
+        else
+          {:error, _} = error -> {:halt, error}
+        end
+      end)
+
+    case result do
+      {:error, _} = error ->
+        error
+
+      ids ->
+        [first | _] = ids = Enum.reverse(ids)
+
+        {:ok,
+         %{whatsapp_message_id: first, provider_message_id: first, whatsapp_message_ids: ids}}
+    end
+  end
+
+  # The message body of a part, without the envelope (messaging_product, to).
+  defp render(_channel, {:text, text}), do: {:ok, %{type: "text", text: %{body: text}}}
+
+  defp render(_channel, {:template, template}) do
+    {:ok,
+     %{
+       type: "template",
+       template: %{
+         name: template["name"],
+         language: %{code: template["language"]},
+         components: template["components"]
+       }
+     }}
+  end
+
+  defp render(channel, {:media, kind, attachment, caption}) do
+    with {:ok, source} <- media_reference(channel, attachment) do
+      media =
+        source
+        |> put_present(:caption, caption)
+        |> put_present(:filename, if(kind == "document", do: attachment["name"]))
+
+      {:ok, %{"type" => kind, kind => media}}
+    end
+  end
+
+  defp render(_channel, {:location, content}) do
+    location =
+      %{latitude: content["latitude"], longitude: content["longitude"]}
+      |> put_present(:name, content["name"])
+      |> put_present(:address, content["address"])
+
+    {:ok, %{type: "location", location: location}}
+  end
+
+  defp render(_channel, {:contacts, contacts}) do
+    contacts =
+      for contact <- contacts do
+        name = contact["name"] || "Contact"
+        phones = for phone <- List.wrap(contact["phones"]), is_binary(phone), do: %{phone: phone}
+        %{name: %{formatted_name: name, first_name: name}, phones: phones}
+      end
+
+    {:ok, %{type: "contacts", contacts: contacts}}
+  end
+
+  defp render(_channel, {:buttons, card}) do
+    buttons =
+      for b <- card["buttons"], do: %{type: "reply", reply: %{id: b["id"], title: b["title"]}}
+
+    {:ok, %{type: "interactive", interactive: interactive("button", card, %{buttons: buttons})}}
+  end
+
+  defp render(_channel, {:list, card}) do
+    sections =
+      for s <- card["sections"] do
+        rows =
+          for r <- s["rows"],
+              do: put_present(%{id: r["id"], title: r["title"]}, :description, r["description"])
+
+        put_present(%{rows: rows}, :title, s["title"])
+      end
+
+    action = %{button: card["button"], sections: sections}
+    {:ok, %{type: "interactive", interactive: interactive("list", card, action)}}
+  end
+
+  defp interactive(type, card, action) do
+    %{type: type, body: %{text: card["body"]}, action: action}
+    |> put_present(:header, card["header"] && %{type: "text", text: card["header"]})
+    |> put_present(:footer, card["footer"] && %{text: card["footer"]})
+  end
+
+  defp put_present(map, _key, nil), do: map
+  defp put_present(map, key, value), do: Map.put(map, key, value)
+
+  # A file uploaded to Converger goes to the Media API first: the Graph API
+  # cannot fetch Converger's authenticated attachment URL.
+  defp media_reference(channel, attachment) do
+    case Outbound.media_source(channel, attachment, type()) do
+      {:stored, stored} -> upload_media(channel, stored)
+      {:provider_id, id} -> {:ok, %{id: id}}
+      {:link, url} -> {:ok, %{link: url}}
+      {:error, _} = error -> error
+    end
+  end
+
+  defp upload_media(channel, stored) do
+    with {:ok, data} <- read_stored(stored) do
+      url = graph_url(channel, "#{channel.config["phone_number_id"]}/media")
+
+      form = [
         messaging_product: "whatsapp",
-        recipient_type: "individual",
-        to: recipient,
-        type: "text",
-        text: %{body: activity.text}
-      }
+        type: stored.content_type,
+        file: {data, filename: stored.filename || stored.id, content_type: stored.content_type}
+      ]
 
-      options =
-        [
-          json: payload,
-          headers: [{"authorization", "Bearer #{access_token}"}],
-          receive_timeout: RetryPolicy.for_channel(channel).timeout_ms
-        ]
-        |> Keyword.merge(Application.get_env(:converger, :whatsapp_req_options, []))
+      case Req.post(url, request_options(channel, form_multipart: form)) do
+        {:ok, %Req.Response{status: 200, body: %{"id" => id}}} ->
+          {:ok, %{id: id}}
 
-      case Req.post(url, options) do
-        {:ok, %Req.Response{status: 200, body: body}} ->
-          message_id = get_in(body, ["messages", Access.at(0), "id"])
-          {:ok, %{whatsapp_message_id: message_id, provider_message_id: message_id}}
-
-        # 400 (e.g. invalid recipient) and auth errors are permanent; 429 and
-        # 5xx are retried, honouring Retry-After.
         {:ok, %Req.Response{status: status, headers: headers, body: body}} ->
-          {:error, DeliveryError.from_http(status, headers, body, "WhatsApp API")}
+          {:error, classify_http(status, headers, body, "WhatsApp media upload")}
 
         {:error, reason} ->
-          {:error, DeliveryError.from_transport(reason, "WhatsApp API")}
+          {:error, DeliveryError.from_transport(reason, "WhatsApp media upload")}
       end
+    end
+  end
+
+  defp read_stored(stored) do
+    case Uploads.storage().get(Uploads.storage_opts(), stored.storage_key) do
+      {:ok, data} ->
+        {:ok, data}
+
+      {:error, :not_found} ->
+        {:error, DeliveryError.permanent("attachment #{stored.id} file is missing")}
+
+      {:error, reason} ->
+        {:error, %DeliveryError{reason: "attachment storage failed: #{inspect(reason)}"}}
+    end
+  end
+
+  defp post_message(channel, recipient, content) do
+    url = graph_url(channel, "#{channel.config["phone_number_id"]}/messages")
+
+    payload =
+      Map.merge(
+        %{"messaging_product" => "whatsapp", "recipient_type" => "individual", "to" => recipient},
+        Map.new(content, fn {k, v} -> {to_string(k), v} end)
+      )
+
+    case Req.post(url, request_options(channel, json: payload)) do
+      {:ok, %Req.Response{status: 200, body: body}} ->
+        {:ok, get_in(body, ["messages", Access.at(0), "id"])}
+
+      # 400 (e.g. invalid recipient) and auth errors are permanent; 429 and
+      # 5xx are retried, honouring Retry-After.
+      {:ok, %Req.Response{status: status, headers: headers, body: body}} ->
+        {:error, classify_http(status, headers, body, "WhatsApp API")}
+
+      {:error, reason} ->
+        {:error, DeliveryError.from_transport(reason, "WhatsApp API")}
+    end
+  end
+
+  # Cloud API error 131047 ("Re-engagement message"): more than 24 hours
+  # since the customer last wrote, so only templates are accepted.
+  @outside_window_code 131_047
+
+  defp classify_http(status, headers, body, label) do
+    if error_code(body) == @outside_window_code do
+      error =
+        DeliveryError.permanent(Outbound.outside_window_message("#{label} returned #{status}"))
+
+      %{error | status: status}
+    else
+      DeliveryError.from_http(status, headers, body, label)
+    end
+  end
+
+  defp error_code(%{"error" => %{"code" => code}}), do: code
+  defp error_code(_body), do: nil
+
+  defp request_options(channel, options) do
+    [
+      headers: [{"authorization", "Bearer #{channel.config["access_token"]}"}],
+      receive_timeout: RetryPolicy.for_channel(channel).timeout_ms
+    ]
+    |> Keyword.merge(options)
+    |> Keyword.merge(Application.get_env(:converger, :whatsapp_req_options, []))
+  end
+
+  defp graph_url(channel, path),
+    do: "https://graph.facebook.com/#{graph_api_version(channel)}/#{path}"
+
+  @doc """
+  Downloads an inbound media file: `GET /<version>/<media id>` returns a
+  short-lived URL and the file size (checked against the upload limit), and
+  the URL is fetched with the same access token.
+  """
+  @impl true
+  def fetch_media(channel, %{"channelData" => %{"providerMediaId" => media_id}})
+      when is_binary(media_id) and media_id != "" do
+    url = graph_url(channel, URI.encode(media_id, &URI.char_unreserved?/1))
+    options = [receive_timeout: MediaDownload.timeout_ms(), retry: false]
+
+    case Req.get(url, request_options(channel, options)) do
+      {:ok, %Req.Response{status: 200, body: %{"url" => media_url} = media}} ->
+        if is_integer(media["file_size"]) and media["file_size"] > Uploads.max_file_size() do
+          {:error, :too_large}
+        else
+          headers = [{"authorization", "Bearer #{channel.config["access_token"]}"}]
+
+          with {:ok, data} <- MediaDownload.get(media_url, headers: headers) do
+            {:ok, %{data: data, filename: nil}}
+          end
+        end
+
+      {:ok, %Req.Response{status: status}} ->
+        {:error, {:http_error, status}}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  def fetch_media(_channel, _attachment), do: :skip
+
+  @max_template_pages 10
+
+  @doc """
+  Lists the message templates of the channel's WhatsApp Business Account
+  (`GET /<version>/<waba_id>/message_templates`, following `paging.next`
+  for up to #{@max_template_pages} pages of 100). Needs the `waba_id`
+  config key.
+  """
+  @impl true
+  def list_templates(channel) do
+    case channel.config["waba_id"] do
+      waba_id when is_binary(waba_id) and waba_id != "" ->
+        url = graph_url(channel, "#{waba_id}/message_templates")
+        params = [limit: 100, fields: "name,language,status,category,components"]
+        fetch_template_pages(channel, url, [params: params], [], @max_template_pages)
+
+      _ ->
+        {:error,
+         {:invalid_config,
+          "whatsapp_meta config 'waba_id' (WhatsApp Business Account id) is required to list templates"}}
+    end
+  end
+
+  defp fetch_template_pages(_channel, _url, _options, acc, 0), do: {:ok, acc}
+
+  defp fetch_template_pages(channel, url, options, acc, pages_left) do
+    options = Keyword.merge(options, retry: false, receive_timeout: 10_000)
+
+    case Req.get(url, request_options(channel, options)) do
+      {:ok, %Req.Response{status: 200, body: %{"data" => data} = body}} when is_list(data) ->
+        templates =
+          acc ++
+            for(
+              t <- data,
+              is_map(t),
+              do: Map.take(t, ~w(id name language status category components))
+            )
+
+        case get_in(body, ["paging", "next"]) do
+          next when is_binary(next) ->
+            fetch_template_pages(channel, next, [], templates, pages_left - 1)
+
+          _ ->
+            {:ok, templates}
+        end
+
+      {:ok, %Req.Response{status: status, body: body}} ->
+        {:error, "WhatsApp API returned #{status}: #{inspect(body)}"}
+
+      {:error, reason} ->
+        {:error, "WhatsApp API request failed: #{inspect(reason)}"}
     end
   end
 
@@ -498,6 +774,11 @@ defmodule Converger.Channels.Adapters.WhatsAppMeta do
   defp normalize_status("read"), do: "read"
   defp normalize_status("failed"), do: "failed"
   defp normalize_status(_), do: "sent"
+
+  # A free-form message sent outside the 24-hour window is accepted with 200
+  # and then fails with error 131047 in a status webhook.
+  defp extract_error(%{"errors" => [%{"code" => @outside_window_code} = error | _]}),
+    do: Outbound.outside_window_message(error["title"] || "error #{@outside_window_code}")
 
   defp extract_error(%{"errors" => [%{"title" => title} | _]}), do: title
   defp extract_error(_), do: nil

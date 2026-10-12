@@ -40,7 +40,7 @@ defmodule ConvergerWeb.ProtocolSocket do
 
   alias Converger.{Activities, Channels, Conversations, Inbound, RateLimit}
   alias Converger.Auth.ConvergerToken
-  alias ConvergerWeb.{ConversationSignals, Protocol, SocketGuard}
+  alias ConvergerWeb.{ClientConnections, ConversationSignals, Protocol, SocketGuard}
   alias ConvergerWeb.Protocol.{Codec, Feed, Frames, Send}
 
   # Frames a client sends that need a bot channel (mekik relay, #64).
@@ -72,6 +72,7 @@ defmodule ConvergerWeb.ProtocolSocket do
     }
 
     ConvergerWeb.ProtocolConnections.register()
+    ClientConnections.connected("protocol", "websocket")
     schedule_tick(state)
     {:ok, state}
   end
@@ -79,6 +80,7 @@ defmodule ConvergerWeb.ProtocolSocket do
   @impl WebSock
   def handle_in({data, opcode: opcode}, state) do
     state = %{state | last_in: now()}
+    Converger.Telemetry.ws_frame("protocol", "websocket", :in)
 
     cond do
       (retry_after = SocketGuard.rate_limited()) != nil ->
@@ -172,10 +174,15 @@ defmodule ConvergerWeb.ProtocolSocket do
 
   def terminate(reason, _state), do: terminated(reason)
 
-  defp terminated({:error, :max_frame_size_exceeded}),
+  defp terminated(reason) do
+    ClientConnections.disconnected("protocol", "websocket")
+    limit_hit(reason)
+  end
+
+  defp limit_hit({:error, :max_frame_size_exceeded}),
     do: SocketGuard.emit(:frame_too_large, __MODULE__)
 
-  defp terminated(_reason), do: :ok
+  defp limit_hit(_reason), do: :ok
 
   defp slow_consumer?,
     do: SocketGuard.queue_len(self()) > SocketGuard.config(:slow_consumer_queue_len)
@@ -650,6 +657,8 @@ defmodule ConvergerWeb.ProtocolSocket do
   defp reply([], state), do: {:ok, state}
 
   defp reply(frames, state) do
+    Converger.Telemetry.ws_frame("protocol", "websocket", :out, length(frames))
+
     {:push, Enum.map(frames, &Codec.encode(&1, state.encoding)), %{state | last_out: now()}}
   end
 

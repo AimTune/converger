@@ -10,7 +10,9 @@ This page covers the behaviour, the built-in channel types and what each one sup
 
 - [WhatsApp (Meta Cloud API and Infobip)](whatsapp.md)
 - [Slack](slack.md)
+- [Telegram](telegram.md)
 - [Email](email.md)
+- [SMS (Twilio, Vonage)](sms.md)
 - [Echo](echo.md)
 - [WebSocket](websocket.md)
 - Generic HTTP webhook: see [Outbound webhooks](../webhooks.md)
@@ -22,7 +24,7 @@ The channel schema ([`lib/converger/channels/channel.ex`](https://github.com/Aim
 
 | Field | Values | Default |
 | --- | --- | --- |
-| `type` | `echo`, `webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `email` | `webhook` |
+| `type` | `echo`, `webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram`, `email`, `sms_twilio`, `sms_vonage` | `webhook` |
 | `mode` | `inbound`, `outbound`, `duplex` | `duplex` |
 | `status` | `active` or another value such as `inactive`. Only `active` channels accept inbound requests and socket joins, are routing-rule targets and get health checks. | `active` |
 | `require_signature` | `true` / `false` | `true` |
@@ -47,7 +49,7 @@ The behaviour lives in [`lib/converger/channels/adapter.ex`](https://github.com/
 
 ### Registry
 
-The channel types are the registered adapters: the built-ins (`echo`, `webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `email`) followed by the modules in `config :converger, :adapters`. A configured adapter with a built-in type replaces it. `Adapter.types/0` lists the types (the channel changeset and the admin type dropdown use it), and `Adapter.types_with/1` the types with a capability. The registry is checked at boot (`Adapter.validate_registry!/0`). Nothing else in the code base lists channel types: the pipeline, health checks, the admin forms and the inbound controller ask the adapter. See [Writing an adapter](writing-an-adapter.md) and [ADR-0038](../adr/0038-adapter-behaviour-v2-and-config-driven-registry.md).
+The channel types are the registered adapters: the built-ins (`echo`, `webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram`, `email`, `sms_twilio`, `sms_vonage`) followed by the modules in `config :converger, :adapters`. A configured adapter with a built-in type replaces it. `Adapter.types/0` lists the types (the channel changeset and the admin type dropdown use it), and `Adapter.types_with/1` the types with a capability. The registry is checked at boot (`Adapter.validate_registry!/0`). Nothing else in the code base lists channel types: the pipeline, health checks, the admin forms and the inbound controller ask the adapter. See [Writing an adapter](writing-an-adapter.md) and [ADR-0038](../adr/0038-adapter-behaviour-v2-and-config-driven-registry.md).
 
 ### Callbacks
 
@@ -66,23 +68,27 @@ The channel types are the registered adapters: the built-ins (`echo`, `webhook`,
 | `normalize_error/1` | no | `DeliveryError` or a map with `reason`, `retryable?`, `retry_after_ms` | Classifies a delivery failure for the retry policy and the circuit breaker. Missing callback means `DeliveryError.normalize/1`. |
 | `rate_limit/0` | no | `String.t()` or `nil` | The provider's default outbound rate, see [rate limiting](../operations/rate-limiting.md). |
 | `health_probe/1` | no | `:ok` or `{:error, term}` | Checks the provider account for channels without recent deliveries, see [channel health](#channel-health). |
+| `register_webhook/2` | no | `:ok` or `{:error, term}` | Points the provider's webhook at the channel's inbound URL (Telegram `setWebhook`). The admin channel list shows a **Register webhook** button for adapters that implement it; a successful call is audited as `register_webhook`. |
 | `capabilities/0` | no | list of atoms and `activity_types: [String.t()]` | What the adapter can do (below). An `activity_types: [...]` entry names the activity types it delivers natively; other types are downgraded to text or skipped per channel ([capabilities and downgrade](writing-an-adapter.md#capabilities-and-downgrade)). Missing callback means `[:inbound, :outbound]`; a missing `activity_types` entry means every client type. |
 | `send_typing/2` | no | `:ok` or `{:error, term}` | Shows a WebSocket participant's typing indicator to the channel's participant. Missing callback means the channel gets no typing. |
 | `send_read_receipt/2` | no | `:ok` or `{:error, term}` | Marks the channel participant's messages as read when a WebSocket participant reads them. Missing callback means no read receipts are sent. |
+| `inbound_response/1` | no | `{content_type, body}` | The body the provider expects in a `200` answer to a handled inbound request (Twilio: an empty TwiML `<Response>`). Missing callback means the JSON summary. |
 
 ### Capabilities
 
 | Capability | Effect | Built-in adapters with it |
 | --- | --- | --- |
-| `:inbound` | Accepts inbound messages; with `:outbound`, allows `duplex` | `webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `email` |
-| `:outbound` | The pipeline delivers to its channels | all seven |
-| `:external_delivery` | Its channels get health checks and dashboard health | `webhook`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `email` |
-| `:receipts` | Reports delivery or read receipts | `webhook`, `whatsapp_meta`, `whatsapp_infobip`, `email` |
-| `:typing` | Forwards typing indicators | `whatsapp_meta` |
+| `:inbound` | Accepts inbound messages; with `:outbound`, allows `duplex` | `webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram`, `email`, `sms_twilio`, `sms_vonage` |
+| `:outbound` | The pipeline delivers to its channels | all ten |
+| `:external_delivery` | Its channels get health checks and dashboard health | `webhook`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram`, `email`, `sms_twilio`, `sms_vonage` |
+| `:receipts` | Reports delivery or read receipts | `webhook`, `whatsapp_meta`, `whatsapp_infobip`, `email`, `sms_twilio`, `sms_vonage` |
+| `:typing` | Forwards typing indicators | `whatsapp_meta`, `telegram` |
 | `:lifecycle_events` | Receives conversation close and reopen events | `webhook`, `websocket` |
-| `:provider_ack` | Handled inbound requests always get `200` | `whatsapp_meta`, `whatsapp_infobip`, `slack`, `email` |
-| `:media`, `:edits` | Native outbound files, and edits / deletes of posted messages | `slack`; `email` has `:media` (stored uploads are attached) |
-| `:templates`, `:reactions` | Native outbound content (planned, [#37](https://github.com/AimTune/converger/issues/37)) | none yet |
+| `:provider_ack` | Handled inbound requests always get `200` | `whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram`, `email`, `sms_twilio`, `sms_vonage` |
+| `:media` | Native outbound files | `whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram` (photos and documents), `email` (stored uploads are attached), `sms_twilio` (MMS from absolute URLs) |
+| `:templates` | Sends provider message templates (WhatsApp HSM) ([WhatsApp](whatsapp.md#templates-hsm)) | `whatsapp_meta`, `whatsapp_infobip` |
+| `:edits` | Edits and deletes of posted messages | `slack` |
+| `:reactions` | Native outbound reactions (descriptive) | none yet |
 
 ### `deliver_activity/2`
 
@@ -140,20 +146,24 @@ Status progression is monotonic (`pending` < `sent` < `delivered` < `read`): a `
 | Type | Modes | Outbound delivery | Native activity types | Inbound webhook | Status receipts | Inbound signature | Batches | Typing / read receipts out |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `webhook` | inbound, outbound, duplex | Canonical activity JSON to the configured URL, signed with `x-converger-signature` | all | One message per request | Yes: `delivery_id` or `provider_message_id` plus `status` | Generic `x-converger-signature` | No (one message per request) | No |
-| `whatsapp_meta` | inbound, outbound, duplex | Text messages through the Graph API | `message` | Yes (Cloud API webhook) | Yes (`statuses`) | Meta `X-Hub-Signature-256` keyed with `app_secret` | Yes: every `entry` / `changes` / `messages` / `statuses` item | Yes: typing indicator and mark as read |
-| `whatsapp_infobip` | inbound, outbound, duplex | Text messages through the Infobip API | `message` | Yes (`results`) | Yes (delivery reports in `results`) | Generic `x-converger-signature` (no Infobip-native check) | Yes: every item of `results` | No |
+| `whatsapp_meta` | inbound, outbound, duplex | Text, media, template, interactive, location and contacts messages through the Graph API | `message` | Yes (Cloud API webhook) | Yes (`statuses`) | Meta `X-Hub-Signature-256` keyed with `app_secret` | Yes: every `entry` / `changes` / `messages` / `statuses` item | Yes: typing indicator and mark as read |
+| `whatsapp_infobip` | inbound, outbound, duplex | Text, media, template, interactive, location and contacts messages through the Infobip API | `message` | Yes (`results`) | Yes (delivery reports in `results`) | Generic `x-converger-signature` (no Infobip-native check) | Yes: every item of `results` | No |
 | `slack` | inbound, outbound, duplex | `chat.postMessage` (cards as Block Kit, files through `files.uploadV2`), `chat.update`, `chat.delete` | `message`, `messageUpdate`, `messageDelete` | Yes (Events API and card button interactions) | No | Slack `X-Slack-Signature` keyed with `signing_secret`, 5 minute window | One event per request | No |
+| `telegram` | inbound, outbound, duplex | Text, photos and documents through the Bot API; card buttons as inline keyboards | `message` | Yes (one `Update` per request: messages, edits, button presses, reactions, media) | No (the Bot API has none) | `X-Telegram-Bot-Api-Secret-Token` against `secret_token` | Not applicable (one update per request) | Typing only (`sendChatAction`) |
 | `email` | inbound, outbound, duplex | Email through Swoosh: SMTP, Amazon SES, SendGrid, Mailgun or Postmark ([Email](email.md)) | `message` | Yes: SES (SNS), SendGrid Inbound Parse, Mailgun routes, Postmark inbound, raw `message/rfc822` | Yes: delivered, opened, bounced and complained events; bounce mails | SES: SNS signature and topic; Mailgun: payload signature; others: basic auth or `x-converger-signature` | One email per request (SendGrid events: an array) | No |
+| `sms_twilio` | inbound, outbound, duplex | SMS / MMS through Twilio Programmable Messaging ([SMS](sms.md)) | `message` | Yes (form-encoded messaging webhook, MMS media as attachments) | Yes: status callbacks (`sent`, `delivered`, `undelivered`, `failed`, `read`) | Twilio `X-Twilio-Signature` keyed with `auth_token` | One message per request | No |
+| `sms_vonage` | inbound, outbound, duplex | SMS through the Vonage Messages API ([SMS](sms.md)) | `message` | Yes (Messages API inbound webhook) | Yes: status webhook (`submitted`, `delivered`, `rejected`, `undeliverable`, `read`) | Vonage signed-webhook JWT keyed with `signature_secret`, with body hash | One message per request | No |
 | `echo` | outbound | Creates a reply activity from `bot` in the same conversation | `message` | No | No | Not applicable | Not applicable | No |
 | `websocket` | inbound, outbound, duplex | Broadcast to the channel's connected sockets; `pending` until a client is connected, replays or acks ([WebSocket](websocket.md)) | all | No (clients send over the socket, through the same inbound path) | Client `ack` over the socket | Not applicable (socket token) | Not applicable | Not applicable (clients get `typing` and `deliveryStatus` frames) |
 
 Notes:
 
-- The pipeline calls the adapter of every channel whose adapter has the `:outbound` capability (`Adapter.capability?/2`, used by `resolve_delivery_channels/1` in [`lib/converger/pipeline.ex`](https://github.com/AimTune/converger/blob/main/lib/converger/pipeline.ex)): all seven types today.
+- The pipeline calls the adapter of every channel whose adapter has the `:outbound` capability (`Adapter.capability?/2`, used by `resolve_delivery_channels/1` in [`lib/converger/pipeline.ex`](https://github.com/AimTune/converger/blob/main/lib/converger/pipeline.ex)): all ten types today.
 - Conversation lifecycle events (close, reopen) are delivered only to channels whose adapter has `:lifecycle_events` (`webhook` and `websocket`).
 - Activity types outside an adapter's native types (the `activity_types:` entry of `capabilities/0`) are downgraded to a text `message` (for example `messageReaction` becomes `"user reacted with 👍"`) or skipped, as set by the channel config key `unsupported_activities` (`downgrade`, the default, or `skip`). `typing` and the internal `deliveryReceipt` never reach messaging adapters. See [activities](../concepts/activities.md#delivery-to-channels).
 - An inbound message is never delivered back to its author: not to the conversation participant's own channel, and not to any target channel on which the sender is a participant (an email reply in a web chat conversation), unless it is a `websocket` channel (its other sockets need it).
-- Outbound WhatsApp media, templates and interactive messages are planned ([#37](https://github.com/AimTune/converger/issues/37)). `capabilities/0` drives pipeline delivery (`:outbound`), health checks (`:external_delivery`), lifecycle events, the inbound `200` policy (`:provider_ack`) and, with its `activity_types:` entry, the downgrade of unsupported activity types ([#28](https://github.com/AimTune/converger/issues/28)).
+- A delivery to a participant who opted out (an SMS `STOP`, see [SMS](sms.md#opt-out-stop--start)) fails immediately with `recipient <id> opted out`, without calling the adapter.
+- WhatsApp channels send media, templates, interactive messages, locations and contacts, and download inbound media into Converger storage ([WhatsApp](whatsapp.md#what-is-sent), [ADR-0039](../adr/0039-whatsapp-rich-outbound-and-inbound-media-download.md)). `capabilities/0` drives pipeline delivery (`:outbound`), health checks (`:external_delivery`), lifecycle events, the inbound `200` policy (`:provider_ack`) and, with its `activity_types:` entry, the downgrade of unsupported activity types ([#28](https://github.com/AimTune/converger/issues/28)).
 
 ## Inbound endpoints
 
@@ -220,7 +230,7 @@ A receipts-only request returns `{"status": "accepted", "receipts_processed": 2}
 | Status | When |
 | --- | --- |
 | `201` | Generic channel (`webhook`), at least one activity created. |
-| `200` | Duplicates only, receipts only, or any handled request on a channel whose adapter has `:provider_ack` (`whatsapp_meta`, `whatsapp_infobip`, `slack`, `email`). These channels always get `200` once the request was handled, even when every message was rejected permanently, because the provider would otherwise retry for days. |
+| `200` | Duplicates only, receipts only, or any handled request on a channel whose adapter has `:provider_ack` (`whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram`, `email`, `sms_twilio`, `sms_vonage`). These channels always get `200` once the request was handled, even when every message was rejected permanently, because the provider would otherwise retry for days. |
 | `400` | Channel inactive (`{"error": "Channel is inactive"}`), channel mode `outbound` with messages (`{"error": "Channel does not accept inbound messages"}`), or the adapter could not parse the body (`{"error": "unable to parse WhatsApp Meta webhook payload"}` and similar). |
 | `401` | Signature missing (on a `require_signature` channel), legacy, invalid, malformed or outside the time window. |
 | `404` | Unknown channel id, or an unknown `conversation_id` for the channel's tenant. |
@@ -270,7 +280,7 @@ Outbound webhooks are signed with the same scheme; the verification snippets and
 
 A signature that is present but wrong is always rejected, even when signatures are optional. `require_signature: false` exists for channels created before signatures were enforced; unsigned requests will be rejected in a future release. The decision is recorded in [ADR-0009](../adr/0009-inbound-signature-scheme-and-per-channel-enforcement.md).
 
-`whatsapp_meta` channels use Meta's own `X-Hub-Signature-256` instead (see [WhatsApp](whatsapp.md#inbound-signature-x-hub-signature-256)), and `slack` channels Slack's `X-Slack-Signature` (see [Slack](slack.md#signature-x-slack-signature)); for them the generic header is not accepted in its place.
+`whatsapp_meta` channels use Meta's own `X-Hub-Signature-256` instead (see [WhatsApp](whatsapp.md#inbound-signature-x-hub-signature-256)), and `slack` channels Slack's `X-Slack-Signature` (see [Slack](slack.md#signature-x-slack-signature)); for them the generic header is not accepted in its place. `telegram` channels compare `X-Telegram-Bot-Api-Secret-Token` with their `secret_token`; once a `secret_token` is set, a missing or wrong header is rejected even when `require_signature` is `false` (see [Telegram](telegram.md#secret-token)). `sms_twilio` channels verify `X-Twilio-Signature` and `sms_vonage` channels a signed JWT (see [SMS](sms.md)); for them too the generic header is not accepted.
 
 ### Signing a request with bash and openssl
 
@@ -317,7 +327,7 @@ Inside the Converger code base (tests, tools), `Converger.Channels.InboundSignat
 
 ## Channel health
 
-Converger computes a health status for every active channel whose adapter has the `:external_delivery` capability (built in: `webhook`, `whatsapp_meta`, `whatsapp_infobip` and `slack`) from its delivery failure rate.
+Converger computes a health status for every active channel whose adapter has the `:external_delivery` capability (built in: `webhook`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram`, `email`, `sms_twilio` and `sms_vonage`) from its delivery failure rate.
 
 - [`Converger.Channels.Health`](https://github.com/AimTune/converger/blob/main/lib/converger/channels/health.ex) counts the channel's deliveries created in the last 60 minutes and the ones with status `failed`.
 - [`Converger.Channels.HealthCheck`](https://github.com/AimTune/converger/blob/main/lib/converger/channels/health_check.ex) is the stored result (table `channel_health_checks`): `status`, `total_deliveries`, `failed_deliveries`, `failure_rate` (0.0 to 1.0, rounded to 4 decimals) and `checked_at`.
@@ -332,7 +342,7 @@ Converger computes a health status for every active channel whose adapter has th
 
 ### Health probes
 
-A channel without deliveries in the window says nothing about its provider. When its adapter implements `health_probe/1`, the check calls it: `:ok` stores `healthy`, `{:error, reason}` (or a raise) stores `degraded` and logs `Health probe failed for channel <id>: <reason>`. A failed probe never yields `unhealthy`, so a single failed call cannot open the [circuit breaker](../delivery.md#circuit-breaker). The `whatsapp_meta` adapter probes `GET https://graph.facebook.com/<version>/<phone_number_id>?fields=id` with the channel's access token (5 second timeout, no retry), which catches an expired or revoked token before the next message fails. The `slack` adapter calls `auth.test` with its bot token. Disable probes with `config :converger, :channel_health, probe_idle_channels: false` (they are disabled in the test environment).
+A channel without deliveries in the window says nothing about its provider. When its adapter implements `health_probe/1`, the check calls it: `:ok` stores `healthy`, `{:error, reason}` (or a raise) stores `degraded` and logs `Health probe failed for channel <id>: <reason>`. A failed probe never yields `unhealthy`, so a single failed call cannot open the [circuit breaker](../delivery.md#circuit-breaker). The `whatsapp_meta` adapter probes `GET https://graph.facebook.com/<version>/<phone_number_id>?fields=id` with the channel's access token (5 second timeout, no retry), which catches an expired or revoked token before the next message fails. The `slack` adapter calls `auth.test` with its bot token, and the `telegram` adapter `getMe`. The `sms_twilio` adapter reads its account, and `sms_vonage` reads the account balance (API key auth) or checks that its application key signs a JWT. Disable probes with `config :converger, :channel_health, probe_idle_channels: false` (they are disabled in the test environment).
 
 Each run inserts one health check per channel. When a channel's status differs from its previous check, the worker:
 

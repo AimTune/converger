@@ -15,6 +15,7 @@ defmodule Converger.Inbound do
 
   alias Converger.{Activities, Conversations, Deliveries, Participants}
   alias Converger.Channels.Channel
+  alias Converger.Inbound.Media
 
   @type message :: map()
   @type result ::
@@ -40,6 +41,10 @@ defmodule Converger.Inbound do
   to; the active conversation of the first one that went through this
   channel is used before the participant's.
 
+  SMS channels add `"opt_out"` (`"stop"` or `"start"`) to an opt-out keyword:
+  the participant is marked opted out or opted in again
+  (`Converger.Participants.set_opted_out/3`) before the activity is created.
+
   ## Options
 
     * `:conversation_id` - the conversation to write into (tenant-scoped).
@@ -53,12 +58,21 @@ defmodule Converger.Inbound do
   """
   @spec receive_message(Channel.t(), message(), keyword()) :: result()
   def receive_message(%Channel{} = channel, message, opts \\ []) do
-    if accepts_inbound?(channel) do
-      do_receive(channel, message, Keyword.get(opts, :conversation_id))
-    else
-      {:error, :inbound_not_supported}
-    end
+    result =
+      if accepts_inbound?(channel) do
+        do_receive(channel, message, Keyword.get(opts, :conversation_id))
+      else
+        {:error, :inbound_not_supported}
+      end
+
+    Converger.Telemetry.inbound_received(channel, outcome(result))
+    result
   end
+
+  defp outcome({:created, _activity}), do: :created
+  defp outcome({:duplicate, _activity}), do: :duplicate
+  defp outcome({:rejected, _changeset}), do: :rejected
+  defp outcome({:error, _reason}), do: :error
 
   defp do_receive(channel, message, conversation_id) do
     key = message["idempotency_key"]
@@ -73,10 +87,11 @@ defmodule Converger.Inbound do
         {:duplicate, existing}
 
       nil ->
-        case resolve_or_create_conversation(channel, conversation_id, message) do
-          {:ok, conversation} ->
-            create_activity(channel, conversation, message)
-
+        with {:ok, conversation} <-
+               resolve_or_create_conversation(channel, conversation_id, message),
+             {:ok, message} <- apply_opt_out(channel, message) do
+          create_activity(channel, conversation, message)
+        else
           # e.g. an external id the participant schema rejects: permanent.
           {:error, %Ecto.Changeset{} = changeset} ->
             Logger.warning("Rejected inbound message: invalid participant or conversation",
@@ -92,8 +107,36 @@ defmodule Converger.Inbound do
     end
   end
 
+  # SMS adapters mark a STOP / START keyword with "opt_out" ("stop" or
+  # "start", see Converger.Channels.Sms). The participant flag is set before
+  # the activity is created: if that fails, the provider re-delivers and the
+  # (idempotent) flag is set again, while a created activity would turn the
+  # re-delivery into a duplicate and lose the opt-out.
+  defp apply_opt_out(channel, message) do
+    {opt_out, message} = Map.pop(message, "opt_out")
+
+    case {opt_out, participant_attrs(message)} do
+      {value, %{"external_id" => external_id}} when value in ["stop", "start"] ->
+        case Participants.set_opted_out(channel, external_id, value == "stop") do
+          {:ok, _participant} ->
+            Logger.info("Participant opted #{if value == "stop", do: "out", else: "in"}",
+              channel_id: channel.id
+            )
+
+            {:ok, message}
+
+          {:error, _} = error ->
+            error
+        end
+
+      _ ->
+        {:ok, message}
+    end
+  end
+
   defp create_activity(channel, conversation, message) do
     message = resolve_reference(channel, conversation, message)
+    {message, stored_media} = Media.store(channel, conversation, message)
 
     case Activities.create_client_activity(message, %{
            tenant_id: channel.tenant_id,
@@ -102,6 +145,8 @@ defmodule Converger.Inbound do
            idempotency_key: message["idempotency_key"]
          }) do
       {:ok, activity} ->
+        Media.link(stored_media, activity.id)
+
         Logger.info("Inbound activity received",
           channel_id: channel.id,
           activity_id: activity.id
@@ -110,6 +155,8 @@ defmodule Converger.Inbound do
         {:created, activity}
 
       {:error, %Ecto.Changeset{} = changeset} ->
+        Media.discard(stored_media)
+
         Logger.warning("Rejected inbound message",
           channel_id: channel.id,
           errors: inspect(changeset.errors)
@@ -118,6 +165,7 @@ defmodule Converger.Inbound do
         {:rejected, changeset}
 
       {:error, _} = error ->
+        Media.discard(stored_media)
         error
     end
   end

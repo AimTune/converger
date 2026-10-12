@@ -12,6 +12,9 @@ defmodule Converger.Participants.Participant do
     field :external_id, :string
     field :display_name, :string
     field :metadata, :map, default: %{}
+    # Set when the participant opted out (an SMS `STOP`): the pipeline does
+    # not deliver to them. Never cast, see Converger.Participants.set_opted_out/3.
+    field :opted_out_at, :utc_datetime_usec
 
     belongs_to :tenant, Converger.Tenants.Tenant
     belongs_to :channel, Converger.Channels.Channel

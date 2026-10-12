@@ -1,0 +1,16 @@
+{
+  "update_id": 912345607,
+  "message": {
+    "message_id": 45,
+    "from": {"id": 123456789, "is_bot": false, "first_name": "Ada"},
+    "chat": {"id": 123456789, "first_name": "Ada", "type": "private"},
+    "date": 1760141100,
+    "voice": {
+      "duration": 3,
+      "mime_type": "audio/ogg",
+      "file_id": "AwACAgQAAxkBAAMvoice",
+      "file_unique_id": "AgADvoice",
+      "file_size": 9876
+    }
+  }
+}

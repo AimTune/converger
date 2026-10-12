@@ -276,4 +276,37 @@ defmodule ConvergerWeb.SocketGuardTest do
       assert Drain.drainer_config() == [batch_size: 7, batch_interval: 11, shutdown: 13]
     end
   end
+
+  describe "connection metrics" do
+    test "an open socket is counted and its frames reported", ctx do
+      ref =
+        :telemetry_test.attach_event_handlers(self(), [
+          [:converger, :ws, :connected],
+          [:converger, :ws, :disconnected],
+          [:converger, :ws, :frame]
+        ])
+
+      key = {"user", "websocket"}
+      before = ConvergerWeb.ClientConnections.counts()[key]
+      sock = connect!(ctx)
+
+      assert_receive {[:converger, :ws, :connected], ^ref, %{count: 1},
+                      %{socket: "user", transport: "websocket"}}
+
+      assert ConvergerWeb.ClientConnections.counts()[key] == before + 1
+
+      heartbeat(sock, "1")
+      assert {:message, [_, "1", _, "phx_reply", %{"status" => "ok"}]} = reply(sock, "1")
+
+      assert_receive {[:converger, :ws, :frame], ^ref, %{count: 1},
+                      %{socket: "user", transport: "websocket", direction: :in}}
+
+      :gen_tcp.close(sock)
+
+      assert_receive {[:converger, :ws, :disconnected], ^ref, %{count: 1},
+                      %{socket: "user", transport: "websocket"}}
+
+      assert ConvergerWeb.ClientConnections.counts()[key] == before
+    end
+  end
 end

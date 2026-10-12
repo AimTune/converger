@@ -238,6 +238,23 @@ defmodule Converger.Pipeline do
   defp attempt_delivery(delivery, activity, channel) do
     alias Converger.Deliveries
 
+    # A participant who opted out (an SMS STOP) gets nothing on this channel:
+    # failed fast, without calling the provider or counting against its
+    # circuit, and not retried.
+    case Converger.Participants.opted_out_recipient(activity, channel.id) do
+      nil ->
+        plan_delivery(delivery, activity, channel)
+
+      recipient ->
+        reason = "recipient #{recipient} opted out"
+        Deliveries.mark_dead(delivery, reason)
+        {:error, {:halted, reason}}
+    end
+  end
+
+  defp plan_delivery(delivery, activity, channel) do
+    alias Converger.Deliveries
+
     # Re-planned at delivery time: the channel config may have changed since
     # the delivery was enqueued.
     case Downgrade.plan(activity, channel) do
@@ -264,16 +281,30 @@ defmodule Converger.Pipeline do
         {:error, {:halted, reason}}
 
       {:ok, transformed_activity} ->
-        # Every failure is classified by the adapter (normalize_error/1)
-        # into a DeliveryError before the breaker and the retry policy see it.
-        result =
-          case Adapter.deliver_activity(channel, transformed_activity) do
-            {:error, reason} -> {:error, Adapter.normalize_error(channel, reason)}
-            other -> other
-          end
+        # Times the adapter call only (Converger.Telemetry), not the
+        # bookkeeping around it. Every failure is classified by the adapter
+        # (normalize_error/1) into a DeliveryError before the breaker and the
+        # retry policy see it.
+        {result, duration} =
+          Converger.Telemetry.delivery_attempt(delivery, activity, channel, fn ->
+            case Adapter.deliver_activity(channel, transformed_activity) do
+              {:error, reason} -> {:error, Adapter.normalize_error(channel, reason)}
+              other -> other
+            end
+          end)
 
         Converger.Channels.Circuit.record(channel, result)
-        record_result(result, delivery, channel)
+        outcome = record_result(result, delivery, channel)
+
+        Converger.Telemetry.delivery_stop(
+          delivery,
+          activity,
+          channel,
+          {result, duration},
+          outcome
+        )
+
+        outcome
     end
   end
 

@@ -247,6 +247,8 @@ Callback checklist:
 | `health_probe/1` | no | Check the provider account (for example a "me" endpoint) for channels without recent deliveries; see [health probe](#health-probe). |
 | `send_typing/2` | no | Show (or clear) a typing indicator to the channel's participant when a WebSocket participant types. Return `:ok` or `{:error, reason}`. |
 | `send_read_receipt/2` | no | Tell the provider the participant's messages were read when a WebSocket participant sends `read`. Return `:ok` or `{:error, reason}`. |
+| `fetch_media/2` | no | Download the file behind an inbound media stub that `parse_inbound/2` returned (an attachment with a provider media id or URL in `channelData` and no `contentUrl`). Return `{:ok, %{data: binary, filename: name_or_nil}}`, `:skip` (nothing to download) or `{:error, reason}`. Converger stores the file and sets `contentUrl`; on error the stub is kept. See [inbound media](#inbound-media). |
+| `list_templates/1` | no | List the provider message templates of the channel's account (`{:ok, [map]}`), served and cached by `GET /api/v1/channels/:id/templates`. Return `{:error, {:invalid_config, message}}` (`422`) when the config lacks what the call needs, `{:error, message}` (`502`) when the provider fails. |
 
 ### Capabilities
 
@@ -261,7 +263,7 @@ Callback checklist:
 | `:typing` | Forwards typing indicators (`send_typing/2`). |
 | `:lifecycle_events` | Receives conversation close and reopen events, which carry no message content. Leave it out for messaging providers, which would send an empty message. |
 | `:provider_ack` | The provider retries every non-`2xx` inbound response (for days, in Meta's case), so a handled request is always answered `200`, even when its messages were rejected permanently. |
-| `:media`, `:templates`, `:reactions`, `:edits` | Outbound content the adapter renders natively (descriptive today, used by [#37](https://github.com/AimTune/converger/issues/37) and [#68](https://github.com/AimTune/converger/issues/68)). |
+| `:media`, `:templates`, `:reactions`, `:edits` | Outbound content the adapter renders natively (descriptive: nothing in Converger branches on them yet; the WhatsApp adapters declare `:media` and `:templates`, see [#68](https://github.com/AimTune/converger/issues/68) for typed messages). |
 | `activity_types: [...]` | The activity types `deliver_activity/2` renders natively; see [capabilities and downgrade](#capabilities-and-downgrade). |
 
 `Converger.Channels.Adapter.types_with/1` lists the registered types with a capability, and `capability?/2` checks one type.
@@ -284,6 +286,10 @@ Callback checklist:
 
 Signals are best effort: they run in a task under `Converger.TaskSupervisor`, are never retried, and an `{:error, reason}` or a raise is only logged. Do not retry inside the callback (pass `retry: false` to Req). Return `:ok` without calling the provider when there is nothing to do, for example `is_typing: false` on a provider that clears indicators on its own, or a `nil` `:provider_message_id`. Typing is forwarded at most every 20 seconds per WebSocket connection. See [ADR-0032](../adr/0032-transient-conversation-signals.md) and the WhatsApp Cloud API implementation in `whatsapp_meta.ex`.
 
+### Webhook registration (optional)
+
+If the provider registers its webhook through an API call (Telegram `setWebhook`), implement `register_webhook(channel, inbound_url)` and return `:ok` or `{:error, reason}` (a readable string is shown to the admin). The admin channel list then shows a **Register webhook** button for your channels; it calls `Channels.register_webhook/3` with the channel's public inbound URL (`https://<PHX_HOST>/api/v1/channels/<id>/inbound`) and audits a successful call as `register_webhook`. Pass the channel's verification secret to the provider in the same call, as the Telegram adapter passes `secret_token`. Use `retry: false` and a timeout of a few seconds: an admin is waiting for the answer.
+
 ## 2. Register the type
 
 Add the module to the registry with one config line, in `config/config.exs` of your fork or application:
@@ -292,7 +298,7 @@ Add the module to the registry with one config line, in `config/config.exs` of y
 config :converger, :adapters, [Converger.Channels.Adapters.AcmeSms]
 ```
 
-The registry (`Converger.Channels.Adapter.adapters/0`) is the built-in adapters (`echo`, `webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `email`) followed by this list, in order. An adapter whose `type/0` equals a built-in type replaces the built-in, so a fork can swap an implementation without patching core. A built-in adapter that ships with Converger itself is added to `@builtin_adapters` in `adapter.ex` instead.
+The registry (`Converger.Channels.Adapter.adapters/0`) is the built-in adapters (`echo`, `webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram`, `email`, `sms_twilio`, `sms_vonage`) followed by this list, in order. An adapter whose `type/0` equals a built-in type replaces the built-in, so a fork can swap an implementation without patching core. A built-in adapter that ships with Converger itself is added to `@builtin_adapters` in `adapter.ex` instead.
 
 That is all. From the registry and the adapter's declarations:
 
@@ -346,10 +352,20 @@ Channel types are plain strings, never atoms created from input. Unknown types f
 - **Set `idempotency_key`** to a stable provider message id. The controller checks it across all conversations of the channel before creating an activity, so a re-delivered webhook produces duplicates, not new activities. Use an id that is unique per channel; prefixing it (`"acme:" <> id`) is optional but makes the origin obvious. Never derive it from a timestamp or from the body hash of a whole batch.
 - **Set `participant.external_id`** to the sender's address (phone number, chat id) so messages from the same party share their active conversation and replies can find the recipient through `Participants.recipient_for/2` ([ADR-0016](../adr/0016-participant-based-conversation-resolution.md)).
 - **Keep unknown message types** as activities (empty text, `metadata` with the provider type) rather than dropping them.
-- Map media to attachment stubs: `contentType` (required, a MIME type; use a wildcard such as `image/*` when the provider does not say) plus provider fields under `channelData` (`provider`, `providerMediaId`). Attachments are validated, so keys outside the [attachment schema](../concepts/activities.md#attachments) are dropped. Do not download media in the request.
+- Map media to attachment stubs: `contentType` (required, a MIME type; use a wildcard such as `image/*` when the provider does not say) plus provider fields under `channelData` (`provider`, `providerMediaId`). Attachments are validated, so keys outside the [attachment schema](../concepts/activities.md#attachments) are dropped. Do not download media in `parse_inbound/2`; implement `fetch_media/2` instead (below).
 - Map reactions to `messageReaction` (`text` is the emoji) and replies to `message`, and set `reply_to_provider_id` to the provider id of the referenced message; the controller resolves it to `reply_to_id` and keeps an unresolvable reaction as an `event`.
 - Only client fields of the parsed message (`type`, `text`, `attachments`, `metadata`, `reply_to_id`) end up on the activity; `sender` and `idempotency_key` are passed by the controller as server-controlled attributes.
 - Receipts: normalize `status` to one of `sent`, `delivered`, `read`, `failed`. Any other value is silently ignored by `Deliveries.advance_status/2` (it has no rank), so map unknown provider states explicitly, as both WhatsApp adapters map them to `sent`.
+
+### Inbound media
+
+When the adapter implements `fetch_media/2`, `Converger.Inbound.Media` calls it for every attachment of a parsed message that has no `contentUrl`, after the duplicate check and before the activity is created. It stores the returned bytes through `Converger.Uploads` (size limit, sniffed type, tenant allowlist), links the file to the activity, and rewrites the attachment with `contentUrl`, `contentType` and `size`. On `{:error, reason}` the stub is kept with `channelData.downloadError`; the message is never dropped. Channels opt out with the config key `download_media: false`.
+
+- Use `Converger.Channels.MediaDownload.get/2`: it streams the body and stops at the upload size limit, with a 10 s default timeout.
+- Treat URLs from the webhook body as untrusted. Send credentials only to the provider's own host (the Infobip adapter requires the media URL host to equal the channel's `base_url` host) and keep the SSRF guard ([section 7](#7-http-and-user-supplied-urls)).
+- Return `:skip` for attachments that have nothing to download (locations, contacts).
+
+See [ADR-0039](../adr/0039-whatsapp-rich-outbound-and-inbound-media-download.md).
 
 ### Capabilities and downgrade
 
@@ -390,6 +406,7 @@ def normalize_error(reason), do: DeliveryError.normalize(reason)
 - Use [`Converger.HTTP`](https://github.com/AimTune/converger/blob/main/lib/converger/http.ex) (`request/1`, `post/2`) for outbound calls. It wraps Req and attaches `OpentelemetryReq`, so each call becomes a client span under the delivery job's span. (The existing webhook and WhatsApp adapters still call `Req` directly.) Do not add other HTTP clients.
 - Set `receive_timeout` from `RetryPolicy.for_channel(channel).timeout_ms`.
 - Merge test options from the application env (`Application.get_env(:converger, :acme_sms_req_options, [])`), the same pattern as `:webhook_req_options` and `:whatsapp_req_options`, so tests can inject `plug: {Req.Test, ...}`.
+- A provider API URL that carries a credential (Telegram puts the bot token in the path) must not be a tenant setting at all: make it application config, as `config :converger, Converger.Channels.Adapters.Telegram, api_base_url: ...`. Such adapters call `Req` directly, because `OpentelemetryReq` records the full URL (`url.full`) on the client span.
 - Any URL a tenant can configure (a base URL, a callback URL) must pass [`Converger.Channels.UrlGuard`](https://github.com/AimTune/converger/blob/main/lib/converger/channels/url_guard.ex): `check/1` at config validation and `resolve/1` before every request. `resolve/1` returns the checked address; to defeat DNS rebinding, pin the connection to it the way the webhook adapter does (`target_url/1` and `connect_options/2` with `hostname:`), and disable redirects (`redirect: false`). The guard is configured with `config :converger, :webhook, allow_private_targets: ..., allowed_targets: [...]` (`WEBHOOK_ALLOW_PRIVATE_TARGETS`, `WEBHOOK_ALLOWED_TARGETS` in releases). See [ADR-0014](../adr/0014-webhook-ssrf-guard-and-outbound-signing.md) and [Outbound webhooks](../webhooks.md#ssrf-protection).
 
 The example above checks `base_url` but, for brevity, does not pin the connection.
@@ -401,6 +418,8 @@ The example above checks `base_url` but, for brevity, does not pin the connectio
 - If the provider cannot sign at all, do not implement the callback: senders then use the generic `x-converger-signature` header with the channel `secret`, or the channel must be created with `require_signature: false`.
 - If the provider's scheme needs a secret, declare it with `required: :with_signature` in `config_schema/0`, as `whatsapp_meta` does for `app_secret`: channels with `require_signature: true` cannot be saved without it.
 - If the provider verifies the webhook URL with a `GET` handshake, implement `verify_subscription/2`. If it posts the handshake to the webhook URL itself, implement `inbound_challenge/2` (see `slack.ex`).
+- If the provider expects a particular body in the answer to a webhook (Twilio flags any non-TwiML response), implement `inbound_response/1` returning `{content_type, body}` (see `sms_twilio.ex`).
+- If the signature covers the request URL (Twilio), note that the adapter does not see it: rebuild the candidate URLs from the channel id and the server URL, as `sms_twilio.ex` does.
 
 ## 9. Tests
 

@@ -187,6 +187,37 @@ takes at most about 90 s. A rescued job may re-send a request that the
 receiver already got before the crash (8 such redeliveries in the 5-kill
 run), which is why receivers must de-duplicate by `x-converger-delivery-id`.
 
+## Alert rules chaos test
+
+`test/chaos/alerts.sh` checks that the delivery [alert rules](operations/observability.md#alert-rules) fire
+against a real node when a webhook target dies, and resolve when it comes back. It reuses the harness above
+(same image, `setup.exs`, `driver.js`, `sink.js`) and adds a Prometheus
+(`test/chaos/docker-compose.alerts.yml`) that scrapes the app every 5 s and evaluates
+`docker/prometheus/alerts.yml` with the `for:` durations shortened to 10 to 20 s.
+
+```bash
+test/chaos/alerts.sh
+```
+
+Under steady REST load (2 conversations, one sender each), the script:
+
+1. waits until delivery metrics are scraped and checks that no delivery alert fires while the sink is up;
+2. raises the breaker's `failure_threshold` (over `bin/converger rpc`) so the failures are not contained, kills the
+   sink (`docker compose kill sink`) and waits for `ConvergerDeliverySuccessRateLow`;
+3. restores the breaker defaults, so the next failures open it, and waits for `ConvergerChannelCircuitOpen`;
+4. starts the sink again and waits for `ConvergerChannelCircuitOpen` to resolve once a probe closes the breaker.
+
+Each wait times out after `CHAOS_ALERT_TIMEOUT_S` (240 s) and fails the run. The time each step took is written to
+`test/chaos/.run/out/timings.txt` and the final alert state to `alerts.json`. Other tunables:
+`CHAOS_REST_CONVERSATIONS` (2), `CHAOS_APP_PORT` (14300), `CHAOS_PROMETHEUS_PORT` (19300), `CHAOS_PROJECT`
+(`converger-chaos-alerts`), `CHAOS_SKIP_BUILD`, `CHAOS_KEEP`.
+
+Step 2 is needed because the [circuit breaker](delivery.md#circuit-breaker) contains a dead endpoint after 5
+failures: the deliveries are parked rather than attempted, so the success rate barely moves. That is why
+`ConvergerChannelCircuitOpen` exists next to the success-rate alert.
+
+The rules themselves are unit tested with `promtool test rules docker/prometheus/alerts.test.yml`.
+
 ## Not covered
 
 - Killing Postgres. The test assumes a durable database; see

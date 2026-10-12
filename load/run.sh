@@ -175,8 +175,14 @@ sampler() {
     ts=$(now_ms)
     echo "$ts;oban;$(docker exec "${PROJECT}-db-1" psql -U postgres -d converger_prod -At -c "SELECT count(*) FROM oban_jobs WHERE state IN ('available','scheduled','executing','retryable')" 2>/dev/null || true)"
     for svc in $SERVICES; do
+      # A histogram since #33 (sum and count of the wait, summed over label
+      # sets); before that a gauge holding the last value.
       curl -s -m 2 -H "authorization: Bearer $METRICS_TOKEN" "http://127.0.0.1:$(port_of "$svc")/metrics" 2>/dev/null |
-        grep -E '^converger_repo_query_queue_time(\{| )' | head -n 1 | sed "s/^/$ts;queue;$svc;/" || true
+        awk -v p="$ts;queue;$svc;" '
+          /^converger_repo_query_queue_time_sum/ { s += $NF; h = 1 }
+          /^converger_repo_query_queue_time_count/ { c += $NF }
+          /^converger_repo_query_queue_time[{ ]/ { g = $NF }
+          END { if (h) print p "hist;" s ";" c; else if (g != "") print p "last;" g }' || true
     done
     sleep 1
   done

@@ -179,6 +179,18 @@ storage skip server-side MIME sniffing, so a public HTTP flow for direct
 uploads (reserve, upload, then finalize and verify) is not part of the API
 yet.
 
+## Channel media
+
+Files do not only come from client uploads. Inbound media of WhatsApp channels (images, voice notes, documents) is
+downloaded and stored through the same `create_attachment/3` checks (size limit, sniffed type, tenant allowlist), with
+the conversation set, and linked to the inbound activity; a file the checks reject stays a provider stub with
+`channelData.downloadError` ([WhatsApp: inbound media download](channels/whatsapp.md#inbound-media-download)). Allow
+`audio/ogg` (WhatsApp voice notes) in a tenant's `allowed_upload_types` if you restrict it.
+
+Outbound, an activity attachment that points to an upload is read from storage by the WhatsApp Cloud API adapter and
+uploaded to Meta. Infobip fetches media by URL, so it gets the signed storage or CDN URL that `download/1` returns; with
+`LocalStorage` there is none and such deliveries fail permanently, so use a cloud backend or a CDN for Infobip media.
+
 ## Retention archive
 
 The same storage backends hold the archive of expired activities and deliveries

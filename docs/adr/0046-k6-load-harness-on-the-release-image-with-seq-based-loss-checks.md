@@ -1,6 +1,6 @@
 ---
-title: "ADR-0043: k6 load harness on the release image, with seq-based loss checks and a nightly regression gate"
-sidebar_label: "0043 Load harness"
+title: "ADR-0046: k6 load harness on the release image, with seq-based loss checks and a nightly regression gate"
+sidebar_label: "0046 Load harness"
 description: Performance is measured end to end with k6 against the production release in Docker Compose (1 or 3 nodes), lost messages are detected from per-conversation seq on every subscriber, results are published as markdown under docs/benchmarks, and a nightly job fails on a p95 regression beyond 15 % against a baseline recorded on the same runner.
 ---
 
