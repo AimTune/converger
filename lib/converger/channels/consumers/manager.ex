@@ -160,8 +160,19 @@ defmodule Converger.Channels.Consumers.Manager do
     end
   end
 
-  defp start(channel) do
+  defp start(channel, retried? \\ false) do
     case Consumers.start_consumer(channel) do
+      # The consumer was just stopped here and :global has not dropped its
+      # name yet.
+      {:error, {:already_started, pid}}
+      when not retried? and node(pid) == node() ->
+        if Process.alive?(pid) do
+          :ok
+        else
+          Process.sleep(50)
+          start(channel, true)
+        end
+
       {:ok, _pid} ->
         Logger.info("Broker consumer started", channel_id: channel.id, channel_type: channel.type)
 

@@ -98,9 +98,13 @@ defmodule Converger.Channels.Consumers do
   @doc "The channel ids of the consumers running on this node."
   @spec local_channel_ids() :: [String.t()]
   def local_channel_ids do
-    Registry.select(Converger.Channels.Broker.Registry, [
-      {{{:consumer, :"$1"}, :_, :_}, [], [:"$1"]}
-    ])
+    # The registry drops a dead process asynchronously.
+    for {channel_id, pid} <-
+          Registry.select(Converger.Channels.Broker.Registry, [
+            {{{:consumer, :"$1"}, :"$2", :_}, [], [{{:"$1", :"$2"}}]}
+          ]),
+        Process.alive?(pid),
+        do: channel_id
   end
 
   @doc "The node the consumer of `channel_id` runs on, or nil."
