@@ -22,7 +22,7 @@ The site is built with Docusaurus from [`website/`](website/) and uses [`docs/`]
 
 - **Multi-tenant by Design**: Full data isolation and tenant-scoped authentication via API Keys.
 - **Real-time Engine**: Powered by Phoenix Channels for instant, bidirectional messaging.
-- **High Performance**: Validated to handle **5,000+ messages/second** on a single node.
+- **Measured Performance**: a [k6 load harness](docs/benchmarks/index.md) drives the release over REST and WebSocket on 1 and 3 nodes every night, publishes p95 latency, connections and memory, and fails on any lost acknowledged message.
 - **Observability Stack**: Built-in support for **OpenTelemetry**, Prometheus, Grafana, Jaeger, and Loki.
 - **Reliability & Safety**:
     - **Idempotency**: `x-idempotency-key` header (REST) and `clientId` on the WebSocket `postActivity` push, so clients can retry after a lost reply without duplicates.

@@ -85,6 +85,10 @@ that change the harness. The results directory is uploaded as the
 `chaos-results` artifact. It is not part of the regular CI workflow because it
 builds the release image.
 
+The [load harness](benchmarks/index.md) applies the same zero-loss rule under
+heavier load and on three nodes (`rolling_restart` and `node_kill` scenarios).
+It detects loss from each subscriber's `seq` instead of from database dumps.
+
 ## What counts as acknowledged
 
 | Transport | Request | Acknowledged when |

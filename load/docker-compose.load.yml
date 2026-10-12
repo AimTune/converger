@@ -1,0 +1,85 @@
+# Load harness override, layered on the root docker-compose.yml by
+# load/run.sh (see docs/benchmarks/index.md):
+#
+#   docker compose -p converger-load --project-directory . \
+#     --env-file load/.run/.env \
+#     -f docker-compose.yml -f load/docker-compose.load.yml ...
+#
+# For three nodes run.sh adds docker-compose.cluster.yml (app2, gossip) and
+# load/docker-compose.load-cluster.yml (app3, ports).
+#
+# Only db, migrate, app(s), the mock provider and k6 are started; nodes are
+# published on 127.0.0.1:14100+ so the harness runs next to a dev stack.
+# Requires Docker Compose >= 2.24 (`!override` / `!reset`).
+x-load-app: &load_app
+  image: converger-load:local
+  environment:
+    # The mock provider lives on the private compose network: allow it past
+    # the webhook SSRF guard (docs/webhooks.md).
+    WEBHOOK_ALLOWED_TARGETS: mock
+    # No collector in the load stack.
+    OTEL_EXPORTER_OTLP_ENDPOINT: ""
+    POOL_SIZE: ${LOAD_POOL_SIZE:-20}
+    METRICS_TOKEN: ${METRICS_TOKEN}
+    # Deliveries left `executing` by a killed node (node_kill) are rescued
+    # after 30 s instead of the 30 minute default, as in the chaos harness.
+    OBAN_LIFELINE_RESCUE_AFTER_SECONDS: ${LOAD_LIFELINE_RESCUE_AFTER_SECONDS:-30}
+    OBAN_LIFELINE_INTERVAL_SECONDS: ${LOAD_LIFELINE_INTERVAL_SECONDS:-10}
+  ulimits:
+    nofile: { soft: 1048576, hard: 1048576 }
+  volumes:
+    - ./load:/load:ro
+  cpus: ${LOAD_APP_CPUS:-0}
+  mem_limit: ${LOAD_APP_MEMORY:-0}
+
+services:
+  db:
+    # Not published; run.sh talks to Postgres with `docker compose exec db psql`.
+    ports: !reset []
+    volumes: !override
+      - load_postgres_data:/var/lib/postgresql/data
+    command: ["postgres", "-c", "max_connections=300"]
+
+  migrate:
+    image: converger-load:local
+
+  app:
+    <<: *load_app
+    ports: !override
+      - "127.0.0.1:${LOAD_APP_PORT:-14100}:4000"
+
+  mock:
+    image: node:22-alpine
+    command: ["node", "/load/mock_provider/server.js"]
+    environment:
+      MOCK_LATENCY_MS: ${MOCK_LATENCY_MS:-20}
+      MOCK_JITTER_MS: ${MOCK_JITTER_MS:-10}
+      MOCK_ERROR_RATE: ${MOCK_ERROR_RATE:-0}
+    volumes:
+      - ./load:/load:ro
+
+  # Started on demand by run.sh (`docker compose run k6 run /load/<scenario>.js`).
+  k6:
+    image: grafana/k6:1.8.1
+    profiles: ["load-tools"]
+    ulimits:
+      nofile: { soft: 1048576, hard: 1048576 }
+    environment:
+      SETUP_JSON: /out/setup.json
+      OUT_DIR: /out
+      APP_URLS: ${LOAD_APP_URLS:-http://app:4000}
+      K6_NO_USAGE_REPORT: "true"
+    volumes:
+      - ./load:/load:ro
+      - ./load/.run/out:/out
+
+  # Started on demand by run.sh for load/results.js.
+  node:
+    image: node:22-alpine
+    profiles: ["load-tools"]
+    volumes:
+      - ./load:/load:ro
+      - ./load/.run/out:/out
+
+volumes:
+  load_postgres_data:

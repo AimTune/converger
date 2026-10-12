@@ -517,8 +517,10 @@ Rollback:
 
 ## Capacity guidance
 
-Starting points; measure with your traffic (`test/load/performance_test.exs`,
-the Prometheus metrics at `/metrics`):
+Starting points; measure with your traffic (the [load harness](benchmarks/index.md)
+with per-node limits such as `LOAD_APP_CPUS=1 LOAD_APP_MEMORY=1g`, and the
+Prometheus metrics at `/metrics`). Published runs, with the hardware they ran on,
+are in [Benchmarks](benchmarks/index.md):
 
 - **Replicas**: at least 2 behind the load balancer for availability. The app is
   stateless apart from WebSocket connections; enable clustering
