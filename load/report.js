@@ -109,8 +109,8 @@ function render(runs, { baseline = [], threshold = 0.15, title } = {}) {
 
   // Resources per scenario and node.
   out.push("### Resources", "", "Highest values sampled while the scenario ran (CPU and RSS about every 2.5 s, the rest every second).", "");
-  out.push("| Topology | Scenario | Node | CPU avg % | CPU max % | RSS max (MiB) | DB pool wait max (ms) | Oban queue depth max |");
-  out.push("| --- | --- | --- | --- | --- | --- | --- | --- |");
+  out.push("| Topology | Scenario | Node | CPU avg % | CPU max % | RSS max (MiB) | DB pool wait max (ms) | Background pool wait max (ms) | Oban queue depth max |");
+  out.push("| --- | --- | --- | --- | --- | --- | --- | --- | --- |");
   for (const r of runs) {
     for (const [scenario, s] of Object.entries(r.scenarios)) {
       const res = s.resources;
@@ -118,7 +118,7 @@ function render(runs, { baseline = [], threshold = 0.15, title } = {}) {
       for (const [node, n] of Object.entries(res.nodes)) {
         out.push(
           `| ${topology(r)} | ${scenario} | ${node} | ${fmt(n.cpu_avg_pct)} | ${fmt(n.cpu_max_pct)} | ${fmt(n.rss_max_mib)} | ` +
-            `${node === "db" ? "–" : fmt(res.db_pool_wait_max_ms)} | ${node === "db" ? "–" : fmt(res.oban_depth_max)} |`,
+            `${node === "db" ? "–" : fmt(res.db_pool_wait_max_ms)} | ${node === "db" ? "–" : fmt(res.db_background_pool_wait_max_ms)} | ${node === "db" ? "–" : fmt(res.oban_depth_max)} |`,
         );
       }
     }
@@ -133,7 +133,7 @@ function render(runs, { baseline = [], threshold = 0.15, title } = {}) {
       `- **${topology(r)}**: ${h.docker_cpus} vCPU and ${fmt(h.docker_memory_bytes / 1024 ** 3)} GiB visible to Docker ` +
         `(${h.runner_os}, ${h.runner}, kernel ${h.kernel}, Docker ${h.docker_version}); ` +
         `per-node limits CPU ${h.app_cpus_limit}, memory ${h.app_memory_limit}; Postgres ${h.postgres_version}, ` +
-        `${fmt(h.database_size_bytes / 1024 ** 2)} MiB after the run; pool size ${h.pool_size}; mock provider latency ` +
+        `${fmt(h.database_size_bytes / 1024 ** 2)} MiB after the run; pool size ${h.pool_size}${h.background_pool_size !== undefined ? ` + ${h.background_pool_size} background` : ""}; mock provider latency ` +
         `${r.mock ? `${r.mock.latencyMs}+${r.mock.jitterMs} ms, error rate ${r.mock.errorRate}` : "–"}.`,
     );
     for (const [scenario, s] of Object.entries(r.scenarios)) {

@@ -40,6 +40,7 @@ defmodule ConvergerWeb.ProtocolSocket do
 
   alias Converger.{Activities, Channels, Conversations, Inbound, RateLimit}
   alias Converger.Auth.ConvergerToken
+  alias Converger.Repo.Pressure
   alias ConvergerWeb.{ClientConnections, ConversationSignals, Protocol, SocketGuard}
   alias ConvergerWeb.Protocol.{Codec, Feed, Frames, Send}
 
@@ -95,7 +96,7 @@ defmodule ConvergerWeb.ProtocolSocket do
 
       true ->
         case Codec.decode(data, opcode, state.encoding) do
-          {:ok, frame} -> handle_frame(frame, state)
+          {:ok, frame} -> safe_handle_frame(frame, state)
           {:error, message} -> reply([Frames.error("bad_request", message)], state)
         end
     end
@@ -111,8 +112,7 @@ defmodule ConvergerWeb.ProtocolSocket do
       SocketGuard.emit(:slow_consumer, __MODULE__)
       {:stop, :normal, SocketGuard.close_detail(4503, "slow_consumer"), state}
     else
-      {frames, feed} = Feed.live(state.feed, activity)
-      reply(frames, %{state | feed: feed})
+      live(activity, state)
     end
   end
 
@@ -194,6 +194,65 @@ defmodule ConvergerWeb.ProtocolSocket do
     else
       [frame]
     end
+  end
+
+  ## Database pressure (issue #35, docs/operations/database.md)
+
+  # A frame that fails because the database is unavailable is answered with a
+  # retryable `unavailable` error. Without a session yet (hello) the
+  # connection closes with 1013 (try again later) instead.
+  defp safe_handle_frame(frame, state) do
+    handle_frame(frame, state)
+  rescue
+    error in DBConnection.ConnectionError ->
+      Pressure.report(:protocol, error)
+      type = if is_binary(frame["type"]), do: frame["type"]
+      opts = [frame_type: type, retry_after_ms: Pressure.retry_after_ms()]
+      unavailable = error("unavailable", "the database is unavailable, retry", opts)
+      unavailable = with_client_id(unavailable, frame)
+
+      case state.phase do
+        :ready -> reply([unavailable], state)
+        _ -> close(1013, "try again later", [unavailable], state)
+      end
+  end
+
+  # A gap the feed cannot read now is not delivered: the next live activity
+  # retries it, and the client may `sync` from the watermark in the error.
+  defp live(activity, state) do
+    {frames, feed} = Feed.live(state.feed, activity)
+    reply(frames, %{state | feed: feed})
+  rescue
+    error in DBConnection.ConnectionError ->
+      Pressure.report(:protocol, error)
+      reply([replay_unavailable(state.feed.last_seq)], state)
+  end
+
+  # A replay that cannot read the database: the session continues live after
+  # `head` and the client `sync`s from its watermark later.
+  defp replay(feed, position, head) do
+    Feed.replay(feed, position, head)
+  rescue
+    error in DBConnection.ConnectionError ->
+      Pressure.report(:protocol, error)
+
+      watermark =
+        case position do
+          nil -> 0
+          {:seq, seq} -> seq
+          _legacy -> nil
+        end
+
+      {[replay_unavailable(watermark)], Feed.seek(feed, head)}
+  end
+
+  defp replay_unavailable(watermark) do
+    details = if is_integer(watermark), do: %{"watermark" => watermark}
+
+    error("replay_unavailable", "the database is unavailable, sync from the watermark later",
+      details: details,
+      retry_after_ms: Pressure.retry_after_ms()
+    )
   end
 
   ## Frames
@@ -450,7 +509,7 @@ defmodule ConvergerWeb.ProtocolSocket do
         reply([welcome, error("invalid_watermark", message) | presence], %{state | feed: feed})
 
       position ->
-        {frames, feed} = Feed.replay(state.feed, position, head)
+        {frames, feed} = replay(state.feed, position, head)
         reply([welcome | frames] ++ presence, %{state | feed: feed})
     end
   end
@@ -600,7 +659,7 @@ defmodule ConvergerWeb.ProtocolSocket do
         reply([error("invalid_watermark", message, frame_type: "sync")], state)
 
       {:ok, position} ->
-        {frames, feed} = Feed.replay(state.feed, position || {:seq, 0}, head)
+        {frames, feed} = replay(state.feed, position || {:seq, 0}, head)
         reply(frames, %{state | feed: feed})
 
       {:error, _} ->

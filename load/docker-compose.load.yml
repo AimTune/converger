@@ -20,6 +20,7 @@ x-load-app: &load_app
     # No collector in the load stack.
     OTEL_EXPORTER_OTLP_ENDPOINT: ""
     POOL_SIZE: ${LOAD_POOL_SIZE:-20}
+    BACKGROUND_POOL_SIZE: ${LOAD_BACKGROUND_POOL_SIZE:-10}
     METRICS_TOKEN: ${METRICS_TOKEN}
     # Deliveries left `executing` by a killed node (node_kill) are rescued
     # after 30 s instead of the 30 minute default, as in the chaos harness.

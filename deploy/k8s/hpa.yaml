@@ -1,5 +1,6 @@
-# Scale on CPU. Needs metrics-server. Keep maxReplicas x POOL_SIZE (plus the
-# migration Job) below Postgres max_connections.
+# Scale on CPU. Needs metrics-server. Keep maxReplicas x (POOL_SIZE +
+# BACKGROUND_POOL_SIZE + 1) plus the migration Job below Postgres
+# max_connections (docs/operations/database.md).
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:

@@ -121,7 +121,13 @@ cleanup() {
 }
 trap cleanup EXIT
 
-ready() { [ "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$1/health/ready")" = "200" ]; }
+# Ready, or `degraded` (#35): readiness answers 503 while the interactive pool
+# wait is high, but the node is up and serving; under load that is expected.
+ready() {
+  local body
+  body=$(curl -s -m 5 "http://127.0.0.1:$1/health/ready" 2>/dev/null) || return 1
+  case "$body" in *'"status":"ready"'* | *'"status":"degraded"'*) return 0 ;; *) return 1 ;; esac
+}
 
 wait_ready() {
   local port=$1 deadline=$((SECONDS + ${2:-180}))
@@ -182,7 +188,12 @@ sampler() {
           /^converger_repo_query_queue_time_sum/ { s += $NF; h = 1 }
           /^converger_repo_query_queue_time_count/ { c += $NF }
           /^converger_repo_query_queue_time[{ ]/ { g = $NF }
-          END { if (h) print p "hist;" s ";" c; else if (g != "") print p "last;" g }' || true
+          /^converger_background_repo_query_queue_time_sum/ { bs += $NF; b = 1 }
+          /^converger_background_repo_query_queue_time_count/ { bc += $NF }
+          END {
+            if (h) print p "hist;" s ";" c; else if (g != "") print p "last;" g
+            if (b) print p "bghist;" bs ";" bc
+          }' || true
     done
     sleep 1
   done
@@ -353,7 +364,8 @@ cat >"$OUT/hardware.json" <<EOF
   "kernel": "$(docker info --format '{{.KernelVersion}}')",
   "app_cpus_limit": "${LOAD_APP_CPUS:-unlimited}",
   "app_memory_limit": "${LOAD_APP_MEMORY:-unlimited}",
-  "pool_size": ${LOAD_POOL_SIZE:-20}
+  "pool_size": ${LOAD_POOL_SIZE:-20},
+  "background_pool_size": ${LOAD_BACKGROUND_POOL_SIZE:-10}
 }
 EOF
 

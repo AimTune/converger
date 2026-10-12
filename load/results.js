@@ -53,7 +53,7 @@ const bytes = (s) => {
   const unit = { B: 1, KiB: 1024, MiB: 1024 ** 2, GiB: 1024 ** 3, TiB: 1024 ** 4, kB: 1e3, KB: 1e3, MB: 1e6, GB: 1e9 }[m[2]];
   return Number(m[1]) * (unit || 1);
 };
-const samples = { stats: [], oban: [], queue: [] };
+const samples = { stats: [], oban: [], queue: [], bgqueue: [] };
 const queuePrev = {};
 for (const row of lines("samples.csv")) {
   const ts = Number(row[0]);
@@ -62,15 +62,18 @@ for (const row of lines("samples.csv")) {
     samples.stats.push({ ts, node, cpu: parseFloat(row[3]), rss: bytes(row[4]) });
   } else if (row[1] === "oban" && row[2] !== "") {
     samples.oban.push({ ts, depth: Number(row[2]) });
-  } else if (row[1] === "queue" && row[3] === "hist") {
+  } else if (row[1] === "queue" && (row[3] === "hist" || row[3] === "bghist")) {
     // Histogram: the mean wait of the queries since the previous sample.
     // A restarted node starts its counters again; skip that interval.
     const sum = Number(row[4]);
     const n = Number(row[5]);
-    const prev = queuePrev[row[2]];
-    queuePrev[row[2]] = { sum, n };
+    // "hist": the interactive pool; "bghist": the background (Oban) pool (#35).
+    const series = row[3] === "hist" ? samples.queue : samples.bgqueue;
+    const key = `${row[2]}:${row[3]}`;
+    const prev = queuePrev[key];
+    queuePrev[key] = { sum, n };
     if (prev && n >= prev.n && sum >= prev.sum) {
-      samples.queue.push({ ts, node: row[2], ms: n > prev.n ? (sum - prev.sum) / (n - prev.n) : 0 });
+      series.push({ ts, node: row[2], ms: n > prev.n ? (sum - prev.sum) / (n - prev.n) : 0 });
     }
   } else if (row[1] === "queue" && row[3] === "last") {
     samples.queue.push({ ts, node: row[2], ms: Number(row[4]) });
@@ -96,10 +99,12 @@ function resources(window) {
   }
   const oban = samples.oban.filter(inWindow).map((s) => s.depth);
   const queue = samples.queue.filter(inWindow).map((s) => s.ms);
+  const bgqueue = samples.bgqueue.filter(inWindow).map((s) => s.ms);
   return {
     nodes: perNode,
     oban_depth_max: oban.length ? Math.max(...oban) : null,
     db_pool_wait_max_ms: queue.length ? round(Math.max(...queue), 2) : null,
+    db_background_pool_wait_max_ms: bgqueue.length ? round(Math.max(...bgqueue), 2) : null,
   };
 }
 

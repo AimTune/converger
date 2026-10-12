@@ -70,8 +70,13 @@ Load balancers and Kubernetes probe `GET /health/live` and `GET /health/ready`.
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `POOL_SIZE` | `10` | Ecto connection pool size (prod only). |
+| `POOL_SIZE` | `10` | Interactive connection pool size: HTTP, WebSocket, LiveView (prod only). |
+| `BACKGROUND_POOL_SIZE` | `10` | Background pool size for Oban jobs (prod only); `0` shares the interactive pool. |
 | `ECTO_IPV6` | unset | Set to `true` or `1` to connect to Postgres over IPv6 (prod only). |
+
+Queue targets, timeouts and the readiness threshold (`DB_*`, `BACKGROUND_DB_*`, `READY_DB_QUEUE_MS`) are listed in the
+[Configuration reference](operations/configuration.md#database); sizing and the behaviour under database pressure are in
+[Database pools and pressure](operations/database.md).
 
 ### Security
 
@@ -533,10 +538,11 @@ are in [Benchmarks](benchmarks/index.md):
   sockets on top of the base footprint. Every handshake reads the database:
   spread reconnects (clients back off with jitter) or raise `POOL_SIZE`. Scale
   out on CPU and on connection count.
-- **Database connections**: `replicas x POOL_SIZE` (+ Oban, + `bin/migrate`)
-  must stay below Postgres `max_connections` with headroom. Start with
-  `POOL_SIZE=10`; raise it when Ecto queue time (`converger.repo.query.queue_time`)
-  grows. Use PgBouncer in session mode in front of many replicas.
+- **Database connections**: `replicas x (POOL_SIZE + BACKGROUND_POOL_SIZE + 1)`
+  (+ `bin/migrate`) must stay below Postgres `max_connections` with headroom.
+  Start with 10 + 10; raise `POOL_SIZE` when the interactive queue time
+  (`converger.repo.pool.queue_time_ms`) grows. Use PgBouncer in session mode in
+  front of many replicas. See [Database pools and pressure](operations/database.md#sizing).
 - **Postgres**: `activities` and `deliveries` grow fastest; plan storage and
   autovacuum for them, and keep conversation expiry (Oban) enabled.
 - **File descriptors**: raise `ulimit -n` (e.g. 65536) for many WebSocket
