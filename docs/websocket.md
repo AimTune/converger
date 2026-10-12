@@ -48,6 +48,7 @@ One frame per WebSocket message. The full contract (every frame, field and error
 - **Receipts, typing, presence.** Send `{"type": "typing", "isTyping": true}` (at most every 2 s) and `{"type": "read", "watermark": 18}`; you receive the other participants' `typing`, read receipts and delivery progress as `deliveryStatus`, and `presence` (online/offline, per channel config). The semantics are the Phoenix binding's, described in [5a. Receipts, typing and presence](#5a-receipts-typing-and-presence); `welcome.data.capabilities` says which are on.
 - **Liveness.** The server sends `heartbeat` after 30 s of silence and answers `ping`; it closes a connection that sent nothing (not even a ping or a WebSocket ping) for 60 s with code 4408.
 - **Limits.** The [client WebSocket limits](operations/websocket-limits.md) apply: too many frames per second draw `rate_limited` with `retryAfterMs`, a client that does not read fast enough is closed with 4503, and a node that shuts down refuses new connections with 503 and closes open ones with 1012 (both with a jittered `retryAfterMs` to wait before reconnecting).
+- **Database outages.** A frame the server cannot handle because the database is unavailable draws a retryable `error` `unavailable` with `retryAfterMs` (and your `clientId` for a send: resend it unchanged). If the replay fails, the session still starts: you get `welcome`, live frames, and `error` `replay_unavailable` with `details.watermark`; after `retryAfterMs` send `sync {"watermark": <details.watermark>}`. Frames from that sync are older than live frames you may already have, so place frames by `seq`. A `hello` that cannot be served closes with **1013** (try again later) after `error` `unavailable`.
 - **Close codes.** 4401: invalid or expired token (`error` `unauthorized` / `token_expired` first; refresh in-band with `auth {"token": ...}` before `welcome.data.expiresAt` to avoid it). 4403: channel deactivated or forced disconnect. 4503: too slow to read (`slow_consumer`). 1012: the node is restarting. 4400: unsupported `hello.protocol`. 1008: the token's conversation does not exist. Reconnect with backoff and the same watermark: nothing is lost.
 - **MessagePack.** Offer `converger.v1+msgpack` to send and receive binary MessagePack frames; the maps are identical to the JSON frames.
 
@@ -164,6 +165,7 @@ Authorization: a conversation token must name this conversation. A token issued 
 | `{"status": "ok", "response": {}}` | Joined. |
 | `{"status": "error", "response": {"reason": "unauthorized"}}` | The token does not grant this conversation, or its channel is not active. |
 | `{"status": "error", "response": {"reason": "invalid_topic"}}` | The topic is neither `converger:conversation:<id>` nor `converger:channel:<id>`. |
+| `{"status": "error", "response": {"reason": "unavailable", "retry_after_ms": N}}` | The database could not be reached. Retryable: join again after `N` ms (the `phoenix` client rejoins on its own). |
 
 ### 5. Receive activities
 
@@ -424,6 +426,12 @@ Activities are committed before they are broadcast, and each frame tells you its
 2. On every (re)join, send `{"watermark": "<last>"}` in the join payload. Without a watermark you start live, from the conversation's current head, with no replay.
 3. The server replays up to `ws_replay_limit` activities (default `100`, `PAGINATION_WS_REPLAY_LIMIT`) after that watermark in one `activitySet`. If it has `has_more: true`, fetch the rest with `GET /api/v1/converger/conversations/:id/activities?watermark=<that frame's watermark>` and repeat until `has_more` is `false`.
 4. Live frames that the replay already covered are not pushed again. When a replay stops at `has_more`, the server also fills the rest in on the next live activity (gap detection); if you fetch over REST at the same time, de-duplicate by activity `id`.
+5. If the database is unavailable when the replay runs, you stay joined and get the event `error` instead:
+   `{"code": "replay_unavailable", "watermark": "<the watermark you joined with>", "retry_after_ms": N}`. Live
+   activities keep coming. After `N` ms, fetch the range after that `watermark` over REST (or leave and rejoin with it),
+   and keep it as your resume point until you have: the live frames you received meanwhile are newer than the gap.
+   The same event, with the socket's last pushed watermark, reports a gap fill that failed; the next live activity
+   retries it.
 
 Watermarks are opaque; today they are URL-safe Base64 of `seq:<n>` (`c2VxOjQy` is `seq:42`), and older activity-id watermarks are still accepted. An invalid watermark is treated as "no watermark". Do not parse or construct them.
 
@@ -667,6 +675,12 @@ Each socket is limited (defaults; operators can change them, see [WebSocket limi
 | Frames sent per socket | 20 per second, heartbeats and joins included | Error reply `{"reason": "rate_limited", "retryAfterMs": N}`; the frame is ignored. Wait `N` ms before sending again. |
 | Joined channels per socket | 50 | The join is refused with `{"reason": "too_many_joins"}`. |
 | Reading speed | the server buffers up to 1 000 frames for you | The socket is closed with 4503 `slow_consumer`. |
+
+When the database is unavailable (a saturated connection pool, a failover), the socket stays up: a join or event that
+needs the database is answered with the error reply `{"reason": "unavailable", "retry_after_ms": N}` (retry after `N`
+ms), a v1 `frame` send with the `error` frame `unavailable` (`retryAfterMs`, your `clientId`), and a replay that
+cannot run with the event `error` `replay_unavailable` (see [Resume without losing activities](#resume-without-losing-activities)).
+REST requests get `503` with `Retry-After`. See [Database pools and pressure](operations/database.md).
 
 The server closes sockets when:
 

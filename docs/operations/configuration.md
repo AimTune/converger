@@ -66,7 +66,17 @@ All prod only. Boolean values accept `true`, `1`, `yes`, `on` (case-insensitive)
 | Variable | Default | Environment | Meaning |
 | --- | --- | --- | --- |
 | `DATABASE_URL` | none | prod | See [Required in production](#required-in-production). |
-| `POOL_SIZE` | `10` | prod | Ecto pool size per node. Dev uses 20, test `2 x schedulers`. |
+| `POOL_SIZE` | `10` | prod | Interactive pool size per node (HTTP, WebSocket, LiveView). Dev uses 20, test `2 x schedulers`. See [Database pools and pressure](database.md). |
+| `DB_QUEUE_TARGET_MS` | `50` | prod | Interactive pool `queue_target`: a checkout queued longer than this for a whole `DB_QUEUE_INTERVAL_MS` is dropped and the request answered `503`. |
+| `DB_QUEUE_INTERVAL_MS` | `1000` | prod | Interactive pool `queue_interval`. |
+| `DB_TIMEOUT_MS` | `15000` | prod | Interactive query timeout. |
+| `BACKGROUND_POOL_SIZE` | `10` | prod | Background pool size per node, used by Oban jobs. `0` shares the interactive pool (one pool, as before #35). Dev uses 10, test shares. |
+| `BACKGROUND_DB_QUEUE_TARGET_MS` | `500` | prod | Background pool `queue_target`. |
+| `BACKGROUND_DB_QUEUE_INTERVAL_MS` | `5000` | prod | Background pool `queue_interval`. |
+| `BACKGROUND_DB_TIMEOUT_MS` | `60000` | prod | Background query timeout. |
+| `DB_RETRY_AFTER_MS` | `1000` | all | Base of the `Retry-After` / `retryAfterMs` hint when the database is unavailable; jittered up to twice the value. |
+| `READY_DB_QUEUE_MS` | `200` | all | `/health/ready` reports `degraded` (503) while the interactive pool's average wait is at least this long. `0` disables. |
+| `DB_QUEUE_WINDOW_MS` | `5000` | all | Window of that average. |
 | `ECTO_IPV6` | unset | prod | `true` or `1` connects over IPv6 (`socket_options: [:inet6]`). |
 | `DB_USERNAME` | `postgres` | dev, test | Postgres user. |
 | `DB_PASSWORD` | `postgres` | dev, test | Postgres password. |
@@ -456,6 +466,8 @@ PgBouncer transaction pooling). See [Migrations and maintenance windows](migrati
 | `:metrics` | `tenant_label: false`, `poll_interval_ms: 15_000` (`false` in test); dev adds `allowed_ips` with loopback and private ranges | `token:` and `allowed_ips:` for `GET /metrics` (see `METRICS_TOKEN`); `tenant_label:` and `poll_interval_ms:` (see `METRICS_TENANT_LABEL`, `METRICS_POLL_INTERVAL_MS`; `poll_interval_ms: false` turns the database-backed gauges off). |
 | `:prometheus_port` | unset | Port of the optional unauthenticated metrics listener (`PROMETHEUS_PORT`). |
 | `Converger.Health` | `db_timeout_ms: 1000` | Readiness database timeout. |
+| `Converger.Repo.Pools` | `background: false`; dev `[pool_size: 10]`; prod from `BACKGROUND_*` | The background pool (keyword list of repo options) or `false` for one shared pool. See [Database pools and pressure](database.md). |
+| `Converger.Repo.Pressure` | `retry_after_ms: 1000`, `queue_window_ms: 5000`, `degraded_queue_ms: 200` | See `DB_RETRY_AFTER_MS`, `DB_QUEUE_WINDOW_MS`, `READY_DB_QUEUE_MS`. |
 | `:force_ssl` | unset outside prod | Keyword list of `Plug.SSL` options, built from the TLS variables in prod; `false` disables. |
 | `:webhook` | `[]` | `allowed_targets`, `allow_private_targets`, `resolver` (SSRF guard), and installation defaults for `connect_timeout` (5000 ms), `receive_timeout` (10000 ms), `max_response_bytes` (1 MiB). |
 | `:channel_signals_async` | `true`; `false` in test | Forward typing indicators and read receipts to external channels (`Converger.Channels.Signals`) in a task under `Converger.TaskSupervisor`. `false` runs them inline in the WebSocket channel process. |

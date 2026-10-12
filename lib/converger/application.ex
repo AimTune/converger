@@ -5,6 +5,8 @@ defmodule Converger.Application do
 
   use Application
 
+  alias Converger.Repo.{Pools, Pressure}
+
   @impl true
   def start(_type, _args) do
     # A misconfigured `config :converger, :adapters` fails the boot, not a delivery.
@@ -12,7 +14,10 @@ defmodule Converger.Application do
 
     OpentelemetryPhoenix.setup(adapter: :bandit)
     OpentelemetryEcto.setup([:converger, :repo])
+    OpentelemetryEcto.setup([:converger, :background_repo])
     OpentelemetryOban.setup()
+    # Oban jobs query the background pool (bulkhead, issue #35).
+    :ok = Pools.attach()
 
     # Node discovery (libcluster). Nothing is started without a
     # CLUSTER_STRATEGY; see Converger.Cluster.
@@ -22,6 +27,11 @@ defmodule Converger.Application do
         Converger.Vault,
         Converger.Repo
       ] ++
+        Pools.child_specs() ++
+        [
+          # Pool wait time for readiness (issue #35).
+          Pressure
+        ] ++
         Converger.Cluster.child_specs() ++
         [
           {Phoenix.PubSub, name: Converger.PubSub},
@@ -64,10 +74,11 @@ defmodule Converger.Application do
   @doc """
   The Oban config, with `config :converger, :oban_lifeline` options (set from
   `OBAN_LIFELINE_*` in config/runtime.exs) merged into the
-  `Oban.Plugins.Lifeline` plugin.
+  `Oban.Plugins.Lifeline` plugin, and Oban's queries routed to the background
+  pool when it is enabled (`Converger.Repo.Pools.oban_config/1`).
   """
   def oban_config do
-    config = Application.fetch_env!(:converger, Oban)
+    config = :converger |> Application.fetch_env!(Oban) |> Pools.oban_config()
 
     case Application.get_env(:converger, :oban_lifeline, []) do
       [] -> config

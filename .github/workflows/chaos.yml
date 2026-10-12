@@ -1,6 +1,7 @@
 name: Chaos
 
-# Kills the app container under REST + WebSocket load and verifies that no
+# Kills the app container (mode `kill`) or pauses Postgres for 10 s (mode
+# `db_pause`, issue #35) under REST + WebSocket load and verifies that no
 # acked message is lost (test/chaos, docs/chaos.md). Manual, nightly, and on
 # pull requests that touch the harness: it builds the release image and takes
 # a few minutes, so it is not part of the regular CI run.
@@ -17,6 +18,9 @@ on:
       duration:
         description: Seconds of load
         default: "60"
+      mode:
+        description: kill (SIGKILL the app) or db_pause (pause Postgres); empty runs both
+        default: ""
   schedule:
     - cron: "30 3 * * *"
 
@@ -29,8 +33,12 @@ permissions:
 
 jobs:
   chaos:
-    name: Kill node during load
+    name: Chaos (${{ matrix.mode }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: ${{ inputs.mode && fromJSON(format('["{0}"]', inputs.mode)) || fromJSON('["kill", "db_pause"]') }}
     timeout-minutes: 30
 
     steps:
@@ -40,13 +48,14 @@ jobs:
         env:
           CHAOS_KILLS: ${{ inputs.kills || '3' }}
           CHAOS_DURATION_S: ${{ inputs.duration || '60' }}
+          CHAOS_MODE: ${{ matrix.mode }}
         run: bash test/chaos/run.sh
 
       - name: Upload results
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: chaos-results
+          name: chaos-results-${{ matrix.mode }}
           # Only the results directory: the generated .env stays behind.
           path: test/chaos/.run/out/
           if-no-files-found: ignore

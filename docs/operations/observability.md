@@ -159,6 +159,9 @@ a node-local registry. Labels: `socket` is `user` (legacy `/socket`), `converger
 | `converger.repo.query.total_time`, `.queue_time` | histogram (ms) | | Ecto queries. `queue_time` is the wait for a pool connection: pool saturation. |
 | `converger.repo.query.decode_time`, `.query_time`, `.idle_time` | last value (ms) | | Ecto queries |
 | `converger.repo.query_count` | counter | | Ecto queries |
+| `converger.background_repo.query.queue_time` | histogram (ms) | | Wait for a background pool connection (Oban jobs; [Database pools](database.md)) |
+| `converger.repo.pool.queue_time_ms` | last value (ms) | | Average interactive pool wait over the last `DB_QUEUE_WINDOW_MS`; readiness reports `degraded` above `READY_DB_QUEUE_MS` |
+| `converger.db.unavailable.count` | counter | `source` | Answers turned into retryable errors (`503`, `unavailable`, `replay_unavailable`) because the database was unavailable: `http`, `socket`, `channel`, `protocol`, `sse` |
 | `vm.memory.total` | last value (KB) | | VM |
 | `vm.total_run_queue_lengths.total`, `.cpu`, `.io` | last value | | Scheduler run queues |
 | `oban.job.stop.duration`, `oban.job.exception.duration` | histogram (ms) | `queue`, `worker`, `state` | Every Oban job execution (`state`: `success`, `cancelled`, `snoozed`, `failure`, `discard`) |
@@ -181,6 +184,8 @@ query on the bare name returns nothing: use `histogram_quantile(0.95, sum by (le
 `phoenix.http.request_count` now actually carries its `status` tag (the tag was missing from the event metadata,
 so the counter was never incremented).
 :::
+
+`converger.repo.pool.queue_time_ms` (the interactive pool's average wait) growing is the signal to raise `POOL_SIZE` (see [Database pools and pressure](database.md#sizing)).
 
 ### Telemetry events
 
@@ -301,7 +306,7 @@ plain HTTP:
 | Endpoint | Answers | Use it for |
 | --- | --- | --- |
 | `GET /health/live` | always `200 {"status":"ok"}` while the VM runs and the endpoint accepts requests | liveness / startup probes. It never touches the database, so a database outage does not restart every replica. |
-| `GET /health/ready` | `200 {"status":"ready","checks":{...}}` when every check passes, otherwise `503` with `"status":"draining"` (the node is shutting down) or `"unavailable"` (any other failed check) | readiness probes and load balancer health checks |
+| `GET /health/ready` | `200 {"status":"ready","checks":{...}}` when every check passes, otherwise `503` with `"status":"draining"` (the node is shutting down), `"degraded"` (only the `pool` check failed: the database pool is saturated) or `"unavailable"` (any other failed check) | readiness probes and load balancer health checks |
 
 Readiness checks (`Converger.Health.readiness/0`):
 
@@ -311,10 +316,11 @@ Readiness checks (`Converger.Health.readiness/0`):
 | `oban` | the Oban supervisor is not running | `oban not running` |
 | `draining` | the node is shutting down (`ConvergerWeb.Drain.draining?/0`) | `draining` |
 | `migrations` | a migration shipped with this release is not in `schema_migrations` (reads the table directly, so it does not wait for the migration lock while `bin/migrate` runs; cached once everything is applied) | `migrations pending: N` |
+| `pool` | the interactive pool's average wait over the last `DB_QUEUE_WINDOW_MS` (5 s) is at least `READY_DB_QUEUE_MS` (200 ms; `0` disables), see [Database pools and pressure](database.md#readiness) | `database pool saturated` |
 
 ```json
 {"status": "unavailable", "reasons": ["migrations pending: 1"],
- "checks": {"database": "ok", "oban": "ok", "draining": "ok", "migrations": "error"}}
+ "checks": {"database": "ok", "oban": "ok", "draining": "ok", "migrations": "error", "pool": "ok"}}
 ```
 
 The response only carries short reasons; details such as connection errors are logged
@@ -397,6 +403,8 @@ node: it kills a webhook target under load and waits for Prometheus to fire them
 Other signals worth watching, without a provisioned rule:
 
 - `rate(phoenix_http_request_count{status=~"5.."}[5m])` above your baseline;
+- `converger_repo_pool_queue_time_ms` consistently above a few milliseconds (pool saturation), and
+  `rate(converger_db_unavailable_count[5m]) > 0` (requests answered `503` because the database was unavailable);
 - `rate(converger_rate_limit_exceeded_count[5m])` by `bucket` (abuse, or limits set too low);
 - `rate(converger_socket_limit_count{reason="slow_consumer"}[5m])` (clients on slow networks, or a node too busy to
   write to its sockets) and the other `reason`s (abusive clients, or WebSocket limits set too low);

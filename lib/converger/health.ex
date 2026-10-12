@@ -15,6 +15,7 @@ defmodule Converger.Health do
     | `oban`       | the Oban supervisor is not running                                 |
     | `draining`   | the node is shutting down (`ConvergerWeb.Drain`)                   |
     | `migrations` | a migration shipped with this release is not applied yet           |
+    | `pool`       | the interactive pool's average wait is at or above `degraded_queue_ms` |
 
   ## Draining
 
@@ -23,6 +24,14 @@ defmodule Converger.Health do
   `ConvergerWeb.Drain.draining?/0`, which this check reads, and waits
   `drain_delay_ms` (`WS_DRAIN_DELAY_MS`) before the endpoint drains its
   sockets. Readiness then fails with `draining`.
+
+  ## Degraded
+
+  Under database pressure (issue #35, `Converger.Repo.Pressure`) the
+  `pool` check fails while checkouts of the interactive pool wait on average
+  at least `degraded_queue_ms` (`READY_DB_QUEUE_MS`, 200 ms) over the last
+  `queue_window_ms` (5 s). The node still works; readiness answers 503 with
+  status `degraded` so the load balancer sends new traffic elsewhere.
   """
 
   import Ecto.Query, only: [from: 2]
@@ -34,7 +43,7 @@ defmodule Converger.Health do
   @migrations_key {__MODULE__, :migrations_applied}
   @default_db_timeout_ms 1_000
 
-  @type check :: :database | :oban | :draining | :migrations
+  @type check :: :database | :oban | :draining | :migrations | :pool
   @type result :: :ok | {:error, String.t()}
 
   @doc "Readiness: `{:ok, checks}` or `{:error, checks}` with a result per check."
@@ -48,7 +57,8 @@ defmodule Converger.Health do
       draining: check_draining(),
       # Needs the database; reported as failing with the database.
       migrations:
-        if(database == :ok, do: check_migrations(), else: {:error, "migrations unknown"})
+        if(database == :ok, do: check_migrations(), else: {:error, "migrations unknown"}),
+      pool: check_pool()
     ]
 
     status = if Enum.all?(checks, fn {_check, result} -> result == :ok end), do: :ok, else: :error
@@ -67,6 +77,12 @@ defmodule Converger.Health do
   catch
     :exit, reason -> unavailable("database unavailable", reason)
   end
+
+  @doc false
+  @spec check_pool() :: result()
+  def check_pool,
+    do:
+      if(Converger.Repo.Pressure.degraded?(), do: {:error, "database pool saturated"}, else: :ok)
 
   @doc false
   @spec check_oban() :: result()
