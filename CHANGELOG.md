@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Load testing harness and published benchmarks (#34)
+
+- `load/`: k6 scenarios against the release image in Docker Compose, on 1 or 3 nodes: REST → WebSocket fan-out
+  (`e2e.js`), inbound webhook burst routed to three channels (`webhook_burst.js`), 10 000 idle sockets
+  (`idle.js`), reconnect storm, rolling restart and node kill with watermark resume (`reconnect.js`). A Node.js
+  mock provider with configurable latency and error rate measures delivery latency.
+- Zero-loss check: every subscriber must see every `seq` of its conversation exactly once up to the head; burst
+  messages must be stored and delivered to every target. Any lost acknowledged message fails the run.
+- `load/run.sh` samples CPU and RSS per node, Oban queue depth and DB pool wait, records the hardware, and writes
+  `results.json` and a markdown report; `load/report.js` merges runs and compares them with a baseline.
+- Nightly `Load` workflow (1 and 3 nodes) fails on lost messages, failed thresholds, or a p95 regression above 15 %.
+- `mix converger.loadtest` replaces `test/load/performance_test.exs` (in-process write-path benchmark). The README's
+  hardcoded throughput figures are replaced by the published results in `docs/benchmarks/`. ADR-0049.
 ### Conditional routing rules, reply-back routing and dry-run (#43)
 
 - Routing rules have `conditions` (JSON predicates over `type`, `sender`, `text`, `metadata.*`,

@@ -1,0 +1,72 @@
+name: Load
+
+# k6 load harness (load/, docs/benchmarks/index.md): REST -> WebSocket
+# fan-out, inbound webhook burst, idle sockets, reconnect storm, rolling
+# restart and node kill, on 1 and 3 nodes. Publishes the report as the job
+# summary and an artifact, and fails on lost acked messages, failed
+# correctness thresholds, or a p95 regression of more than 15 % against the committed
+# baseline for this runner (load/baselines/).
+on:
+  pull_request:
+    paths:
+      - "load/**"
+      - ".github/workflows/load.yml"
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: full or smoke
+        default: full
+  schedule:
+    - cron: "0 2 * * *"
+
+concurrency:
+  group: load-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  load:
+    name: Load (${{ matrix.nodes }} node${{ matrix.nodes == 3 && 's' || '' }})
+    # Fixed runner size: baselines are only comparable on the same hardware
+    # (recorded in every report).
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        nodes: [1, 3]
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Run load harness
+        env:
+          LOAD_NODES: ${{ matrix.nodes }}
+          LOAD_PROFILE: ${{ inputs.profile || 'full' }}
+        run: bash load/run.sh
+
+      - name: Compare with baseline
+        if: always() && hashFiles('load/.run/out/results.json') != ''
+        run: |
+          baseline="load/baselines/ubuntu-24.04-${{ matrix.nodes }}node.json"
+          args=()
+          if [ -f "$baseline" ] && [ "${{ inputs.profile || 'full' }}" = "full" ]; then
+            args=(--baseline "$baseline")
+          else
+            echo "::notice::no baseline for this runner and profile ($baseline); comparison skipped"
+          fi
+          code=0
+          node load/report.js "${args[@]}" --out load/.run/out/comparison.md load/.run/out/results.json || code=$?
+          cat load/.run/out/comparison.md >>"$GITHUB_STEP_SUMMARY"
+          exit "$code"
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: load-results-${{ matrix.nodes }}node
+          # Only the results directory: the generated .env stays behind.
+          path: load/.run/out/
+          if-no-files-found: ignore

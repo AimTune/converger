@@ -87,6 +87,10 @@ that change the harness. It runs both modes (`kill` and `db_pause`) as a matrix;
 results directory of each is uploaded as the `chaos-results-<mode>` artifact. It is not part of the regular CI workflow because it
 builds the release image.
 
+The [load harness](benchmarks/index.md) applies the same zero-loss rule under
+heavier load and on three nodes (`rolling_restart` and `node_kill` scenarios).
+It detects loss from each subscriber's `seq` instead of from database dumps.
+
 ## What counts as acknowledged
 
 | Transport | Request | Acknowledged when |
