@@ -30,6 +30,12 @@ defmodule Converger.Channels do
   end
 
   def create_channel(attrs \\ %{}, actor \\ nil) do
+    attrs
+    |> do_create_channel(actor)
+    |> notify_consumers()
+  end
+
+  defp do_create_channel(attrs, actor) do
     changeset = Channel.changeset(%Channel{}, attrs)
 
     if actor do
@@ -68,7 +74,7 @@ defmodule Converger.Channels do
       ConvergerWeb.Sockets.disconnect_channel(updated.id)
     end
 
-    result
+    notify_consumers(result)
   end
 
   defp do_update_channel(channel, attrs, actor) do
@@ -106,7 +112,7 @@ defmodule Converger.Channels do
       ConvergerWeb.Sockets.disconnect_channel(deleted.id)
     end
 
-    result
+    notify_consumers(result)
   end
 
   # The channel's conversations cascade with the row. Their activities, and
@@ -306,4 +312,42 @@ defmodule Converger.Channels do
     )
     |> Repo.all()
   end
+
+  @doc """
+  Every channel that needs a broker consumer, across tenants: active,
+  `inbound` or `duplex`, of a type with the `:consumer` capability (see
+  `Converger.Channels.Consumers`).
+  """
+  def list_consumer_channels do
+    case Adapter.types_with(:consumer) do
+      [] ->
+        []
+
+      types ->
+        from(c in Channel,
+          where: c.type in ^types and c.mode in ["inbound", "duplex"] and c.status == "active",
+          order_by: [asc: c.id]
+        )
+        # Complete on purpose (no bounded_all cap): a channel missing from
+        # the list would have its consumer stopped.
+        |> Repo.all()
+    end
+  end
+
+  @doc "The channel with `id`, or nil."
+  def get_channel(id) do
+    case Ecto.UUID.cast(id) do
+      {:ok, uuid} -> Repo.get(Channel, uuid)
+      :error -> nil
+    end
+  end
+
+  # Broker channels consume through Converger.Channels.Consumers: every node's
+  # consumer manager reconciles the channel after a change.
+  defp notify_consumers({:ok, %Channel{id: id}} = result) do
+    Converger.Channels.Consumers.notify_changed(id)
+    result
+  end
+
+  defp notify_consumers(result), do: result
 end

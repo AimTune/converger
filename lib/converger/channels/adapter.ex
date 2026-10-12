@@ -68,6 +68,10 @@ defmodule Converger.Channels.Adapter do
     * `:provider_ack` - the provider retries every non-2xx inbound response,
       so a handled request is always answered `200`, even when messages were
       rejected permanently
+    * `:consumer` - inbound messages are pulled from a message broker by a
+      consumer Converger runs for each inbound channel
+      (`Converger.Channels.Consumers`), not posted to the inbound webhook.
+      The adapter also implements the `Converger.Channels.Broker` behaviour
     * `:media`, `:templates`, `:reactions`, `:edits` - outbound content the
       adapter renders natively
     * `activity_types: [String.t()]` - the activity types
@@ -84,6 +88,7 @@ defmodule Converger.Channels.Adapter do
           | :typing
           | :lifecycle_events
           | :provider_ack
+          | :consumer
           | :media
           | :templates
           | :reactions
@@ -96,8 +101,11 @@ defmodule Converger.Channels.Adapter do
     * `:name` - the config key (string)
     * `:type` - `:string`, `:url` (http/https), `:integer`, `:boolean` or
       `:map`; checked when the value is present
-    * `:required` - `true`, `false` (default), or `:with_signature`: required
-      only on channels with `require_signature: true` (a webhook signing key)
+    * `:required` - `true`, `false` (default), `:with_signature`: required
+      only on channels with `require_signature: true` (a webhook signing key),
+      `:inbound`: required only on channels with mode `inbound` or `duplex`
+      (a topic to consume), or `:outbound`: required only on channels with
+      mode `outbound` or `duplex` (a topic to produce to)
     * `:secret` - masked in the admin UI and rendered as a password input
     * `:label`, `:placeholder`, `:help` - admin form texts
     * `:summary` - shown next to the channel in the admin channel list
@@ -106,7 +114,7 @@ defmodule Converger.Channels.Adapter do
   @type field :: %{
           required(:name) => String.t(),
           required(:type) => :string | :url | :integer | :boolean | :map,
-          optional(:required) => boolean() | :with_signature,
+          optional(:required) => boolean() | :with_signature | :inbound | :outbound,
           optional(:secret) => boolean(),
           optional(:label) => String.t(),
           optional(:placeholder) => String.t(),
@@ -432,7 +440,9 @@ defmodule Converger.Channels.Adapter do
     Converger.Channels.Adapters.Viber,
     Converger.Channels.Adapters.Discord,
     Converger.Channels.Adapters.Teams,
-    Converger.Channels.Adapters.HttpPull
+    Converger.Channels.Adapters.HttpPull,
+    Converger.Channels.Adapters.Kafka,
+    Converger.Channels.Adapters.RabbitMQ
   ]
 
   @required_functions [type: 0, supported_modes: 0, deliver_activity: 2, parse_inbound: 2]
@@ -532,6 +542,9 @@ defmodule Converger.Channels.Adapter do
     * `:require_signature` - whether the channel requires signed inbound
       requests; fields with `required: :with_signature` are required only
       then (default `false`)
+    * `:mode` - the channel mode (`"inbound"`, `"outbound"` or `"duplex"`);
+      fields with `required: :inbound` / `required: :outbound` are required
+      only on channels of a matching mode. Without it they are not required.
   """
   def validate_config(type, config, opts \\ [])
 
@@ -549,18 +562,19 @@ defmodule Converger.Channels.Adapter do
   @doc "Check `config` against a config schema, see `validate_config/3`."
   def validate_schema(type, schema, config, opts \\ []) do
     signed? = Keyword.get(opts, :require_signature, false) == true
+    mode = Keyword.get(opts, :mode)
 
-    missing = for %{required: true} = f <- schema, blank?(config[f.name]), do: f.name
-
-    missing_signed =
-      for %{required: :with_signature} = f <- schema,
-          signed?,
-          blank?(config[f.name]),
-          do: f.name
+    missing = missing(schema, config, &(&1 == true))
+    missing_mode = missing(schema, config, &required_in_mode?(&1, mode))
+    missing_signed = missing(schema, config, &(signed? and &1 == :with_signature))
 
     cond do
       missing != [] ->
         {:error, "#{type} config missing: #{Enum.join(missing, ", ")}"}
+
+      missing_mode != [] ->
+        {:error,
+         "#{type} config missing: #{Enum.join(missing_mode, ", ")} (required in #{mode} mode)"}
 
       missing_signed != [] ->
         {:error,
@@ -576,6 +590,20 @@ defmodule Converger.Channels.Adapter do
         end)
     end
   end
+
+  # Names of the blank fields whose `:required` value satisfies `required?`.
+  defp missing(schema, config, required?) do
+    for field <- schema,
+        required?.(Map.get(field, :required, false)),
+        blank?(config[field.name]),
+        do: field.name
+  end
+
+  # `required: :inbound` / `:outbound` apply in that mode and in duplex.
+  defp required_in_mode?(direction, mode) when direction in [:inbound, :outbound],
+    do: mode in [Atom.to_string(direction), "duplex"]
+
+  defp required_in_mode?(_required, _mode), do: false
 
   defp blank?(value), do: value in [nil, ""]
 

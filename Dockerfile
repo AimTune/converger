@@ -9,8 +9,9 @@ ARG RUNNER_IMAGE="docker.io/debian:${DEBIAN_VERSION}"
 # --- Build Stage ---
 FROM ${BUILDER_IMAGE} AS builder
 
+# cmake builds the CRC32C NIF of the Kafka client (crc32cer, a brod dependency).
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends build-essential git \
+  && apt-get install -y --no-install-recommends build-essential cmake git \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

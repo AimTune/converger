@@ -263,6 +263,7 @@ Callback checklist:
 | `:typing` | Forwards typing indicators (`send_typing/2`). |
 | `:lifecycle_events` | Receives conversation close and reopen events, which carry no message content. Leave it out for messaging providers, which would send an empty message. |
 | `:provider_ack` | The provider retries every non-`2xx` inbound response (for days, in Meta's case), so a handled request is always answered `200`, even when its messages were rejected permanently. |
+| `:consumer` | Inbound messages are pulled from a message broker by a consumer Converger runs, one per channel in the cluster, instead of arriving on the inbound webhook. The adapter also implements `Converger.Channels.Broker`; see [broker adapters](#broker-adapters-optional). |
 | `:media`, `:templates`, `:reactions`, `:edits` | Outbound content the adapter renders natively (descriptive: nothing in Converger branches on them yet; the WhatsApp adapters declare `:media` and `:templates`, see [#68](https://github.com/AimTune/converger/issues/68) for typed messages). |
 | `activity_types: [...]` | The activity types `deliver_activity/2` renders natively; see [capabilities and downgrade](#capabilities-and-downgrade). |
 
@@ -290,6 +291,25 @@ Signals are best effort: they run in a task under `Converger.TaskSupervisor`, ar
 
 If the provider registers its webhook through an API call (Telegram `setWebhook`), implement `register_webhook(channel, inbound_url)` and return `:ok` or `{:error, reason}` (a readable string is shown to the admin). The admin channel list then shows a **Register webhook** button for your channels; it calls `Channels.register_webhook/3` with the channel's public inbound URL (`https://<PHX_HOST>/api/v1/channels/<id>/inbound`) and audits a successful call as `register_webhook`. Pass the channel's verification secret to the provider in the same call, as the Telegram adapter passes `secret_token`. Use `retry: false` and a timeout of a few seconds: an admin is waiting for the answer.
 
+### Broker adapters (optional)
+
+An adapter whose inbound side is a broker topic or queue (the built-in [`kafka`](kafka.md) and
+[`rabbitmq`](rabbitmq.md)) declares the `:consumer` capability and implements the `Converger.Channels.Broker`
+behaviour next to the adapter one:
+
+| Callback | Returns | Purpose |
+| --- | --- | --- |
+| `consumer_options(channel)` | `{:ok, keyword}` or `{:error, message}` | Broadway options of the channel's consumer: `producer: [module: {ProducerModule, opts}, concurrency: 1]` and `processors: [default: [concurrency: n]]`. |
+| `message_info(channel, %Broadway.Message{})` | `%{payload:, message_id:, source:, key:, headers:}` | The body and the broker message id (stable across redeliveries: it becomes the idempotency key), plus what dead-lettering keeps. |
+| `dead_letter(channel, info, reason)` | `:ok` or `{:error, term}` | Write a poison message to the channel's dead-letter destination. Retried until it returns `:ok`. |
+
+Everything else is shared: `Converger.Channels.Consumers` starts one consumer per active inbound channel in the
+cluster and follows channel changes, and `Converger.Channels.Broker.handle/4` decodes the
+[envelope](brokers.md#envelope), applies idempotency, retries transient failures and dead-letters poison messages.
+`deliver_activity/2` should skip activities consumed from the same channel (`Broker.echo?/2`). Use `required: :inbound`
+and `required: :outbound` for the topics in `config_schema/0`. See [Broker channels](brokers.md) and
+[ADR-0047](../adr/0047-broker-channels-kafka-and-rabbitmq.md).
+
 ## 2. Register the type
 
 Add the module to the registry with one config line, in `config/config.exs` of your fork or application:
@@ -298,7 +318,7 @@ Add the module to the registry with one config line, in `config/config.exs` of y
 config :converger, :adapters, [Converger.Channels.Adapters.AcmeSms]
 ```
 
-The registry (`Converger.Channels.Adapter.adapters/0`) is the built-in adapters (`echo`, `webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram`, `email`, `sms_twilio`, `sms_vonage`) followed by this list, in order. An adapter whose `type/0` equals a built-in type replaces the built-in, so a fork can swap an implementation without patching core. A built-in adapter that ships with Converger itself is added to `@builtin_adapters` in `adapter.ex` instead.
+The registry (`Converger.Channels.Adapter.adapters/0`) is the built-in adapters (`echo`, `webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram`, `email`, `sms_twilio`, `sms_vonage`, `kafka`, `rabbitmq`) followed by this list, in order. An adapter whose `type/0` equals a built-in type replaces the built-in, so a fork can swap an implementation without patching core. A built-in adapter that ships with Converger itself is added to `@builtin_adapters` in `adapter.ex` instead.
 
 That is all. From the registry and the adapter's declarations:
 
@@ -328,7 +348,7 @@ Channel types are plain strings, never atoms created from input. Unknown types f
 | --- | --- | --- |
 | `name` | string | The config key. |
 | `type` | `:string`, `:url`, `:integer`, `:boolean`, `:map` | Checked when the value is present. `:url` must be `http` or `https` with a host; `:integer` and `:boolean` also accept the strings the admin form sends (`"5000"`, `"true"`). |
-| `required` | `true`, `false` (default), `:with_signature` | `:with_signature` makes the field required only on channels with `require_signature: true`, for a provider signing key (Meta's `app_secret`). |
+| `required` | `true`, `false` (default), `:with_signature`, `:inbound`, `:outbound` | `:with_signature` makes the field required only on channels with `require_signature: true`, for a provider signing key (Meta's `app_secret`). `:inbound` and `:outbound` make it required only on channels whose mode includes that direction (`duplex` includes both), for a topic to consume or produce to ([Kafka](kafka.md)). |
 | `secret` | boolean | Rendered as a password input and masked in the admin channel list. |
 | `label`, `placeholder`, `help` | string | Admin form texts. |
 | `summary` | boolean | Shown next to the channel in the admin channel list (`Label: value`, or the bare value for a `:url`). |
@@ -343,7 +363,7 @@ Channel types are plain strings, never atoms created from input. Unknown types f
 
 - The whole `config` map is stored with `Converger.Encrypted.Map` (Cloak, AES key from `CLOAK_KEY`), and the channel `secret` with `Converger.Encrypted.Binary`. Nothing extra is needed to encrypt a new config key at rest. See [ADR-0012](../adr/0012-secrets-at-rest-and-audit-redaction.md).
 - Mark secret fields `secret: true` in `config_schema/0`: the admin form renders them as password inputs and the admin channel list masks them.
-- **Audit redaction depends on the key name.** `Converger.Secrets.redact/1` (audit logs) and the admin config view mask keys named `access_token`, `api_key`, `secret`, `token`, `password`, `password_hash`, `verify_token`, `app_secret`, `authorization`, `x-api-key`, `x-channel-token`, and any key ending in `_secret`, `_token` or `_hash`. Name secret config keys so they match (`api_key`, `webhook_secret`, `refresh_token`), never `key` or `credentials`.
+- **Audit redaction depends on the key name.** `Converger.Secrets.redact/1` (audit logs) and the admin config view mask keys named `access_token`, `api_key`, `secret`, `token`, `password`, `password_hash`, `verify_token`, `app_secret`, `authorization`, `x-api-key`, `x-channel-token`, and any key ending in `_secret`, `_token`, `_hash` or `_password`. Name secret config keys so they match (`api_key`, `webhook_secret`, `refresh_token`), never `key` or `credentials`.
 - Never log `channel.config` or request headers unredacted.
 
 ## 5. Inbound parsing and idempotency

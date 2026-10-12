@@ -75,11 +75,16 @@ defmodule Converger.Channels.Channel do
 
   # The adapter's config schema and checks. Fields required only on signed
   # channels (`required: :with_signature`, e.g. Meta's app_secret) depend on
-  # `require_signature`.
+  # `require_signature`; fields required per direction (`required: :inbound`,
+  # e.g. a broker channel's topic_in) depend on `mode`.
   defp validate_channel_config(changeset) do
     type = get_field(changeset, :type)
     config = get_field(changeset, :config) || %{}
-    opts = [require_signature: get_field(changeset, :require_signature) == true]
+
+    opts = [
+      require_signature: get_field(changeset, :require_signature) == true,
+      mode: get_field(changeset, :mode) || "duplex"
+    ]
 
     case Adapter.validate_config(type, config, opts) do
       :ok -> changeset

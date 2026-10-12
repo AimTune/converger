@@ -83,14 +83,22 @@ Selected with `broadway: [producer: ...]`:
 | Producer | Broadway producer module | Push module | Extra dependency |
 | --- | --- | --- | --- |
 | `:memory` (default) | `Converger.Pipeline.Broadway.MemoryProducer` (GenStage, in-process queue) | built in | none |
-| `:kafka` | `BroadwayKafka.Producer` with `hosts` (default `[localhost: 9092]`), `group_id` (default `"converger_pipeline"`), `topics` (default `["converger.activities"]`) | `Converger.Pipeline.Broadway.KafkaPush` (`:brod.produce_sync/5`, keyed by `activity_id`, to `topic`, default `"converger.activities"`, client `client_id`, default `:converger_kafka_client`) | `{:broadway_kafka, "~> 0.4"}` and `:brod` |
-| `:rabbitmq` | `BroadwayRabbitMQ.Producer` with `queue` (default `"converger.activities"`) and `connection` (default `[host: "localhost"]`) | `Converger.Pipeline.Broadway.RabbitmqPush` (publishes JSON to the default exchange with the queue as routing key) | `{:broadway_rabbitmq, "~> 0.8"}` and `{:amqp, "~> 3.3"}` |
+| `:kafka` | `BroadwayKafka.Producer` with `hosts` (default `[localhost: 9092]`), `group_id` (default `"converger_pipeline"`), `topics` (default `["converger.activities"]`) | `Converger.Pipeline.Broadway.KafkaPush` (`:brod.produce_sync/5`, keyed by `activity_id`, to `topic`, default `"converger.activities"`, client `client_id`, default `:converger_kafka_client`) | included (`broadway_kafka`, `brod`) |
+| `:rabbitmq` | `BroadwayRabbitMQ.Producer` with `queue` (default `"converger.activities"`) and `connection` (default `[host: "localhost"]`) | `Converger.Pipeline.Broadway.RabbitmqPush` (publishes JSON to the default exchange with the queue as routing key) | included (`broadway_rabbitmq`, `amqp`) |
 | `:custom` | `custom: [broadway_producer: {Module, opts}]` | `custom: [push_module: Module]`, implementing `Converger.Pipeline.Broadway.PushBehaviour` (`push(message, config)`) | your own |
 
 For Kafka and RabbitMQ you can replace the producer with `broadway_producer: {Mod, opts}` and the push side with `kafka_push_module:` / `rabbitmq_push_module:` under `broadway:`.
 
 :::warning
-The Kafka and RabbitMQ client libraries are **not** in `mix.exs`. Using those producers requires adding the dependencies and building your own release. The RabbitMQ push module also opens and closes an AMQP connection per message, which is not suitable for high volume as shipped.
+The RabbitMQ push module opens and closes an AMQP connection per message, which is not suitable for high volume as shipped. The Kafka push module produces through the `:brod` client named by `client_id`, which you must start yourself. (The client libraries ship with Converger since [#42](https://github.com/AimTune/converger/issues/42), for the broker channels.)
+:::
+
+:::tip Pipeline transport is not an integration point
+Kafka and RabbitMQ here are the **pipeline transport**: an internal queue between "activity committed" and "deliver to
+channels", carrying only `activity_id` / `channel_id` pointers. To exchange conversations with your own services over
+Kafka or RabbitMQ, create a **broker channel** (`kafka`, `rabbitmq`) instead: it has a documented envelope, consumes
+inbound messages, is tenant-scoped and is tracked like every channel. See
+[pipeline transport or broker channel](../channels/brokers.md#pipeline-transport-or-broker-channel).
 :::
 
 Tuning keys under `broadway:` and their defaults:
@@ -126,7 +134,7 @@ The backend is the `:pipeline` application env, set in [config/config.exs](https
 config :converger, :pipeline,
   backend: Converger.Pipeline.Oban
 
-# Broadway with Kafka (add broadway_kafka and brod to mix.exs first)
+# Broadway with Kafka
 config :converger, :pipeline,
   backend: Converger.Pipeline.Broadway,
   broadway: [
@@ -144,7 +152,7 @@ config :converger, :pipeline,
     delivery_batch_timeout: 1000
   ]
 
-# Broadway with RabbitMQ (add broadway_rabbitmq and amqp to mix.exs first)
+# Broadway with RabbitMQ
 config :converger, :pipeline,
   backend: Converger.Pipeline.Broadway,
   broadway: [

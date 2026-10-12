@@ -105,7 +105,29 @@ All prod only. Boolean values accept `true`, `1`, `yes`, `on` (case-insensitive)
 | `WEBHOOK_ALLOWED_TARGETS` | empty (dev: `localhost,127.0.0.0/8,::1` from `dev.exs`) | all | Comma-separated host names (`*.svc.local` matches subdomains) or IP/CIDR ranges that webhooks may target although they are private. Replaces the dev default when set. |
 | `WEBHOOK_ALLOW_PRIVATE_TARGETS` | unset | all | Exactly `true` or `1` disables the SSRF guard entirely. Development only. |
 
-See [Outbound webhooks](../webhooks.md#ssrf-protection).
+See [Outbound webhooks](../webhooks.md#ssrf-protection). The same guard, and these two variables, apply to the broker
+hosts of [broker channels](../channels/brokers.md#security) (`kafka` brokers, the `rabbitmq` URL host): allow a
+private Kafka or RabbitMQ cluster with `WEBHOOK_ALLOWED_TARGETS`.
+
+## Broker channels
+
+Consumers of the `kafka` and `rabbitmq` channel types ([Broker channels](../channels/brokers.md#consumers-in-a-cluster)).
+
+| Variable | Default | Environment | Meaning |
+| --- | --- | --- | --- |
+| `BROKER_CONSUMERS` | `true` (test: `false`) | all | `false` / `0` keeps broker consumers off this node (no consumer manager); the other nodes of the cluster run them. Producing (deliveries to broker channels) is not affected. |
+| `BROKER_RECONCILE_INTERVAL_MS` | `30000` | all | How often every node reconciles the running consumers with the channels (restarts consumers that gave up, picks up the consumers of a node that left). Channel changes are applied at once regardless. |
+
+The other keys of `config :converger, :broker_channels` (application config only):
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `consumers` | `true` | Set by `BROKER_CONSUMERS`. |
+| `reconcile_interval_ms` | `30000` | Set by `BROKER_RECONCILE_INTERVAL_MS`. |
+| `inbound_max_attempts` | `8` | Attempts for a consumed message that fails transiently before it is dead-lettered. |
+| `inbound_backoff_ms`, `inbound_max_backoff_ms` | `500`, `30000` | Backoff between those attempts (doubling, capped). |
+| `dead_letter_max_backoff_ms` | `30000` | Cap of the backoff between attempts to write a message to the dead-letter topic or queue (retried until it succeeds). |
+| `publisher_idle_ms` | `900000` | A node's producer connection to a broker channel is closed after this long without deliveries. |
 
 ## Pagination
 
@@ -285,6 +307,8 @@ Compose also sets `PORT=4000`, `OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collecto
 | `MINIO_ENDPOINT`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY` | `test/converger/uploads/storage_integration_test.exs` (`--only minio`) | MinIO server for the S3 integration tests. |
 | `AZURITE_ENDPOINT` | same file (`--only azurite`) | Azurite blob endpoint, e.g. `http://127.0.0.1:10000/devstoreaccount1`. |
 | `CHECK_ORIGIN` | `test/converger_web/check_origin_config_test.exs` | Exercises the runtime parsing. |
+| `KAFKA_BROKERS` | `test/converger/channels/kafka_integration_test.exs` (`--only kafka`) | Kafka bootstrap brokers, default `localhost:9092`. See [running the broker tests](../channels/brokers.md#running-the-broker-tests). |
+| `RABBITMQ_URL`, `RABBITMQ_USERNAME`, `RABBITMQ_PASSWORD` | `test/converger/channels/rabbitmq_integration_test.exs` (`--only rabbitmq`) | RabbitMQ broker, default `amqp://localhost:5672` with `guest` / `guest`. |
 
 ## Application configuration (config/*.exs)
 
@@ -332,7 +356,7 @@ config :converger, pipeline: [backend: Converger.Pipeline.Oban]
 | Backend | Use |
 | --- | --- |
 | `Converger.Pipeline.Oban` | Default. Deliveries are Oban jobs inserted in the activity transaction (durable). See [ADR-0001](../adr/0001-transactional-outbox-with-oban.md). |
-| `Converger.Pipeline.Broadway` | Throughput backend with `broadway: [producer: :memory, :kafka, :rabbitmq or :custom, ...]`. Not durable; the `:memory` producer refuses to start in prod unless `allow_memory_producer_in_prod: true`. Kafka/RabbitMQ need optional deps. See [ADR-0002](../adr/0002-broadway-for-throughput-oban-for-retries.md). |
+| `Converger.Pipeline.Broadway` | Throughput backend with `broadway: [producer: :memory, :kafka, :rabbitmq or :custom, ...]`. Not durable; the `:memory` producer refuses to start in prod unless `allow_memory_producer_in_prod: true`. See [ADR-0002](../adr/0002-broadway-for-throughput-oban-for-retries.md). This is the internal *pipeline transport*; to exchange conversations with other systems over Kafka or RabbitMQ use a [broker channel](../channels/brokers.md#pipeline-transport-or-broker-channel) instead. |
 | `Converger.Pipeline.Inline` | Synchronous; used by `config/test.exs`. |
 
 Retry defaults for external deliveries come from `config :converger, :retry_policy` (keys `max_attempts` 5,

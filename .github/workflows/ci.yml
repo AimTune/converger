@@ -250,6 +250,66 @@ jobs:
           AZURITE_ENDPOINT: http://127.0.0.1:10000/devstoreaccount1
         run: mix test test/converger/uploads/storage_integration_test.exs --only minio --only azurite
 
+  brokers:
+    name: Broker channel suites (Kafka, RabbitMQ)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Optional: depends on two broker containers starting on the runner.
+    continue-on-error: true
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+
+      # Single-node KRaft broker, advertised as localhost:9092 by the image defaults.
+      kafka:
+        image: apache/kafka:3.9.1
+        ports: ["9092:9092"]
+        options: >-
+          --health-cmd "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092"
+          --health-interval 5s --health-timeout 10s --health-retries 20
+
+      rabbitmq:
+        image: rabbitmq:3.13-management
+        ports: ["5672:5672"]
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q ping"
+          --health-interval 5s --health-timeout 10s --health-retries 20
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          otp-version: ${{ env.OTP_VERSION }}
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            deps
+            _build
+          key: mix-${{ runner.os }}-${{ env.ELIXIR_VERSION }}-${{ env.OTP_VERSION }}-${{ hashFiles('mix.lock') }}
+          restore-keys: mix-${{ runner.os }}-${{ env.ELIXIR_VERSION }}-${{ env.OTP_VERSION }}-
+
+      - run: mix deps.get
+      - run: mix compile --warnings-as-errors
+
+      # test/converger/channels/{kafka,rabbitmq}_integration_test.exs: an
+      # external produce reaches a WebSocket client, the reply is produced,
+      # restarts resume without duplicates, poison messages are dead-lettered.
+      - name: Run the broker channel suites
+        env:
+          KAFKA_BROKERS: localhost:9092
+          RABBITMQ_URL: amqp://localhost:5672
+        run: mix test --only kafka --only rabbitmq --warnings-as-errors
+
   cluster:
     name: Two-node cluster suite
     runs-on: ubuntu-latest
