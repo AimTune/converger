@@ -9,7 +9,7 @@ description: The HTTP API is described by an OpenAPI 3.1 document generated from
 | **Status** | Accepted |
 | **Date** | 2026-10-12 |
 | **Issue** | [#45](https://github.com/AimTune/converger/issues/45) |
-| **Pull request** | to be linked |
+| **Pull request** | [#145](https://github.com/AimTune/converger/pull/145) |
 | **Related** | [ADR-0024](0024-converger-protocol-v1-as-superset-of-mekik-1.md), [ADR-0026](0026-one-client-socket-stack-and-shape-checked-legacy-tokens.md), [ADR-0044](0044-bulkheaded-pools-and-graceful-degradation-under-database-pressure.md) |
 
 ## Context and problem statement
