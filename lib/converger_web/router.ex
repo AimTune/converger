@@ -61,6 +61,8 @@ defmodule ConvergerWeb.Router do
       post "/reopen", ConversationController, :reopen
     end
 
+    post "/routing_rules/dry_run", RoutingRuleController, :dry_run
+
     resources "/routing_rules", RoutingRuleController,
       only: [:index, :show, :create, :update, :delete]
 
@@ -170,6 +172,7 @@ defmodule ConvergerWeb.Router do
       live "/conversations", ConversationLive, :index
       live "/conversations/:id", ConversationLive, :show
       live "/routing_rules", RoutingRuleLive
+      live "/routing_rules/dry_run", RoutingRuleDryRunLive
       live "/deliveries", DeliveryLive
       live "/audit_logs", AuditLogLive
       live "/users", AdminUserLive

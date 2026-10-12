@@ -141,6 +141,7 @@ defmodule Converger.Inbound do
     case Activities.create_client_activity(message, %{
            tenant_id: channel.tenant_id,
            conversation_id: conversation.id,
+           source_channel_id: channel.id,
            sender: message["sender"],
            idempotency_key: message["idempotency_key"]
          }) do

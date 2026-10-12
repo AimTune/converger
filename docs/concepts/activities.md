@@ -26,6 +26,7 @@ Table `activities`:
 | `idempotency_key` | text | server | From the `x-idempotency-key` header or the provider message id. `(conversation_id, idempotency_key)` is unique where not null. |
 | `reply_to_id` | uuid | client | Optional. The activity this one refers to, in the same conversation ([references](#references-replies-reactions-edits-and-deletes)). No foreign key (`activities` is partitioned, [ADR-0034](../adr/0034-monthly-partitioning-and-per-tenant-retention.md)); the reference can dangle once retention drops the original's month. |
 | `edited_at`, `deleted_at` | utc_datetime_usec | server | Stamped on a message when a `messageUpdate` or `messageDelete` for it is accepted. Never cast from input. |
+| `source_channel_id` | uuid | server | The channel the activity came in on (inbound webhook, WebSocket, client API token). `NULL` for the tenant API and system events. Not part of the wire format; the pipeline uses it to route replies back to the conversation's origin channel ([Routing rules](routing-rules.md#how-activities-fan-out)). |
 | `inserted_at`, `updated_at` | utc_datetime_usec | server | The server timestamp always wins. Clients cannot set it. |
 
 ### Types

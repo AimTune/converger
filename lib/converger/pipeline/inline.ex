@@ -28,7 +28,7 @@ defmodule Converger.Pipeline.Inline do
   def after_commit(activity) do
     Converger.Pipeline.broadcast(activity)
 
-    channels = Converger.Pipeline.resolve_delivery_channels(activity)
+    channels = Converger.Pipeline.delivery_channels(activity)
 
     Enum.each(channels, fn channel ->
       case Converger.Pipeline.deliver(activity, channel) do

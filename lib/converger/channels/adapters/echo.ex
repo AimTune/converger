@@ -19,10 +19,11 @@ defmodule Converger.Channels.Adapters.Echo do
   @impl true
   def deliver_activity(_channel, %{metadata: %{"echo_of" => _}}), do: :ok
 
-  def deliver_activity(_channel, activity) do
+  def deliver_activity(channel, activity) do
     result =
       Converger.Activities.create_activity(%{
         "tenant_id" => activity.tenant_id,
+        "source_channel_id" => channel.id,
         "conversation_id" => activity.conversation_id,
         "text" => activity.text,
         "sender" => "bot",
