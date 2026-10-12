@@ -32,6 +32,8 @@ defmodule Converger.Application do
           # Open client connections, for the connection gauge (ConvergerWeb.Telemetry).
           ConvergerWeb.ClientConnections,
           {Task.Supervisor, name: Converger.TaskSupervisor},
+          # Per-node cache of provider message templates (WhatsApp HSM).
+          Converger.Channels.Templates,
           Converger.RateLimit.Supervisor,
           {Oban, oban_config()}
         ] ++

@@ -98,8 +98,8 @@
 
 ## v2.3 — Future Enhancements (Planned)
 
-- [ ] Media message support (images, documents, audio, video)
-- [ ] Template message support (WhatsApp HSM templates)
+- [x] Media message support (images, documents, audio, video) ([#37](https://github.com/AimTune/converger/issues/37))
+- [x] Template message support (WhatsApp HSM templates) ([#37](https://github.com/AimTune/converger/issues/37))
 - [x] Delivery receipts / read receipts
 - [x] Channel health monitoring and alerting
 - [ ] Webhook retry dashboard in admin panel

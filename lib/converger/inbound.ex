@@ -15,6 +15,7 @@ defmodule Converger.Inbound do
 
   alias Converger.{Activities, Conversations, Deliveries, Participants}
   alias Converger.Channels.Channel
+  alias Converger.Inbound.Media
 
   @type message :: map()
   @type result ::
@@ -135,6 +136,7 @@ defmodule Converger.Inbound do
 
   defp create_activity(channel, conversation, message) do
     message = resolve_reference(channel, conversation, message)
+    {message, stored_media} = Media.store(channel, conversation, message)
 
     case Activities.create_client_activity(message, %{
            tenant_id: channel.tenant_id,
@@ -143,6 +145,8 @@ defmodule Converger.Inbound do
            idempotency_key: message["idempotency_key"]
          }) do
       {:ok, activity} ->
+        Media.link(stored_media, activity.id)
+
         Logger.info("Inbound activity received",
           channel_id: channel.id,
           activity_id: activity.id
@@ -151,6 +155,8 @@ defmodule Converger.Inbound do
         {:created, activity}
 
       {:error, %Ecto.Changeset{} = changeset} ->
+        Media.discard(stored_media)
+
         Logger.warning("Rejected inbound message",
           channel_id: channel.id,
           errors: inspect(changeset.errors)
@@ -159,6 +165,7 @@ defmodule Converger.Inbound do
         {:rejected, changeset}
 
       {:error, _} = error ->
+        Media.discard(stored_media)
         error
     end
   end
