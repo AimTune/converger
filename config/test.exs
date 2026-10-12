@@ -53,6 +53,10 @@ config :converger, pipeline: [backend: Converger.Pipeline.Inline]
 # No health probes against real providers in tests (tests enable them per case)
 config :converger, :channel_health, probe_idle_channels: false
 
+# No database-backed metric polling (queue depth, dead letters): the poller
+# process has no sandbox connection.
+config :converger, :metrics, poll_interval_ms: false
+
 # Store test uploads in a temp dir (per partition)
 config :converger, Converger.Uploads,
   storage: Converger.Uploads.LocalStorage,

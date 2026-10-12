@@ -94,7 +94,7 @@ defmodule Converger.Channels.Circuit do
 
   # The first worker to find an open (or a stale half-open) breaker past its
   # cooldown moves it to half_open and becomes the probe.
-  defp claim_probe(%Channel{id: id}) do
+  defp claim_probe(%Channel{id: id} = channel) do
     now = now()
     cutoff = DateTime.add(now, -config()[:cooldown_ms], :millisecond)
 
@@ -104,6 +104,8 @@ defmodule Converger.Channels.Circuit do
         where: is_nil(c.circuit_changed_at) or c.circuit_changed_at <= ^cutoff
       )
       |> Repo.update_all(set: [circuit_state: "half_open", circuit_changed_at: now])
+
+    if count == 1, do: emit_state_change(channel, "half_open", :probe)
 
     count == 1
   end
@@ -279,6 +281,7 @@ defmodule Converger.Channels.Circuit do
 
   defp after_transition(channel, to, reason, now) do
     event = event_for(to, reason)
+    emit_state_change(channel, to, reason)
 
     :telemetry.execute([:converger, :channel, event], %{count: 1}, %{
       channel_id: channel.id,
@@ -302,6 +305,16 @@ defmodule Converger.Channels.Circuit do
       do: send_alert(channel, event, reason, now)
 
     :ok
+  end
+
+  defp emit_state_change(channel, to, reason) do
+    :telemetry.execute([:converger, :circuit, :state_change], %{count: 1}, %{
+      channel_id: channel.id,
+      channel_type: channel.type,
+      tenant_id: channel.tenant_id,
+      to: to,
+      reason: reason
+    })
   end
 
   defp schedule_follow_up(channel, "open"),
