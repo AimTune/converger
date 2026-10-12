@@ -52,6 +52,23 @@ defmodule ConvergerWeb.RoutingRuleController do
     send_resp(conn, :no_content, "")
   end
 
+  # Dry-run: matched rules and the payload each target would get, without
+  # storing or sending anything (Converger.RoutingRules.DryRun).
+  def dry_run(conn, params) do
+    case RoutingRules.DryRun.run(conn.assigns.tenant.id, Map.drop(params, ["format"])) do
+      {:ok, result} ->
+        render(conn, :dry_run, result: result)
+
+      {:error, {:bad_request, message}} ->
+        conn
+        |> put_status(:bad_request)
+        |> json(%{error: message})
+
+      {:error, _} = error ->
+        error
+    end
+  end
+
   defp build_actor(conn) do
     %{type: "tenant_api", id: conn.assigns.tenant.id}
   end

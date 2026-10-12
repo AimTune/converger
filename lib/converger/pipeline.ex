@@ -38,7 +38,7 @@ defmodule Converger.Pipeline do
 
   alias Converger.Activities.{Activity, Downgrade}
   alias Converger.Channels.{Adapter, DeliveryError}
-  alias Converger.Pipeline.RetryPolicy
+  alias Converger.Pipeline.{Middleware, RetryPolicy}
 
   @type activity :: Converger.Activities.Activity.t()
 
@@ -121,50 +121,190 @@ defmodule Converger.Pipeline do
   end
 
   @doc """
-  Resolve all channels that should receive a delivery for this activity.
-  Returns a list of Channel structs (may be empty).
-  Includes: primary channel (if deliverable) + routing rule targets (if deliverable and active).
-  A channel is deliverable when its adapter has the `:outbound` capability
-  (`Converger.Channels.Adapter.capabilities/1`).
+  Plan the deliveries of an activity: every candidate channel, why it is a
+  candidate and, when it is left out, why.
+
+  Candidates depend on the routing direction (`Converger.RoutingRules.route/3`):
+
+    * `:inbound` - the conversation's origin channel (`reason: :origin`) and
+      the targets of the origin channel's matching rules (`:rule`);
+    * `:reply` - the activity came in on another channel: the origin channel
+      (`:reply_back`, the conversation's participant is there), the replying
+      channel itself when it is a `websocket` hub (`:source_hub`: its other
+      sockets, such as other agents' consoles, see the reply), and the targets
+      of the replying channel's matching rules (`:rule`).
+
+  A candidate is left out (`excluded`) when its adapter cannot deliver
+  (`:not_deliverable`), its mode is `inbound` (`:inbound_only`), a rule
+  target is not active (`:inactive`), it would echo the participant's own
+  message back to them (`:echo`), or it does not take the activity's type
+  (`:unsupported_activity`).
+
+  Options: `:conversation`, `:participant` (loaded when not given), `:rules`
+  and `:at` (passed to `Converger.RoutingRules.route/3`).
+
+  Returns `%{route: route, entries: [%{channel, reason, rule_ids, excluded}]}`.
   """
-  def resolve_delivery_channels(activity) do
-    conversation = Converger.Conversations.get_conversation!(activity.conversation_id)
-    primary_channel = Converger.Channels.get_channel!(conversation.channel_id)
+  def plan(activity, opts \\ []) do
+    conversation =
+      Keyword.get_lazy(opts, :conversation, fn ->
+        Converger.Conversations.get_conversation!(activity.conversation_id)
+      end)
 
-    primary =
-      if deliverable?(primary_channel) and
-           primary_channel.mode in ["outbound", "duplex"],
-         do: [primary_channel],
-         else: []
+    participant =
+      Keyword.get_lazy(opts, :participant, fn ->
+        conversation.participant_id &&
+          Converger.Participants.get_participant(conversation.participant_id)
+      end)
 
-    target_ids =
-      Converger.RoutingRules.resolve_target_channels(
-        primary_channel.id,
-        conversation.tenant_id
+    route =
+      Converger.RoutingRules.route(
+        activity,
+        conversation,
+        Keyword.merge(Keyword.take(opts, [:rules, :at]), participant: participant)
       )
 
-    additional_ids = target_ids -- [primary_channel.id]
+    entries =
+      route
+      |> candidates()
+      |> Enum.map(&exclude_undeliverable/1)
+      |> exclude_echo(activity, participant)
+      |> Enum.map(fn
+        %{excluded: nil, channel: channel} = entry ->
+          if accepts_activity?(channel, activity),
+            do: entry,
+            else: %{entry | excluded: :unsupported_activity}
 
-    additional =
-      additional_ids
-      |> Enum.map(fn id ->
-        try do
-          Converger.Channels.get_channel!(id)
-        rescue
-          Ecto.NoResultsError -> nil
-        end
+        entry ->
+          entry
       end)
-      |> Enum.reject(&is_nil/1)
-      |> Enum.filter(&deliverable?/1)
-      |> Enum.filter(&(&1.status == "active"))
-      |> Enum.filter(&(&1.mode in ["outbound", "duplex"]))
 
-    candidates = Enum.uniq_by(primary ++ additional, & &1.id)
-    echo_channel_ids = participant_echo_channel_ids(activity, conversation, candidates)
+    %{route: route, entries: entries}
+  end
 
-    candidates
-    |> Enum.reject(&(&1.id in echo_channel_ids))
-    |> Enum.filter(&accepts_activity?(&1, activity))
+  # One entry per channel, in order: the fixed ones first, then rule targets
+  # in rule order. A channel named by several matched rules lists them all.
+  defp candidates(route) do
+    fixed =
+      case route.direction do
+        :inbound ->
+          [{route.origin_channel_id, :origin}]
+
+        :reply ->
+          source = get_channel(route.source_channel_id)
+
+          [{route.origin_channel_id, :reply_back}] ++
+            if(source && source.type == "websocket",
+              do: [{route.source_channel_id, :source_hub}],
+              else: []
+            )
+      end
+
+    fixed_ids = Enum.map(fixed, &elem(&1, 0))
+
+    rule_targets =
+      route.matched
+      |> Enum.flat_map(fn rule -> Enum.map(rule.target_channel_ids, &{&1, rule.id}) end)
+      |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
+
+    ordered_targets =
+      route.matched
+      |> Enum.flat_map(& &1.target_channel_ids)
+      |> Enum.uniq()
+      |> Enum.reject(&(&1 in fixed_ids))
+
+    fixed_entries =
+      Enum.map(fixed, fn {id, reason} ->
+        %{
+          channel: get_channel(id),
+          channel_id: id,
+          reason: reason,
+          rule_ids: Map.get(rule_targets, id, []),
+          excluded: nil
+        }
+      end)
+
+    target_entries =
+      Enum.map(ordered_targets, fn id ->
+        %{
+          channel: get_channel(id),
+          channel_id: id,
+          reason: :rule,
+          rule_ids: Map.fetch!(rule_targets, id),
+          excluded: nil
+        }
+      end)
+
+    Enum.reject(fixed_entries ++ target_entries, &is_nil(&1.channel))
+  end
+
+  defp get_channel(nil), do: nil
+  defp get_channel(id), do: Converger.Repo.get(Converger.Channels.Channel, id)
+
+  # The conversation's own channels (origin, reply-back, source hub) are not
+  # checked for `status` (a paused channel parks its jobs, ADR-0031); rule
+  # targets must be active, as before conditional routing.
+  defp exclude_undeliverable(%{channel: channel, reason: reason} = entry) do
+    cond do
+      not deliverable?(channel) -> %{entry | excluded: :not_deliverable}
+      channel.mode not in ["outbound", "duplex"] -> %{entry | excluded: :inbound_only}
+      reason == :rule and channel.status != "active" -> %{entry | excluded: :inactive}
+      true -> entry
+    end
+  end
+
+  defp exclude_echo(entries, activity, participant) do
+    candidates = for %{excluded: nil, channel: channel} <- entries, do: channel
+    echo_ids = participant_echo_channel_ids(activity, participant, candidates)
+
+    Enum.map(entries, fn
+      %{excluded: nil, channel: %{id: id}} = entry ->
+        if id in echo_ids, do: %{entry | excluded: :echo}, else: entry
+
+      entry ->
+        entry
+    end)
+  end
+
+  @doc """
+  The channels that should receive a delivery for this activity: the
+  entries of `plan/2` that are not excluded. Returns a list of Channel
+  structs (may be empty). A channel is deliverable when its adapter has the
+  `:outbound` capability (`Converger.Channels.Adapter.capabilities/1`).
+  """
+  def resolve_delivery_channels(activity, opts \\ []) do
+    activity |> plan(opts) |> planned_channels()
+  end
+
+  defp planned_channels(%{entries: entries}) do
+    for %{excluded: nil, channel: channel} <- entries, do: channel
+  end
+
+  @doc """
+  The delivery channels of a stored activity (`resolve_delivery_channels/2`),
+  recording in `conversation_channels` the channel it came in on and the
+  channels it is delivered to. Used by the pipeline backends.
+  """
+  def delivery_channels(activity) do
+    conversation = Converger.Conversations.get_conversation!(activity.conversation_id)
+    plan = plan(activity, conversation: conversation)
+    channels = planned_channels(plan)
+
+    source = Map.get(activity, :source_channel_id)
+
+    source_entry =
+      cond do
+        is_nil(source) -> []
+        source == plan.route.origin_channel_id -> []
+        true -> [{source, "member"}]
+      end
+
+    Converger.Conversations.record_channels(
+      conversation,
+      Enum.map(channels, &{&1.id, "target"}) ++ source_entry
+    )
+
+    channels
   end
 
   defp deliverable?(channel), do: Adapter.capability?(channel.type, :outbound)
@@ -177,13 +317,14 @@ defmodule Converger.Pipeline do
   # Returns those channel ids. A websocket channel is exempt: it is a hub of
   # many sockets (the participant's other tabs, an agent console on the same
   # channel), and the sending socket drops the frame by `seq`.
-  defp participant_echo_channel_ids(activity, conversation, candidates) do
+  defp participant_echo_channel_ids(activity, participant, candidates) do
     candidate_ids = for c <- candidates, c.type != "websocket", do: c.id
+    sender = Map.get(activity, :sender)
 
     own =
-      case conversation.participant_id &&
-             Converger.Participants.get_participant(conversation.participant_id) do
-        %{external_id: external_id, channel_id: channel_id} when external_id == activity.sender ->
+      case participant do
+        %{external_id: external_id, channel_id: channel_id}
+        when external_id == sender and not is_nil(sender) ->
           if Converger.Channels.get_channel!(channel_id).type == "websocket",
             do: [],
             else: [channel_id]
@@ -192,7 +333,7 @@ defmodule Converger.Pipeline do
           []
       end
 
-    own ++ Converger.Participants.channels_with_participant(candidate_ids, activity.sender)
+    own ++ Converger.Participants.channels_with_participant(candidate_ids, sender)
   end
 
   # Conversation lifecycle events (close/reopen) carry no message content:
@@ -212,10 +353,66 @@ defmodule Converger.Pipeline do
   end
 
   @doc """
+  Transform an activity for delivery to `channel`: the channel's own
+  middleware (`channel.transformations`), then the transformations of the
+  routing rules that matched the activity and target the channel, in rule
+  order (ADR-0046).
+
+  `rules` are those matched rules; when not given they are found by routing
+  the activity again (`Converger.RoutingRules.route/3`), which is skipped when
+  no enabled rule targeting the channel has transformations.
+
+  Returns `{:ok, activity}` or `{:halt, reason}`.
+  """
+  def transform(activity, channel, rules \\ nil) do
+    with {:ok, transformed} <- Middleware.run(activity, channel) do
+      rules
+      |> rules_for(activity, channel)
+      |> Enum.reduce_while({:ok, transformed}, fn rule, {:ok, acc} ->
+        case Middleware.run(acc, %{channel | transformations: rule.transformations}) do
+          {:ok, next} -> {:cont, {:ok, next}}
+          {:halt, reason} -> {:halt, {:halt, reason}}
+        end
+      end)
+    end
+  end
+
+  defp rules_for(nil, activity, channel) do
+    with tenant_id when is_binary(tenant_id) <- Map.get(activity, :tenant_id),
+         conversation_id when is_binary(conversation_id) <- Map.get(activity, :conversation_id),
+         true <- Converger.RoutingRules.transformations_target?(tenant_id, channel.id),
+         %Converger.Conversations.Conversation{} = conversation <-
+           Converger.Conversations.get_conversation(conversation_id) do
+      rules_for(Converger.RoutingRules.route(activity, conversation).matched, activity, channel)
+    else
+      _ -> []
+    end
+  end
+
+  defp rules_for(rules, _activity, channel) do
+    Enum.filter(rules, &(channel.id in &1.target_channel_ids and &1.transformations != []))
+  end
+
+  @doc """
+  What `channel` would be sent for `activity`, without sending it: the type
+  downgrade (`Converger.Activities.Downgrade`), then `transform/3` with the
+  matched `rules`. Returns `{:ok, activity}`, `{:halt, reason}` or
+  `{:skip, reason}`. Used by the routing dry-run.
+  """
+  def preview(activity, channel, rules) do
+    case Downgrade.plan(activity, channel) do
+      :native -> transform(activity, channel, rules)
+      {:downgrade, downgraded} -> transform(downgraded, channel, rules)
+      :skip -> {:skip, "unsupported activity type #{activity.type}"}
+    end
+  end
+
+  @doc """
   Execute the actual delivery via middleware + adapter + delivery tracking.
 
-  The middleware chain (from `channel.transformations`) runs before the adapter.
-  If any middleware halts, the delivery is dead-lettered immediately.
+  The middleware chain (`transform/3`: the channel's `transformations`, then
+  those of the routing rules that matched the activity and target the channel)
+  runs before the adapter. If any middleware halts, the delivery is dead-lettered immediately.
 
   Returns:
 
@@ -273,9 +470,8 @@ defmodule Converger.Pipeline do
 
   defp run_delivery(delivery, activity, channel) do
     alias Converger.Deliveries
-    alias Converger.Pipeline.Middleware
 
-    case Middleware.run(activity, channel) do
+    case transform(activity, channel) do
       {:halt, reason} ->
         Deliveries.mark_dead(delivery, "halted: #{reason}")
         {:error, {:halted, reason}}

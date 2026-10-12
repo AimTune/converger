@@ -90,7 +90,13 @@ defmodule ConvergerWeb.ConversationController do
 
     with %Conversations.Conversation{} = conversation <-
            Conversations.get_conversation(id, tenant.id) do
-      render(conn, :show, conversation: Converger.Repo.preload(conversation, :participant))
+      conversation =
+        Converger.Repo.preload(conversation, [
+          :participant,
+          conversation_channels: Conversations.conversation_channels_query()
+        ])
+
+      render(conn, :show, conversation: conversation)
     end
   end
 

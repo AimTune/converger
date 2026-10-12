@@ -17,6 +17,7 @@ Table `conversations`:
 | `id` | uuid | | Primary key. |
 | `tenant_id` | uuid | | Owner. |
 | `channel_id` | uuid | | The channel the conversation lives on. Its activities are delivered to this channel (when it can send) and to its routing rule targets. |
+| `origin_channel_id` | uuid, nullable | `channel_id` | The channel the conversation started on, set on insert, never cast. Replies written from other channels go back to it ([reply-back routing](routing-rules.md#how-activities-fan-out)). `NULL` only on rows the migration has not backfilled yet, which are treated as `channel_id`. |
 | `participant_id` | uuid, nullable | | The external party, set by inbound participant resolution. Never cast from client input. Cleared if the participant is deleted. |
 | `status` | text | `"active"` | `active` or `closed`, validated by the changeset. |
 | `last_seq` | bigint | `0` | Highest activity `seq` handed out. Server-managed. |
@@ -34,6 +35,7 @@ The REST representation (`ConvergerWeb.ConversationJSON`) is:
     "status": "active",
     "metadata": { "source": "inbound_webhook" },
     "channel_id": "8d1e2f3a-...",
+    "origin_channel_id": "8d1e2f3a-...",
     "tenant_id": "3f2a1b0c-...",
     "participant_id": "c4d5e6f7-...",
     "participant": { "id": "c4d5e6f7-...", "external_id": "905551112233", "display_name": "Ayse" },
@@ -44,6 +46,34 @@ The REST representation (`ConvergerWeb.ConversationJSON`) is:
 ```
 
 `participant` is `null` when the conversation has none, or when it was not preloaded (the close and reopen responses do not preload it).
+
+`GET /api/v1/conversations/:id` also returns `channels`, the channels the conversation spans (below):
+
+```json
+"channels": [
+  { "channel_id": "8d1e2f3a-...", "role": "origin", "participant_id": "c4d5e6f7-...", "inserted_at": "2026-10-09T10:00:00.000000Z" },
+  { "channel_id": "4b7c9d0e-...", "role": "target", "participant_id": null, "inserted_at": "2026-10-09T10:00:00.120000Z" }
+]
+```
+
+## Channels of a conversation
+
+A conversation starts on one channel but can span several: the routing rules deliver it to target channels, and
+an agent console or another channel can write into it. Table `conversation_channels` records them, one row per
+`(conversation_id, channel_id)` ([ADR-0046](../adr/0046-conditional-routing-rules-and-reply-back-routing.md)):
+
+| Field | Notes |
+| --- | --- |
+| `conversation_id`, `channel_id`, `tenant_id` | Deleting the conversation, the channel or the tenant deletes the row. |
+| `role` | `origin`: the channel the conversation started on, written when the conversation is created. `target`: a channel the pipeline delivered one of its activities to. `member`: a channel an activity was written from that is neither. A channel keeps the role it got first. |
+| `participant_id` | The conversation's participant on the `origin` row; `NULL` otherwise. Cleared if the participant is deleted. |
+| `inserted_at`, `updated_at` | When the channel joined. |
+
+Every activity also records the channel it came in on (`activities.source_channel_id`; `NULL` for the tenant API,
+system events and activities stored before this column existed). The pipeline uses it to tell an inbound message
+from a reply: an activity from a channel other than the origin goes back to the origin channel and its participant
+only, unless a routing rule of the replying channel says otherwise ([Routing rules](routing-rules.md#how-activities-fan-out)).
+The migration backfills `origin_channel_id` and an `origin` row for every existing conversation.
 
 ## Lifecycle
 

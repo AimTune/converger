@@ -9,7 +9,7 @@ sidebar_position: 1
 Converger's performance numbers come from a load harness that drives the **production release** over HTTP and
 WebSocket, the same way clients and providers do. Each run records the hardware it ran on, and it fails if any
 message the server acknowledged is lost. The decision and its trade-offs are in
-[ADR-0046](../adr/0046-k6-load-harness-on-the-release-image-with-seq-based-loss-checks.md).
+[ADR-0049](../adr/0049-k6-load-harness-on-the-release-image-with-seq-based-loss-checks.md).
 
 ## Published results
 

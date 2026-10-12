@@ -98,7 +98,7 @@ sequenceDiagram
 2. Create a routing rule with the WhatsApp channel as source and the console as target.
 3. Issue a channel-scoped token for the console: `POST /api/v1/converger/tokens/generate` with the console's secret and `{"scope": "channel", "user": {"id": "agent-7"}}`.
 4. The console joins `converger:channel:<console id>` and receives an `activitySet` with `conversation_id` for every WhatsApp message.
-5. The agent replies with `postActivity` and the `conversation_id`. The reply is an activity of the WhatsApp conversation: the pipeline delivers it to WhatsApp, with the WhatsApp channel's middleware, and to the console's sockets.
+5. The agent replies with `postActivity` and the `conversation_id`. The reply is an activity of the WhatsApp conversation that came in on the console (`source_channel_id`), so it is routed back to the conversation's origin: the pipeline delivers it to WhatsApp, to the participant who started the conversation, with the WhatsApp channel's middleware, and to the console's sockets. Other targets of the WhatsApp channel's rules (a CRM webhook, for example) do not get it unless a rule with the console as source routes it there ([reply-back routing](../concepts/routing-rules.md#how-activities-fan-out)).
 
 The same channel-scoped token can also join `converger:conversation:<id>` for one routed conversation (an unscoped token cannot join; an end user gets a conversation token). Such a routed socket receives the console's deliveries, after the console's middleware; a socket of the conversation's own channel receives every activity as committed.
 

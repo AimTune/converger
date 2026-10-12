@@ -3,14 +3,21 @@ defmodule Converger.RoutingRules do
   The RoutingRules context.
 
   Manages tenant-scoped routing rules that define how activities
-  are fan-out delivered from a source channel to target channels.
+  are fan-out delivered from a source channel to target channels, and routes
+  activities through them (`route/3`): conditions, priority, first-match
+  `stop_processing` and reply-back routing (ADR-0046).
+
+  Cycle detection (`would_create_cycle?/4`) treats every enabled rule as an
+  edge, whatever its conditions: a conditional edge can carry an activity, so
+  it counts.
   """
 
   import Ecto.Query, warn: false
   alias Converger.AuditLogs
   alias Converger.AuditLogs.Changes
+  alias Converger.Conversations.Conversation
   alias Converger.Repo
-  alias Converger.RoutingRules.RoutingRule
+  alias Converger.RoutingRules.{Conditions, RoutingRule}
   alias Ecto.Multi
 
   def list_routing_rules do
@@ -174,6 +181,112 @@ defmodule Converger.RoutingRules do
     |> Repo.all()
     |> List.flatten()
     |> Enum.uniq()
+  end
+
+  @doc """
+  Enabled rules of `tenant_id` whose source is `source_channel_id`, in
+  evaluation order: ascending `priority`, then `name`, then `id`.
+  """
+  def enabled_rules_for_source(nil, _tenant_id), do: []
+
+  def enabled_rules_for_source(source_channel_id, tenant_id) do
+    from(r in RoutingRule,
+      where:
+        r.source_channel_id == ^source_channel_id and r.tenant_id == ^tenant_id and
+          r.enabled == true,
+      order_by: [asc: r.priority, asc: r.name, asc: r.id]
+    )
+    |> Repo.all()
+  end
+
+  @doc """
+  Route an activity: which rules apply to it and which of them match.
+
+  The conversation's origin channel (`Conversation.origin_channel_id/1`) and
+  the channel the activity came in on (`activity.source_channel_id`) decide
+  the direction:
+
+    * `:inbound` - the activity came in on the origin channel, or without a
+      channel (tenant API, system events, activities stored before ADR-0046).
+      The origin channel's rules are evaluated.
+    * `:reply` - the activity came in on another channel (an agent console a
+      rule routed the conversation to). It goes back to the origin channel
+      (`Converger.Pipeline.plan/2`); only the replying channel's own rules
+      are evaluated, so a reply is not fanned out to the origin's other
+      targets unless a rule of the replying channel says so.
+
+  Rules are evaluated in `enabled_rules_for_source/2` order against their
+  `conditions` (`Converger.RoutingRules.Conditions`). A matching rule with
+  `stop_processing` ends the evaluation: later rules are reported as
+  `:skipped`.
+
+  Options:
+
+    * `:participant` - the conversation's participant (loaded when not given);
+    * `:rules` - the candidate rules (loaded when not given);
+    * `:at` - evaluation time for an activity without `inserted_at`.
+
+  Returns a map with `:direction`, `:origin_channel_id`, `:source_channel_id`,
+  `:rule_source_channel_id`, `:evaluations` (`[{rule, :matched | :not_matched
+  | :skipped}]`) and `:matched` (the matched rules, in order).
+  """
+  def route(activity, conversation, opts \\ []) do
+    origin = Conversation.origin_channel_id(conversation)
+    source = Map.get(activity, :source_channel_id)
+    direction = if is_nil(source) or source == origin, do: :inbound, else: :reply
+    rule_source = if direction == :reply, do: source, else: origin
+
+    rules =
+      Keyword.get_lazy(opts, :rules, fn ->
+        enabled_rules_for_source(rule_source, conversation.tenant_id)
+      end)
+
+    participant =
+      Keyword.get_lazy(opts, :participant, fn ->
+        conversation.participant_id &&
+          Converger.Participants.get_participant(conversation.participant_id)
+      end)
+
+    context = Conditions.context(activity, conversation, participant, Keyword.get(opts, :at))
+    evaluations = evaluate(rules, context)
+
+    %{
+      direction: direction,
+      origin_channel_id: origin,
+      source_channel_id: source,
+      rule_source_channel_id: rule_source,
+      evaluations: evaluations,
+      matched: for({rule, :matched} <- evaluations, do: rule)
+    }
+  end
+
+  defp evaluate(rules, context) do
+    {evaluations, _stopped?} =
+      Enum.map_reduce(rules, false, fn
+        rule, true ->
+          {{rule, :skipped}, true}
+
+        rule, false ->
+          if Conditions.matches?(rule.conditions, context),
+            do: {{rule, :matched}, rule.stop_processing},
+            else: {{rule, :not_matched}, false}
+      end)
+
+    evaluations
+  end
+
+  @doc """
+  Whether an enabled rule of `tenant_id` targeting `channel_id` has its own
+  transformations (a cheap check before routing an activity at delivery time).
+  """
+  def transformations_target?(tenant_id, channel_id) do
+    from(r in RoutingRule,
+      where:
+        r.tenant_id == ^tenant_id and r.enabled == true and
+          ^channel_id in r.target_channel_ids and
+          fragment("jsonb_array_length(?) > 0", r.transformations)
+    )
+    |> Repo.exists?()
   end
 
   @doc """

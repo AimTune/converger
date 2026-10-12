@@ -88,7 +88,7 @@ defmodule Converger.Participants do
           "channel_id" => channel.id,
           "metadata" => %{"source" => "inbound_webhook"}
         })
-        |> Repo.insert()
+        |> Converger.Conversations.insert_conversation()
     end
   end
 
