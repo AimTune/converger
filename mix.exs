@@ -99,7 +99,7 @@ defmodule Converger.MixProject do
       {:broadway_kafka, "~> 0.7.0"},
       {:brod, "~> 4.7.0"},
       {:broadway_rabbitmq, "~> 0.8.2"},
-      {:amqp, "~> 4.2.1"},
+      {:amqp, "~> 4.3.0"},
       {:hammer, "~> 7.5"},
       {:opentelemetry, "~> 1.5"},
       {:opentelemetry_exporter, "~> 1.8"},
