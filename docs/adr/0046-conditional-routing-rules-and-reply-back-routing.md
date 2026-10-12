@@ -9,7 +9,7 @@ description: Routing rules get JSON conditions validated on save, a priority wit
 | **Status** | Accepted |
 | **Date** | 2026-10-12 |
 | **Issue** | [#43](https://github.com/AimTune/converger/issues/43) |
-| **Pull request** | (pending) |
+| **Pull request** | [#138](https://github.com/AimTune/converger/pull/138) |
 | **Related** | [ADR-0003](0003-pipeline-is-the-only-delivery-path.md), [ADR-0008](0008-middleware-receives-channel-and-crashes-are-contained.md), [ADR-0016](0016-participant-based-conversation-resolution.md), [ADR-0033](0033-websocket-channel-adapter-delivery.md), [ADR-0034](0034-monthly-partitioning-and-per-tenant-retention.md) |
 
 ## Context and problem statement
