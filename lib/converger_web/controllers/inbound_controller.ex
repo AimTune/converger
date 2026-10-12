@@ -245,11 +245,12 @@ defmodule ConvergerWeb.InboundController do
     end
   end
 
-  # A handled request: the body the adapter's provider expects (e.g. TwiML),
-  # else the JSON summary. 201 answers (generic webhooks) are always JSON.
+  # A handled request: the body the adapter's provider expects (e.g. TwiML,
+  # or a Discord interaction response built from the request), else the JSON
+  # summary. 201 answers (generic webhooks) are always JSON.
   # sobelow_skip ["XSS.SendResp", "XSS.ContentType"]
   defp send_accepted(conn, channel, status, summary) do
-    case status == :ok and Adapter.inbound_response(channel) do
+    case status == :ok and Adapter.inbound_response(channel, conn.params) do
       {content_type, body} ->
         conn
         |> put_resp_content_type(content_type, nil)

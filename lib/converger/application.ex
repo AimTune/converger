@@ -44,6 +44,8 @@ defmodule Converger.Application do
           {Task.Supervisor, name: Converger.TaskSupervisor},
           # Per-node cache of provider message templates (WhatsApp HSM).
           Converger.Channels.Templates,
+          # Per-node cache of provider tokens and signing keys (Bot Framework).
+          Converger.Channels.TokenCache,
           Converger.RateLimit.Supervisor,
           {Oban, oban_config()}
         ] ++

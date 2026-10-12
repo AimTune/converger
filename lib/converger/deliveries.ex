@@ -196,6 +196,74 @@ defmodule Converger.Deliveries do
     count
   end
 
+  @doc """
+  One page of the outbox of an `http_pull` channel: its handed-off
+  (`pending`, `attempts > 0`) deliveries, oldest first by `(inserted_at,
+  id)`, at most `limit`. Every returned delivery is marked served
+  (`metadata.outbox_served_at`), which is what `acknowledge_outbox/2` looks
+  for. Returns `{deliveries, more?}`.
+  """
+  def outbox_page(channel_id, limit) when is_integer(limit) and limit > 0 do
+    rows =
+      from(d in Delivery,
+        where: d.channel_id == ^channel_id and d.status == "pending" and d.attempts > 0,
+        order_by: [asc: d.inserted_at, asc: d.id],
+        limit: ^(limit + 1)
+      )
+      |> Repo.all()
+
+    {page, rest} = Enum.split(rows, limit)
+    ids = for d <- page, is_nil((d.metadata || %{})["outbox_served_at"]), do: d.id
+
+    if ids != [] do
+      served_at = DateTime.utc_now() |> DateTime.to_iso8601()
+
+      from(d in Delivery,
+        where: d.id in ^ids,
+        update: [
+          set: [
+            metadata:
+              fragment(
+                "? || jsonb_build_object('outbox_served_at', ?::text)",
+                d.metadata,
+                ^served_at
+              )
+          ]
+        ]
+      )
+      |> Repo.update_all([])
+    end
+
+    {page, rest != []}
+  end
+
+  @doc """
+  Acknowledge the outbox of an `http_pull` channel up to the position
+  `{inserted_at, id}` (a decoded watermark): its pending deliveries at or
+  before it that were served by `outbox_page/2` are marked `sent`. A
+  delivery committed late, with an earlier position than items already
+  served, was never served and stays in the outbox, so a watermark never
+  acknowledges something the consumer has not seen.
+
+  Returns the number of deliveries marked.
+  """
+  def acknowledge_outbox(channel_id, {%DateTime{} = inserted_at, id}) when is_binary(id) do
+    now = DateTime.utc_now()
+
+    {count, deliveries} =
+      from(d in Delivery,
+        where:
+          d.channel_id == ^channel_id and d.status == "pending" and d.attempts > 0 and
+            fragment("(?->>'outbox_served_at') IS NOT NULL", d.metadata) and
+            (d.inserted_at < ^inserted_at or (d.inserted_at == ^inserted_at and d.id <= ^id)),
+        select: d
+      )
+      |> Repo.update_all(set: [status: "sent", sent_at: now, updated_at: now])
+
+    Enum.each(deliveries, &broadcast_status_update/1)
+    count
+  end
+
   @doc deprecated: "Use mark_sent/2 instead"
   def mark_delivered(delivery, response_metadata \\ %{}) do
     mark_sent(delivery, response_metadata)
