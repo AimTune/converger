@@ -85,7 +85,8 @@ Rendered by [`ConvergerWeb.ConversationJSON`](https://github.com/AimTune/converg
   "participant": {
     "id": "5e7a9c1b-3d5f-4a7c-9e1b-3d5f7a9c1b3d",
     "external_id": "16505551234",
-    "display_name": "Sheena"
+    "display_name": "Sheena",
+    "opted_out_at": null
   },
   "inserted_at": "2026-10-09T12:00:00.123456Z",
   "updated_at": "2026-10-09T12:05:41.004512Z"
@@ -96,7 +97,7 @@ Rendered by [`ConvergerWeb.ConversationJSON`](https://github.com/AimTune/converg
 | --- | --- |
 | `status` | `active` (open, accepts activities) or `closed` |
 | `metadata` | Free-form JSON object |
-| `participant_id`, `participant` | The external party (for example a WhatsApp number), set by inbound participant resolution ([ADR-0016](../adr/0016-participant-based-conversation-resolution.md)). `participant` is `null` when there is none, and also in responses that do not load it (create, close, reopen). |
+| `participant_id`, `participant` | The external party (for example a WhatsApp number), set by inbound participant resolution ([ADR-0016](../adr/0016-participant-based-conversation-resolution.md)). `participant` is `null` when there is none, and also in responses that do not load it (create, close, reopen). `participant.opted_out_at` is set while the participant has opted out (an SMS `STOP`, see [Participants](../concepts/participants.md#opt-out)). |
 | `updated_at` | Bumped by every new activity; the inactivity expiry uses it as the last-activity time |
 
 ### Activity
@@ -327,7 +328,7 @@ curl -s "$CONVERGER/api/v1/conversations?status=active&external_id=16505551234&l
       "channel_id": "9b1f3a52-6c0d-4e2b-8f7a-1d2c3b4a5e6f",
       "tenant_id": "c2a4e6f8-1b3d-4f5a-9c7e-2d4f6a8b0c1e",
       "participant_id": "5e7a9c1b-3d5f-4a7c-9e1b-3d5f7a9c1b3d",
-      "participant": { "id": "5e7a9c1b-3d5f-4a7c-9e1b-3d5f7a9c1b3d", "external_id": "16505551234", "display_name": "Sheena" },
+      "participant": { "id": "5e7a9c1b-3d5f-4a7c-9e1b-3d5f7a9c1b3d", "external_id": "16505551234", "display_name": "Sheena", "opted_out_at": null },
       "inserted_at": "2026-10-09T12:00:00.123456Z",
       "updated_at": "2026-10-09T12:05:41.004512Z"
     }

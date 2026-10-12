@@ -233,6 +233,15 @@ defmodule Converger.Channels.Adapter do
   @callback inbound_challenge(channel, params :: map()) :: {:ok, map()} | :none
 
   @doc """
+  The body the provider expects in answer to a handled inbound request, as
+  `{content_type, body}` (e.g. an empty TwiML `<Response/>` for Twilio, which
+  flags any other content type as an error). Only used for `200` answers;
+  adapters that do not implement it get the JSON summary
+  (`activity_ids`, `receipts_processed`, ...).
+  """
+  @callback inbound_response(channel) :: {String.t(), iodata()}
+
+  @doc """
   Adapter-specific retry policy defaults (e.g. `%{timeout_ms: 10_000}`), merged
   over the global defaults and under the channel's own `retry_policy`. See
   `Converger.Pipeline.RetryPolicy`.
@@ -337,6 +346,7 @@ defmodule Converger.Channels.Adapter do
     verify_inbound_signature: 3,
     verify_subscription: 2,
     inbound_challenge: 2,
+    inbound_response: 1,
     retry_policy: 0,
     normalize_error: 1,
     capabilities: 0,
@@ -404,7 +414,9 @@ defmodule Converger.Channels.Adapter do
     Converger.Channels.Adapters.WhatsAppInfobip,
     Converger.Channels.Adapters.Slack,
     Converger.Channels.Adapters.Telegram,
-    Converger.Channels.Adapters.Email
+    Converger.Channels.Adapters.Email,
+    Converger.Channels.Adapters.SmsTwilio,
+    Converger.Channels.Adapters.SmsVonage
   ]
 
   @required_functions [type: 0, supported_modes: 0, deliver_activity: 2, parse_inbound: 2]
@@ -650,6 +662,14 @@ defmodule Converger.Channels.Adapter do
   """
   def inbound_challenge(%{type: type} = channel, params),
     do: call_optional(type, :inbound_challenge, [channel, params], :none)
+
+  @doc """
+  The provider's expected answer to a handled inbound request
+  (`c:inbound_response/1`); `:default` (the JSON summary) when the adapter
+  does not implement one.
+  """
+  def inbound_response(%{type: type} = channel),
+    do: call_optional(type, :inbound_response, [channel], :default)
 
   @doc """
   Forward a typing signal with the channel's adapter. `:unsupported` when the

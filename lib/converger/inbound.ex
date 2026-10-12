@@ -41,6 +41,10 @@ defmodule Converger.Inbound do
   to; the active conversation of the first one that went through this
   channel is used before the participant's.
 
+  SMS channels add `"opt_out"` (`"stop"` or `"start"`) to an opt-out keyword:
+  the participant is marked opted out or opted in again
+  (`Converger.Participants.set_opted_out/3`) before the activity is created.
+
   ## Options
 
     * `:conversation_id` - the conversation to write into (tenant-scoped).
@@ -83,10 +87,11 @@ defmodule Converger.Inbound do
         {:duplicate, existing}
 
       nil ->
-        case resolve_or_create_conversation(channel, conversation_id, message) do
-          {:ok, conversation} ->
-            create_activity(channel, conversation, message)
-
+        with {:ok, conversation} <-
+               resolve_or_create_conversation(channel, conversation_id, message),
+             {:ok, message} <- apply_opt_out(channel, message) do
+          create_activity(channel, conversation, message)
+        else
           # e.g. an external id the participant schema rejects: permanent.
           {:error, %Ecto.Changeset{} = changeset} ->
             Logger.warning("Rejected inbound message: invalid participant or conversation",
@@ -99,6 +104,33 @@ defmodule Converger.Inbound do
           {:error, _} = error ->
             error
         end
+    end
+  end
+
+  # SMS adapters mark a STOP / START keyword with "opt_out" ("stop" or
+  # "start", see Converger.Channels.Sms). The participant flag is set before
+  # the activity is created: if that fails, the provider re-delivers and the
+  # (idempotent) flag is set again, while a created activity would turn the
+  # re-delivery into a duplicate and lose the opt-out.
+  defp apply_opt_out(channel, message) do
+    {opt_out, message} = Map.pop(message, "opt_out")
+
+    case {opt_out, participant_attrs(message)} do
+      {value, %{"external_id" => external_id}} when value in ["stop", "start"] ->
+        case Participants.set_opted_out(channel, external_id, value == "stop") do
+          {:ok, _participant} ->
+            Logger.info("Participant opted #{if value == "stop", do: "out", else: "in"}",
+              channel_id: channel.id
+            )
+
+            {:ok, message}
+
+          {:error, _} = error ->
+            error
+        end
+
+      _ ->
+        {:ok, message}
     end
   end
 

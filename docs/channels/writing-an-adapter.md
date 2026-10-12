@@ -298,7 +298,7 @@ Add the module to the registry with one config line, in `config/config.exs` of y
 config :converger, :adapters, [Converger.Channels.Adapters.AcmeSms]
 ```
 
-The registry (`Converger.Channels.Adapter.adapters/0`) is the built-in adapters (`echo`, `webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram`, `email`) followed by this list, in order. An adapter whose `type/0` equals a built-in type replaces the built-in, so a fork can swap an implementation without patching core. A built-in adapter that ships with Converger itself is added to `@builtin_adapters` in `adapter.ex` instead.
+The registry (`Converger.Channels.Adapter.adapters/0`) is the built-in adapters (`echo`, `webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram`, `email`, `sms_twilio`, `sms_vonage`) followed by this list, in order. An adapter whose `type/0` equals a built-in type replaces the built-in, so a fork can swap an implementation without patching core. A built-in adapter that ships with Converger itself is added to `@builtin_adapters` in `adapter.ex` instead.
 
 That is all. From the registry and the adapter's declarations:
 
@@ -418,6 +418,8 @@ The example above checks `base_url` but, for brevity, does not pin the connectio
 - If the provider cannot sign at all, do not implement the callback: senders then use the generic `x-converger-signature` header with the channel `secret`, or the channel must be created with `require_signature: false`.
 - If the provider's scheme needs a secret, declare it with `required: :with_signature` in `config_schema/0`, as `whatsapp_meta` does for `app_secret`: channels with `require_signature: true` cannot be saved without it.
 - If the provider verifies the webhook URL with a `GET` handshake, implement `verify_subscription/2`. If it posts the handshake to the webhook URL itself, implement `inbound_challenge/2` (see `slack.ex`).
+- If the provider expects a particular body in the answer to a webhook (Twilio flags any non-TwiML response), implement `inbound_response/1` returning `{content_type, body}` (see `sms_twilio.ex`).
+- If the signature covers the request URL (Twilio), note that the adapter does not see it: rebuild the candidate URLs from the channel id and the server URL, as `sms_twilio.ex` does.
 
 ## 9. Tests
 
