@@ -9,7 +9,7 @@ description: Performance is measured end to end with k6 against the production r
 | **Status** | Accepted |
 | **Date** | 2026-10-12 |
 | **Issue** | [#34](https://github.com/AimTune/converger/issues/34) |
-| **Pull request** | to be opened |
+| **Pull request** | [#140](https://github.com/AimTune/converger/pull/140) |
 | **Related** | [ADR-0006](0006-per-conversation-seq-and-opaque-watermarks.md), [ADR-0027](0027-websocket-limits-backpressure-and-draining.md), [ADR-0030](0030-native-websocket-endpoint-and-fallback-transports.md), [ADR-0037](0037-libcluster-clustering-health-endpoints-and-metrics-on-the-main-port.md) |
 
 ## Context and problem statement
