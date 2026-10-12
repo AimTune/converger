@@ -25,7 +25,8 @@ defmodule ConvergerWeb.Deprecation do
   @migration_guide "https://converger.aimtune.dev/api/migrating-from-legacy"
 
   # When these surfaces were deprecated (RFC 9745 `Deprecation: @<unix time>`).
-  @deprecated_at ~U[2026-10-09 00:00:00Z] |> DateTime.to_unix()
+  # No `Sunset` yet: the removal date is not decided (docs/api/versioning.md).
+  @deprecated_at ~U[2026-10-09 00:00:00Z]
 
   @replacements %{
     legacy_socket:
@@ -62,8 +63,9 @@ defmodule ConvergerWeb.Deprecation do
   def mark(conn, surface, metadata \\ []) do
     warn(surface, metadata)
 
-    conn
-    |> Plug.Conn.put_resp_header("deprecation", "@#{@deprecated_at}")
-    |> Plug.Conn.put_resp_header("link", ~s(<#{@migration_guide}>; rel="deprecation"))
+    ConvergerWeb.Plugs.Deprecated.put_headers(conn,
+      deprecated_at: @deprecated_at,
+      link: @migration_guide
+    )
   end
 end
