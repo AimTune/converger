@@ -16,6 +16,7 @@ defmodule ConvergerWeb.ApiSchemas do
   alias Converger.Activities.Activity
   alias Converger.Auth.ConvergerToken
   alias Converger.Deliveries.Delivery
+  alias Converger.Tenants.Tenant
   alias Converger.Webhooks.{Catalog, Event}
   alias OpenApiSpex.{Header, MediaType, Reference, Response, Schema}
 
@@ -70,10 +71,13 @@ defmodule ConvergerWeb.ApiSchemas do
   @error_responses %{
     400 => {"BadRequest", "Malformed request (`bad_request`, `invalid_watermark`, ...)"},
     401 => {"Unauthorized", "Missing or invalid credential (`unauthorized`, `token_expired`)"},
-    403 => {"Forbidden", "Not allowed (`forbidden`, `channel_inactive`)"},
+    403 => {"Forbidden", "Not allowed (`forbidden`, `insufficient_scope`, `channel_inactive`)"},
     404 => {"NotFound", "Unknown resource, or one of another tenant or channel (`not_found`)"},
     409 =>
       {"Conflict", "Conflicts with the resource state (`conversation_closed`, `not_failed`)"},
+    412 =>
+      {"PreconditionFailed",
+       "The If-Match ETag is stale (`precondition_failed`); fetch the resource and retry"},
     413 => {"PayloadTooLarge", "A size limit was exceeded (`payload_too_large`)"},
     415 => {"UnsupportedMediaType", "File type not allowed (`unsupported_media_type`)"},
     422 =>
@@ -113,6 +117,7 @@ defmodule ConvergerWeb.ApiSchemas do
     common_schemas()
     |> Map.merge(tenant_schemas())
     |> Map.merge(webhook_schemas())
+    |> Map.merge(management_schemas())
     |> Map.merge(client_schemas())
   end
 
@@ -744,6 +749,291 @@ defmodule ConvergerWeb.ApiSchemas do
   end
 
   ## Platform event webhooks (ADR-0053)
+
+  ## Management and admin API (ADR-0061)
+
+  defp channel_properties do
+    %{
+      id: @uuid,
+      tenant_id: @uuid,
+      name: %Schema{type: :string},
+      type: %Schema{type: :string, description: "Channel type (adapter), e.g. `webhook`"},
+      mode: %Schema{type: :string, enum: ~w(inbound outbound duplex)},
+      status: %Schema{type: :string, enum: ~w(active inactive)},
+      require_signature: %Schema{type: :boolean},
+      config: %Schema{
+        type: :object,
+        additionalProperties: true,
+        description:
+          "Adapter configuration. Secret fields come back as `[REDACTED]`; sending `[REDACTED]` back keeps the stored value."
+      },
+      transformations: %Schema{type: :array, items: @object},
+      retry_policy: @object,
+      rate_limit: nullable(%Schema{type: :string, description: "e.g. `80/s`, `1000/m`"}),
+      circuit_state: %Schema{type: :string, description: "Delivery circuit breaker state"},
+      inserted_at: @datetime,
+      updated_at: @datetime
+    }
+  end
+
+  defp tenant_user_properties do
+    %{
+      id: @uuid,
+      tenant_id: @uuid,
+      email: %Schema{type: :string},
+      name: %Schema{type: :string},
+      role: %Schema{type: :string, enum: ~w(owner admin member viewer)},
+      status: %Schema{type: :string, enum: ~w(active inactive)},
+      totp_enabled: %Schema{type: :boolean, description: "Whether two-factor login is on"},
+      inserted_at: @datetime,
+      updated_at: @datetime
+    }
+  end
+
+  defp tenant_properties do
+    %{
+      id: @uuid,
+      name: %Schema{type: :string},
+      status: %Schema{type: :string, enum: ~w(active inactive)},
+      tier: %Schema{type: :string, enum: Tenant.tiers()},
+      retention_days: %Schema{type: :integer},
+      alert_webhook_url: nullable(%Schema{type: :string}),
+      allowed_upload_types: nullable(%Schema{type: :array, items: %Schema{type: :string}}),
+      limits: %Schema{
+        type: :object,
+        additionalProperties: true,
+        description: "Rate-limit overrides: bucket => `{limit, scale_ms}`"
+      },
+      api_key_prefix:
+        nullable(%Schema{type: :string, description: "Start of the primary API key, for display"}),
+      inserted_at: @datetime,
+      updated_at: @datetime
+    }
+  end
+
+  defp api_key_properties do
+    %{
+      id: @uuid,
+      tenant_id: @uuid,
+      name: %Schema{type: :string},
+      prefix: %Schema{type: :string, description: "Start of the key, for display"},
+      scopes: %Schema{type: :array, items: ref("ApiKeyScope")},
+      expires_at: nullable(@datetime),
+      last_used_at: nullable(%{@datetime | description: "Updated at most once a minute"}),
+      revoked_at: nullable(@datetime),
+      created_by: nullable(%Schema{type: :string, description: "`<actor type>:<actor id>`"}),
+      inserted_at: @datetime,
+      updated_at: @datetime
+    }
+  end
+
+  defp with_secret(properties, field, description),
+    do: Map.put(properties, field, %Schema{type: :string, description: description})
+
+  defp management_schemas do
+    %{
+      "Channel" =>
+        object(
+          "Channel",
+          "A channel. The secret is only returned by create and rotate_secret.",
+          channel_properties(),
+          :all
+        ),
+      "ChannelWithSecret" =>
+        object(
+          "ChannelWithSecret",
+          "A channel with its secret: only the create and rotate_secret responses carry it.",
+          with_secret(
+            channel_properties(),
+            :secret,
+            "The channel secret; store it, it is not returned again"
+          ),
+          :all
+        ),
+      "ChannelResponse" => data("ChannelResponse", "One channel.", ref("Channel")),
+      "ChannelWithSecretResponse" =>
+        data(
+          "ChannelWithSecretResponse",
+          "One channel with its secret.",
+          ref("ChannelWithSecret")
+        ),
+      "ChannelList" =>
+        data("ChannelList", "Every channel of the tenant, sorted by name.", %Schema{
+          type: :array,
+          items: ref("Channel")
+        }),
+      "ChannelInput" =>
+        object(
+          "ChannelInput",
+          "Writable fields of a channel (`name` is required on create). `config` replaces the stored one.",
+          %{
+            name: %Schema{type: :string},
+            type: %Schema{type: :string},
+            mode: %Schema{type: :string, enum: ~w(inbound outbound duplex)},
+            status: %Schema{type: :string, enum: ~w(active inactive)},
+            require_signature: %Schema{type: :boolean},
+            config: @object,
+            transformations: %Schema{type: :array, items: @object},
+            retry_policy: @object,
+            rate_limit: nullable(%Schema{type: :string})
+          },
+          []
+        ),
+      "ChannelRequest" =>
+        object(
+          "ChannelRequest",
+          "Create or update a channel.",
+          %{channel: ref("ChannelInput")},
+          [:channel]
+        ),
+      "TenantUser" =>
+        object("TenantUser", "A tenant portal user.", tenant_user_properties(), :all),
+      "TenantUserResponse" => data("TenantUserResponse", "One user.", ref("TenantUser")),
+      "TenantUserList" =>
+        data("TenantUserList", "The tenant's portal users, newest first.", %Schema{
+          type: :array,
+          items: ref("TenantUser")
+        }),
+      "TenantUserInput" =>
+        object(
+          "TenantUserInput",
+          "Writable fields of a portal user. `email`, `name` and `password` are required on create; `password` is ignored on update.",
+          %{
+            email: %Schema{type: :string},
+            name: %Schema{type: :string},
+            password: %Schema{type: :string, writeOnly: true},
+            role: %Schema{type: :string, enum: ~w(owner admin member viewer)},
+            status: %Schema{type: :string, enum: ~w(active inactive)}
+          },
+          []
+        ),
+      "TenantUserRequest" =>
+        object(
+          "TenantUserRequest",
+          "Create or update a portal user.",
+          %{user: ref("TenantUserInput")},
+          [:user]
+        ),
+      "Tenant" => object("Tenant", "A tenant and its settings.", tenant_properties(), :all),
+      "TenantWithApiKey" =>
+        object(
+          "TenantWithApiKey",
+          "A tenant with its primary API key: only the create and rotate_api_key responses carry it.",
+          with_secret(
+            tenant_properties(),
+            :api_key,
+            "The primary API key (every scope); store it, it is not returned again"
+          ),
+          :all
+        ),
+      "TenantResponse" => data("TenantResponse", "One tenant.", ref("Tenant")),
+      "TenantWithApiKeyResponse" =>
+        data(
+          "TenantWithApiKeyResponse",
+          "One tenant with its primary API key.",
+          ref("TenantWithApiKey")
+        ),
+      "TenantList" =>
+        data("TenantList", "Every tenant, sorted by name.", %Schema{
+          type: :array,
+          items: ref("Tenant")
+        }),
+      "TenantSettingsInput" =>
+        object(
+          "TenantSettingsInput",
+          "Settings a tenant manages itself. `limits` replaces every override.",
+          %{
+            retention_days: %Schema{type: :integer},
+            alert_webhook_url: nullable(%Schema{type: :string}),
+            allowed_upload_types: nullable(%Schema{type: :array, items: %Schema{type: :string}}),
+            limits: @object
+          },
+          []
+        ),
+      "TenantSettingsRequest" =>
+        object(
+          "TenantSettingsRequest",
+          "Change the tenant's settings.",
+          %{settings: ref("TenantSettingsInput")},
+          [:settings]
+        ),
+      "TenantInput" =>
+        object(
+          "TenantInput",
+          "Writable fields of a tenant (`name` is required on create). `limits` replaces every override.",
+          %{
+            name: %Schema{type: :string},
+            status: %Schema{type: :string, enum: ~w(active inactive)},
+            tier: %Schema{type: :string, enum: Tenant.tiers()},
+            retention_days: %Schema{type: :integer},
+            alert_webhook_url: nullable(%Schema{type: :string}),
+            allowed_upload_types: nullable(%Schema{type: :array, items: %Schema{type: :string}}),
+            limits: @object
+          },
+          []
+        ),
+      "TenantRequest" =>
+        object(
+          "TenantRequest",
+          "Create or update a tenant.",
+          %{tenant: ref("TenantInput")},
+          [:tenant]
+        ),
+      "ApiKeyScope" => %Schema{
+        title: "ApiKeyScope",
+        description:
+          "`read`: GET the tenant API; `write`: change conversation data; `manage`: configuration (`/api/v1/manage`, routing rules, webhook subscriptions, channel pause/resume).",
+        type: :string,
+        enum: Converger.ApiKeys.scopes()
+      },
+      "ApiKey" =>
+        object(
+          "ApiKey",
+          "A scoped tenant API key. The key itself is only returned on create.",
+          api_key_properties(),
+          :all
+        ),
+      "ApiKeyWithKey" =>
+        object(
+          "ApiKeyWithKey",
+          "A scoped API key with the key: only the create response carries it.",
+          with_secret(
+            api_key_properties(),
+            :key,
+            "The API key, sent in `x-api-key`; store it, it is not returned again"
+          ),
+          :all
+        ),
+      "ApiKeyResponse" => data("ApiKeyResponse", "One API key.", ref("ApiKey")),
+      "ApiKeyWithKeyResponse" =>
+        data("ApiKeyWithKeyResponse", "One API key with the key.", ref("ApiKeyWithKey")),
+      "ApiKeyList" =>
+        data(
+          "ApiKeyList",
+          "The tenant's scoped API keys, revoked ones included, newest first.",
+          %Schema{type: :array, items: ref("ApiKey")}
+        ),
+      "CreateApiKeyRequest" =>
+        object(
+          "CreateApiKeyRequest",
+          "Issue a scoped API key.",
+          %{
+            api_key:
+              object(
+                "ApiKeyInput",
+                "The key's name, scopes and optional expiry.",
+                %{
+                  name: %Schema{type: :string},
+                  scopes: %Schema{type: :array, items: ref("ApiKeyScope"), minItems: 1},
+                  expires_at: @datetime
+                },
+                [:name, :scopes]
+              )
+          },
+          [:api_key]
+        )
+    }
+  end
 
   defp webhook_schemas do
     %{

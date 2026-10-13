@@ -154,5 +154,5 @@ defmodule ConvergerWeb.WebhookEventController do
       else: conn
   end
 
-  defp build_actor(conn), do: %{type: "tenant_api", id: conn.assigns.tenant.id}
+  defp build_actor(conn), do: ConvergerWeb.Plugs.TenantAuth.actor(conn)
 end

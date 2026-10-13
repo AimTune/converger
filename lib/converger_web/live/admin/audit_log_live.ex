@@ -86,6 +86,7 @@ defmodule ConvergerWeb.Admin.AuditLogLive do
   @actor_type_options [
     {"All Actors", ""},
     {"Admin", "admin"},
+    {"Admin API", "admin_api"},
     {"Tenant API", "tenant_api"},
     {"Tenant user", "tenant_user"},
     {"System", "system"}

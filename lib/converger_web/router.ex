@@ -122,6 +122,39 @@ defmodule ConvergerWeb.Router do
     post "/channels/:channel_id/status", InboundController, :status
   end
 
+  # Management API (ADR-0061): the tenant's configuration, for onboarding
+  # flows and infrastructure as code. API key with the `manage` scope.
+  scope "/api/v1/manage", ConvergerWeb.Manage do
+    pipe_through :api
+
+    resources "/channels", ChannelController, only: [:index, :show, :create, :update, :delete] do
+      post "/rotate_secret", ChannelController, :rotate_secret
+    end
+
+    resources "/users", TenantUserController, only: [:index, :show, :create, :update, :delete]
+    resources "/api_keys", ApiKeyController, only: [:index, :show, :create, :delete]
+
+    get "/settings", SettingsController, :show
+    patch "/settings", SettingsController, :update
+    put "/settings", SettingsController, :update
+  end
+
+  # Platform admin API (ADR-0061): ADMIN_API_TOKEN behind the admin IP
+  # allowlist.
+  pipeline :admin_api do
+    plug ConvergerWeb.Plugs.AdminAuth
+    plug ConvergerWeb.Plugs.AdminApiAuth
+  end
+
+  scope "/api/v1/admin", ConvergerWeb.AdminAPI do
+    pipe_through [:api, :admin_api]
+
+    resources "/tenants", TenantController, only: [:index, :show, :create, :update, :delete] do
+      post "/rotate_api_key", TenantController, :rotate_api_key
+      resources "/api_keys", ApiKeyController, only: [:index, :create, :delete]
+    end
+  end
+
   # Converger client API (Direct Line-inspired)
   pipeline :converger_secret_auth do
     plug ConvergerWeb.Plugs.ConvergerAuth, mode: :secret

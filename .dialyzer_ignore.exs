@@ -8,6 +8,7 @@
   # needs an entry here; OTP 27 does not emit it (mix.exs sets
   # `list_unused_filters: false` so unused filters do not fail the run).
   {"lib/converger/accounts.ex", :call_without_opaque},
+  {"lib/converger/api_keys.ex", :call_without_opaque},
   {"lib/converger/accounts/password_reset.ex", :call_without_opaque},
   {"lib/converger/accounts/totp.ex", :call_without_opaque},
   {"lib/converger/channels.ex", :call_without_opaque},

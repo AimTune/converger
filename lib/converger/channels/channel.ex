@@ -191,7 +191,8 @@ defmodule Converger.Channels.Channel do
     end
   end
 
-  defp generate_secret do
+  @doc "A new random channel secret."
+  def generate_secret do
     :crypto.strong_rand_bytes(32) |> Base.encode64(padding: false)
   end
 end
