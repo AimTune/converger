@@ -57,6 +57,21 @@ defmodule ConvergerWeb.Sockets do
     :ok
   end
 
+  @doc """
+  Disconnect every Converger socket of the subject of a token (its end user,
+  channel console or conversation), e.g. after the token was revoked. Holders
+  of other, still valid tokens of the same subject reconnect; the revoked
+  token is refused (ADR-0057).
+  """
+  def disconnect_claims(claims) do
+    case converger_socket_id(claims) do
+      nil -> :ok
+      socket_id -> disconnect_id(socket_id)
+    end
+
+    :ok
+  end
+
   @doc "Disconnect every socket of a conversation's token-holders."
   def disconnect_conversation(tenant_id, conversation_id) do
     disconnect_id("converger_socket:#{tenant_id}:conversation:#{conversation_id}")

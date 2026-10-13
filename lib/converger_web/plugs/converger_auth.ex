@@ -14,7 +14,7 @@ defmodule ConvergerWeb.Plugs.ConvergerAuth do
 
     case extract_bearer(conn) || query_token(conn, opts) do
       nil -> unauthorized(conn, "Missing or malformed Authorization header")
-      bearer -> authenticate(conn, bearer, mode)
+      bearer -> authenticate(conn, bearer, mode, opts)
     end
   end
 
@@ -36,7 +36,7 @@ defmodule ConvergerWeb.Plugs.ConvergerAuth do
     end
   end
 
-  defp authenticate(conn, bearer, :secret) do
+  defp authenticate(conn, bearer, :secret, opts) do
     case find_channel_by_secret(bearer) do
       {:ok, channel} ->
         conn
@@ -44,12 +44,16 @@ defmodule ConvergerWeb.Plugs.ConvergerAuth do
         |> assign(:auth_mode, :secret)
 
       {:error, _} ->
-        authenticate(conn, bearer, :token)
+        authenticate(conn, bearer, :token, opts)
     end
   end
 
-  defp authenticate(conn, bearer, :token) do
-    case ConvergerToken.verify_token(bearer) do
+  # `allow_rotated: true` (the refresh endpoint) also accepts a token that was
+  # refreshed before, so the endpoint can detect the reuse (ADR-0057).
+  defp authenticate(conn, bearer, :token, opts) do
+    verify_opts = [allow_rotated: Keyword.get(opts, :allow_rotated, false)]
+
+    case ConvergerToken.verify_token(bearer, verify_opts) do
       {:ok, claims} ->
         case verify_channel_enabled(claims["channel_id"]) do
           :ok ->
@@ -64,9 +68,12 @@ defmodule ConvergerWeb.Plugs.ConvergerAuth do
       {:error, reason} ->
         Logger.warning("Converger token verification failed: #{inspect(reason)}")
 
-        if expired?(reason),
-          do: unauthorized(conn, "Token expired", "token_expired"),
-          else: unauthorized(conn, "Invalid or expired token")
+        cond do
+          expired?(reason) -> unauthorized(conn, "Token expired", "token_expired")
+          reason == :token_revoked -> unauthorized(conn, "Token revoked", "token_revoked")
+          reason == :token_rotated -> unauthorized(conn, "Token was refreshed", "token_revoked")
+          true -> unauthorized(conn, "Invalid or expired token")
+        end
     end
   end
 

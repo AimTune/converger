@@ -51,6 +51,9 @@ defmodule ConvergerWeb.ConvergerAPI.EventStreamController do
   # text/event-stream).
   plug :put_format, "json"
 
+  # Token permissions (ADR-0057).
+  plug ConvergerWeb.Plugs.RequirePermission, "read"
+
   action_fallback ConvergerWeb.FallbackController
 
   tags(["Client: Events"])
