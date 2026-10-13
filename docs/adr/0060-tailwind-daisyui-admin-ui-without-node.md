@@ -9,7 +9,7 @@ description: The admin panel and tenant portal stay server-rendered LiveView, st
 | **Status** | Accepted |
 | **Date** | 2026-10-13 |
 | **Issue** | [#50](https://github.com/AimTune/converger/issues/50) |
-| **Pull request** | to be added |
+| **Pull request** | [#162](https://github.com/AimTune/converger/pull/162) |
 | **Related** | [ADR-0023](0023-platform-and-dependency-baseline.md), [ADR-0022](0022-deployment-hardening.md) |
 
 ## Context and problem statement
