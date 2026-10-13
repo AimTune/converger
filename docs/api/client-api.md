@@ -19,7 +19,8 @@ unlike the snake_case tenant API.
 | Method | Path | Auth | Purpose |
 | --- | --- | --- | --- |
 | `POST` | `/api/v1/converger/tokens/generate` | Bearer channel secret | Issue an unscoped or channel-scoped converger token (backend only) |
-| `POST` | `/api/v1/converger/tokens/refresh` | Bearer converger token | Exchange a valid token for a fresh one |
+| `POST` | `/api/v1/converger/tokens/refresh` | Bearer converger token | Exchange a valid token for a fresh one (the old one is rotated) |
+| `POST` | `/api/v1/converger/tokens/revoke` | Bearer converger token, or channel secret | Revoke a token and its family (logout), or every token of an end user (backend) |
 | `POST` | `/api/v1/converger/conversations` | Bearer converger token | Start a conversation; returns a conversation-bound token and `streamUrl` |
 | `GET` | `/api/v1/converger/conversations/:id` | Bearer converger token | Reconnect: new token and `streamUrl` for an existing conversation |
 | `POST` | `/api/v1/converger/conversations/:id/close` | Bearer converger token | Close the conversation |
@@ -31,7 +32,10 @@ unlike the snake_case tenant API.
 | `GET` | `/api/v1/converger/attachments/:id` | Bearer converger token | Download an uploaded file |
 
 Authentication is described in [client authentication](overview.md#client-authentication-authorization-bearer).
-Every token-authenticated route also checks that the token's channel is still `active` (`403` otherwise).
+Every token-authenticated route also checks that the token's channel is still `active` (`403` otherwise), that
+the token was not revoked (`401 token_revoked`), and that it has the permission the route needs (`403
+insufficient_permission`, see [Permissions](#permissions)). How tokens are signed, rotated and revoked is in
+[Client tokens](../security/client-tokens.md).
 
 ## Flow
 
@@ -68,7 +72,25 @@ a conversation-bound one (`POST /conversations`) as early as possible, and do no
 :::
 
 Every token expires after 1800 seconds (`expires_in`). Refresh it with `POST /tokens/refresh` before it expires;
-an expired token cannot be refreshed, so the client has to get a new one from your backend.
+an expired token cannot be refreshed, so the client has to get a new one from your backend. A token issued by
+`POST /conversations` or `GET /conversations/:id` never outlives the token that asked for it (`expires_in` says how
+long it has left): only a refresh extends a session, and a refresh rotates the token.
+
+### Permissions
+
+A token may be restricted with `permissions` on `tokens/generate` (the `perms` claim). The restriction is
+carried to every token derived from it (`POST /conversations`, `GET /conversations/:id`) or refreshed from it, and
+cannot be widened. A token without the claim has every permission.
+
+| Permission | Allows |
+| --- | --- |
+| `read` | `GET /conversations/:id`, `GET .../activities`, `GET .../events` (SSE), `GET /attachments/:id`; joining a conversation on the WebSocket (and with it `ack`, `read` receipts, `sync`) |
+| `write` | `POST /conversations` (and starting one on the native WebSocket), `POST .../activities`, `POST .../upload`, `close`, `reopen`; `postActivity` and `text` frames on the WebSocket |
+| `typing` | Typing indicators on the WebSocket |
+
+A missing permission is answered `403 insufficient_permission` with `details.required` (WebSocket:
+`insufficient_permission`, see [Protocol v1](../protocol/v1.md#122-error-codes)). Example: a read-only viewer of a
+conversation gets `{"permissions": ["read"]}`.
 
 The examples use:
 
@@ -94,6 +116,7 @@ Called by **your backend** with the channel secret. Never call it from a browser
 | --- | --- | --- |
 | `user.id` | string | Optional end-user id, stored as the `user_id` claim and carried through refreshes and conversation tokens. Used for the per-user socket id, so one user can be disconnected individually. |
 | `scope` | string | Optional. The only accepted value is `"channel"`: the token gets the `scope: "channel"` claim and may join `converger:channel:<channel_id>` on the client socket (agent console). Conversation tokens minted from it (`POST /conversations`) do not carry the scope. |
+| `permissions` | array of strings | Optional. A non-empty subset of `read`, `write`, `typing` (see [Permissions](#permissions)). Omitted: every permission. |
 
 ```bash
 curl -s -X POST "$CONVERGER/api/v1/converger/tokens/generate" \
@@ -105,13 +128,16 @@ curl -s -X POST "$CONVERGER/api/v1/converger/tokens/generate" \
 `200 OK`:
 
 ```json
-{ "conversationId": null, "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...", "expires_in": 1800 }
+{ "conversationId": null, "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...", "expires_in": 1800, "permissions": null }
 ```
+
+`permissions` echoes the restriction (`null`: every permission).
 
 | Status | Error (`code: message`) | Cause |
 | --- | --- | --- |
 | `400` | `bad_request: Token generation requires channel secret, not a token` | A converger token was sent instead of the secret |
 | `400` | `bad_request: scope must be one of: channel` | Unknown `scope` value |
+| `400` | `bad_request: permissions must be a ...` | `permissions` is not a non-empty list of known permissions |
 | `401` | `unauthorized: Missing or malformed Authorization header` | No `Bearer` header |
 | `401` | `unauthorized: Invalid or expired token` | Unknown secret, or the channel is inactive |
 | `429` | `rate_limited` | Channel's `token_generate` limit exceeded |
@@ -121,7 +147,14 @@ curl -s -X POST "$CONVERGER/api/v1/converger/tokens/generate" \
 `POST /api/v1/converger/tokens/refresh`
 
 Exchanges a still-valid token for a new one with a fresh 1800 s expiry, keeping its `conversation_id` (if any),
-`user_id` and `scope`. No body.
+`user_id`, `scope`, permissions and family. No body.
+
+The presented token is **rotated**: it keeps working for the rotation grace period (default 30 s, so requests
+already in flight with it succeed) and is then rejected with `401 token_revoked`. Use the new token from now on.
+Refreshing the same old token again within the grace period returns another token (two tabs refreshing at once);
+refreshing it **after** the grace period is treated as token theft: the whole family (every token derived or
+refreshed from the same generated token, the legitimate one included) is revoked and the answer is `401
+token_revoked`. The client then needs a new token from your backend.
 
 ```bash
 curl -s -X POST "$CONVERGER/api/v1/converger/tokens/refresh" \
@@ -134,8 +167,29 @@ curl -s -X POST "$CONVERGER/api/v1/converger/tokens/refresh" \
 { "conversationId": "3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10", "token": "eyJhbGciOi...", "expires_in": 1800 }
 ```
 
-`conversationId` is `null` for an unscoped token. Errors: `401` (invalid or expired token), `403` (channel
-inactive), `429` (`token_generate` limit, per channel).
+`conversationId` is `null` for an unscoped token. Errors: `401` (invalid or expired token, `token_revoked`), `403`
+(channel inactive), `429` (`token_generate` limit, per channel).
+
+### Revoke tokens
+
+`POST /api/v1/converger/tokens/revoke`
+
+Revocation takes effect on every node within a second, for REST and WebSocket alike: revoked tokens are refused
+(`401 token_revoked`, WebSocket close 4401) and the sockets of the token's subject (its end user, or its
+conversation) are disconnected; holders of other valid tokens of that subject reconnect normally.
+
+| Credential | Body | Revokes |
+| --- | --- | --- |
+| Converger token | none | The token and its family: every token generated, derived or refreshed in the same chain. Use it on logout. |
+| Channel secret (backend) | `{"token": "..."}` | That token of the channel and its family. A token of another channel is `403`; an invalid or expired token needs no revocation and is answered `200`. |
+| Channel secret (backend) | `{"user": {"id": "user-42"}}` | Every token of that end user on the channel issued until now (a banned user). Tokens generated afterwards are valid. |
+
+```bash
+curl -s -X POST "$CONVERGER/api/v1/converger/tokens/revoke" \n  -H "authorization: Bearer $CHANNEL_SECRET" \n  -H "content-type: application/json" \n  -d '{"user": {"id": "user-42"}}'
+```
+
+`200 OK`: `{"revoked": "user"}` (or `"token"`). Errors: `400` (neither `token` nor `user.id` with the secret), `401`,
+`403`, `429` (`token_generate` limit, per channel).
 
 ## Conversations
 

@@ -97,6 +97,8 @@ defmodule ConvergerWeb.Protocol.Session do
       last_in: now,
       last_out: now,
       claims: nil,
+      # The token's permissions (ADR-0059), as a set for frame guards.
+      permitted: %{},
       conversation_id: nil,
       user_id: nil,
       feed: nil,
@@ -325,6 +327,11 @@ defmodule ConvergerWeb.Protocol.Session do
   defp handle_frame(%{"type" => "sync"} = frame, state), do: sync(frame, state)
   defp handle_frame(%{"type" => "auth"} = frame, state), do: refresh_token(frame, state)
 
+  # Token permissions (ADR-0059): typing needs `typing`, sends need `write`.
+  defp handle_frame(%{"type" => "typing"}, state)
+       when not is_map_key(state.permitted, "typing"),
+       do: reply([insufficient_permission("typing", "typing")], state)
+
   defp handle_frame(%{"type" => "typing", "isTyping" => is_typing}, state)
        when is_boolean(is_typing) do
     typing =
@@ -369,6 +376,9 @@ defmodule ConvergerWeb.Protocol.Session do
 
   defp handle_frame(%{"type" => type} = frame, state) when is_binary(type) do
     case Send.kind(type) do
+      :text when not is_map_key(state.permitted, "write") ->
+        reply([insufficient_permission("write", type) |> with_client_id(frame)], state)
+
       :text ->
         send_message(frame, state)
 
@@ -398,6 +408,7 @@ defmodule ConvergerWeb.Protocol.Session do
   defp handshake(hello, state) do
     with :ok <- check_protocol(hello["protocol"]),
          {:ok, claims} <- authenticate(state.token || string(hello["token"])),
+         :ok <- permit(claims, "read"),
          {:ok, _channel} <- active_channel(claims),
          {:ok, conversation} <- resolve_conversation(claims, hello) do
       start_session(hello, claims, conversation, state)
@@ -408,6 +419,13 @@ defmodule ConvergerWeb.Protocol.Session do
 
       {:error, :unauthorized} ->
         close(4401, "unauthorized", [error("unauthorized", "missing or invalid token")], state)
+
+      {:error, :token_revoked} ->
+        close(4401, "token revoked", [error("token_revoked", "the token was revoked")], state)
+
+      {:error, {:insufficient_permission, permission}} ->
+        frame = insufficient_permission(permission, nil)
+        close(4403, "insufficient permission", [frame], state)
 
       {:error, :channel_inactive} ->
         close(4403, "channel inactive", [error("channel_inactive", "channel is inactive")], state)
@@ -428,8 +446,29 @@ defmodule ConvergerWeb.Protocol.Session do
   defp authenticate(token) do
     case ConvergerToken.verify_token(token) do
       {:ok, claims} -> {:ok, claims}
+      {:error, reason} when reason in [:token_revoked, :token_rotated] -> {:error, :token_revoked}
       {:error, _reason} -> {:error, :unauthorized}
     end
+  end
+
+  defp permitted(claims) do
+    for permission <- ConvergerToken.permissions(),
+        ConvergerToken.permitted?(claims, permission),
+        into: %{},
+        do: {permission, true}
+  end
+
+  defp permit(claims, permission) do
+    if ConvergerToken.permitted?(claims, permission),
+      do: :ok,
+      else: {:error, {:insufficient_permission, permission}}
+  end
+
+  defp insufficient_permission(permission, frame_type) do
+    error("insufficient_permission", "the token lacks the #{permission} permission",
+      frame_type: frame_type,
+      details: %{"required" => permission}
+    )
   end
 
   defp active_channel(claims) do
@@ -456,7 +495,7 @@ defmodule ConvergerWeb.Protocol.Session do
 
   defp resolve_conversation(claims, hello) do
     case adoptable(claims, hello["conversationId"]) do
-      nil -> create_conversation(claims)
+      nil -> with :ok <- permit(claims, "write"), do: create_conversation(claims)
       conversation -> {:ok, conversation}
     end
   end
@@ -525,6 +564,7 @@ defmodule ConvergerWeb.Protocol.Session do
       state
       | phase: :ready,
         claims: claims,
+        permitted: permitted(claims),
         conversation_id: conversation_id,
         user_id: user_id,
         participant: participant,
@@ -732,8 +772,10 @@ defmodule ConvergerWeb.Protocol.Session do
     end
   end
 
+  # A refreshed token must not widen the session: same identity and
+  # permissions.
   defp same_identity?(new, old) do
-    Enum.all?(~w(tenant_id channel_id conversation_id user_id), &(new[&1] == old[&1]))
+    Enum.all?(~w(tenant_id channel_id conversation_id user_id perms), &(new[&1] == old[&1]))
   end
 
   ## Helpers

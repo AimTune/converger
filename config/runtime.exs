@@ -43,6 +43,42 @@ if metrics_config != [] do
   config :converger, :metrics, metrics_config
 end
 
+# Converger client token signing keys (ADR-0059): comma-separated kid:secret
+# pairs, the signing key first; every listed key verifies. Rotate by putting a
+# new key first, then removing the old one after a token lifetime (30 min).
+# Secrets must be at least 32 bytes. Unset: secret_key_base, kid "default".
+if keys = System.get_env("TOKEN_SIGNING_KEYS") do
+  token_keys =
+    keys
+    |> String.split(",", trim: true)
+    |> Enum.map(&String.trim/1)
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.map(fn entry ->
+      case String.split(entry, ":", parts: 2) do
+        [kid, secret] when kid != "" and byte_size(secret) >= 32 ->
+          {kid, secret}
+
+        [kid, _short] when kid != "" ->
+          raise "TOKEN_SIGNING_KEYS: the secret of #{kid} must be at least 32 bytes"
+
+        _ ->
+          raise "TOKEN_SIGNING_KEYS entries must be kid:secret"
+      end
+    end)
+
+  kids = Enum.map(token_keys, &elem(&1, 0))
+  if kids != Enum.uniq(kids), do: raise("TOKEN_SIGNING_KEYS has a duplicate kid")
+  if token_keys != [], do: config(:converger, :token_signing_keys, token_keys)
+end
+
+if grace = System.get_env("TOKEN_ROTATION_GRACE_SECONDS") do
+  config :converger, :token_rotation_grace_seconds, String.to_integer(grace)
+end
+
+if accept = System.get_env("TOKEN_ACCEPT_UNKEYED") do
+  config :converger, :token_accept_unkeyed, accept in ~w(true 1)
+end
+
 # Legacy separate metrics listener: only started when PROMETHEUS_PORT is set.
 # It is unauthenticated, so it must only be reachable from the scraper.
 if port = System.get_env("PROMETHEUS_PORT") do

@@ -164,6 +164,7 @@ Authorization: a conversation token must name this conversation. A token issued 
 | --- | --- |
 | `{"status": "ok", "response": {}}` | Joined. |
 | `{"status": "error", "response": {"reason": "unauthorized"}}` | The token does not grant this conversation, or its channel is not active. |
+| `{"status": "error", "response": {"reason": "insufficient_permission", "required": "read"}}` | The token's `perms` claim lacks `read` ([permissions](api/client-api.md#permissions)). On a joined channel, `postActivity` and `frame` need `write` and `typing` needs `typing`; otherwise the reply is `insufficient_permission` with `required`. |
 | `{"status": "error", "response": {"reason": "invalid_topic"}}` | The topic is neither `converger:conversation:<id>` nor `converger:channel:<id>`. |
 | `{"status": "error", "response": {"reason": "unavailable", "retry_after_ms": N}}` | The database could not be reached. Retryable: join again after `N` ms (the `phoenix` client rejoins on its own). |
 
@@ -686,6 +687,7 @@ The server closes sockets when:
 
 - the channel is deactivated or deleted: every tracked socket of the channel is disconnected, and reconnects are refused while it stays inactive;
 - an operator disconnects one user or conversation (`ConvergerWeb.Sockets.disconnect_user/2`, `disconnect_conversation/2`);
+- a token of the socket's subject is revoked (`POST /api/v1/converger/tokens/revoke`, or a refresh reuse that revokes the family): the subject's sockets are disconnected on every node, and the revoked token is refused on reconnect. See [Client tokens](security/client-tokens.md#revocation);
 - the node shuts down (a deploy): close code **1012** with the reason `{"reason": "unavailable", "retryAfterMs": N}`. While a node is draining it refuses new connections with HTTP 503 and `Retry-After`; reconnect and the load balancer sends you to another node;
 - the client cannot keep up: close code **4503** with `{"reason": "slow_consumer", "retryAfterMs": N}`;
 - a frame exceeds the hard size cap (1009), or nothing was received for 60 s (send heartbeats).

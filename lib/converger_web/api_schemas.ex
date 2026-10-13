@@ -14,6 +14,7 @@ defmodule ConvergerWeb.ApiSchemas do
   """
 
   alias Converger.Activities.Activity
+  alias Converger.Auth.ConvergerToken
   alias Converger.Deliveries.Delivery
   alias Converger.Webhooks.{Catalog, Event}
   alias OpenApiSpex.{Header, MediaType, Reference, Response, Schema}
@@ -923,9 +924,33 @@ defmodule ConvergerWeb.ApiSchemas do
           "Token generation options.",
           %{
             user: object(nil, "The end user", %{id: %Schema{type: :string}}, []),
-            scope: %Schema{type: :string, enum: Converger.Auth.ConvergerToken.scopes()}
+            scope: %Schema{type: :string, enum: ConvergerToken.scopes()},
+            permissions: %Schema{
+              type: :array,
+              minItems: 1,
+              items: %Schema{type: :string, enum: ConvergerToken.permissions()},
+              description:
+                "Restricts the token (and every token derived or refreshed from it). Omitted: all permissions."
+            }
           },
           []
+        ),
+      "ClientTokenRevokeRequest" =>
+        object(
+          "ClientTokenRevokeRequest",
+          "What to revoke. With the channel secret: `token` (a token of the channel, with its family) or `user.id` (every token of that end user issued so far). With a token: nothing, the token revokes itself and its family.",
+          %{
+            token: %Schema{type: :string},
+            user: object(nil, "The end user", %{id: %Schema{type: :string}}, [])
+          },
+          []
+        ),
+      "ClientTokenRevoked" =>
+        object(
+          "ClientTokenRevoked",
+          "The revocation, effective on every node within a second.",
+          %{revoked: %Schema{type: :string, enum: ~w(token user)}},
+          [:revoked]
         ),
       "ClientToken" =>
         object(
@@ -934,7 +959,12 @@ defmodule ConvergerWeb.ApiSchemas do
           %{
             conversationId: nullable(@uuid),
             token: %Schema{type: :string},
-            expires_in: %Schema{type: :integer, description: "Seconds"}
+            expires_in: %Schema{type: :integer, description: "Seconds"},
+            permissions:
+              nullable(%Schema{
+                type: :array,
+                items: %Schema{type: :string, enum: ConvergerToken.permissions()}
+              })
           },
           [:conversationId, :token, :expires_in]
         ),

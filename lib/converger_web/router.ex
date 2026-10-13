@@ -131,16 +131,30 @@ defmodule ConvergerWeb.Router do
     plug ConvergerWeb.Plugs.ConvergerAuth, mode: :token
   end
 
+  # Refresh also accepts a token refreshed before (past the rotation grace
+  # period), so reuse can be detected and the family revoked (ADR-0059).
+  pipeline :converger_refresh_auth do
+    plug ConvergerWeb.Plugs.ConvergerAuth, mode: :token, allow_rotated: true
+  end
+
   scope "/api/v1/converger", ConvergerWeb.ConvergerAPI do
     pipe_through [:api, :converger_secret_auth]
 
     post "/tokens/generate", TokenController, :generate
+    # The channel secret revokes any token or end user of its channel; a
+    # token revokes itself (its family).
+    post "/tokens/revoke", TokenController, :revoke
+  end
+
+  scope "/api/v1/converger", ConvergerWeb.ConvergerAPI do
+    pipe_through [:api, :converger_refresh_auth]
+
+    post "/tokens/refresh", TokenController, :refresh
   end
 
   scope "/api/v1/converger", ConvergerWeb.ConvergerAPI do
     pipe_through [:api, :converger_token_auth]
 
-    post "/tokens/refresh", TokenController, :refresh
     post "/conversations", ConversationController, :create
     get "/conversations/:id", ConversationController, :show
     post "/conversations/:id/close", ConversationController, :close

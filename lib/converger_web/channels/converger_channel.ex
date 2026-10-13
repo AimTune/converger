@@ -58,6 +58,7 @@ defmodule ConvergerWeb.ConvergerChannel do
     RoutingRules
   }
 
+  alias Converger.Auth.ConvergerToken
   alias Converger.Channels.Adapters.WebSocket
   alias Converger.ConvergerAPI.Watermark
   alias Converger.Pagination
@@ -67,9 +68,12 @@ defmodule ConvergerWeb.ConvergerChannel do
   alias ConvergerWeb.{ConversationSignals, SocketGuard}
   alias ConvergerWeb.Protocol.{Frames, InFlight, Send}
 
+  # Receiving a conversation needs the token's `read` permission (ADR-0059).
   @impl true
   def join(topic, payload, socket) do
-    do_join(topic, payload, socket)
+    if ConvergerToken.permitted?(socket.assigns.converger_claims, "read"),
+      do: do_join(topic, payload, socket),
+      else: {:error, %{reason: "insufficient_permission", required: "read"}}
   rescue
     error in DBConnection.ConnectionError ->
       Pressure.report(:channel, error)
@@ -146,7 +150,12 @@ defmodule ConvergerWeb.ConvergerChannel do
   # with a retryable error; the channel stays joined (issue #35).
   @impl true
   def handle_in(event, payload, socket) do
-    do_handle_in(event, payload, socket)
+    permission = required_permission(event)
+
+    if is_nil(permission) or
+         ConvergerToken.permitted?(socket.assigns.converger_claims, permission),
+       do: do_handle_in(event, payload, socket),
+       else: insufficient_permission(event, payload, permission, socket)
   rescue
     error in DBConnection.ConnectionError ->
       Pressure.report(:channel, error)
@@ -296,6 +305,26 @@ defmodule ConvergerWeb.ConvergerChannel do
   defp do_handle_in(_event, _payload, socket), do: bad_request(socket)
 
   defp bad_request(socket), do: {:reply, {:error, %{reason: "bad_request"}}, socket}
+
+  # Token permissions (ADR-0059): sending needs `write`, typing needs
+  # `typing`; acks and read receipts come with `read`, checked on join.
+  defp required_permission(event) when event in ["postActivity", "frame"], do: "write"
+  defp required_permission("typing"), do: "typing"
+  defp required_permission(_event), do: nil
+
+  defp insufficient_permission("frame", frame, permission, socket) do
+    push_frames(socket, [
+      Frames.error("insufficient_permission", "the token lacks the #{permission} permission",
+        frame_type: if(is_map(frame), do: frame["type"]),
+        client_id: if(is_map(frame), do: valid_client_id(frame))
+      )
+    ])
+
+    {:reply, {:error, %{reason: "insufficient_permission", required: permission}}, socket}
+  end
+
+  defp insufficient_permission(_event, _payload, permission, socket),
+    do: {:reply, {:error, %{reason: "insufficient_permission", required: permission}}, socket}
 
   defp sender(%{"user_id" => user_id}, _payload) when is_binary(user_id) and user_id != "",
     do: user_id

@@ -15,6 +15,10 @@ defmodule ConvergerWeb.ConvergerAPI.ActivityController do
        [bucket: :activity_create, scope: :tenant]
        when action in [:create]
 
+  # Token permissions (ADR-0059).
+  plug ConvergerWeb.Plugs.RequirePermission, "write" when action in [:create]
+  plug ConvergerWeb.Plugs.RequirePermission, "read" when action in [:index]
+
   action_fallback ConvergerWeb.FallbackController
 
   tags(["Client: Activities"])

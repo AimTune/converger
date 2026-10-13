@@ -22,6 +22,8 @@ defmodule ConvergerWeb.Protocol.Frames do
     "token_expired" => {2001, true},
     "forbidden" => {2002, false},
     "channel_inactive" => {2003, false},
+    "insufficient_permission" => {2004, false},
+    "token_revoked" => {2005, false},
     "rate_limited" => {3000, true},
     "payload_too_large" => {3001, false},
     "too_many_in_flight" => {3002, true},
