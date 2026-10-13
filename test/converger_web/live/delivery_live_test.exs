@@ -57,7 +57,7 @@ defmodule ConvergerWeb.DeliveryLiveTest do
 
     conn
     |> Map.put(:remote_ip, {127, 0, 0, 1})
-    |> init_test_session(%{admin_user_id: admin.id})
+    |> log_in_admin(admin)
   end
 
   defp portal_conn(conn, tenant, role) do
@@ -66,11 +66,11 @@ defmodule ConvergerWeb.DeliveryLiveTest do
         tenant_id: tenant.id,
         name: "Portal",
         email: "dlq-#{System.unique_integer([:positive])}@example.com",
-        password: "password123",
+        password: "password-123456",
         role: role
       })
 
-    init_test_session(conn, %{tenant_user_id: user.id})
+    log_in_tenant_user(conn, user)
   end
 
   describe "admin" do

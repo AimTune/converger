@@ -38,7 +38,7 @@ defmodule ConvergerWeb.PaginationLiveTest do
   defp admin_conn(conn, admin) do
     conn
     |> Map.put(:remote_ip, {127, 0, 0, 1})
-    |> init_test_session(%{admin_user_id: admin.id})
+    |> log_in_admin(admin)
   end
 
   defp row_count(html, prefix) do
@@ -116,7 +116,7 @@ defmodule ConvergerWeb.PaginationLiveTest do
           tenant_id: t.id,
           name: "User #{i}",
           email: "lu#{i}-#{System.unique_integer([:positive])}@example.com",
-          password: "password123"
+          password: "password-123456"
         })
     end
 
@@ -137,11 +137,11 @@ defmodule ConvergerWeb.PaginationLiveTest do
         tenant_id: t.id,
         name: "Portal",
         email: "portal-#{System.unique_integer([:positive])}@example.com",
-        password: "password123",
+        password: "password-123456",
         role: "owner"
       })
 
-    conn = init_test_session(conn, %{tenant_user_id: user.id})
+    conn = log_in_tenant_user(conn, user)
     {:ok, view, html} = live(conn, ~p"/portal/conversations")
     assert row_count(html, "conversations") == 2
 

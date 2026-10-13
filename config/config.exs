@@ -193,6 +193,23 @@ config :converger, :websocket_max_frame_size, 1_048_576
 # at the `config/runtime.exs`.
 config :converger, Converger.Mailer, adapter: Swoosh.Adapters.Local
 
+# Admin / tenant portal account security (issue #52, ADR-0058); env overrides
+# in config/runtime.exs, see docs/operations/configuration.md.
+#   * sessions: server-side sessions end max_age_seconds after login, or
+#     idle_timeout_seconds after the last request (Converger.Accounts.Sessions);
+#   * password_min_length: Converger.Accounts.PasswordPolicy;
+#   * require_2fa_roles: admin roles that must enable TOTP 2FA before using
+#     the admin panel;
+#   * mailer_from: sender of account emails (password reset).
+config :converger, :sessions,
+  max_age_seconds: 43_200,
+  idle_timeout_seconds: 1_800
+
+config :converger,
+  password_min_length: 12,
+  require_2fa_roles: ["super_admin"],
+  mailer_from: {"Converger", "noreply@converger.local"}
+
 # Configures Elixir's Logger
 config :logger, :default_formatter,
   format: "$time $metadata[$level] $message\n",
@@ -222,7 +239,9 @@ config :converger, Oban,
        # daily, archive and drop expired activities/deliveries monthly.
        {"15 0 * * *", Converger.Workers.PartitionMaintenanceWorker},
        {"30 1 * * *", Converger.Workers.PruneWorker},
-       {"0 2 1 * *", Converger.Workers.RetentionWorker}
+       {"0 2 1 * *", Converger.Workers.RetentionWorker},
+       # Expired admin/portal sessions and password reset tokens (ADR-0058)
+       {"*/10 * * * *", Converger.Workers.SessionPruneWorker}
      ]}
   ],
   # Delivery queues per tenant tier (tenants.tier), see Converger.Pipeline.Oban.

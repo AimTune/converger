@@ -47,7 +47,10 @@ defmodule Converger.RateLimit do
     token_create: {10, 60_000},
     # failed logins, per client IP and per account
     login_ip: {5, 60_000},
-    login_account: {5, 60_000}
+    login_account: {5, 60_000},
+    # password reset requests (ADR-0058): per client IP, and per account
+    password_reset_ip: {5, 60_000},
+    password_reset_account: {3, 3_600_000}
   }
 
   @tenant_buckets ~w(activity_create upload inbound token_generate)

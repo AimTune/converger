@@ -118,6 +118,8 @@ defmodule Converger.MixProject do
       {:opentelemetry_req, "~> 1.0"},
       {:telemetry_metrics_prometheus_core, "~> 1.2"},
       {:bcrypt_elixir, "~> 3.0"},
+      # TOTP two-factor authentication for admin and portal users (ADR-0058).
+      {:nimble_totp, "~> 1.0"},
       {:cloak, "~> 1.1"},
       {:cloak_ecto, "~> 1.3"},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},

@@ -202,6 +202,46 @@ defmodule Converger.Release do
     result
   end
 
+  @doc """
+  Turns off TOTP 2FA of the admin with `email` (lost authenticator, locked
+  out super_admin) and signs them out everywhere. Audit-logged with actor
+  `system` / `release`. At the next login an admin whose role requires 2FA
+  is asked to enroll again.
+
+      bin/converger eval 'Converger.Release.reset_admin_2fa("admin@example.com")'
+  """
+  def reset_admin_2fa(email) when is_binary(email) do
+    load_app()
+
+    {:ok, result, _} =
+      Ecto.Migrator.with_repo(Converger.Repo, fn _repo ->
+        {:ok, _} = Application.ensure_all_started(:cloak)
+        start_vault()
+
+        result =
+          case Converger.Accounts.get_admin_user_by_email(String.trim(email)) do
+            nil ->
+              {:error, :not_found}
+
+            user ->
+              {:ok, _} = Converger.Accounts.TOTP.reset(user, %{type: "system", id: "release"})
+              Converger.Accounts.Sessions.delete_all("admin", user.id)
+              :ok
+          end
+
+        report_reset_admin_2fa(email, result)
+        result
+      end)
+
+    result
+  end
+
+  defp report_reset_admin_2fa(email, :ok),
+    do: IO.puts("Two-factor authentication of #{email} is off; their sessions were ended")
+
+  defp report_reset_admin_2fa(email, {:error, :not_found}),
+    do: IO.puts("No admin user with email #{email}")
+
   @doc false
   def report_seed_admin({:ok, user, :generated, password}) do
     IO.puts("""
