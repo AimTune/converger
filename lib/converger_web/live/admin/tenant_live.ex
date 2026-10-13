@@ -125,34 +125,27 @@ defmodule ConvergerWeb.Admin.TenantLive do
 
   def render(assigns) do
     ~H"""
-    <h1>Tenants</h1>
+    <Layouts.app flash={@flash} nav={@nav}>
+      <.header>
+        Tenants
+        <:subtitle>Organizations that own channels, conversations and API keys.</:subtitle>
+      </.header>
 
-    <div class="card">
-      <h3>Create Tenant</h3>
-      <.form for={@form} phx-submit="save">
-        <div style="display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap;">
-          <div>
-            <.input field={@form[:name]} placeholder="Tenant Name" />
-          </div>
-          <div>
-            <label style="display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.85em; color: #555;">Alert Webhook URL</label>
-            <input
-              type="text"
-              name="tenant[alert_webhook_url]"
-              placeholder="https://example.com/alerts (optional)"
-              style="padding: 8px; border: 1px solid #ddd; border-radius: 4px; min-width: 300px;"
-            />
-            <small style="display: block; color: #888;">
-              Kept as a managed subscription on channel health events, see Webhooks.
-            </small>
-          </div>
-          <div>
-            <label style="display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.85em; color: #555;">Delivery tier</label>
-            <select name="tenant[tier]" style="padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
-              <option :for={tier <- Tenant.tiers()} value={tier} selected={tier == "default"}><%= tier %></option>
-            </select>
-          </div>
-          <div>
+      <.panel title="Create tenant">
+        <.form for={@form} id="tenant-form" phx-submit="save">
+          <div class="grid gap-x-4 sm:grid-cols-2 lg:grid-cols-4">
+            <.input field={@form[:name]} label="Name" placeholder="Tenant name" />
+            <div>
+              <.input
+                field={@form[:alert_webhook_url]}
+                label="Alert webhook URL"
+                placeholder="https://example.com/alerts (optional)"
+              />
+              <p class="-mt-1 text-xs text-base-content/60">
+                Kept as a managed subscription on channel health events, see Webhooks.
+              </p>
+            </div>
+            <.input field={@form[:tier]} type="select" label="Delivery tier" options={Tenant.tiers()} />
             <.input
               field={@form[:retention_days]}
               type="number"
@@ -160,87 +153,89 @@ defmodule ConvergerWeb.Admin.TenantLive do
               min={Converger.Retention.min_retention_days()}
             />
           </div>
-          <button type="submit">Create</button>
+          <.button type="submit" variant="primary">Create</.button>
+        </.form>
+      </.panel>
+
+      <div :if={@revealed_key} id="revealed-api-key" role="alert" class="alert alert-warning items-start">
+        <.icon name="hero-key" class="size-6 shrink-0" />
+        <div class="min-w-0 flex-1 space-y-2">
+          <h3 class="font-semibold">API key for {@revealed_key.tenant_name}</h3>
+          <p class="text-sm">Copy this key now. It is stored hashed and will not be shown again.</p>
+          <code class="block rounded bg-base-100 p-2 font-mono text-sm break-all text-base-content">{@revealed_key.key}</code>
+          <p :if={@revealed_key.previous_expires_at} class="text-xs">
+            The previous key stays valid until {Calendar.strftime(
+              @revealed_key.previous_expires_at,
+              "%Y-%m-%d %H:%M UTC"
+            )}.
+          </p>
+          <.button phx-click="dismiss_key" size="sm" variant="neutral">I have saved the key</.button>
         </div>
-      </.form>
-    </div>
+      </div>
 
-    <div
-      :if={@revealed_key}
-      id="revealed-api-key"
-      class="card"
-      style="border-left: 4px solid #f0ad4e;"
-    >
-      <h3>API key for <%= @revealed_key.tenant_name %></h3>
-      <p>Copy this key now. It is stored hashed and will not be shown again.</p>
-      <code style="display: block; padding: 8px; background: #f6f8fa; word-break: break-all;"><%= @revealed_key.key %></code>
-      <p :if={@revealed_key.previous_expires_at} style="font-size: 0.85em; color: #666;">
-        The previous key stays valid until <%= Calendar.strftime(@revealed_key.previous_expires_at, "%Y-%m-%d %H:%M UTC") %>.
-      </p>
-      <button phx-click="dismiss_key">I have saved the key</button>
-    </div>
-
-    <div class="card">
-      <table>
-        <thead>
-          <tr>
-            <th>ID</th>
-            <th>Name</th>
-            <th>API Key</th>
-            <th>Alert Webhook</th>
-            <th>Retention</th>
-            <th>Status</th>
-            <th>Tier</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr :for={tenant <- @tenants}>
-            <td><small><%= tenant.id %></small></td>
-            <td><%= tenant.name %></td>
-            <td><code style="font-size: 0.8em;"><%= Tenant.masked_api_key(tenant) %></code></td>
-            <td>
-              <span :if={tenant.alert_webhook_url && tenant.alert_webhook_url != ""} style="font-size: 0.8em; color: #666;" title={tenant.alert_webhook_url}>
-                <%= String.slice(tenant.alert_webhook_url, 0, 40) %><%= if String.length(tenant.alert_webhook_url) > 40, do: "..." %>
+      <.panel>
+        <div class="overflow-x-auto">
+          <.table id="tenants" rows={@tenants} row_id={&"tenant-#{&1.id}"}>
+            <:col :let={tenant} label="Name">
+              <div class="font-medium">{tenant.name}</div>
+              <div class="font-mono text-xs text-base-content/60">{tenant.id}</div>
+            </:col>
+            <:col :let={tenant} label="API key">
+              <code class="font-mono text-xs">{Tenant.masked_api_key(tenant)}</code>
+            </:col>
+            <:col :let={tenant} label="Alert webhook">
+              <span
+                :if={tenant.alert_webhook_url && tenant.alert_webhook_url != ""}
+                class="block max-w-60 truncate text-xs text-base-content/70"
+                title={tenant.alert_webhook_url}
+              >
+                {tenant.alert_webhook_url}
               </span>
-              <span :if={!tenant.alert_webhook_url || tenant.alert_webhook_url == ""} style="color: #aaa;">—</span>
-            </td>
-            <td><%= tenant.retention_days %> days</td>
-            <td>
-              <span class={"badge badge-#{tenant.status}"}>
-                <%= tenant.status %>
+              <span :if={!tenant.alert_webhook_url || tenant.alert_webhook_url == ""} class="text-base-content/40">
+                —
               </span>
-            </td>
-            <td>
+            </:col>
+            <:col :let={tenant} label="Retention">{tenant.retention_days} days</:col>
+            <:col :let={tenant} label="Status"><.badge value={tenant.status} /></:col>
+            <:col :let={tenant} label="Tier">
               <button
+                type="button"
                 phx-click="cycle_tier"
                 phx-value-id={tenant.id}
-                class="badge"
-                title="Delivery queue tier: high → default → bulk"
+                class={["badge badge-sm cursor-pointer", badge_color(tenant.tier)]}
+                title="Delivery queue tier: high → default → bulk (click to change)"
               >
-                <%= tenant.tier %>
+                {tenant.tier}
               </button>
-            </td>
-            <td>
-              <button phx-click="toggle_status" phx-value-id={tenant.id} class="badge">
-                <%= if tenant.status == "active", do: "Disable", else: "Enable" %>
-              </button>
-              <button
+            </:col>
+            <:action :let={tenant}>
+              <.button phx-click="toggle_status" phx-value-id={tenant.id} size="xs" variant="neutral">
+                {if tenant.status == "active", do: "Disable", else: "Enable"}
+              </.button>
+              <.button
                 phx-click="rotate_api_key"
                 phx-value-id={tenant.id}
-                phx-confirm="Generate a new API key? The current key stays valid for a grace period."
-                class="badge"
+                data-confirm="Generate a new API key? The current key stays valid for a grace period."
+                size="xs"
+                variant="neutral"
               >
                 Rotate key
-              </button>
-              <button phx-click="delete" phx-value-id={tenant.id} phx-confirm="Are you sure?" class="badge badge-inactive">
+              </.button>
+              <.button
+                phx-click="delete"
+                phx-value-id={tenant.id}
+                data-confirm="Are you sure?"
+                size="xs"
+                variant="error"
+              >
                 Delete
-              </button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
+              </.button>
+            </:action>
+          </.table>
+        </div>
+        <.empty_state :if={@tenants == []}>No tenants yet.</.empty_state>
+      </.panel>
+    </Layouts.app>
     """
   end
 end

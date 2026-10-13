@@ -211,6 +211,28 @@ config :converger, :websocket_max_frame_size, 1_048_576
 # at the `config/runtime.exs`.
 config :converger, Converger.Mailer, adapter: Swoosh.Adapters.Local
 
+# Admin/portal assets (ADR-0060): `mix assets.build` / `mix assets.deploy`
+# download these exact versions of the standalone binaries on first use.
+config :esbuild,
+  version: "0.25.4",
+  converger: [
+    args:
+      ~w(js/app.js --bundle --target=es2022 --outdir=../priv/static/assets/js --external:/fonts/* --external:/images/* --alias:@=.),
+    cd: Path.expand("../assets", __DIR__),
+    env: %{"NODE_PATH" => [Path.expand("../deps", __DIR__), Mix.Project.build_path()]}
+  ]
+
+config :tailwind,
+  version: "4.3.3",
+  converger: [
+    args: ~w(
+      --input=assets/css/app.css
+      --output=priv/static/assets/css/app.css
+    ),
+    cd: Path.expand("..", __DIR__),
+    env: %{"NODE_PATH" => [Path.expand("../deps", __DIR__), Mix.Project.build_path()]}
+  ]
+
 # Configures Elixir's Logger
 config :logger, :default_formatter,
   format: "$time $metadata[$level] $message\n",

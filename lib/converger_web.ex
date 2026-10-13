@@ -38,12 +38,10 @@ defmodule ConvergerWeb do
 
   def controller do
     quote do
-      use Phoenix.Controller,
-        formats: [:html, :json],
-        layouts: [html: ConvergerWeb.Layouts]
+      use Phoenix.Controller, formats: [:html, :json]
 
       import Plug.Conn
-      import ConvergerWeb.Gettext
+      use Gettext, backend: ConvergerWeb.Gettext
 
       unquote(verified_routes())
     end
@@ -51,8 +49,7 @@ defmodule ConvergerWeb do
 
   def live_view do
     quote do
-      use Phoenix.LiveView,
-        layout: {ConvergerWeb.Layouts, :app}
+      use Phoenix.LiveView
 
       unquote(html_helpers())
     end
@@ -85,7 +82,10 @@ defmodule ConvergerWeb do
       import Phoenix.HTML
       # Core UI components and translation
       import ConvergerWeb.CoreComponents
-      import ConvergerWeb.Gettext
+      use Gettext, backend: ConvergerWeb.Gettext
+
+      # Page frames: <Layouts.app> (LiveViews), <Layouts.auth> (login pages)
+      alias ConvergerWeb.Layouts
 
       # Shortcut for generating JS commands
       alias Phoenix.LiveView.JS

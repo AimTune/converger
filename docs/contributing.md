@@ -14,9 +14,11 @@ The full walkthrough is in [Getting started](./getting-started.md). In short:
 
 - Install the toolchain from `.tool-versions` (Elixir `1.19.5-otp-28`, Erlang `28.5.0.5`), for example with asdf
   or mise, and a PostgreSQL server (CI and compose use 17).
-- `mix setup` runs `deps.get` and `ecto.setup` (create, migrate, seed). The seed creates the first `super_admin`
+- `mix setup` runs `deps.get` and `ecto.setup` (create, migrate, seed) and builds the admin/portal assets
+  (`assets.setup`, `assets.build`: standalone tailwind and esbuild, no Node.js). The seed creates the first `super_admin`
   from `ADMIN_EMAIL` / `ADMIN_PASSWORD`, or prints a one-time password.
-- `mix phx.server` starts the app on `http://localhost:4000` (admin panel at `/admin`).
+- `mix phx.server` starts the app on `http://localhost:4000` (admin panel at `/admin`); its watchers rebuild
+  the CSS and JavaScript on change. UI conventions: [Admin panel and tenant portal](admin-ui.md#writing-pages).
 - Database settings come from `DB_USERNAME`, `DB_PASSWORD`, `DB_HOSTNAME`, `DB_NAME` (defaults
   `postgres` / `postgres` / `localhost` / `converger_dev`); see the
   [Configuration reference](operations/configuration.md#database).

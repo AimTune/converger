@@ -194,183 +194,183 @@ defmodule ConvergerWeb.Live.WebhooksPage do
     |> Enum.flat_map(fn {field, messages} -> Enum.map(messages, &"#{field} #{&1}") end)
   end
 
-  defp status_badge_class("failed"), do: "badge-inactive"
-  defp status_badge_class("delivered"), do: "badge-active"
-  defp status_badge_class(_), do: ""
-
   defp format_timestamp(nil), do: "-"
   defp format_timestamp(dt), do: Calendar.strftime(dt, "%Y-%m-%d %H:%M:%S")
 
   defp tenant_name(%{tenant: %{name: name}}), do: name
   defp tenant_name(_), do: ""
 
-  @input_style "padding: 6px; border: 1px solid #ddd; border-radius: 4px;"
+  defp status_options, do: [{"All statuses", ""} | Enum.map(Event.statuses(), &{&1, &1})]
+
+  defp subscription_options(subscriptions),
+    do: [{"All subscriptions", ""} | Enum.map(subscriptions, &{&1.url, &1.id})]
+
+  defp tenant_options(tenants),
+    do: [{"Select a tenant", ""} | Enum.map(tenants, &{&1.name, &1.id})]
 
   def render(assigns) do
-    assigns = assign(assigns, input_style: @input_style, statuses: Event.statuses())
-
     ~H"""
-    <h1>Webhooks</h1>
-    <p style="color: #666;">
-      Platform event webhooks: Converger POSTs signed events (activities, delivery
-      status, conversations, channel health) to these URLs.
-    </p>
+    <Layouts.app flash={@flash} nav={@nav}>
+      <.header>
+        Webhooks
+        <:subtitle>
+          Platform event webhooks: Converger POSTs signed events (activities, delivery
+          status, conversations, channel health) to these URLs.
+        </:subtitle>
+      </.header>
 
-    <div :if={@new_secret} class="card" id="new-webhook-secret" style="border: 1px solid #f0ad4e;">
-      <strong>Signing secret</strong> (shown once, store it now):
-      <code style="word-break: break-all;">{@new_secret.secret}</code>
-      <button type="button" phx-click="dismiss_secret" class="badge">Done</button>
-    </div>
+      <div :if={@new_secret} id="new-webhook-secret" role="alert" class="alert alert-warning items-start">
+        <.icon name="hero-key" class="size-6 shrink-0" />
+        <div class="min-w-0 flex-1 space-y-2">
+          <h3 class="font-semibold">Signing secret</h3>
+          <p class="text-sm">Shown once, store it now.</p>
+          <code class="block rounded bg-base-100 p-2 font-mono text-sm break-all text-base-content">{@new_secret.secret}</code>
+          <.button type="button" phx-click="dismiss_secret" size="sm" variant="neutral">Done</.button>
+        </div>
+      </div>
 
-    <div :if={@can_edit} class="card">
-      <h3 style="margin-top: 0;">New subscription</h3>
-      <form phx-submit="create" id="webhook-subscription-form">
-        <div :if={@tenants} style="margin-bottom: 8px;">
-          <label>Tenant</label>
-          <select name="subscription[tenant_id]" style={@input_style}>
-            <option value="">Select a tenant</option>
-            <option :for={t <- @tenants} value={t.id}>{t.name}</option>
-          </select>
-        </div>
-        <div style="margin-bottom: 8px;">
-          <label>URL</label>
-          <input
-            type="url"
-            name="subscription[url]"
-            placeholder="https://example.com/converger-events"
-            style={@input_style <> " width: 420px;"}
-          />
-        </div>
-        <div style="margin-bottom: 8px;">
-          <label>Description</label>
-          <input type="text" name="subscription[description]" style={@input_style <> " width: 420px;"} />
-        </div>
-        <div style="margin-bottom: 8px;">
-          <label>Events</label>
-          <div style="display: flex; flex-wrap: wrap; gap: 10px;">
-            <label style="font-weight: normal;">
-              <input type="checkbox" name="subscription[events][]" value="*" /> all (<code>*</code>)
-            </label>
-            <label :for={type <- @event_types} style="font-weight: normal;">
-              <input type="checkbox" name="subscription[events][]" value={type} /> <code>{type}</code>
-            </label>
+      <.panel :if={@can_edit} title="New subscription">
+        <form phx-submit="create" id="webhook-subscription-form">
+          <div class="grid gap-x-4 sm:grid-cols-2 lg:grid-cols-3">
+            <.input
+              :if={@tenants}
+              type="select"
+              id="webhook-subscription-tenant"
+              name="subscription[tenant_id]"
+              label="Tenant"
+              value=""
+              options={tenant_options(@tenants)}
+            />
+            <.input
+              type="url"
+              id="webhook-subscription-url"
+              name="subscription[url]"
+              label="URL"
+              value=""
+              placeholder="https://example.com/converger-events"
+            />
+            <.input
+              type="text"
+              id="webhook-subscription-description"
+              name="subscription[description]"
+              label="Description"
+              value=""
+            />
           </div>
-        </div>
-        <ul :if={@form_errors != []} style="color: #dc3545;">
-          <li :for={error <- @form_errors}>{error}</li>
-        </ul>
-        <button type="submit">Create subscription</button>
-      </form>
-    </div>
+          <fieldset class="fieldset mb-2">
+            <legend class="label mb-1">Events</legend>
+            <div class="flex flex-wrap gap-x-4 gap-y-2">
+              <label class="label cursor-pointer gap-2 text-sm">
+                <input type="checkbox" name="subscription[events][]" value="*" class="checkbox checkbox-sm" />
+                all (<code class="font-mono text-xs">*</code>)
+              </label>
+              <label :for={type <- @event_types} class="label cursor-pointer gap-2 text-sm">
+                <input type="checkbox" name="subscription[events][]" value={type} class="checkbox checkbox-sm" />
+                <code class="font-mono text-xs">{type}</code>
+              </label>
+            </div>
+          </fieldset>
+          <ul :if={@form_errors != []} class="mb-2 list-disc pl-5 text-sm text-error">
+            <li :for={error <- @form_errors}>{error}</li>
+          </ul>
+          <.button type="submit" variant="primary">Create subscription</.button>
+        </form>
+      </.panel>
 
-    <div class="card">
-      <h3 style="margin-top: 0;">Subscriptions</h3>
-      <table id="webhook-subscriptions">
-        <thead>
-          <tr>
-            <th :if={@tenants}>Tenant</th>
-            <th>URL</th>
-            <th>Events</th>
-            <th>Status</th>
-            <th :if={@can_edit}>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr :for={s <- @subscriptions} id={"subscription-#{s.id}"}>
-            <td :if={@tenants}>{tenant_name(s)}</td>
-            <td style="max-width: 320px; word-break: break-all;">
-              {s.url}
-              <div :if={s.description} style="color: #888; font-size: 0.85em;">{s.description}</div>
-              <span :if={s.managed_by} class="badge" title="Maintained from the tenant's alert webhook URL">
-                {s.managed_by}
-              </span>
-            </td>
-            <td>
-              <span :for={type <- s.events} class="badge" style="margin-right: 4px;">{type}</span>
-            </td>
-            <td>
-              <span class={"badge badge-#{if s.enabled, do: "active", else: "inactive"}"}>
-                {if s.enabled, do: "enabled", else: "disabled"}
-              </span>
-            </td>
-            <td :if={@can_edit} style="white-space: nowrap;">
-              <button phx-click="toggle" phx-value-id={s.id} class="badge">
+      <.panel title="Subscriptions">
+        <div class="overflow-x-auto">
+          <.table id="webhook-subscriptions" rows={@subscriptions} row_id={&"subscription-#{&1.id}"}>
+            <:col :let={s} :if={@tenants} label="Tenant">{tenant_name(s)}</:col>
+            <:col :let={s} label="URL">
+              <div class="max-w-80 break-all font-mono text-xs">{s.url}</div>
+              <div :if={s.description} class="text-xs text-base-content/60">{s.description}</div>
+              <.badge
+                :if={s.managed_by}
+                value={s.managed_by}
+                class="mt-1"
+                title="Maintained from the tenant's alert webhook URL"
+              />
+            </:col>
+            <:col :let={s} label="Events">
+              <div class="flex flex-wrap gap-1">
+                <.badge :for={type <- s.events} value={type} class="font-mono" />
+              </div>
+            </:col>
+            <:col :let={s} label="Status">
+              <.badge value={if s.enabled, do: "enabled", else: "disabled"} />
+            </:col>
+            <:action :let={s} :if={@can_edit}>
+              <.button phx-click="toggle" phx-value-id={s.id} size="xs" variant="neutral">
                 {if s.enabled, do: "Disable", else: "Enable"}
-              </button>
-              <button
+              </.button>
+              <.button
                 phx-click="delete"
                 phx-value-id={s.id}
-                class="badge"
                 data-confirm="Delete this subscription and its event log?"
+                size="xs"
+                variant="error"
               >
                 Delete
-              </button>
-            </td>
-          </tr>
-          <tr :if={@subscriptions == []}>
-            <td colspan="5" style="text-align: center; color: #999;">No subscriptions yet.</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
+              </.button>
+            </:action>
+          </.table>
+        </div>
+        <.empty_state :if={@subscriptions == []}>No subscriptions yet.</.empty_state>
+      </.panel>
 
-    <div class="card">
-      <h3 style="margin-top: 0;">Recent events</h3>
-      <form phx-change="filter_events" id="webhook-event-filter" style="margin-bottom: 10px;">
-        <select name="events[status]" style={@input_style}>
-          <option value="" selected={@event_filters["status"] == ""}>All statuses</option>
-          <option :for={s <- @statuses} value={s} selected={@event_filters["status"] == s}>{s}</option>
-        </select>
-        <select name="events[subscription_id]" style={@input_style}>
-          <option value="" selected={@event_filters["subscription_id"] == ""}>All subscriptions</option>
-          <option
-            :for={s <- @subscriptions}
-            value={s.id}
-            selected={@event_filters["subscription_id"] == s.id}
-          >
-            {s.url}
-          </option>
-        </select>
-      </form>
-      <table id="webhook-events">
-        <thead>
-          <tr>
-            <th>Time</th>
-            <th>Type</th>
-            <th>Subscription</th>
-            <th>Status</th>
-            <th>Attempts</th>
-            <th>Last error</th>
-            <th :if={@can_edit}></th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr :for={e <- @events} id={"webhook-event-#{e.id}"}>
-            <td style="white-space: nowrap;"><small>{format_timestamp(e.inserted_at)}</small></td>
-            <td><code>{e.type}</code></td>
-            <td style="max-width: 240px; word-break: break-all;">
-              <small>{Map.get(@subscription_urls, e.subscription_id, e.subscription_id)}</small>
-            </td>
-            <td><span class={"badge #{status_badge_class(e.status)}"}>{e.status}</span></td>
-            <td>{e.attempts}</td>
-            <td style="max-width: 280px; word-break: break-all;"><small>{e.last_error}</small></td>
-            <td :if={@can_edit}>
-              <button
+      <.panel title="Recent events">
+        <form phx-change="filter_events" id="webhook-event-filter">
+          <div class="grid gap-x-4 sm:grid-cols-2 lg:grid-cols-3">
+            <.input
+              type="select"
+              id="webhook-event-filter-status"
+              name="events[status]"
+              label="Status"
+              value={@event_filters["status"]}
+              options={status_options()}
+            />
+            <.input
+              type="select"
+              id="webhook-event-filter-subscription"
+              name="events[subscription_id]"
+              label="Subscription"
+              value={@event_filters["subscription_id"]}
+              options={subscription_options(@subscriptions)}
+            />
+          </div>
+        </form>
+        <div class="overflow-x-auto">
+          <.table id="webhook-events" rows={@events} row_id={&"webhook-event-#{&1.id}"}>
+            <:col :let={e} label="Time">
+              <span class="whitespace-nowrap text-xs">{format_timestamp(e.inserted_at)}</span>
+            </:col>
+            <:col :let={e} label="Type"><code class="font-mono text-xs">{e.type}</code></:col>
+            <:col :let={e} label="Subscription">
+              <span class="block max-w-60 break-all text-xs">
+                {Map.get(@subscription_urls, e.subscription_id, e.subscription_id)}
+              </span>
+            </:col>
+            <:col :let={e} label="Status"><.badge value={e.status} /></:col>
+            <:col :let={e} label="Attempts">{e.attempts}</:col>
+            <:col :let={e} label="Last error">
+              <span class="block max-w-72 break-all text-xs text-error">{e.last_error}</span>
+            </:col>
+            <:action :let={e} :if={@can_edit}>
+              <.button
                 :if={e.status == "failed"}
                 phx-click="redeliver"
                 phx-value-id={e.id}
-                class="badge"
+                size="xs"
+                variant="neutral"
               >
                 Redeliver
-              </button>
-            </td>
-          </tr>
-          <tr :if={@events == []}>
-            <td colspan="7" style="text-align: center; color: #999;">No events.</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
+              </.button>
+            </:action>
+          </.table>
+        </div>
+        <.empty_state :if={@events == []}>No events.</.empty_state>
+      </.panel>
+    </Layouts.app>
     """
   end
 end

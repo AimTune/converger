@@ -88,6 +88,24 @@ defmodule Converger.MixProject do
       {:joken, "~> 2.7"},
       {:logger_json, "~> 7.0"},
       {:phoenix_live_view, "~> 1.2.12"},
+      # Admin/portal assets (ADR-0060): standalone tailwind + esbuild binaries, no
+      # Node.js. heroicons and daisyUI are sparse git checkouts read by tailwind.
+      {:esbuild, "~> 0.10", runtime: Mix.env() == :dev},
+      {:tailwind, "~> 0.5", runtime: Mix.env() == :dev},
+      {:heroicons,
+       github: "tailwindlabs/heroicons",
+       tag: "v2.2.0",
+       sparse: "optimized",
+       app: false,
+       compile: false,
+       depth: 1},
+      {:daisyui,
+       github: "saadeghi/daisyui",
+       tag: "v5.5.20",
+       sparse: "packages/bundle",
+       app: false,
+       compile: false,
+       depth: 1},
       {:lazy_html, ">= 0.1.0", only: :test},
       {:jsv, "~> 0.26", only: :test},
       # Discord Gateway client (ADR-0055); also the WebSocket client of the tests.
@@ -154,10 +172,17 @@ defmodule Converger.MixProject do
   # See the documentation for `Mix` for more info on aliases.
   defp aliases do
     [
-      setup: ["deps.get", "ecto.setup"],
+      setup: ["deps.get", "ecto.setup", "assets.setup", "assets.build"],
       "ecto.setup": ["ecto.create", "ecto.migrate", "run priv/repo/seeds.exs"],
       "ecto.reset": ["ecto.drop", "ecto.setup"],
       test: ["ecto.create --quiet", "ecto.migrate --quiet", "test"],
+      "assets.setup": ["tailwind.install --if-missing", "esbuild.install --if-missing"],
+      "assets.build": ["compile", "tailwind converger", "esbuild converger"],
+      "assets.deploy": [
+        "tailwind converger --minify",
+        "esbuild converger --minify",
+        "phx.digest"
+      ],
       # The committed OpenAPI 3.1 document, priv/static/openapi.json (ADR-0050).
       # `--check` fails on drift (CI). Replaces open_api_spex's own task,
       # which writes OpenAPI 3.0.

@@ -64,9 +64,9 @@ defmodule ConvergerWeb.Admin.AuditLogLive do
     end
   end
 
-  defp action_badge_class("create"), do: "active"
-  defp action_badge_class("delete"), do: "inactive"
-  defp action_badge_class(_), do: ""
+  defp action_badge_class("create"), do: "badge-success"
+  defp action_badge_class("delete"), do: "badge-error"
+  defp action_badge_class(_), do: "badge-ghost"
 
   defp format_timestamp(dt) do
     Calendar.strftime(dt, "%Y-%m-%d %H:%M:%S")
@@ -75,100 +75,126 @@ defmodule ConvergerWeb.Admin.AuditLogLive do
   defp truncate_id(id) when is_binary(id), do: String.slice(id, 0..7) <> "..."
   defp truncate_id(_), do: "-"
 
+  defp tenant_options(tenants), do: [{"All Tenants", ""} | Enum.map(tenants, &{&1.name, &1.id})]
+
+  @actor_type_options [
+    {"All Actors", ""},
+    {"Admin", "admin"},
+    {"Tenant API", "tenant_api"},
+    {"System", "system"}
+  ]
+
+  @action_options [{"All Actions", ""}] ++
+                    Enum.map(
+                      ~w(create update delete toggle_status toggle_enabled rotate_api_key),
+                      &{&1, &1}
+                    )
+
+  @resource_type_options [{"All Resources", ""}] ++
+                           Enum.map(~w(tenant channel routing_rule), &{&1, &1})
+
   def render(assigns) do
+    assigns =
+      assign(assigns,
+        actor_type_options: @actor_type_options,
+        action_options: @action_options,
+        resource_type_options: @resource_type_options
+      )
+
     ~H"""
-    <h1>Audit Logs</h1>
+    <Layouts.app flash={@flash} nav={@nav}>
+      <.header>
+        Audit Logs
+        <:subtitle>Who changed what, across tenants, channels and routing rules.</:subtitle>
+      </.header>
 
-    <div class="card" style="margin-bottom: 20px;">
-      <form phx-change="filter" id="audit-filter-form">
-        <div style="display: flex; gap: 15px; align-items: flex-end; flex-wrap: wrap;">
-          <div style="margin-bottom: 0;">
-            <label style="display: block; font-weight: 600; margin-bottom: 5px; font-size: 0.9em; color: #555;">Tenant</label>
-            <select name="filters[tenant_id]" style="padding: 6px; border: 1px solid #ddd; border-radius: 4px;">
-              <option value="">All Tenants</option>
-              <option :for={t <- @tenants} value={t.id} selected={@filters["tenant_id"] == t.id}>
-                <%= t.name %>
-              </option>
-            </select>
+      <.panel title="Filters">
+        <form phx-change="filter" id="audit-filter-form">
+          <div class="grid gap-x-4 sm:grid-cols-2 lg:grid-cols-4">
+            <.input
+              type="select"
+              id="audit-filter-tenant"
+              name="filters[tenant_id]"
+              label="Tenant"
+              value={@filters["tenant_id"]}
+              options={tenant_options(@tenants)}
+            />
+            <.input
+              type="select"
+              id="audit-filter-actor-type"
+              name="filters[actor_type]"
+              label="Actor Type"
+              value={@filters["actor_type"]}
+              options={@actor_type_options}
+            />
+            <.input
+              type="select"
+              id="audit-filter-action"
+              name="filters[action]"
+              label="Action"
+              value={@filters["action"]}
+              options={@action_options}
+            />
+            <.input
+              type="select"
+              id="audit-filter-resource-type"
+              name="filters[resource_type]"
+              label="Resource Type"
+              value={@filters["resource_type"]}
+              options={@resource_type_options}
+            />
           </div>
+          <.button href={~p"/admin/audit_logs"} size="sm" variant="ghost">
+            <.icon name="hero-x-mark" class="size-4" /> Reset
+          </.button>
+        </form>
+      </.panel>
 
-          <div style="margin-bottom: 0;">
-            <label style="display: block; font-weight: 600; margin-bottom: 5px; font-size: 0.9em; color: #555;">Actor Type</label>
-            <select name="filters[actor_type]" style="padding: 6px; border: 1px solid #ddd; border-radius: 4px;">
-              <option value="">All Actors</option>
-              <option value="admin" selected={@filters["actor_type"] == "admin"}>Admin</option>
-              <option value="tenant_api" selected={@filters["actor_type"] == "tenant_api"}>Tenant API</option>
-              <option value="system" selected={@filters["actor_type"] == "system"}>System</option>
-            </select>
-          </div>
-
-          <div style="margin-bottom: 0;">
-            <label style="display: block; font-weight: 600; margin-bottom: 5px; font-size: 0.9em; color: #555;">Action</label>
-            <select name="filters[action]" style="padding: 6px; border: 1px solid #ddd; border-radius: 4px;">
-              <option value="">All Actions</option>
-              <option :for={a <- ~w(create update delete toggle_status toggle_enabled rotate_api_key)} value={a} selected={@filters["action"] == a}>
-                <%= a %>
-              </option>
-            </select>
-          </div>
-
-          <div style="margin-bottom: 0;">
-            <label style="display: block; font-weight: 600; margin-bottom: 5px; font-size: 0.9em; color: #555;">Resource Type</label>
-            <select name="filters[resource_type]" style="padding: 6px; border: 1px solid #ddd; border-radius: 4px;">
-              <option value="">All Resources</option>
-              <option :for={r <- ~w(tenant channel routing_rule)} value={r} selected={@filters["resource_type"] == r}>
-                <%= r %>
-              </option>
-            </select>
-          </div>
-
-          <a href={~p"/admin/audit_logs"} style="padding: 6px 12px; background: #6c757d; color: white; border-radius: 4px; text-decoration: none; font-size: 0.9em;">
-            Reset
-          </a>
-        </div>
-      </form>
-    </div>
-
-    <div class="card">
-
-      <table>
-        <thead>
-          <tr>
-            <th>Time</th>
-            <th>Actor</th>
-            <th>Action</th>
-            <th>Resource</th>
-            <th>Resource ID</th>
-            <th>Changes</th>
-          </tr>
-        </thead>
-        <tbody id="audit-logs" phx-update="stream">
-          <tr :for={{dom_id, log} <- @streams.audit_logs} id={dom_id}>
-            <td style="white-space: nowrap;"><small><%= format_timestamp(log.inserted_at) %></small></td>
-            <td>
-              <span class="badge"><%= log.actor_type %></span>
-              <br />
-              <small style="color: #666;"><%= truncate_id(log.actor_id) %></small>
-            </td>
-            <td><span class={"badge badge-#{action_badge_class(log.action)}"}><%= log.action %></span></td>
-            <td><%= log.resource_type %></td>
-            <td><small><%= truncate_id(to_string(log.resource_id)) %></small></td>
-            <td>
+      <.panel>
+        <div class="overflow-x-auto">
+          <.table id="audit-logs" rows={@streams.audit_logs}>
+            <:col :let={{_id, log}} label="Time">
+              <span class="whitespace-nowrap text-xs">{format_timestamp(log.inserted_at)}</span>
+            </:col>
+            <:col :let={{_id, log}} label="Actor">
+              <.badge value={log.actor_type} />
+              <span class="block font-mono text-xs text-base-content/60">
+                {truncate_id(log.actor_id)}
+              </span>
+            </:col>
+            <:col :let={{_id, log}} label="Action">
+              <span class={["badge badge-sm whitespace-nowrap", action_badge_class(log.action)]}>
+                {log.action}
+              </span>
+            </:col>
+            <:col :let={{_id, log}} label="Resource">{log.resource_type}</:col>
+            <:col :let={{_id, log}} label="Resource ID">
+              <span class="font-mono text-xs">{truncate_id(to_string(log.resource_id))}</span>
+            </:col>
+            <:col :let={{_id, log}} label="Changes">
               <details :if={log.changes}>
-                <summary style="cursor: pointer; font-size: 0.85em; color: #007bff;">View changes</summary>
-                <pre style="font-size: 0.75em; max-height: 200px; overflow: auto; background: #f8f9fa; padding: 8px; border-radius: 4px; margin-top: 5px;"><%= Jason.encode!(log.changes, pretty: true) %></pre>
+                <summary class="cursor-pointer text-xs link link-primary">View changes</summary>
+                <pre class="mt-1 bg-base-200 rounded-box p-3 text-xs overflow-auto max-h-60">{Jason.encode!(log.changes, pretty: true)}</pre>
               </details>
-              <span :if={is_nil(log.changes)} style="color: #999; font-size: 0.85em;">-</span>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-      <p :if={@loaded_count == 0} style="text-align: center; color: #999; padding: 30px;">No audit logs found</p>
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;">
-        <span style="color: #666; font-size: 0.9em;">Showing <%= @loaded_count %> entries</span>
-        <button :if={@has_more} id="load-more-audit-logs" phx-click="load_more" style="font-size: 0.85em;">Load more</button>
-      </div>
-    </div>
+              <span :if={is_nil(log.changes)} class="text-xs text-base-content/40">-</span>
+            </:col>
+          </.table>
+        </div>
+        <.empty_state :if={@loaded_count == 0}>No audit logs found</.empty_state>
+        <div class="flex items-center justify-between gap-2">
+          <span class="text-sm text-base-content/60">Showing {@loaded_count} entries</span>
+          <.button
+            :if={@has_more}
+            id="load-more-audit-logs"
+            phx-click="load_more"
+            size="sm"
+            variant="neutral"
+          >
+            Load more
+          </.button>
+        </div>
+      </.panel>
+    </Layouts.app>
     """
   end
 end

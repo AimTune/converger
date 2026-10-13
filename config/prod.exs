@@ -6,6 +6,9 @@ config :swoosh, api_client: Swoosh.ApiClient.Req
 # Disable Swoosh Local Memory Storage
 config :swoosh, local: false
 
+# Digested admin/portal assets, written by `mix assets.deploy` (ADR-0060).
+config :converger, ConvergerWeb.Endpoint, cache_static_manifest: "priv/static/cache_manifest.json"
+
 # Do not print debug messages in production
 config :logger, level: :info
 

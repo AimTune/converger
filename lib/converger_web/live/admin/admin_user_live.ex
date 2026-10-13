@@ -93,83 +93,102 @@ defmodule ConvergerWeb.Admin.AdminUserLive do
 
   def render(assigns) do
     ~H"""
-    <h1>Admin Users</h1>
+    <Layouts.app flash={@flash} nav={@nav}>
+      <.header>
+        Admin Users
+        <:subtitle>Operators who can sign in to the admin panel.</:subtitle>
+      </.header>
 
-    <div :if={@show_form} class="card">
-      <h3>Create Admin User</h3>
-      <.form for={@form} phx-submit="save">
-        <div style="display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap;">
-          <div>
-            <label style="display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.85em; color: #555;">Name</label>
-            <input type="text" name="admin_user[name]" placeholder="Full Name" required
-              style="padding: 8px; border: 1px solid #ddd; border-radius: 4px;" />
+      <.panel :if={@show_form} title="Create Admin User">
+        <.form for={@form} id="admin-user-form" phx-submit="save">
+          <div class="grid gap-x-4 sm:grid-cols-2 lg:grid-cols-4">
+            <.input
+              id="admin_user_name"
+              name="admin_user[name]"
+              value=""
+              label="Name"
+              placeholder="Full Name"
+              required
+            />
+            <.input
+              id="admin_user_email"
+              type="email"
+              name="admin_user[email]"
+              value=""
+              label="Email"
+              placeholder="admin@example.com"
+              required
+            />
+            <.input
+              id="admin_user_password"
+              type="password"
+              name="admin_user[password]"
+              value=""
+              label="Password"
+              placeholder="Min 8 characters"
+              autocomplete="new-password"
+              required
+              minlength="8"
+            />
+            <.input
+              id="admin_user_role"
+              type="select"
+              name="admin_user[role]"
+              value="admin"
+              label="Role"
+              options={~w(admin viewer super_admin)}
+            />
           </div>
-          <div>
-            <label style="display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.85em; color: #555;">Email</label>
-            <input type="email" name="admin_user[email]" placeholder="admin@example.com" required
-              style="padding: 8px; border: 1px solid #ddd; border-radius: 4px;" />
-          </div>
-          <div>
-            <label style="display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.85em; color: #555;">Password</label>
-            <input type="password" name="admin_user[password]" placeholder="Min 8 characters" required minlength="8"
-              style="padding: 8px; border: 1px solid #ddd; border-radius: 4px;" />
-          </div>
-          <div>
-            <label style="display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.85em; color: #555;">Role</label>
-            <select name="admin_user[role]" style="padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
-              <option value="admin">admin</option>
-              <option value="viewer">viewer</option>
-              <option value="super_admin">super_admin</option>
-            </select>
-          </div>
-          <button type="submit">Create</button>
-        </div>
-      </.form>
-    </div>
+          <.button type="submit" variant="primary">Create</.button>
+        </.form>
+      </.panel>
 
-    <div :if={!@show_form} class="card" style="background: #fff3e0; color: #e65100;">
-      Only super_admin users can create or manage admin users.
-    </div>
+      <div :if={!@show_form} role="alert" class="alert alert-warning">
+        <.icon name="hero-lock-closed" class="size-5" />
+        <span>Only super_admin users can create or manage admin users.</span>
+      </div>
 
-    <div class="card">
-      <table>
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>Email</th>
-            <th>Role</th>
-            <th>Status</th>
-            <th>Created</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr :for={user <- @admin_users}>
-            <td><%= user.name %></td>
-            <td><%= user.email %></td>
-            <td>
-              <span class={"badge badge-#{user.role}"}><%= user.role %></span>
-            </td>
-            <td>
-              <span class={"badge badge-#{user.status}"}><%= user.status %></span>
-            </td>
-            <td><small><%= Calendar.strftime(user.inserted_at, "%Y-%m-%d %H:%M") %></small></td>
-            <td>
-              <button :if={@show_form} phx-click="toggle_status" phx-value-id={user.id} class="badge">
-                <%= if user.status == "active", do: "Disable", else: "Enable" %>
-              </button>
-              <button :if={@show_form && user.id != @current_admin_user.id}
-                phx-click="delete" phx-value-id={user.id}
-                phx-confirm="Are you sure you want to delete this admin user?"
-                class="badge badge-inactive">
+      <.panel>
+        <div class="overflow-x-auto">
+          <.table id="admin-users" rows={@admin_users} row_id={&"admin-user-#{&1.id}"}>
+            <:col :let={user} label="Name"><span class="font-medium">{user.name}</span></:col>
+            <:col :let={user} label="Email">{user.email}</:col>
+            <:col :let={user} label="Role"><.badge value={user.role} /></:col>
+            <:col :let={user} label="Status"><.badge value={user.status} /></:col>
+            <:col :let={user} label="Created">
+              <span class="text-xs text-base-content/70">
+                {Calendar.strftime(user.inserted_at, "%Y-%m-%d %H:%M")}
+              </span>
+            </:col>
+            <:action :let={user}>
+              <.button
+                :if={@show_form}
+                phx-click="toggle_status"
+                phx-value-id={user.id}
+                size="xs"
+                variant="neutral"
+              >
+                {if user.status == "active", do: "Disable", else: "Enable"}
+              </.button>
+              <.button
+                :if={@show_form && user.id != @current_admin_user.id}
+                phx-click="delete"
+                phx-value-id={user.id}
+                data-confirm="Are you sure you want to delete this admin user?"
+                size="xs"
+                variant="error"
+              >
                 Delete
-              </button>
-              <span :if={user.id == @current_admin_user.id} style="color: #999; font-size: 0.85em;">(you)</span>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
+              </.button>
+              <span :if={user.id == @current_admin_user.id} class="text-xs text-base-content/60">
+                (you)
+              </span>
+            </:action>
+          </.table>
+        </div>
+        <.empty_state :if={@admin_users == []}>No admin users found.</.empty_state>
+      </.panel>
+    </Layouts.app>
     """
   end
 end

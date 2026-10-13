@@ -119,7 +119,7 @@ The task does nothing if an admin user already exists, and prints `Admin users a
 
 ### 5. Log in
 
-Open `http://localhost:4000/admin/login` and sign in with the email and password. Failed logins are rate limited to 5 per minute per IP and per account. The admin panel has pages for tenants, channels, conversations, routing rules, admin users, tenant users and audit logs, plus the Oban dashboard at `/admin/oban`.
+Open `http://localhost:4000/admin/login` and sign in with the email and password. Failed logins are rate limited to 5 per minute per IP and per account. The admin panel has pages for tenants, channels, conversations, routing rules, admin users, tenant users and audit logs, plus the Oban dashboard at `/admin/oban`. See [Admin panel and tenant portal](admin-ui.md) for every page and the light/dark theme toggle.
 
 ## Option B: local development
 

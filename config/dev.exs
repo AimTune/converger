@@ -27,7 +27,10 @@ config :converger, ConvergerWeb.Endpoint,
   code_reloader: true,
   debug_errors: true,
   secret_key_base: "3QQOE3Fo01fuLFggDestryz62sQDVwUrORaf7rPYcGEXmzFOIE9hSOUPX7WtCRB7",
-  watchers: []
+  watchers: [
+    esbuild: {Esbuild, :install_and_run, [:converger, ~w(--sourcemap=inline --watch)]},
+    tailwind: {Tailwind, :install_and_run, [:converger, ~w(--watch)]}
+  ]
 
 # ## SSL Support
 #
