@@ -9,7 +9,7 @@ description: Scoped tenant API keys (read, write, manage) next to the full-acces
 | **Status** | Accepted |
 | **Date** | 2026-10-13 |
 | **Issue** | [#51](https://github.com/AimTune/converger/issues/51) |
-| **Pull request** | To be linked |
+| **Pull request** | [#164](https://github.com/AimTune/converger/pull/164) |
 | **Related** | [ADR-0012](0012-secrets-at-rest-and-audit-redaction.md), [ADR-0050](0050-openapi-spec-error-envelope-and-api-versioning.md), [ADR-0053](0053-platform-event-webhooks.md), [ADR-0059](0059-client-token-keys-revocation-rotation-and-permissions.md) |
 
 ## Context and problem statement
