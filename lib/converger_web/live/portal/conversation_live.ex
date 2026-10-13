@@ -162,100 +162,139 @@ defmodule ConvergerWeb.Portal.ConversationLive do
 
   def render(%{viewing: %{} = _conversation} = assigns) do
     ~H"""
-    <div style="margin-bottom: 15px;">
-      <a href={~p"/portal/conversations"} style="color: #2e7d32; text-decoration: none;">&larr; Back to Conversations</a>
-    </div>
+    <Layouts.app flash={@flash} nav={@nav}>
+      <.header>
+        Conversation Detail
+        <:subtitle><span class="font-mono text-xs break-all">{@viewing.id}</span></:subtitle>
+        <:actions>
+          <.button href={~p"/portal/conversations"} size="sm" variant="ghost">
+            <.icon name="hero-arrow-left" /> Back to Conversations
+          </.button>
+        </:actions>
+      </.header>
 
-    <h1>Conversation Detail</h1>
-
-    <div class="card">
-      <p><strong>ID:</strong> <small><%= @viewing.id %></small></p>
-      <p><strong>Status:</strong> <span class={"badge badge-#{@viewing.status}"}><%= @viewing.status %></span></p>
-      <button :if={@viewing.status == "active"} id="close-conversation" phx-click="close"
-        data-confirm="Close this conversation? It will stop accepting activities.">
-        Close conversation
-      </button>
-      <button :if={@viewing.status == "closed"} id="reopen-conversation" phx-click="reopen">
-        Reopen conversation
-      </button>
-    </div>
-
-    <h2>Activities</h2>
-    <div class="card">
-      <div :if={@has_older} style="text-align: center; margin-bottom: 10px;">
-        <button id="load-older-activities" phx-click="load_older"
-          style="padding: 6px 12px; border: 1px solid #ddd; border-radius: 4px; background: white; cursor: pointer;">
-          &uarr; Load earlier activities
-        </button>
-      </div>
-      <div id="activities" phx-update="stream">
-        <div :for={{dom_id, activity} <- @streams.activities} id={dom_id} style="padding: 10px; border-bottom: 1px solid #eee;">
-          <div style="display: flex; justify-content: space-between; align-items: center;">
-            <strong><%= activity.sender || "system" %></strong>
-            <small style="color: #999;"><%= Calendar.strftime(activity.inserted_at, "%Y-%m-%d %H:%M:%S") %></small>
+      <.panel>
+        <dl class="grid gap-4 sm:grid-cols-2">
+          <div>
+            <dt class="text-sm text-base-content/60">ID</dt>
+            <dd><code class="font-mono text-xs break-all">{@viewing.id}</code></dd>
           </div>
-          <p style="margin: 5px 0;"><%= activity.text %></p>
+          <div>
+            <dt class="text-sm text-base-content/60">Status</dt>
+            <dd><.badge value={@viewing.status} /></dd>
+          </div>
+        </dl>
+        <div>
+          <.button
+            :if={@viewing.status == "active"}
+            id="close-conversation"
+            phx-click="close"
+            data-confirm="Close this conversation? It will stop accepting activities."
+            size="sm"
+            variant="error"
+          >
+            Close conversation
+          </.button>
+          <.button
+            :if={@viewing.status == "closed"}
+            id="reopen-conversation"
+            phx-click="reopen"
+            size="sm"
+            variant="neutral"
+          >
+            Reopen conversation
+          </.button>
         </div>
-      </div>
-      <p :if={@activity_count == 0} style="color: #999; text-align: center;">No activities yet.</p>
-    </div>
+      </.panel>
+
+      <.panel title="Activities">
+        <div :if={@has_older} class="text-center">
+          <.button id="load-older-activities" phx-click="load_older" size="sm" variant="neutral">
+            <.icon name="hero-arrow-up" /> Load earlier activities
+          </.button>
+        </div>
+        <ul id="activities" phx-update="stream" class="divide-y divide-base-300">
+          <li :for={{dom_id, activity} <- @streams.activities} id={dom_id} class="py-3">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <span class="font-semibold">{activity.sender || "system"}</span>
+              <span class="text-xs text-base-content/60">
+                {Calendar.strftime(activity.inserted_at, "%Y-%m-%d %H:%M:%S")}
+              </span>
+            </div>
+            <p class="mt-1 break-words">{activity.text}</p>
+          </li>
+        </ul>
+        <.empty_state :if={@activity_count == 0}>No activities yet.</.empty_state>
+      </.panel>
+    </Layouts.app>
     """
   end
 
   def render(assigns) do
     ~H"""
-    <h1>Conversations</h1>
+    <Layouts.app flash={@flash} nav={@nav}>
+      <.header>
+        Conversations
+        <:subtitle>Conversations on {@current_tenant.name}'s channels.</:subtitle>
+      </.header>
 
-    <div class="card">
-      <div style="display: flex; gap: 10px; align-items: flex-end; margin-bottom: 15px;">
-        <div>
-          <label style="display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.85em; color: #555;">Channel</label>
-          <select phx-change="filter" name="channel_id"
-            style="padding: 6px; border: 1px solid #ddd; border-radius: 4px;">
-            <option value="">All Channels</option>
-            <option :for={c <- @channels} value={c.id} selected={c.id == @filter_channel_id}><%= c.name %></option>
-          </select>
-        </div>
-        <div>
-          <label style="display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.85em; color: #555;">Status</label>
-          <select phx-change="filter" name="status"
-            style="padding: 6px; border: 1px solid #ddd; border-radius: 4px;">
-            <option value="">All</option>
-            <option value="active" selected={@filter_status == "active"}>Active</option>
-            <option value="closed" selected={@filter_status == "closed"}>Closed</option>
-          </select>
-        </div>
-      </div>
+      <.panel>
+        <form id="portal-conversation-filter" phx-change="filter">
+          <div class="grid gap-x-4 sm:grid-cols-2 lg:grid-cols-4">
+            <.input
+              type="select"
+              id="filter_channel_id"
+              name="channel_id"
+              value={@filter_channel_id}
+              label="Channel"
+              prompt="All Channels"
+              options={Enum.map(@channels, &{&1.name, &1.id})}
+            />
+            <.input
+              type="select"
+              id="filter_status"
+              name="status"
+              value={@filter_status}
+              label="Status"
+              prompt="All"
+              options={[{"Active", "active"}, {"Closed", "closed"}]}
+            />
+          </div>
+        </form>
 
-      <table>
-        <thead>
-          <tr>
-            <th>ID</th>
-            <th>Status</th>
-            <th>Created</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody id="conversations" phx-update="stream">
-          <tr :for={{dom_id, conv} <- @streams.conversations} id={dom_id}>
-            <td><small><%= conv.id %></small></td>
-            <td><span class={"badge badge-#{conv.status}"}><%= conv.status %></span></td>
-            <td><small><%= Calendar.strftime(conv.inserted_at, "%Y-%m-%d %H:%M") %></small></td>
-            <td>
-              <a href={~p"/portal/conversations/#{conv.id}"} style="color: #2e7d32; text-decoration: none;">View</a>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-      <p :if={@loaded_count == 0} style="text-align: center; color: #999;">No conversations found.</p>
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;">
-        <small style="color: #666;">Showing <%= @loaded_count %> conversations</small>
-        <button :if={@has_more} id="load-more-conversations" phx-click="load_more"
-          style="padding: 6px 12px; border: 1px solid #ddd; border-radius: 4px; background: white; cursor: pointer;">
-          Load more
-        </button>
-      </div>
-    </div>
+        <div class="overflow-x-auto">
+          <.table id="conversations" rows={@streams.conversations}>
+            <:col :let={{_id, conv}} label="ID">
+              <span class="font-mono text-xs break-all">{conv.id}</span>
+            </:col>
+            <:col :let={{_id, conv}} label="Status"><.badge value={conv.status} /></:col>
+            <:col :let={{_id, conv}} label="Created">
+              <span class="text-xs whitespace-nowrap">
+                {Calendar.strftime(conv.inserted_at, "%Y-%m-%d %H:%M")}
+              </span>
+            </:col>
+            <:action :let={{_id, conv}}>
+              <.button href={~p"/portal/conversations/#{conv.id}"} size="xs" variant="neutral">
+                View
+              </.button>
+            </:action>
+          </.table>
+        </div>
+        <.empty_state :if={@loaded_count == 0}>No conversations found.</.empty_state>
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <span class="text-sm text-base-content/60">Showing {@loaded_count} conversations</span>
+          <.button
+            :if={@has_more}
+            id="load-more-conversations"
+            phx-click="load_more"
+            size="sm"
+            variant="neutral"
+          >
+            Load more
+          </.button>
+        </div>
+      </.panel>
+    </Layouts.app>
     """
   end
 end

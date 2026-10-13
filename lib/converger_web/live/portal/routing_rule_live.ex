@@ -62,55 +62,50 @@ defmodule ConvergerWeb.Portal.RoutingRuleLive do
 
   def render(assigns) do
     ~H"""
-    <h1>Routing Rules</h1>
+    <Layouts.app flash={@flash} nav={@nav}>
+      <.header>
+        Routing Rules
+        <:subtitle>Rules that route messages from a source channel to target channels.</:subtitle>
+      </.header>
 
-    <div class="card">
-      <table>
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>Source Channel</th>
-            <th>Target Channels</th>
-            <th>Priority</th>
-            <th>Conditions</th>
-            <th>Enabled</th>
-            <th :if={@can_edit}>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr :for={rule <- @routing_rules}>
-            <td style="font-weight: 500;"><%= rule.name %></td>
-            <td><%= channel_name(@channels, rule.source_channel_id) %></td>
-            <td>
-              <span :for={target_id <- rule.target_channel_ids} class="badge" style="margin-right: 4px;">
-                <%= channel_name(@channels, target_id) %>
-              </span>
-            </td>
-            <td>
-              <%= rule.priority %><span :if={rule.stop_processing} style="color: #888;"> (stop)</span>
-            </td>
-            <td style="max-width: 280px;">
-              <code style="font-size: 0.8em; word-break: break-all;">
-                <%= if rule.conditions == %{}, do: "always", else: Jason.encode!(rule.conditions) %>
+      <.panel>
+        <div :if={@routing_rules != []} class="overflow-x-auto">
+          <.table id="routing-rules" rows={@routing_rules} row_id={&"rule-#{&1.id}"}>
+            <:col :let={rule} label="Name"><span class="font-medium">{rule.name}</span></:col>
+            <:col :let={rule} label="Source Channel">
+              {channel_name(@channels, rule.source_channel_id)}
+            </:col>
+            <:col :let={rule} label="Target Channels">
+              <div class="flex flex-wrap gap-1">
+                <span
+                  :for={target_id <- rule.target_channel_ids}
+                  class="badge badge-sm badge-secondary whitespace-nowrap"
+                >
+                  {channel_name(@channels, target_id)}
+                </span>
+              </div>
+            </:col>
+            <:col :let={rule} label="Priority">
+              {rule.priority}<span :if={rule.stop_processing} class="text-base-content/60"> (stop)</span>
+            </:col>
+            <:col :let={rule} label="Conditions">
+              <code class="block max-w-72 font-mono text-xs break-all">
+                {if rule.conditions == %{}, do: "always", else: Jason.encode!(rule.conditions)}
               </code>
-            </td>
-            <td>
-              <span class={"badge badge-#{if rule.enabled, do: "active", else: "inactive"}"}>
-                <%= if rule.enabled, do: "enabled", else: "disabled" %>
-              </span>
-            </td>
-            <td :if={@can_edit}>
-              <button phx-click="toggle_enabled" phx-value-id={rule.id} class="badge">
-                <%= if rule.enabled, do: "Disable", else: "Enable" %>
-              </button>
-            </td>
-          </tr>
-          <tr :if={@routing_rules == []}>
-            <td colspan="7" style="text-align: center; color: #999;">No routing rules found.</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
+            </:col>
+            <:col :let={rule} label="Enabled">
+              <.badge value={if rule.enabled, do: "enabled", else: "disabled"} />
+            </:col>
+            <:col :let={rule} :if={@can_edit} label="Actions">
+              <.button phx-click="toggle_enabled" phx-value-id={rule.id} size="xs" variant="neutral">
+                {if rule.enabled, do: "Disable", else: "Enable"}
+              </.button>
+            </:col>
+          </.table>
+        </div>
+        <.empty_state :if={@routing_rules == []}>No routing rules found.</.empty_state>
+      </.panel>
+    </Layouts.app>
     """
   end
 end

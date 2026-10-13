@@ -172,159 +172,158 @@ defmodule ConvergerWeb.Live.DeliveriesPage do
     "#{base_path}/export?#{query}"
   end
 
-  defp status_badge_class("failed"), do: "badge-inactive"
-  defp status_badge_class(status) when status in ~w(sent delivered read), do: "badge-active"
-  defp status_badge_class(_), do: ""
-
   defp format_timestamp(nil), do: "-"
   defp format_timestamp(dt), do: Calendar.strftime(dt, "%Y-%m-%d %H:%M:%S")
 
   defp truncate_id(id) when is_binary(id), do: String.slice(id, 0..7) <> "..."
   defp truncate_id(_), do: "-"
 
-  @label_style "display: block; font-weight: 600; margin-bottom: 5px; font-size: 0.9em; color: #555;"
-  @input_style "padding: 6px; border: 1px solid #ddd; border-radius: 4px;"
+  defp tenant_options(tenants), do: [{"All Tenants", ""} | Enum.map(tenants, &{&1.name, &1.id})]
+
+  defp channel_options(channels),
+    do: [{"All Channels", ""} | Enum.map(channels, &{&1.name, &1.id})]
+
+  defp status_options,
+    do: [{"All", ""} | Enum.map(Converger.Deliveries.Delivery.statuses(), &{&1, &1})]
 
   def render(assigns) do
-    assigns = assign(assigns, label_style: @label_style, input_style: @input_style)
-
     ~H"""
-    <h1>Deliveries</h1>
+    <Layouts.app flash={@flash} nav={@nav}>
+      <.header>
+        Deliveries
+        <:subtitle>Dead-letter inspection, payload preview, retry and CSV export.</:subtitle>
+      </.header>
 
-    <div class="card" style="margin-bottom: 20px;">
-      <form phx-change="filter" id="delivery-filter-form">
-        <div style="display: flex; gap: 15px; align-items: flex-end; flex-wrap: wrap;">
-          <div :if={@tenants}>
-            <label style={@label_style}>Tenant</label>
-            <select name="filters[tenant_id]" style={@input_style}>
-              <option value="">All Tenants</option>
-              <option :for={t <- @tenants} value={t.id} selected={@params["tenant_id"] == t.id}>
-                {t.name}
-              </option>
-            </select>
+      <.panel title="Filters">
+        <form phx-change="filter" id="delivery-filter-form">
+          <div class="grid gap-x-4 sm:grid-cols-2 lg:grid-cols-5">
+            <.input
+              :if={@tenants}
+              type="select"
+              id="delivery-filter-tenant"
+              name="filters[tenant_id]"
+              label="Tenant"
+              value={@params["tenant_id"]}
+              options={tenant_options(@tenants)}
+            />
+            <.input
+              type="select"
+              id="delivery-filter-channel"
+              name="filters[channel_id]"
+              label="Channel"
+              value={@params["channel_id"]}
+              options={channel_options(@channels)}
+            />
+            <.input
+              type="select"
+              id="delivery-filter-status"
+              name="filters[status]"
+              label="Status"
+              value={@params["status"]}
+              options={status_options()}
+            />
+            <.input
+              type="date"
+              id="delivery-filter-from"
+              name="filters[from]"
+              label="From"
+              value={@params["from"]}
+            />
+            <.input
+              type="date"
+              id="delivery-filter-to"
+              name="filters[to]"
+              label="To"
+              value={@params["to"]}
+            />
           </div>
-
-          <div>
-            <label style={@label_style}>Channel</label>
-            <select name="filters[channel_id]" style={@input_style}>
-              <option value="">All Channels</option>
-              <option :for={c <- @channels} value={c.id} selected={@params["channel_id"] == c.id}>
-                {c.name}
-              </option>
-            </select>
+          <div class="flex flex-wrap items-center gap-2">
+            <.button href={@base_path} size="sm" variant="ghost">
+              <.icon name="hero-x-mark" class="size-4" /> Reset
+            </.button>
+            <.button
+              id="export-deliveries"
+              href={export_path(@base_path, @params)}
+              size="sm"
+              variant="neutral"
+            >
+              <.icon name="hero-arrow-down-tray" class="size-4" /> Export CSV
+            </.button>
+            <.button
+              :if={@can_retry}
+              type="button"
+              id="bulk-retry"
+              phx-click="bulk_retry"
+              data-confirm="Re-enqueue every failed delivery matching these filters?"
+              size="sm"
+              variant="error"
+            >
+              <.icon name="hero-arrow-path" class="size-4" /> Retry all failed
+            </.button>
           </div>
+        </form>
+      </.panel>
 
-          <div>
-            <label style={@label_style}>Status</label>
-            <select name="filters[status]" style={@input_style}>
-              <option value="" selected={@params["status"] == ""}>All</option>
-              <option
-                :for={s <- Converger.Deliveries.Delivery.statuses()}
-                value={s}
-                selected={@params["status"] == s}
-              >
-                {s}
-              </option>
-            </select>
-          </div>
-
-          <div>
-            <label style={@label_style}>From</label>
-            <input type="date" name="filters[from]" value={@params["from"]} style={@input_style} />
-          </div>
-
-          <div>
-            <label style={@label_style}>To</label>
-            <input type="date" name="filters[to]" value={@params["to"]} style={@input_style} />
-          </div>
-
-          <a
-            href={@base_path}
-            style="padding: 6px 12px; background: #6c757d; color: white; border-radius: 4px; text-decoration: none; font-size: 0.9em;"
-          >
-            Reset
-          </a>
-          <a
-            id="export-deliveries"
-            href={export_path(@base_path, @params)}
-            style="padding: 6px 12px; background: #17a2b8; color: white; border-radius: 4px; text-decoration: none; font-size: 0.9em;"
-          >
-            Export CSV
-          </a>
-          <button
-            :if={@can_retry}
-            type="button"
-            id="bulk-retry"
-            phx-click="bulk_retry"
-            data-confirm="Re-enqueue every failed delivery matching these filters?"
-            style="font-size: 0.9em;"
-          >
-            Retry all failed
-          </button>
-        </div>
-      </form>
-    </div>
-
-    <div class="card">
-      <table>
-        <thead>
-          <tr>
-            <th>Last change</th>
-            <th>Channel</th>
-            <th>Activity</th>
-            <th>Status</th>
-            <th>Attempts</th>
-            <th>Retries</th>
-            <th>Error / payload</th>
-            <th :if={@can_retry}>Actions</th>
-          </tr>
-        </thead>
-        <tbody id="deliveries" phx-update="stream">
-          <tr :for={{dom_id, delivery} <- @streams.deliveries} id={dom_id}>
-            <td style="white-space: nowrap;"><small>{format_timestamp(delivery.updated_at)}</small></td>
-            <td>{delivery.channel && delivery.channel.name}</td>
-            <td><small>{truncate_id(delivery.activity_id)}</small></td>
-            <td><span class={"badge #{status_badge_class(delivery.status)}"}>{delivery.status}</span></td>
-            <td>{delivery.attempts}</td>
-            <td>
+      <.panel>
+        <div class="overflow-x-auto">
+          <.table id="deliveries" rows={@streams.deliveries}>
+            <:col :let={{_id, delivery}} label="Last change">
+              <span class="whitespace-nowrap text-xs">{format_timestamp(delivery.updated_at)}</span>
+            </:col>
+            <:col :let={{_id, delivery}} label="Channel">
+              {delivery.channel && delivery.channel.name}
+            </:col>
+            <:col :let={{_id, delivery}} label="Activity">
+              <span class="font-mono text-xs">{truncate_id(delivery.activity_id)}</span>
+            </:col>
+            <:col :let={{_id, delivery}} label="Status"><.badge value={delivery.status} /></:col>
+            <:col :let={{_id, delivery}} label="Attempts">{delivery.attempts}</:col>
+            <:col :let={{_id, delivery}} label="Retries">
               {delivery.retry_count}
-              <small :if={delivery.retried_by} style="display: block; color: #666;">
+              <span :if={delivery.retried_by} class="block text-xs text-base-content/60">
                 {delivery.retried_by} at {format_timestamp(delivery.retried_at)}
-              </small>
-            </td>
-            <td style="max-width: 420px;">
-              <small :if={delivery.last_error} style="color: #721c24; word-break: break-word;">
-                {delivery.last_error}
-              </small>
-              <details>
-                <summary style="cursor: pointer; font-size: 0.85em; color: #007bff;">Payload</summary>
-                <pre style="font-size: 0.75em; max-height: 240px; overflow: auto; background: #f8f9fa; padding: 8px; border-radius: 4px; margin-top: 5px;">{Jason.encode!(Deliveries.payload_preview(delivery), pretty: true)}</pre>
-              </details>
-            </td>
-            <td :if={@can_retry}>
-              <button
+              </span>
+            </:col>
+            <:col :let={{_id, delivery}} label="Error / payload">
+              <div class="max-w-md">
+                <p :if={delivery.last_error} class="text-xs text-error break-words">
+                  {delivery.last_error}
+                </p>
+                <details>
+                  <summary class="cursor-pointer text-xs link link-primary">Payload</summary>
+                  <pre class="mt-1 bg-base-200 rounded-box p-3 text-xs overflow-auto max-h-60">{Jason.encode!(Deliveries.payload_preview(delivery), pretty: true)}</pre>
+                </details>
+              </div>
+            </:col>
+            <:action :let={{_id, delivery}} :if={@can_retry}>
+              <.button
                 :if={delivery.status == "failed"}
                 id={"retry-#{delivery.id}"}
                 phx-click="retry"
                 phx-value-id={delivery.id}
-                class="badge"
+                size="xs"
+                variant="neutral"
               >
                 Retry
-              </button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-      <p :if={@loaded_count == 0} style="text-align: center; color: #999; padding: 30px;">
-        No deliveries found
-      </p>
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;">
-        <span style="color: #666; font-size: 0.9em;">Showing {@loaded_count} deliveries</span>
-        <button :if={@has_more} id="load-more-deliveries" phx-click="load_more" style="font-size: 0.85em;">
-          Load more
-        </button>
-      </div>
-    </div>
+              </.button>
+            </:action>
+          </.table>
+        </div>
+        <.empty_state :if={@loaded_count == 0}>No deliveries found</.empty_state>
+        <div class="flex items-center justify-between gap-2">
+          <span class="text-sm text-base-content/60">Showing {@loaded_count} deliveries</span>
+          <.button
+            :if={@has_more}
+            id="load-more-deliveries"
+            phx-click="load_more"
+            size="sm"
+            variant="neutral"
+          >
+            Load more
+          </.button>
+        </div>
+      </.panel>
+    </Layouts.app>
     """
   end
 end

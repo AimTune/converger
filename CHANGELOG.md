@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Admin panel and tenant portal on Tailwind and daisyUI (#50, part 1)
+
+- The admin panel and tenant portal use the Phoenix 1.8 stack: Tailwind CSS v4, daisyUI 5 and heroicons, built by
+  the standalone `tailwind` and `esbuild` binaries (`mix assets.build`, `mix assets.deploy`; no Node.js). The
+  `Dockerfile` builds them into the release; phoenix and LiveView are no longer loaded from jsDelivr, and
+  `cdn.jsdelivr.net` is removed from the CSP.
+- One layout for every page: sidebar navigation (a drawer on small screens), the signed-in user and role, toast
+  flash messages, and a system / light / dark theme toggle. The generator's `core_components.ex` replaces the old
+  one, plus `badge`, `panel`, `stat` and `empty_state`. No inline `style=` attributes remain.
+- Confirmation prompts on destructive buttons now show: `data-confirm`, handled by the now bundled `phoenix_html`.
+  Before, neither the `phx-confirm` attributes nor `data-confirm` opened a dialog.
+- `mix setup` also installs and builds the assets. Docs: [Admin panel and tenant portal](docs/admin-ui.md),
+  security overview, contributing, deployment; ADR-0060.
+
 ### Admin and portal auth hardening (#52, part 2)
 
 - Admin and tenant portal logins are **server-side sessions** (`user_sessions`; only a SHA-256 of the cookie's

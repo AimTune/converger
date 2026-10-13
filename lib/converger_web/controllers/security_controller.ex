@@ -18,7 +18,6 @@ defmodule ConvergerWeb.SecurityController do
   alias ConvergerWeb.UserAuth
 
   plug :put_view, html: ConvergerWeb.AuthHTML
-  plug :put_type_root_layout
 
   def show(conn, _params), do: render_page(conn)
 
@@ -120,6 +119,7 @@ defmodule ConvergerWeb.SecurityController do
           base: UserAuth.base_path(conn.assigns.user_type),
           user: user,
           page_title: "Security",
+          nav: nav(conn, user),
           required: TOTP.enrollment_required?(user),
           totp_enabled: TOTP.enabled?(user),
           totp_pending: TOTP.pending?(user),
@@ -145,10 +145,12 @@ defmodule ConvergerWeb.SecurityController do
 
   defp type_path(conn, suffix), do: UserAuth.base_path(conn.assigns.user_type) <> suffix
 
-  defp put_type_root_layout(conn, _opts) do
+  # The page frame of the admin panel / portal (ConvergerWeb.Layouts.app/1), like
+  # the `nav` that ConvergerWeb.Live.AuthHooks assigns to the LiveViews.
+  defp nav(conn, user) do
     case conn.assigns.user_type do
-      "admin" -> put_root_layout(conn, html: {ConvergerWeb.Layouts, :admin_root})
-      "tenant" -> put_root_layout(conn, html: {ConvergerWeb.Layouts, :portal_root})
+      "admin" -> %{section: :admin, user: user, tenant: nil, path: "/admin/security"}
+      "tenant" -> %{section: :portal, user: user, tenant: user.tenant, path: "/portal/security"}
     end
   end
 

@@ -287,21 +287,22 @@ defmodule ConvergerWeb.Admin.ChannelLive do
     Health.get_latest_health_map(channel_ids)
   end
 
-  defp health_color("healthy"), do: "#4CAF50"
-  defp health_color("degraded"), do: "#FF9800"
-  defp health_color("unhealthy"), do: "#f44336"
-  defp health_color(_), do: "#9E9E9E"
+  # Status dot + text colour classes (literal so Tailwind picks them up).
+  defp health_class("healthy"), do: {"status-success", "text-success"}
+  defp health_class("degraded"), do: {"status-warning", "text-warning"}
+  defp health_class("unhealthy"), do: {"status-error", "text-error"}
+  defp health_class(_), do: {"status-neutral", "text-base-content/50"}
 
   defp health_label("healthy"), do: "Healthy"
   defp health_label("degraded"), do: "Degraded"
   defp health_label("unhealthy"), do: "Unhealthy"
   defp health_label(_), do: "—"
 
-  defp circuit_color("closed"), do: "#4CAF50"
-  defp circuit_color("half_open"), do: "#FF9800"
-  defp circuit_color("open"), do: "#f44336"
-  defp circuit_color("paused"), do: "#607D8B"
-  defp circuit_color(_), do: "#9E9E9E"
+  defp circuit_class("closed"), do: {"status-success", "text-success"}
+  defp circuit_class("half_open"), do: {"status-warning", "text-warning"}
+  defp circuit_class("open"), do: {"status-error", "text-error"}
+  defp circuit_class("paused"), do: {"status-info", "text-info"}
+  defp circuit_class(_), do: {"status-neutral", "text-base-content/50"}
 
   defp circuit_label("closed"), do: "Flowing"
   defp circuit_label("half_open"), do: "Probing"
@@ -436,334 +437,447 @@ defmodule ConvergerWeb.Admin.ChannelLive do
   defp mode_indicator("outbound"), do: "→ Outbound"
   defp mode_indicator("duplex"), do: "↔ Duplex"
 
+  defp config_field_label(field) do
+    if Map.get(field, :required) == true,
+      do: "#{field_label(field)} *",
+      else: field_label(field)
+  end
+
+  defp mode_filters do
+    [
+      {"all", "All"},
+      {"inbound", "← Inbound"},
+      {"outbound", "→ Outbound"},
+      {"duplex", "↔ Duplex"}
+    ]
+  end
+
+  attr :class, :any, required: true
+  slot :inner_block, required: true
+
+  defp status_dot(assigns) do
+    {dot, text} = assigns.class
+    assigns = assign(assigns, dot: dot, text: text)
+
+    ~H"""
+    <span class={["inline-flex items-center gap-1.5 text-xs whitespace-nowrap", @text]}>
+      <span class={["status", @dot]}></span>
+      {render_slot(@inner_block)}
+    </span>
+    """
+  end
+
+  attr :channel, :map, required: true
+
+  # The token is generated once per render so the shown value, its tooltip
+  # and the copy button agree.
+  defp channel_token(assigns) do
+    {:ok, token, _} = Token.generate_channel_token(assigns.channel)
+    assigns = assign(assigns, token: token)
+
+    ~H"""
+    <div class="flex items-center gap-1">
+      <code class="block max-w-32 truncate font-mono text-xs" title={@token}>{@token}</code>
+      <button
+        type="button"
+        onclick={"navigator.clipboard.writeText('#{@token}')"}
+        class="btn btn-ghost btn-xs"
+        title="Copy token"
+      >
+        Copy
+      </button>
+    </div>
+    """
+  end
+
+  attr :idx, :integer, required: true
+  attr :field, :string, required: true
+  attr :label, :string, required: true
+  attr :value, :any, default: nil
+  attr :placeholder, :string, default: nil
+  attr :type, :string, default: "text"
+  attr :min, :string, default: nil
+  attr :class, :any, default: "w-48"
+
+  # Middleware step fields are saved on blur (`change_transformation`), not
+  # through the form's params, so they carry no `name`.
+  defp mw_text(assigns) do
+    ~H"""
+    <div class={@class}>
+      <label class="fieldset" for={"mw-#{@idx}-#{@field}"}>
+        <span class="label mb-1">{@label}</span>
+        <input
+          id={"mw-#{@idx}-#{@field}"}
+          type={@type}
+          value={@value}
+          placeholder={@placeholder}
+          min={@min}
+          phx-blur="change_transformation"
+          phx-value-index={@idx}
+          phx-value-field={@field}
+          class="input input-sm w-full"
+        />
+      </label>
+    </div>
+    """
+  end
+
   def render(assigns) do
     ~H"""
-    <h1>Channels</h1>
+    <Layouts.app flash={@flash} nav={@nav}>
+      <.header>
+        Channels
+        <:subtitle>
+          Connections to messaging providers, with health, delivery state and tokens.
+        </:subtitle>
+      </.header>
 
-    <div
-      :if={@revealed_secret}
-      id="revealed-channel-secret"
-      class="card"
-      style="border-left: 4px solid #f0ad4e;"
-    >
-      <h3>Secret for <%= @revealed_secret.channel_name %></h3>
-      <p>Copy this channel secret now. It is stored encrypted and will not be shown again.</p>
-      <code style="display: block; padding: 8px; background: #f6f8fa; word-break: break-all;"><%= @revealed_secret.secret %></code>
-      <button phx-click="dismiss_secret">I have saved the secret</button>
-    </div>
-
-    <div class="card">
-      <h3>Create Channel</h3>
-      <.form for={@form} phx-submit="save" phx-change="form_changed">
-        <div style="display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap;">
-          <div>
-            <label style="display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.85em; color: #555;">Tenant</label>
-            <select name="channel[tenant_id]" required style="padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
-              <option value="">Select Tenant</option>
-              <%= for tenant <- @tenants do %>
-                <option value={tenant.id}><%= tenant.name %></option>
-              <% end %>
-            </select>
-          </div>
-          <div>
-            <label style="display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.85em; color: #555;">Type</label>
-            <select name="channel[type]" required style="padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
-              <%= for type <- Channel.channel_types() do %>
-                <option value={type} selected={type == @selected_type}><%= type %></option>
-              <% end %>
-            </select>
-          </div>
-          <div>
-            <label style="display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.85em; color: #555;">Mode</label>
-            <select name="channel[mode]" required style="padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
-              <%= for mode <- @supported_modes do %>
-                <option value={mode} selected={mode == @selected_mode}><%= mode_label(mode) %></option>
-              <% end %>
-            </select>
-          </div>
-          <div>
-            <label style="display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.85em; color: #555;">Name</label>
-            <.input field={@form[:name]} placeholder="Channel Name" />
-          </div>
-          <div>
-            <label style="display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.85em; color: #555;">Rate limit</label>
-            <.input field={@form[:rate_limit]} placeholder="e.g. 80/s (optional)" />
-          </div>
-          <div style="padding-bottom: 8px;">
-            <.input
-              type="checkbox"
-              field={@form[:require_signature]}
-              label="Require signed inbound webhooks"
-            />
-          </div>
+      <div
+        :if={@revealed_secret}
+        id="revealed-channel-secret"
+        role="alert"
+        class="alert alert-warning items-start"
+      >
+        <.icon name="hero-key" class="size-6 shrink-0" />
+        <div class="min-w-0 flex-1 space-y-2">
+          <h3 class="font-semibold">Secret for {@revealed_secret.channel_name}</h3>
+          <p class="text-sm">
+            Copy this channel secret now. It is stored encrypted and will not be shown again.
+          </p>
+          <code class="block rounded bg-base-100 p-2 font-mono text-sm break-all text-base-content">{@revealed_secret.secret}</code>
+          <.button phx-click="dismiss_secret" size="sm" variant="neutral">
+            I have saved the secret
+          </.button>
         </div>
-        <.error :for={{msg, _} <- Keyword.get_values(@form.errors, :config)}><%= msg %></.error>
+      </div>
 
-        <div :if={config_fields(@selected_type) != []} style="margin-top: 12px; padding: 12px; background: #f8f9fa; border-radius: 6px; border: 1px solid #e9ecef;">
-          <h4 style="margin: 0 0 10px 0; font-size: 0.9em; color: #555;">Configuration</h4>
-          <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-            <div :for={field <- config_fields(@selected_type)} title={Map.get(field, :help)}>
-              <label style="display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.85em; color: #555;">
-                <%= field_label(field) %><span :if={Map.get(field, :required) == true}> *</span>
-              </label>
-              <select
-                :if={field.type == :boolean}
-                name={"channel[config][#{field.name}]"}
-                style="padding: 8px; border: 1px solid #ddd; border-radius: 4px; min-width: 200px;"
-              >
-                <option value="">default</option>
-                <option value="true">true</option>
-                <option value="false">false</option>
-              </select>
-              <input
-                :if={field.type != :boolean}
-                type={field_input_type(field)}
-                name={"channel[config][#{field.name}]"}
-                placeholder={field_placeholder(field)}
-                style="padding: 8px; border: 1px solid #ddd; border-radius: 4px; min-width: 200px;"
+      <.panel title="Create Channel">
+        <.form for={@form} id="channel-form" phx-submit="save" phx-change="form_changed">
+          <div class="grid gap-x-4 sm:grid-cols-2 lg:grid-cols-3">
+            <.input
+              type="select"
+              id="channel-tenant"
+              name="channel[tenant_id]"
+              label="Tenant"
+              value={nil}
+              prompt="Select Tenant"
+              options={Enum.map(@tenants, &{&1.name, &1.id})}
+              required
+            />
+            <.input
+              type="select"
+              id="channel-type"
+              name="channel[type]"
+              label="Type"
+              value={@selected_type}
+              options={Channel.channel_types()}
+              required
+            />
+            <.input
+              type="select"
+              id="channel-mode"
+              name="channel[mode]"
+              label="Mode"
+              value={@selected_mode}
+              options={Enum.map(@supported_modes, &{mode_label(&1), &1})}
+              required
+            />
+            <.input field={@form[:name]} label="Name" placeholder="Channel Name" />
+            <.input field={@form[:rate_limit]} label="Rate limit" placeholder="e.g. 80/s (optional)" />
+            <div class="flex items-end">
+              <.input
+                type="checkbox"
+                field={@form[:require_signature]}
+                label="Require signed inbound webhooks"
               />
             </div>
           </div>
-        </div>
+          <.error :for={{msg, _} <- Keyword.get_values(@form.errors, :config)}>{msg}</.error>
 
-        <div style="margin-top: 12px; padding: 12px; background: #f0f4ff; border-radius: 6px; border: 1px solid #d0d8ef;">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-            <h4 style="margin: 0; font-size: 0.9em; color: #555;">Middleware Pipeline</h4>
-            <button type="button" phx-click="add_transformation" class="badge" style="cursor: pointer; font-size: 0.8em;">
-              + Add Step
-            </button>
-          </div>
-          <div :if={@transformations == []} style="color: #999; font-size: 0.85em; padding: 4px 0;">
-            No middleware configured. Messages will be delivered as-is.
-          </div>
-          <div :for={{t, idx} <- Enum.with_index(@transformations)} style="display: flex; gap: 8px; align-items: flex-start; margin-bottom: 8px; padding: 8px; background: #fff; border-radius: 4px; border: 1px solid #e0e0e0;">
-            <div style="min-width: 60px;">
-              <span style="font-size: 0.75em; color: #999; font-weight: 600;">#<%= idx + 1 %></span>
-            </div>
-            <div>
-              <label style="display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.8em; color: #555;">Type</label>
-              <select
-                name={"mw_type_#{idx}"}
-                style="padding: 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 0.85em;"
-              >
-                <%= for {val, label} <- middleware_types() do %>
-                  <option value={val} selected={val == t["type"]}><%= label %></option>
-                <% end %>
-              </select>
-            </div>
-            <%= case t["type"] do %>
-              <% "add_prefix" -> %>
-                <div>
-                  <label style="display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.8em; color: #555;">Prefix</label>
-                  <input type="text" value={t["prefix"]} placeholder="[Alert] "
-                    phx-blur="change_transformation" phx-value-index={idx} phx-value-field="prefix"
-                    style="padding: 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 0.85em; width: 180px;" />
-                </div>
-              <% "add_suffix" -> %>
-                <div>
-                  <label style="display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.8em; color: #555;">Suffix</label>
-                  <input type="text" value={t["suffix"]} placeholder=" [end]"
-                    phx-blur="change_transformation" phx-value-index={idx} phx-value-field="suffix"
-                    style="padding: 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 0.85em; width: 180px;" />
-                </div>
-              <% "text_replace" -> %>
-                <div>
-                  <label style="display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.8em; color: #555;">Pattern</label>
-                  <input type="text" value={t["pattern"]} placeholder="find this"
-                    phx-blur="change_transformation" phx-value-index={idx} phx-value-field="pattern"
-                    style="padding: 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 0.85em; width: 140px;" />
-                </div>
-                <div>
-                  <label style="display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.8em; color: #555;">Replacement</label>
-                  <input type="text" value={t["replacement"]} placeholder="replace with"
-                    phx-blur="change_transformation" phx-value-index={idx} phx-value-field="replacement"
-                    style="padding: 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 0.85em; width: 140px;" />
-                </div>
-              <% "truncate_text" -> %>
-                <div>
-                  <label style="display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.8em; color: #555;">Max Length</label>
-                  <input type="number" value={t["max_length"]} placeholder="160" min="1"
-                    phx-blur="change_transformation" phx-value-index={idx} phx-value-field="max_length"
-                    style="padding: 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 0.85em; width: 80px;" />
-                </div>
-                <div>
-                  <label style="display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.8em; color: #555;">Ellipsis</label>
-                  <input type="text" value={t["ellipsis"]} placeholder="..."
-                    phx-blur="change_transformation" phx-value-index={idx} phx-value-field="ellipsis"
-                    style="padding: 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 0.85em; width: 60px;" />
-                </div>
-              <% "set_metadata" -> %>
-                <div>
-                  <label style="display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.8em; color: #555;">Values (key=value, one per line)</label>
-                  <textarea rows="2" placeholder={"source=converger\nenv=prod"}
-                    phx-blur="change_transformation" phx-value-index={idx} phx-value-field="values_text"
-                    style="padding: 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 0.85em; width: 220px;"><%= t["values_text"] %></textarea>
-                </div>
-              <% "content_filter" -> %>
-                <div>
-                  <label style="display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.8em; color: #555;">Block Patterns (comma-separated)</label>
-                  <input type="text" value={t["patterns_text"]} placeholder="spam, blocked, unwanted"
-                    phx-blur="change_transformation" phx-value-index={idx} phx-value-field="patterns_text"
-                    style="padding: 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 0.85em; width: 250px;" />
-                </div>
-              <% _ -> %>
-            <% end %>
-            <div style="margin-left: auto; padding-top: 18px;">
-              <button type="button" phx-click="remove_transformation" phx-value-index={idx}
-                class="badge badge-inactive" style="cursor: pointer; font-size: 0.75em;">
-                Remove
-              </button>
+          <div
+            :if={config_fields(@selected_type) != []}
+            class="mt-3 rounded-box border border-base-300 bg-base-200 p-4"
+          >
+            <h3 class="mb-2 text-sm font-semibold text-base-content/70">Configuration</h3>
+            <div class="grid gap-x-4 sm:grid-cols-2 lg:grid-cols-3">
+              <div :for={field <- config_fields(@selected_type)} title={Map.get(field, :help)}>
+                <.input
+                  :if={field.type == :boolean}
+                  type="select"
+                  id={"channel-config-#{field.name}"}
+                  name={"channel[config][#{field.name}]"}
+                  label={config_field_label(field)}
+                  value={nil}
+                  options={[{"default", ""}, "true", "false"]}
+                />
+                <.input
+                  :if={field.type != :boolean}
+                  type={field_input_type(field)}
+                  id={"channel-config-#{field.name}"}
+                  name={"channel[config][#{field.name}]"}
+                  label={config_field_label(field)}
+                  value={nil}
+                  placeholder={field_placeholder(field)}
+                />
+              </div>
             </div>
           </div>
+
+          <div class="mt-3 rounded-box border border-base-300 bg-base-200 p-4">
+            <div class="mb-2 flex items-center justify-between gap-2">
+              <h3 class="text-sm font-semibold text-base-content/70">Middleware Pipeline</h3>
+              <.button type="button" phx-click="add_transformation" size="xs" variant="neutral">
+                + Add Step
+              </.button>
+            </div>
+            <p :if={@transformations == []} class="py-1 text-sm text-base-content/60">
+              No middleware configured. Messages will be delivered as-is.
+            </p>
+            <div
+              :for={{t, idx} <- Enum.with_index(@transformations)}
+              class="mb-2 flex flex-wrap items-start gap-3 rounded-box border border-base-300 bg-base-100 p-3"
+            >
+              <span class="pt-7 text-xs font-semibold text-base-content/50">#{idx + 1}</span>
+              <div class="w-44">
+                <.input
+                  type="select"
+                  id={"mw-type-#{idx}"}
+                  name={"mw_type_#{idx}"}
+                  label="Type"
+                  value={t["type"]}
+                  options={Enum.map(middleware_types(), fn {val, label} -> {label, val} end)}
+                  class="w-full select select-sm"
+                />
+              </div>
+              <%= case t["type"] do %>
+                <% "add_prefix" -> %>
+                  <.mw_text
+                    idx={idx}
+                    field="prefix"
+                    label="Prefix"
+                    value={t["prefix"]}
+                    placeholder="[Alert] "
+                  />
+                <% "add_suffix" -> %>
+                  <.mw_text
+                    idx={idx}
+                    field="suffix"
+                    label="Suffix"
+                    value={t["suffix"]}
+                    placeholder=" [end]"
+                  />
+                <% "text_replace" -> %>
+                  <.mw_text
+                    idx={idx}
+                    field="pattern"
+                    label="Pattern"
+                    value={t["pattern"]}
+                    placeholder="find this"
+                  />
+                  <.mw_text
+                    idx={idx}
+                    field="replacement"
+                    label="Replacement"
+                    value={t["replacement"]}
+                    placeholder="replace with"
+                  />
+                <% "truncate_text" -> %>
+                  <.mw_text
+                    idx={idx}
+                    field="max_length"
+                    label="Max Length"
+                    value={t["max_length"]}
+                    placeholder="160"
+                    type="number"
+                    min="1"
+                    class="w-28"
+                  />
+                  <.mw_text
+                    idx={idx}
+                    field="ellipsis"
+                    label="Ellipsis"
+                    value={t["ellipsis"]}
+                    placeholder="..."
+                    class="w-24"
+                  />
+                <% "set_metadata" -> %>
+                  <div class="w-64">
+                    <label class="fieldset" for={"mw-#{idx}-values_text"}>
+                      <span class="label mb-1">Values (key=value, one per line)</span>
+                      <textarea
+                        id={"mw-#{idx}-values_text"}
+                        rows="2"
+                        placeholder={"source=converger\nenv=prod"}
+                        phx-blur="change_transformation"
+                        phx-value-index={idx}
+                        phx-value-field="values_text"
+                        class="textarea textarea-sm w-full"
+                      >{t["values_text"]}</textarea>
+                    </label>
+                  </div>
+                <% "content_filter" -> %>
+                  <.mw_text
+                    idx={idx}
+                    field="patterns_text"
+                    label="Block Patterns (comma-separated)"
+                    value={t["patterns_text"]}
+                    placeholder="spam, blocked, unwanted"
+                    class="w-72"
+                  />
+                <% _ -> %>
+              <% end %>
+              <div class="ml-auto pt-7">
+                <.button
+                  type="button"
+                  phx-click="remove_transformation"
+                  phx-value-index={idx}
+                  size="xs"
+                  variant="error"
+                >
+                  Remove
+                </.button>
+              </div>
+            </div>
+          </div>
+
+          <div class="mt-3">
+            <.button type="submit" variant="primary">Create</.button>
+          </div>
+        </.form>
+      </.panel>
+
+      <.panel>
+        <div role="group" aria-label="Filter by mode" class="flex flex-wrap gap-2">
+          <.button
+            :for={{mode, label} <- mode_filters()}
+            phx-click="filter_mode"
+            phx-value-mode={mode}
+            size="xs"
+            variant={if @mode_filter == mode, do: "primary", else: "ghost"}
+          >
+            {label}
+          </.button>
         </div>
 
-        <div style="margin-top: 12px;">
-          <button type="submit" style="height: 38px;">Create</button>
-        </div>
-      </.form>
-    </div>
-
-    <div style="margin-bottom: 15px; display: flex; gap: 8px;">
-      <button phx-click="filter_mode" phx-value-mode="all"
-        class={"badge #{if @mode_filter == "all", do: "badge-active", else: ""}"}>
-        All
-      </button>
-      <button phx-click="filter_mode" phx-value-mode="inbound"
-        class={"badge #{if @mode_filter == "inbound", do: "badge-inbound", else: ""}"}>
-        ← Inbound
-      </button>
-      <button phx-click="filter_mode" phx-value-mode="outbound"
-        class={"badge #{if @mode_filter == "outbound", do: "badge-outbound", else: ""}"}>
-        → Outbound
-      </button>
-      <button phx-click="filter_mode" phx-value-mode="duplex"
-        class={"badge #{if @mode_filter == "duplex", do: "badge-duplex", else: ""}"}>
-        ↔ Duplex
-      </button>
-    </div>
-
-    <div class="card">
-      <table>
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>Type</th>
-            <th>Mode</th>
-            <th>Tenant</th>
-            <th>Status</th>
-            <th>Health</th>
-            <th>Delivery</th>
-            <th>Config</th>
-            <th>Middleware</th>
-            <th>Token</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr :for={channel <- @channels}>
-            <td style="font-weight: 500;"><%= channel.name %></td>
-            <td><span class="badge"><%= channel.type %></span></td>
-            <td>
-              <span class={"badge badge-#{channel.mode}"}>
-                <%= mode_indicator(channel.mode) %>
-              </span>
-            </td>
-            <td><%= if channel.tenant, do: channel.tenant.name, else: "-" %></td>
-            <td>
-              <span class={"badge badge-#{channel.status}"}>
-                <%= channel.status %>
-              </span>
-            </td>
-            <td>
-              <% health_status = channel_health_status(@health_map, channel.id) %>
-              <span style={"display: inline-flex; align-items: center; gap: 4px; color: #{health_color(health_status)}; font-size: 0.85em;"}>
-                <span style={"width: 8px; height: 8px; border-radius: 50%; background: #{health_color(health_status)}; display: inline-block;"}></span>
-                <%= health_label(health_status) %>
-              </span>
-            </td>
-            <td>
+        <div class="overflow-x-auto">
+          <.table id="channels" rows={@channels} row_id={&"channel-#{&1.id}"}>
+            <:col :let={channel} label="Name">
+              <span class="font-medium">{channel.name}</span>
+            </:col>
+            <:col :let={channel} label="Type"><.badge value={channel.type} /></:col>
+            <:col :let={channel} label="Mode">
+              <.badge value={channel.mode}>{mode_indicator(channel.mode)}</.badge>
+            </:col>
+            <:col :let={channel} label="Tenant">
+              {if channel.tenant, do: channel.tenant.name, else: "-"}
+            </:col>
+            <:col :let={channel} label="Status"><.badge value={channel.status} /></:col>
+            <:col :let={channel} label="Health">
+              <.status_dot class={health_class(channel_health_status(@health_map, channel.id))}>
+                {health_label(channel_health_status(@health_map, channel.id))}
+              </.status_dot>
+            </:col>
+            <:col :let={channel} label="Delivery">
               <span
                 id={"circuit-#{channel.id}"}
                 title={"#{channel.consecutive_failures} consecutive failure(s); rate limit: #{channel.rate_limit || "adapter default"}"}
-                style={"display: inline-flex; align-items: center; gap: 4px; color: #{circuit_color(channel.circuit_state)}; font-size: 0.85em;"}
               >
-                <span style={"width: 8px; height: 8px; border-radius: 50%; background: #{circuit_color(channel.circuit_state)}; display: inline-block;"}></span>
-                <%= circuit_label(channel.circuit_state) %>
+                <.status_dot class={circuit_class(channel.circuit_state)}>
+                  {circuit_label(channel.circuit_state)}
+                </.status_dot>
               </span>
-            </td>
-            <td>
-              <span :if={config_summary(channel) != ""} style="font-size: 0.8em; color: #666;" title={config_detail(channel)}>
-                <%= config_summary(channel) %>
+            </:col>
+            <:col :let={channel} label="Config">
+              <span
+                :if={config_summary(channel) != ""}
+                class="block max-w-60 truncate text-xs text-base-content/70"
+                title={config_detail(channel)}
+              >
+                {config_summary(channel)}
               </span>
-              <span :if={config_summary(channel) == ""} style="color: #aaa;">-</span>
-            </td>
-            <td>
-              <span :if={length(channel.transformations || []) > 0}
-                class="badge"
-                title={channel.transformations |> Enum.map_join(", ", &(&1["type"]))}>
-                <%= length(channel.transformations) %> step(s)
+              <span :if={config_summary(channel) == ""} class="text-base-content/40">-</span>
+            </:col>
+            <:col :let={channel} label="Middleware">
+              <.badge
+                :if={length(channel.transformations || []) > 0}
+                value="steps"
+                title={Enum.map_join(channel.transformations, ", ", & &1["type"])}
+              >
+                {length(channel.transformations)} step(s)
+              </.badge>
+              <span :if={length(channel.transformations || []) == 0} class="text-base-content/40">
+                -
               </span>
-              <span :if={length(channel.transformations || []) == 0} style="color: #aaa;">-</span>
-            </td>
-            <td>
-              <% {:ok, token, _} = Token.generate_channel_token(channel) %>
-              <div style="display: flex; align-items: center; gap: 4px;">
-                <code style="font-size: 0.75em; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title={token}><%= token %></code>
-                <button onclick={"navigator.clipboard.writeText('#{token}')"} class="badge" style="cursor: pointer; font-size: 0.7em;">Copy</button>
+            </:col>
+            <:col :let={channel} label="Token"><.channel_token channel={channel} /></:col>
+            <:action :let={channel}>
+              <div class="flex flex-wrap gap-1">
+                <.button
+                  phx-click="toggle_status"
+                  phx-value-id={channel.id}
+                  size="xs"
+                  variant="neutral"
+                >
+                  {if channel.status == "active", do: "Disable", else: "Enable"}
+                </.button>
+                <.button
+                  :if={channel.circuit_state == "closed"}
+                  phx-click="pause_deliveries"
+                  phx-value-id={channel.id}
+                  size="xs"
+                  variant="neutral"
+                  title="Park outbound deliveries until resumed"
+                >
+                  Pause deliveries
+                </.button>
+                <.button
+                  :if={channel.circuit_state != "closed"}
+                  phx-click="resume_deliveries"
+                  phx-value-id={channel.id}
+                  size="xs"
+                  variant="neutral"
+                  title="Close the breaker and release parked deliveries"
+                >
+                  Resume deliveries
+                </.button>
+                <.button
+                  phx-click="toggle_require_signature"
+                  phx-value-id={channel.id}
+                  size="xs"
+                  variant="neutral"
+                  title="Whether unsigned inbound webhooks are rejected"
+                >
+                  {if channel.require_signature,
+                    do: "Signature: required",
+                    else: "Signature: optional"}
+                </.button>
+                <.button
+                  :if={Adapter.supports?(channel.type, :register_webhook, 2)}
+                  id={"register-webhook-#{channel.id}"}
+                  phx-click="register_webhook"
+                  phx-value-id={channel.id}
+                  size="xs"
+                  variant="neutral"
+                  title="Point the provider's webhook at this channel's inbound URL"
+                >
+                  Register webhook
+                </.button>
+                <.button
+                  phx-click="delete"
+                  phx-value-id={channel.id}
+                  data-confirm="Are you sure?"
+                  size="xs"
+                  variant="error"
+                >
+                  Delete
+                </.button>
               </div>
-            </td>
-            <td style="white-space: nowrap;">
-              <button phx-click="toggle_status" phx-value-id={channel.id} class="badge">
-                <%= if channel.status == "active", do: "Disable", else: "Enable" %>
-              </button>
-              <button
-                :if={channel.circuit_state == "closed"}
-                phx-click="pause_deliveries"
-                phx-value-id={channel.id}
-                class="badge"
-                style="margin-left: 4px;"
-                title="Park outbound deliveries until resumed"
-              >
-                Pause deliveries
-              </button>
-              <button
-                :if={channel.circuit_state != "closed"}
-                phx-click="resume_deliveries"
-                phx-value-id={channel.id}
-                class="badge"
-                style="margin-left: 4px;"
-                title="Close the breaker and release parked deliveries"
-              >
-                Resume deliveries
-              </button>
-              <button
-                phx-click="toggle_require_signature"
-                phx-value-id={channel.id}
-                class="badge"
-                style="margin-left: 4px;"
-                title="Whether unsigned inbound webhooks are rejected"
-              >
-                <%= if channel.require_signature, do: "Signature: required", else: "Signature: optional" %>
-              </button>
-              <button
-                :if={Adapter.supports?(channel.type, :register_webhook, 2)}
-                id={"register-webhook-#{channel.id}"}
-                phx-click="register_webhook"
-                phx-value-id={channel.id}
-                class="badge"
-                style="margin-left: 4px;"
-                title="Point the provider's webhook at this channel's inbound URL"
-              >
-                Register webhook
-              </button>
-              <button phx-click="delete" phx-value-id={channel.id} phx-confirm="Are you sure?" class="badge badge-inactive" style="margin-left: 4px;">
-                Delete
-              </button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
+            </:action>
+          </.table>
+        </div>
+        <.empty_state :if={@channels == []}>No channels found.</.empty_state>
+      </.panel>
+    </Layouts.app>
     """
   end
 end

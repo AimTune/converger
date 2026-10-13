@@ -55,41 +55,31 @@ defmodule ConvergerWeb.Portal.ChannelLive do
 
   def render(assigns) do
     ~H"""
-    <h1>Channels</h1>
+    <Layouts.app flash={@flash} nav={@nav}>
+      <.header>
+        Channels
+        <:subtitle>The messaging channels connected to your organization.</:subtitle>
+      </.header>
 
-    <div class="card">
-      <table>
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>Type</th>
-            <th>Mode</th>
-            <th>Status</th>
-            <th :if={@can_edit}>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr :for={channel <- @channels}>
-            <td style="font-weight: 500;"><%= channel.name %></td>
-            <td><span class="badge"><%= channel.type %></span></td>
-            <td>
-              <span class={"badge badge-#{channel.mode}"}><%= channel.mode %></span>
-            </td>
-            <td>
-              <span class={"badge badge-#{channel.status}"}><%= channel.status %></span>
-            </td>
-            <td :if={@can_edit}>
-              <button phx-click="toggle_status" phx-value-id={channel.id} class="badge">
-                <%= if channel.status == "active", do: "Disable", else: "Enable" %>
-              </button>
-            </td>
-          </tr>
-          <tr :if={@channels == []}>
-            <td colspan="5" style="text-align: center; color: #999;">No channels found.</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
+      <.panel>
+        <div class="overflow-x-auto">
+          <.table id="channels" rows={@channels} row_id={&"channel-#{&1.id}"}>
+            <:col :let={channel} label="Name">
+              <span class="font-medium">{channel.name}</span>
+            </:col>
+            <:col :let={channel} label="Type"><.badge value={channel.type} /></:col>
+            <:col :let={channel} label="Mode"><.badge value={channel.mode} /></:col>
+            <:col :let={channel} label="Status"><.badge value={channel.status} /></:col>
+            <:action :let={channel} :if={@can_edit}>
+              <.button phx-click="toggle_status" phx-value-id={channel.id} size="xs" variant="neutral">
+                {if channel.status == "active", do: "Disable", else: "Enable"}
+              </.button>
+            </:action>
+          </.table>
+        </div>
+        <.empty_state :if={@channels == []}>No channels found.</.empty_state>
+      </.panel>
+    </Layouts.app>
     """
   end
 end
