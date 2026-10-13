@@ -9,7 +9,7 @@ description: The mqtt channel type uses a small in-house MQTT 3.1.1 client so a 
 | **Status** | Accepted |
 | **Date** | 2026-10-13 |
 | **Issue** | [#44](https://github.com/AimTune/converger/issues/44) |
-| **Pull request** | to be linked when the pull request is opened |
+| **Pull request** | [#157](https://github.com/AimTune/converger/pull/157) |
 | **Related** | [ADR-0038](0038-adapter-behaviour-v2-and-config-driven-registry.md), [ADR-0047](0047-broker-channels-kafka-and-rabbitmq.md), [ADR-0048](0048-additional-adapters-shared-meta-code-bot-framework-jwt-and-pull-outbox.md), [ADR-0015](0015-per-message-idempotent-inbound-batches.md), [ADR-0014](0014-webhook-ssrf-guard-and-outbound-signing.md) |
 
 ## Context and problem statement
