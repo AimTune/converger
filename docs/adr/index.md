@@ -92,6 +92,7 @@ supersedes the old one and both are linked. Read
 | [0012](0012-secrets-at-rest-and-audit-redaction.md) | Secrets at rest (Cloak AES-GCM), hashed tenant API keys, recursive audit redaction | Accepted | [#12](https://github.com/AimTune/converger/issues/12) / [#79](https://github.com/AimTune/converger/pull/79) |
 | [0013](0013-cluster-wide-rate-limiting-with-hammer-and-pubsub.md) | Cluster-wide rate limiting with Hammer 7 ETS and PubSub sync | Accepted | [#13](https://github.com/AimTune/converger/issues/13) / [#83](https://github.com/AimTune/converger/pull/83) |
 | [0014](0014-webhook-ssrf-guard-and-outbound-signing.md) | Webhook SSRF guard with DNS pinning and outbound signing | Accepted | [#14](https://github.com/AimTune/converger/issues/14) / [#87](https://github.com/AimTune/converger/pull/87) |
+| [0058](0058-server-side-sessions-totp-2fa-and-password-reset-for-admin-and-portal.md) | Admin and portal logins as hashed server-side session rows (absolute and idle expiry, revocable, LiveView disconnect), TOTP 2FA with `nimble_totp` (encrypted secret, single-use codes, required for `super_admin` by default), single-use hashed email reset tokens, one password policy (12 characters, 72 bytes, no email) | Accepted | [#52](https://github.com/AimTune/converger/issues/52) / PR_PLACEHOLDER |
 
 ### Platform, operations and process
 

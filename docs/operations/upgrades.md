@@ -254,3 +254,21 @@ is no longer started by default, and `/metrics` answers `404` until one of the t
   refuses to start without it.
 - Point load balancer health checks at `GET /health/ready` instead of a TCP check; entries for health paths in
   `FORCE_SSL_EXCLUDE_PATHS` are no longer needed.
+
+### Server-side admin/portal sessions, required 2FA for `super_admin`
+
+[#52](https://github.com/AimTune/converger/issues/52), migration `20261013160000`
+([ADR-0058](../adr/0058-server-side-sessions-totp-2fa-and-password-reset-for-admin-and-portal.md)).
+
+- Admin and portal logins are server-side sessions. **Everyone is logged out once** by the upgrade (old cookies
+  carry a user id, which is no longer accepted). Sessions now end after 12 hours, or 30 minutes without activity
+  (`SESSION_MAX_AGE_SECONDS`, `SESSION_IDLE_TIMEOUT_SECONDS`).
+- **`super_admin` accounts must enable TOTP 2FA** at their next login: every admin page redirects to
+  `/admin/security` until they do. Set `ADMIN_REQUIRE_2FA_ROLES` (comma-separated roles, or empty for none) to
+  change who must. A locked-out admin's 2FA is reset with
+  `bin/converger eval 'Converger.Release.reset_admin_2fa("admin@example.com")'`.
+- New passwords need at least 12 characters (`PASSWORD_MIN_LENGTH`) and must not contain the email address.
+  Existing passwords keep working, but `ADMIN_PASSWORD` for `seed_admin` must follow the new policy.
+- Password reset by email needs a mailer: set `SMTP_HOST` (and `SMTP_*`, `MAILER_FROM`), see
+  [Accounts, sessions and email](configuration.md#accounts-sessions-and-email). Without it reset links are never
+  delivered.

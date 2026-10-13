@@ -98,6 +98,27 @@ All prod only. Boolean values accept `true`, `1`, `yes`, `on` (case-insensitive)
 | `TRUSTED_PROXIES` | empty (forwarding headers ignored) | all | Comma-separated IPs/CIDRs whose `X-Forwarded-For` / `X-Forwarded-Proto` are honoured. See [../security.md](../security.md). |
 | `ADMIN_IP_WHITELIST` | `127.0.0.1,::1` | all | Comma-separated IPs/CIDRs allowed to reach `/admin`. |
 
+## Accounts, sessions and email
+
+Admin panel and tenant portal logins, 2FA and password reset
+([Security model](../security/overview.md#sessions),
+[ADR-0058](../adr/0058-server-side-sessions-totp-2fa-and-password-reset-for-admin-and-portal.md)).
+
+| Variable | Default | Environment | Meaning |
+| --- | --- | --- | --- |
+| `SESSION_MAX_AGE_SECONDS` | `43200` (12 h) | all | Absolute lifetime of an admin/portal session from login, whatever the activity. Also the session cookie's `max_age`. |
+| `SESSION_IDLE_TIMEOUT_SECONDS` | `1800` (30 min) | all | A session without requests for this long ends. |
+| `PASSWORD_MIN_LENGTH` | `12` | all | Minimum password length for admins and tenant users, applied when a password is set (existing passwords keep working). The maximum is fixed at 72 bytes (bcrypt). |
+| `ADMIN_REQUIRE_2FA_ROLES` | `super_admin` | all | Comma-separated admin roles (`super_admin`, `admin`, `viewer`) that must enable TOTP 2FA before using the admin panel. Empty (`""`) requires it for nobody. |
+| `MAILER_FROM` | `Converger <noreply@converger.local>` | all | Sender of account emails (password reset): `addr@example.com` or `Name <addr@example.com>`. |
+| `SMTP_HOST` | unset | all | When set, `Converger.Mailer` sends through this SMTP relay. Without it production sends no email, so password reset links never arrive. |
+| `SMTP_PORT` | `587` | all | SMTP port. |
+| `SMTP_USERNAME` / `SMTP_PASSWORD` | unset | all | SMTP credentials; authentication is used when `SMTP_USERNAME` is set. |
+| `SMTP_SSL` | `false` | all | `true` or `1` for implicit TLS (usually port 465). Otherwise STARTTLS is required. |
+
+Reset links are built from the endpoint URL (`PHX_HOST`, see [HTTP server and endpoint](#http-server-and-endpoint)),
+so it must be the address users open.
+
 ## Outbound webhooks (SSRF guard)
 
 | Variable | Default | Environment | Meaning |
@@ -314,6 +335,9 @@ set); without them the archive uses the attachment storage.
 | `ADMIN_EMAIL` | `admin@converger.local` | `Converger.Release.seed_admin/0`, `priv/repo/seeds.exs` | Email of the first `super_admin`. |
 | `ADMIN_PASSWORD` | generated | same | Password of that account. When unset, a random one is printed once and `must_change_password` is set. |
 
+`Converger.Release.reset_admin_2fa/1` turns off 2FA of a locked-out admin by email:
+`bin/converger eval 'Converger.Release.reset_admin_2fa("admin@example.com")'`.
+
 ## Docker compose only
 
 These are read by `docker-compose.yml` (from `.env`, see `.env.example`), not by the application.
@@ -361,7 +385,8 @@ config :converger, Oban,
        {"*/5 * * * *", Converger.Workers.ChannelHealthWorker},
        {"15 0 * * *", Converger.Workers.PartitionMaintenanceWorker},
        {"30 1 * * *", Converger.Workers.PruneWorker},
-       {"0 2 1 * *", Converger.Workers.RetentionWorker}
+       {"0 2 1 * *", Converger.Workers.RetentionWorker},
+       {"*/10 * * * *", Converger.Workers.SessionPruneWorker}
      ]}
   ],
   queues: [default: 10, deliveries_high: 10, deliveries: 20, deliveries_bulk: 5, maintenance: 1, webhooks: 10]
@@ -370,7 +395,7 @@ config :converger, Oban,
 | Setting | Value | Notes |
 | --- | --- | --- |
 | Queue `default` | 10 concurrent jobs per node | Conversation expiration (hourly) and channel health checks (every 5 minutes). |
-| Queue `maintenance` | 1 concurrent job per node | Data lifecycle: partitions (daily 00:15 UTC), pruning (daily 01:30 UTC), retention (monthly, 1st at 02:00 UTC) and the `PurgeWorker` jobs enqueued by tenant, channel and conversation deletes. See [Data retention](retention.md). |
+| Queue `maintenance` | 1 concurrent job per node | Data lifecycle: partitions (daily 00:15 UTC), pruning (daily 01:30 UTC), retention (monthly, 1st at 02:00 UTC), expired admin/portal sessions and password reset tokens (every 10 minutes, `SessionPruneWorker`) and the `PurgeWorker` jobs enqueued by tenant, channel and conversation deletes. See [Data retention](retention.md). |
 | Queues `deliveries_high`, `deliveries`, `deliveries_bulk` | 10 / 20 / 5 concurrent jobs per node | `Converger.Workers.ActivityDeliveryWorker` (unique per activity and channel), one queue per tenant tier (`tenants.tier`: `high`, `default`, `bulk`); see [flow control](../delivery.md#tenant-tiers-fair-queueing). |
 | Queue `webhooks` | 10 concurrent jobs per node | `Converger.Workers.WebhookEventWorker`: [platform event webhooks](../platform-webhooks.md). |
 | `Pruner` | completed/discarded jobs older than 24 h | Keeps `oban_jobs` small. |
@@ -490,6 +515,10 @@ PgBouncer transaction pooling). See [Migrations and maintenance windows](migrati
 | `:cors_origins` | `["http://127.0.0.1:5500", "http://localhost:5500"]` | See `CORS_ORIGINS`. |
 | `:admin_ip_whitelist` | `["127.0.0.1", "::1"]` | See `ADMIN_IP_WHITELIST`. |
 | `:trusted_proxies` | `[]` | See `TRUSTED_PROXIES`. |
+| `:sessions` | `max_age_seconds: 43_200`, `idle_timeout_seconds: 1_800` | See `SESSION_MAX_AGE_SECONDS`, `SESSION_IDLE_TIMEOUT_SECONDS`. |
+| `:password_min_length` | `12` | See `PASSWORD_MIN_LENGTH`. |
+| `:require_2fa_roles` | `["super_admin"]`; `[]` in test | See `ADMIN_REQUIRE_2FA_ROLES`. |
+| `:mailer_from` | `{"Converger", "noreply@converger.local"}` | See `MAILER_FROM`. |
 | `:inbound_signature_tolerance_seconds` | `300` | Allowed clock skew for `x-converger-signature` timestamps. |
 | `:pagination` | see [Pagination](#pagination) | Page size defaults and caps. |
 | `:dead_letters` | `bulk_retry_limit: 10_000`, `export_limit: 10_000` | Max deliveries replayed by one bulk retry call, and max rows in one Deliveries CSV export. See [Replaying dead letters](../delivery.md#replaying-dead-letters). |
@@ -533,5 +562,7 @@ above. See [Observability](observability.md#logging).
 
 ### Mailer
 
-`Converger.Mailer` uses `Swoosh.Adapters.Local` (dev mailbox) and `Swoosh.Adapters.Test` in test. Production sets
-the Req API client but configures no delivery adapter; no feature sends email yet.
+`Converger.Mailer` sends the account emails (password reset). It uses `Swoosh.Adapters.Local` (dev mailbox at
+`/dev/mailbox`) and `Swoosh.Adapters.Test` in test. Production sets the Req API client; with `SMTP_HOST` set it
+uses `Swoosh.Adapters.SMTP` ([Accounts, sessions and email](#accounts-sessions-and-email)), otherwise no email is
+delivered.
