@@ -9,7 +9,7 @@ description: NATS JetStream and Redis Streams become broker channel types on the
 | **Status** | Accepted |
 | **Date** | 2026-10-13 |
 | **Issue** | [#42](https://github.com/AimTune/converger/issues/42) |
-| **Pull request** | to be linked |
+| **Pull request** | [#155](https://github.com/AimTune/converger/pull/155) |
 | **Related** | [ADR-0047](0047-broker-channels-kafka-and-rabbitmq.md), [ADR-0012](0012-secrets-at-rest-and-audit-redaction.md), [ADR-0014](0014-webhook-ssrf-guard-and-outbound-signing.md), [ADR-0038](0038-adapter-behaviour-v2-and-config-driven-registry.md) |
 
 ## Context and problem statement
