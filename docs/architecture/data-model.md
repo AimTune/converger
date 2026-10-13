@@ -227,7 +227,7 @@ A connection to one messaging surface (a webhook, a WhatsApp number, a WebSocket
 
 | Column | Type | Notes |
 | --- | --- | --- |
-| `type` | string, default `"webhook"` | `echo`, `webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram`, `email`, `sms_twilio`, `sms_vonage`, `kafka`, `rabbitmq`, `nats`, `redis_streams`. |
+| `type` | string, default `"webhook"` | `echo`, `webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram`, `email`, `sms_twilio`, `sms_vonage`, `messenger`, `instagram`, `viber`, `discord`, `teams`, `http_pull`, `kafka`, `rabbitmq`, `nats`, `redis_streams`, `mqtt`. |
 | `mode` | text, default `"duplex"` | `inbound`, `outbound` or `duplex`. Only `outbound` and `duplex` channels receive deliveries. |
 | `status` | text | `"active"` or not. Deactivating disconnects the channel's sockets. |
 | `secret` | binary, not null, **encrypted** | Channel secret (Converger API `Bearer` secret, inbound signature key). Cloak `Converger.Encrypted.Binary`. |
@@ -344,7 +344,7 @@ The event log: one row per event per subscription. Columns: `tenant_id` (FK, cas
 
 ### channel_health_checks
 
-Written by `ChannelHealthWorker` every 5 minutes per active `webhook`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram`, `email`, `sms_twilio`, `sms_vonage`, `kafka`, `rabbitmq`, `nats` and `redis_streams` channel: `status` (`healthy`, `degraded`, `unhealthy`, `unknown`), `total_deliveries`, `failed_deliveries`, `failure_rate`, `checked_at`. Rows older than 7 days (`HEALTH_CHECK_RETENTION_DAYS`) are pruned daily by `PruneWorker`. Indexes: `(channel_id)`, `(channel_id, checked_at)`, `(checked_at)`.
+Written by `ChannelHealthWorker` every 5 minutes per active `webhook`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram`, `email`, `sms_twilio`, `sms_vonage`, `kafka`, `rabbitmq`, `nats`, `redis_streams` and `mqtt` channel (every type with `:external_delivery`): `status` (`healthy`, `degraded`, `unhealthy`, `unknown`), `total_deliveries`, `failed_deliveries`, `failure_rate`, `checked_at`. Rows older than 7 days (`HEALTH_CHECK_RETENTION_DAYS`) are pruned daily by `PruneWorker`. Indexes: `(channel_id)`, `(channel_id, checked_at)`, `(checked_at)`.
 
 ### archive_parts
 

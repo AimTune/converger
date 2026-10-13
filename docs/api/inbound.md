@@ -41,7 +41,7 @@ Which channel types accept which requests:
 | `viber` | yes (modes `inbound`, `duplex`) | `x-viber-content-signature` (auth token; a missing or wrong header is always `401`); see [Viber](../channels/viber.md) |
 | `discord` | yes (modes `inbound`, `duplex`); `PING` is answered with `PONG`, interactions with an interaction response | `x-signature-ed25519` and `x-signature-timestamp` (application public key; always required); see [Discord](../channels/discord.md) |
 | `teams` | yes (modes `inbound`, `duplex`) | `Authorization: Bearer` Bot Framework JWT (always required); see [Microsoft Teams](../channels/teams.md) |
-| `kafka`, `rabbitmq`, `nats`, `redis_streams` | no: `400` with the adapter's message (broker channels consume their topic, queue or stream, see [Broker channels](../channels/brokers.md)) | `x-converger-signature` |
+| `kafka`, `rabbitmq`, `nats`, `redis_streams`, `mqtt` | no: `400` with the adapter's message (broker channels consume their topic, queue or stream, see [Broker channels](../channels/brokers.md)) | `x-converger-signature` |
 | `echo`, `websocket`, `http_pull` | no: `400` with the adapter's message | `x-converger-signature` |
 
 A channel in `outbound` mode answers messages with `400 inbound_not_supported`.

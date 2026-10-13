@@ -11,5 +11,10 @@
   {"lib/converger/channels.ex", :call_without_opaque},
   {"lib/converger/conversations.ex", :call_without_opaque},
   {"lib/converger/routing_rules.ex", :call_without_opaque},
-  {"lib/converger/tenants.ex", :call_without_opaque}
+  {"lib/converger/tenants.ex", :call_without_opaque},
+  # Mint.WebSocket.new/5: Dialyzer infers that it can only return an error
+  # (its success typing goes through the untyped private map of the Mint
+  # connection), so it flags the {:ok, conn, websocket} branch. The branch is
+  # taken on every connection (test/converger/channels/discord/gateway_test.exs).
+  {"lib/converger/channels/discord/gateway.ex", :pattern_match}
 ]
