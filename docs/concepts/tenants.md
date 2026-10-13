@@ -40,7 +40,7 @@ The migration [`20261008100001_hash_tenant_api_keys`](https://github.com/AimTune
 
 ### Authentication
 
-Server-to-server routes under `/api/v1` (conversations, activities, routing rules) authenticate with the `x-api-key` header through `ConvergerWeb.Plugs.TenantAuth`. The presented key is hashed and looked up by `api_key_hash`, or by `previous_api_key_hash` while `previous_api_key_expires_at` is in the future. The tenant must have `status: "active"`. Otherwise the response is `401` `unauthorized` with the message "Invalid or inactive API Key" ([errors](../api/errors.md)).
+Server-to-server routes under `/api/v1` (conversations, activities, routing rules) authenticate with the `x-api-key` header through `ConvergerWeb.Plugs.TenantAuth`. The presented key is hashed and looked up among the scoped keys (`api_keys.key_hash`, active and not expired), then by `api_key_hash`, or by `previous_api_key_hash` while `previous_api_key_expires_at` is in the future. The tenant must have `status: "active"`. Otherwise the response is `401` `unauthorized` with the message "Invalid or inactive API Key" ([errors](../api/errors.md)).
 
 The same plug also accepts a channel token in `x-channel-token`, and then resolves the tenant from the token's `tenant_id` claim. Only channel tokens are accepted there: end-user tokens (legacy conversation tokens and Converger API tokens) are refused with `401` `Unauthorized: Invalid token`. `x-channel-token` is deprecated; `x-api-key` is not (see [migrating from the legacy surfaces](../api/migrating-from-legacy.md)). Listing conversations (`GET /api/v1/conversations`) requires the API key specifically, because it exposes other end users' conversations. See the [tenant API](../api/tenant-api.md).
 
@@ -57,6 +57,18 @@ The same plug also accepts a channel token in `x-channel-token`, and then resolv
 | `config :converger, :api_key_rotation_grace_period` | `86400` (24 h) | Seconds during which the previous key remains valid. `rotate_api_key/2` also accepts `grace_period:` per call. |
 
 Only one previous key is kept. A second rotation inside the grace period invalidates the first key immediately.
+
+The key above is the tenant's **primary key**: it has every scope. It can also be rotated with
+`POST /api/v1/admin/tenants/:id/rotate_api_key`.
+
+### Scoped keys
+
+A tenant can also have any number of **scoped keys** in `api_keys`, with a name, a subset of the scopes `read`,
+`write` and `manage`, and an optional expiry. They are issued and revoked with `/api/v1/manage/api_keys` (by a key
+with `manage`) or `/api/v1/admin/tenants/:id/api_keys`, and are deleted with the tenant. Revoking or expiring one
+does not affect the primary key, and rotating the primary key does not affect them. See the
+[management API](../api/management-api.md#api-keys-and-scopes) and
+[ADR-0061](../adr/0061-scoped-api-keys-and-the-management-api.md).
 
 ## Status
 

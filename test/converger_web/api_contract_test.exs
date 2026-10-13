@@ -258,6 +258,144 @@ defmodule ConvergerWeb.ApiContractTest do
     end
   end
 
+  describe "management API" do
+    test "channels, users, API keys and settings", %{tenant: tenant} do
+      created =
+        api(tenant)
+        |> post(~p"/api/v1/manage/channels", %{
+          "channel" => %{"name" => "contract", "type" => "websocket"}
+        })
+        |> check(201)
+        |> json_response(201)
+
+      id = created["data"]["id"]
+      api(tenant) |> get(~p"/api/v1/manage/channels") |> check(200)
+      api(tenant) |> get(~p"/api/v1/manage/channels/#{id}") |> check(200)
+
+      api(tenant)
+      |> patch(~p"/api/v1/manage/channels/#{id}", %{"channel" => %{"rate_limit" => "5/s"}})
+      |> check(200)
+
+      api(tenant)
+      |> put_req_header("if-match", ~s("stale"))
+      |> put(~p"/api/v1/manage/channels/#{id}", %{"channel" => %{"name" => "x"}})
+      |> check(412)
+
+      api(tenant) |> post(~p"/api/v1/manage/channels/#{id}/rotate_secret") |> check(200)
+
+      api(tenant)
+      |> post(~p"/api/v1/manage/channels", %{"channel" => %{"name" => ""}})
+      |> check(422)
+
+      api(tenant) |> delete(~p"/api/v1/manage/channels/#{id}") |> check(204)
+
+      user =
+        api(tenant)
+        |> post(~p"/api/v1/manage/users", %{
+          "user" => %{
+            "email" => "contract@example.com",
+            "name" => "Contract",
+            "password" => Converger.AccountsFixtures.valid_password()
+          }
+        })
+        |> check(201)
+        |> json_response(201)
+        |> get_in(["data", "id"])
+
+      api(tenant) |> get(~p"/api/v1/manage/users") |> check(200)
+
+      api(tenant)
+      |> put(~p"/api/v1/manage/users/#{user}", %{"user" => %{"role" => "admin"}})
+      |> check(200)
+
+      api(tenant) |> delete(~p"/api/v1/manage/users/#{user}") |> check(204)
+      api(tenant) |> get(~p"/api/v1/manage/users/#{user}") |> check(404)
+
+      key =
+        api(tenant)
+        |> post(~p"/api/v1/manage/api_keys", %{
+          "api_key" => %{"name" => "contract", "scopes" => ["read"]}
+        })
+        |> check(201)
+        |> json_response(201)
+        |> get_in(["data", "id"])
+
+      api(tenant) |> get(~p"/api/v1/manage/api_keys") |> check(200)
+      api(tenant) |> get(~p"/api/v1/manage/api_keys/#{key}") |> check(200)
+      api(tenant) |> delete(~p"/api/v1/manage/api_keys/#{key}") |> check(204)
+
+      api(tenant) |> get(~p"/api/v1/manage/settings") |> check(200)
+
+      api(tenant)
+      |> put(~p"/api/v1/manage/settings", %{"settings" => %{"retention_days" => 200}})
+      |> check(200)
+
+      api(tenant)
+      |> patch(~p"/api/v1/manage/settings", %{"settings" => %{"retention_days" => 0}})
+      |> check(422)
+
+      {:ok, read_key} =
+        Converger.ApiKeys.create_api_key(
+          tenant.id,
+          %{"name" => "r", "scopes" => ["read"]},
+          %{type: "system", id: "test"}
+        )
+
+      build_conn()
+      |> put_req_header("x-api-key", read_key.key)
+      |> get(~p"/api/v1/manage/channels")
+      |> check(403)
+    end
+  end
+
+  describe "admin API" do
+    setup do
+      token = String.duplicate("c", 40)
+      Application.put_env(:converger, :admin_api_token, token)
+      on_exit(fn -> Application.delete_env(:converger, :admin_api_token) end)
+      %{admin: build_conn() |> put_req_header("authorization", "Bearer " <> token)}
+    end
+
+    test "tenants and API keys", %{admin: admin} do
+      tenant =
+        admin
+        |> post(~p"/api/v1/admin/tenants", %{"tenant" => %{"name" => "contract-tenant"}})
+        |> check(201)
+        |> json_response(201)
+        |> get_in(["data", "id"])
+
+      admin |> get(~p"/api/v1/admin/tenants") |> check(200)
+      admin |> get(~p"/api/v1/admin/tenants/#{tenant}") |> check(200)
+
+      admin
+      |> patch(~p"/api/v1/admin/tenants/#{tenant}", %{"tenant" => %{"tier" => "bulk"}})
+      |> check(200)
+
+      admin
+      |> put(~p"/api/v1/admin/tenants/#{tenant}", %{"tenant" => %{"tier" => "nope"}})
+      |> check(422)
+
+      admin |> post(~p"/api/v1/admin/tenants/#{tenant}/rotate_api_key") |> check(200)
+
+      key =
+        admin
+        |> post(~p"/api/v1/admin/tenants/#{tenant}/api_keys", %{
+          "api_key" => %{"name" => "ci", "scopes" => ["read", "write"]}
+        })
+        |> check(201)
+        |> json_response(201)
+        |> get_in(["data", "id"])
+
+      admin |> get(~p"/api/v1/admin/tenants/#{tenant}/api_keys") |> check(200)
+      admin |> delete(~p"/api/v1/admin/tenants/#{tenant}/api_keys/#{key}") |> check(204)
+
+      build_conn() |> get(~p"/api/v1/admin/tenants") |> check(401)
+
+      admin |> delete(~p"/api/v1/admin/tenants/#{tenant}") |> check(204)
+      admin |> get(~p"/api/v1/admin/tenants/#{tenant}") |> check(404)
+    end
+  end
+
   describe "inbound webhooks" do
     test "messages and receipts", %{tenant: tenant} do
       channel = webhook_channel_fixture(tenant, %{mode: "duplex"})

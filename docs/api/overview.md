@@ -59,7 +59,9 @@ with an `Accept` header that excludes JSON is rejected with `406`.
 
 | Credential | Where it comes from | Sent as | Used by |
 | --- | --- | --- | --- |
-| Tenant API key | Created with the tenant (admin panel); format `cvg_live_` + 43 URL-safe Base64 chars | `x-api-key: <key>` | Tenant API |
+| Tenant API key (primary) | Created with the tenant (admin panel or admin API); format `cvg_live_` + 43 URL-safe Base64 chars; every scope | `x-api-key: <key>` | Tenant API and management API |
+| Scoped API key | `POST /api/v1/manage/api_keys` or the admin API; same format; scopes `read`, `write`, `manage`, optional expiry ([management API](management-api.md#api-keys-and-scopes)) | `x-api-key: <key>` | What its scopes allow |
+| Admin API token | `ADMIN_API_TOKEN` ([configuration](../operations/configuration.md#network-trust-and-admin-access)) | `Authorization: Bearer <token>` | Admin API `/api/v1/admin` only, from the admin IP allowlist |
 | Channel token (deprecated) | Shown (and copyable) per channel in the admin panel, Channels page | `x-channel-token: <jwt>` | Tenant API: create conversation, issue conversation token, and accepted by every tenant-authenticated route |
 | Conversation token (deprecated) | `POST /api/v1/tokens` | `token` param of the legacy socket `/socket/websocket` | Legacy WebSocket channel `conversation:<id>` |
 | Channel secret | Generated per channel (admin panel) | `Authorization: Bearer <secret>` | `POST /api/v1/converger/tokens/generate` only |
@@ -84,8 +86,8 @@ End-user clients get short-lived converger tokens from your backend, which excha
 [`ConvergerWeb.Plugs.TenantAuth`](https://github.com/AimTune/converger/blob/main/lib/converger_web/plugs/tenant_auth.ex)
 checks, in this order:
 
-1. `x-api-key`: the key is hashed and matched against the current key or the previous key while its grace period
-   lasts. The tenant must have status `active`.
+1. `x-api-key`: the key is hashed and matched against the scoped keys (not revoked, not expired), then against the
+   tenant's primary key or its previous key while the grace period lasts. The tenant must have status `active`.
 2. `x-channel-token`: the token must be a **channel token**. Every token type is signed with the same key, so
    the claims decide: a channel token has `typ: "channel"` (tokens issued before that claim existed are
    recognised by `sub: "channel_<channel_id>"` and the absence of `conversation_id` and `type`). Its channel must
@@ -102,10 +104,14 @@ Failures return `401` with code `unauthorized` ([error envelope](errors.md)):
 | `message` | Cause |
 | --- | --- |
 | `Missing authentication headers` | Neither header present |
-| `Invalid or inactive API Key` | Unknown key, expired previous key, or tenant not `active` |
+| `Invalid or inactive API Key` | Unknown key, expired previous key, revoked or expired scoped key, or tenant not `active` |
 | `Invalid token` | `x-channel-token` signature or expiry invalid, not a channel token, or its channel or tenant does not exist |
 | `Channel is not active` | Channel token valid, channel deactivated |
 | `Tenant is not active` | Channel token valid, tenant suspended |
+
+Then the request must have the scope its action needs: `read` for `GET`, `write` for other methods, `manage` for
+configuration changes ([scopes](management-api.md#api-keys-and-scopes)). Without it the answer is
+`403 insufficient_scope`. The primary key and channel tokens have every scope.
 
 Some endpoints apply stricter rules on top. `GET /api/v1/conversations` requires `x-api-key` and answers `403` to a
 channel token. `POST /api/v1/conversations` and `POST /api/v1/tokens` do not run `TenantAuth` at all and
@@ -181,10 +187,11 @@ Branch on `code`, never on `message`. `details` carries the errors per field for
 | --- | --- | --- |
 | `400` | `bad_request`, `invalid_watermark`, `channel_inactive`, `inbound_not_supported` | A request-level problem (`Missing x-channel-token header`, `Invalid cursor`, `Invalid channel_id`, `Missing file in upload`, malformed JSON or UUID, missing required body params), a bad watermark, a disabled channel, inbound to an outbound-only channel |
 | `401` | `unauthorized`, `token_expired` | Missing or invalid credential, invalid inbound signature, expired Converger token |
-| `403` | `forbidden`, `channel_inactive` | Authenticated but not allowed (wrong conversation for the token, channel token where an API key is required); the token's channel is disabled |
+| `403` | `forbidden`, `insufficient_scope`, `insufficient_permission`, `channel_inactive` | Authenticated but not allowed (wrong conversation for the token, channel token where an API key is required, IP outside the admin allowlist); the API key lacks the scope or the Converger token the permission; the token's channel is disabled |
 | `404` | `not_found` | Unknown resource, or a resource of another tenant (tenant isolation never reveals existence), unknown route |
 | `406` | `not_acceptable` | The `Accept` header excludes JSON |
 | `409` | `conversation_closed`, `not_failed` | Activity posted to a closed conversation ([ADR-0017](../adr/0017-conversation-lifecycle-enforced-under-the-seq-lock.md)); replay of a delivery that is not `failed` ([tenant API](tenant-api.md#retry-a-delivery)) |
+| `412` | `precondition_failed` | A management call's `If-Match` ETag is stale ([management API](management-api.md#conventions)) |
 | `413` | `payload_too_large` | Upload over the size limit (`File too large (max 10.0MB)`), or a raw inbound body over the limit |
 | `415` | `unsupported_media_type` | Upload whose sniffed type is not allow-listed |
 | `422` | `invalid_message`, `validation_failed`, `unsupported_channel_type`, `invalid_channel_config` | Validation failed (`details` per field), or the channel cannot do the operation |

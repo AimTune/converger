@@ -39,7 +39,7 @@
             }
           }
         },
-        "description": "Not allowed (`forbidden`, `channel_inactive`)"
+        "description": "Not allowed (`forbidden`, `insufficient_scope`, `channel_inactive`)"
       },
       "InternalError": {
         "content": {
@@ -70,6 +70,16 @@
           }
         },
         "description": "A size limit was exceeded (`payload_too_large`)"
+      },
+      "PreconditionFailed": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        },
+        "description": "The If-Match ETag is stale (`precondition_failed`); fetch the resource and retry"
       },
       "ServiceUnavailable": {
         "content": {
@@ -349,6 +359,244 @@
         "title": "ActivityType",
         "type": "string"
       },
+      "ApiKey": {
+        "description": "A scoped tenant API key. The key itself is only returned on create.",
+        "properties": {
+          "created_by": {
+            "description": "`<actor type>:<actor id>`",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "expires_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "inserted_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "last_used_at": {
+            "description": "Updated at most once a minute",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "prefix": {
+            "description": "Start of the key, for display",
+            "type": "string"
+          },
+          "revoked_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "scopes": {
+            "items": {
+              "$ref": "#/components/schemas/ApiKeyScope"
+            },
+            "type": "array"
+          },
+          "tenant_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "created_by",
+          "expires_at",
+          "id",
+          "inserted_at",
+          "last_used_at",
+          "name",
+          "prefix",
+          "revoked_at",
+          "scopes",
+          "tenant_id",
+          "updated_at"
+        ],
+        "title": "ApiKey",
+        "type": "object"
+      },
+      "ApiKeyInput": {
+        "description": "The key's name, scopes and optional expiry.",
+        "properties": {
+          "expires_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "scopes": {
+            "items": {
+              "$ref": "#/components/schemas/ApiKeyScope"
+            },
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "scopes"
+        ],
+        "title": "ApiKeyInput",
+        "type": "object"
+      },
+      "ApiKeyList": {
+        "description": "The tenant's scoped API keys, revoked ones included, newest first.",
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ApiKey"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "ApiKeyList",
+        "type": "object"
+      },
+      "ApiKeyResponse": {
+        "description": "One API key.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ApiKey"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "ApiKeyResponse",
+        "type": "object"
+      },
+      "ApiKeyScope": {
+        "description": "`read`: GET the tenant API; `write`: change conversation data; `manage`: configuration (`/api/v1/manage`, routing rules, webhook subscriptions, channel pause/resume).",
+        "enum": [
+          "read",
+          "write",
+          "manage"
+        ],
+        "title": "ApiKeyScope",
+        "type": "string"
+      },
+      "ApiKeyWithKey": {
+        "description": "A scoped API key with the key: only the create response carries it.",
+        "properties": {
+          "created_by": {
+            "description": "`<actor type>:<actor id>`",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "expires_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "inserted_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "key": {
+            "description": "The API key, sent in `x-api-key`; store it, it is not returned again",
+            "type": "string"
+          },
+          "last_used_at": {
+            "description": "Updated at most once a minute",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "prefix": {
+            "description": "Start of the key, for display",
+            "type": "string"
+          },
+          "revoked_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "scopes": {
+            "items": {
+              "$ref": "#/components/schemas/ApiKeyScope"
+            },
+            "type": "array"
+          },
+          "tenant_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "created_by",
+          "expires_at",
+          "id",
+          "inserted_at",
+          "key",
+          "last_used_at",
+          "name",
+          "prefix",
+          "revoked_at",
+          "scopes",
+          "tenant_id",
+          "updated_at"
+        ],
+        "title": "ApiKeyWithKey",
+        "type": "object"
+      },
+      "ApiKeyWithKeyResponse": {
+        "description": "One API key with the key.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ApiKeyWithKey"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "ApiKeyWithKeyResponse",
+        "type": "object"
+      },
       "BulkRetryResponse": {
         "description": "A bulk retry.",
         "properties": {
@@ -378,6 +626,97 @@
           "has_more"
         ],
         "title": "BulkRetryResult",
+        "type": "object"
+      },
+      "Channel": {
+        "description": "A channel. The secret is only returned by create and rotate_secret.",
+        "properties": {
+          "circuit_state": {
+            "description": "Delivery circuit breaker state",
+            "type": "string"
+          },
+          "config": {
+            "additionalProperties": true,
+            "description": "Adapter configuration. Secret fields come back as `[REDACTED]`; sending `[REDACTED]` back keeps the stored value.",
+            "type": "object"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "inserted_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "mode": {
+            "enum": [
+              "inbound",
+              "outbound",
+              "duplex"
+            ],
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "rate_limit": {
+            "description": "e.g. `80/s`, `1000/m`",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "require_signature": {
+            "type": "boolean"
+          },
+          "retry_policy": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "status": {
+            "enum": [
+              "active",
+              "inactive"
+            ],
+            "type": "string"
+          },
+          "tenant_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "transformations": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "type": {
+            "description": "Channel type (adapter), e.g. `webhook`",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "circuit_state",
+          "config",
+          "id",
+          "inserted_at",
+          "mode",
+          "name",
+          "rate_limit",
+          "require_signature",
+          "retry_policy",
+          "status",
+          "tenant_id",
+          "transformations",
+          "type",
+          "updated_at"
+        ],
+        "title": "Channel",
         "type": "object"
       },
       "ChannelDeliveryState": {
@@ -451,6 +790,209 @@
           "data"
         ],
         "title": "ChannelDeliveryStateResponse",
+        "type": "object"
+      },
+      "ChannelInput": {
+        "description": "Writable fields of a channel (`name` is required on create). `config` replaces the stored one.",
+        "properties": {
+          "config": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "mode": {
+            "enum": [
+              "inbound",
+              "outbound",
+              "duplex"
+            ],
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "rate_limit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "require_signature": {
+            "type": "boolean"
+          },
+          "retry_policy": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "status": {
+            "enum": [
+              "active",
+              "inactive"
+            ],
+            "type": "string"
+          },
+          "transformations": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "title": "ChannelInput",
+        "type": "object"
+      },
+      "ChannelList": {
+        "description": "Every channel of the tenant, sorted by name.",
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/Channel"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "ChannelList",
+        "type": "object"
+      },
+      "ChannelRequest": {
+        "description": "Create or update a channel.",
+        "properties": {
+          "channel": {
+            "$ref": "#/components/schemas/ChannelInput"
+          }
+        },
+        "required": [
+          "channel"
+        ],
+        "title": "ChannelRequest",
+        "type": "object"
+      },
+      "ChannelResponse": {
+        "description": "One channel.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/Channel"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "ChannelResponse",
+        "type": "object"
+      },
+      "ChannelWithSecret": {
+        "description": "A channel with its secret: only the create and rotate_secret responses carry it.",
+        "properties": {
+          "circuit_state": {
+            "description": "Delivery circuit breaker state",
+            "type": "string"
+          },
+          "config": {
+            "additionalProperties": true,
+            "description": "Adapter configuration. Secret fields come back as `[REDACTED]`; sending `[REDACTED]` back keeps the stored value.",
+            "type": "object"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "inserted_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "mode": {
+            "enum": [
+              "inbound",
+              "outbound",
+              "duplex"
+            ],
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "rate_limit": {
+            "description": "e.g. `80/s`, `1000/m`",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "require_signature": {
+            "type": "boolean"
+          },
+          "retry_policy": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "secret": {
+            "description": "The channel secret; store it, it is not returned again",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "active",
+              "inactive"
+            ],
+            "type": "string"
+          },
+          "tenant_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "transformations": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "type": {
+            "description": "Channel type (adapter), e.g. `webhook`",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "circuit_state",
+          "config",
+          "id",
+          "inserted_at",
+          "mode",
+          "name",
+          "rate_limit",
+          "require_signature",
+          "retry_policy",
+          "secret",
+          "status",
+          "tenant_id",
+          "transformations",
+          "type",
+          "updated_at"
+        ],
+        "title": "ChannelWithSecret",
+        "type": "object"
+      },
+      "ChannelWithSecretResponse": {
+        "description": "One channel with its secret.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ChannelWithSecret"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "ChannelWithSecretResponse",
         "type": "object"
       },
       "ClientActivity": {
@@ -923,6 +1465,41 @@
           }
         },
         "title": "CreateActivityRequest",
+        "type": "object"
+      },
+      "CreateApiKeyRequest": {
+        "description": "Issue a scoped API key.",
+        "properties": {
+          "api_key": {
+            "description": "The key's name, scopes and optional expiry.",
+            "properties": {
+              "expires_at": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "scopes": {
+                "items": {
+                  "$ref": "#/components/schemas/ApiKeyScope"
+                },
+                "minItems": 1,
+                "type": "array"
+              }
+            },
+            "required": [
+              "name",
+              "scopes"
+            ],
+            "title": "ApiKeyInput",
+            "type": "object"
+          }
+        },
+        "required": [
+          "api_key"
+        ],
+        "title": "CreateApiKeyRequest",
         "type": "object"
       },
       "CreateConversationRequest": {
@@ -1556,6 +2133,7 @@
           "forbidden",
           "inbound_not_supported",
           "insufficient_permission",
+          "insufficient_scope",
           "internal",
           "invalid_channel_config",
           "invalid_message",
@@ -1565,6 +2143,7 @@
           "not_failed",
           "not_found",
           "payload_too_large",
+          "precondition_failed",
           "rate_limited",
           "token_expired",
           "token_revoked",
@@ -2090,6 +2669,450 @@
         "title": "RoutingRuleResponse",
         "type": "object"
       },
+      "Tenant": {
+        "description": "A tenant and its settings.",
+        "properties": {
+          "alert_webhook_url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "allowed_upload_types": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "api_key_prefix": {
+            "description": "Start of the primary API key, for display",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "inserted_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "limits": {
+            "additionalProperties": true,
+            "description": "Rate-limit overrides: bucket => `{limit, scale_ms}`",
+            "type": "object"
+          },
+          "name": {
+            "type": "string"
+          },
+          "retention_days": {
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "active",
+              "inactive"
+            ],
+            "type": "string"
+          },
+          "tier": {
+            "enum": [
+              "high",
+              "default",
+              "bulk"
+            ],
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "alert_webhook_url",
+          "allowed_upload_types",
+          "api_key_prefix",
+          "id",
+          "inserted_at",
+          "limits",
+          "name",
+          "retention_days",
+          "status",
+          "tier",
+          "updated_at"
+        ],
+        "title": "Tenant",
+        "type": "object"
+      },
+      "TenantInput": {
+        "description": "Writable fields of a tenant (`name` is required on create). `limits` replaces every override.",
+        "properties": {
+          "alert_webhook_url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "allowed_upload_types": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "limits": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "name": {
+            "type": "string"
+          },
+          "retention_days": {
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "active",
+              "inactive"
+            ],
+            "type": "string"
+          },
+          "tier": {
+            "enum": [
+              "high",
+              "default",
+              "bulk"
+            ],
+            "type": "string"
+          }
+        },
+        "title": "TenantInput",
+        "type": "object"
+      },
+      "TenantList": {
+        "description": "Every tenant, sorted by name.",
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/Tenant"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "TenantList",
+        "type": "object"
+      },
+      "TenantRequest": {
+        "description": "Create or update a tenant.",
+        "properties": {
+          "tenant": {
+            "$ref": "#/components/schemas/TenantInput"
+          }
+        },
+        "required": [
+          "tenant"
+        ],
+        "title": "TenantRequest",
+        "type": "object"
+      },
+      "TenantResponse": {
+        "description": "One tenant.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/Tenant"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "TenantResponse",
+        "type": "object"
+      },
+      "TenantSettingsInput": {
+        "description": "Settings a tenant manages itself. `limits` replaces every override.",
+        "properties": {
+          "alert_webhook_url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "allowed_upload_types": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "limits": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "retention_days": {
+            "type": "integer"
+          }
+        },
+        "title": "TenantSettingsInput",
+        "type": "object"
+      },
+      "TenantSettingsRequest": {
+        "description": "Change the tenant's settings.",
+        "properties": {
+          "settings": {
+            "$ref": "#/components/schemas/TenantSettingsInput"
+          }
+        },
+        "required": [
+          "settings"
+        ],
+        "title": "TenantSettingsRequest",
+        "type": "object"
+      },
+      "TenantUser": {
+        "description": "A tenant portal user.",
+        "properties": {
+          "email": {
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "inserted_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "owner",
+              "admin",
+              "member",
+              "viewer"
+            ],
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "active",
+              "inactive"
+            ],
+            "type": "string"
+          },
+          "tenant_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "totp_enabled": {
+            "description": "Whether two-factor login is on",
+            "type": "boolean"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "id",
+          "inserted_at",
+          "name",
+          "role",
+          "status",
+          "tenant_id",
+          "totp_enabled",
+          "updated_at"
+        ],
+        "title": "TenantUser",
+        "type": "object"
+      },
+      "TenantUserInput": {
+        "description": "Writable fields of a portal user. `email`, `name` and `password` are required on create; `password` is ignored on update.",
+        "properties": {
+          "email": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string",
+            "writeOnly": true
+          },
+          "role": {
+            "enum": [
+              "owner",
+              "admin",
+              "member",
+              "viewer"
+            ],
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "active",
+              "inactive"
+            ],
+            "type": "string"
+          }
+        },
+        "title": "TenantUserInput",
+        "type": "object"
+      },
+      "TenantUserList": {
+        "description": "The tenant's portal users, newest first.",
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/TenantUser"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "TenantUserList",
+        "type": "object"
+      },
+      "TenantUserRequest": {
+        "description": "Create or update a portal user.",
+        "properties": {
+          "user": {
+            "$ref": "#/components/schemas/TenantUserInput"
+          }
+        },
+        "required": [
+          "user"
+        ],
+        "title": "TenantUserRequest",
+        "type": "object"
+      },
+      "TenantUserResponse": {
+        "description": "One user.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/TenantUser"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "TenantUserResponse",
+        "type": "object"
+      },
+      "TenantWithApiKey": {
+        "description": "A tenant with its primary API key: only the create and rotate_api_key responses carry it.",
+        "properties": {
+          "alert_webhook_url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "allowed_upload_types": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "api_key": {
+            "description": "The primary API key (every scope); store it, it is not returned again",
+            "type": "string"
+          },
+          "api_key_prefix": {
+            "description": "Start of the primary API key, for display",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "inserted_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "limits": {
+            "additionalProperties": true,
+            "description": "Rate-limit overrides: bucket => `{limit, scale_ms}`",
+            "type": "object"
+          },
+          "name": {
+            "type": "string"
+          },
+          "retention_days": {
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "active",
+              "inactive"
+            ],
+            "type": "string"
+          },
+          "tier": {
+            "enum": [
+              "high",
+              "default",
+              "bulk"
+            ],
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "alert_webhook_url",
+          "allowed_upload_types",
+          "api_key",
+          "api_key_prefix",
+          "id",
+          "inserted_at",
+          "limits",
+          "name",
+          "retention_days",
+          "status",
+          "tier",
+          "updated_at"
+        ],
+        "title": "TenantWithApiKey",
+        "type": "object"
+      },
+      "TenantWithApiKeyResponse": {
+        "description": "One tenant with its primary API key.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/TenantWithApiKey"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "TenantWithApiKeyResponse",
+        "type": "object"
+      },
       "UpdateWebhookSubscriptionRequest": {
         "description": "Fields to change. A `secret` is ignored: use rotate_secret.",
         "properties": {
@@ -2569,6 +3592,11 @@
       }
     },
     "securitySchemes": {
+      "adminToken": {
+        "description": "`ADMIN_API_TOKEN` (platform admin API only), behind the admin IP allowlist",
+        "scheme": "bearer",
+        "type": "http"
+      },
       "apiKey": {
         "description": "Tenant API key (server side only)",
         "in": "header",
@@ -2607,12 +3635,566 @@
     }
   },
   "info": {
-    "description": "Converger's HTTP API. Three families share the `/api/v1` prefix:\n\n* **Tenant API** (`/api/v1/...`): server to server, authenticated with the tenant API key (`x-api-key`).\n* **Client API** (`/api/v1/converger/...`): end-user clients, authenticated with a Converger token\n  (`Authorization: Bearer`), issued from a channel secret.\n* **Inbound webhooks** (`/api/v1/channels/{channel_id}/inbound|status`): called by providers, verified by signature.\n\nEvery error response uses one envelope:\n`{\"error\": {\"code\", \"message\", \"details\", \"request_id\"}}` (schema `ErrorResponse`). See\n[errors](https://converger.aimtune.dev/api/errors) and the\n[versioning policy](https://converger.aimtune.dev/api/versioning).\n",
+    "description": "Converger's HTTP API. Four families share the `/api/v1` prefix:\n\n* **Tenant API** (`/api/v1/...`): server to server, authenticated with a tenant API key (`x-api-key`) whose\n  scopes (`read`, `write`, `manage`) gate each operation; `/api/v1/manage/...` holds the tenant's configuration.\n* **Admin API** (`/api/v1/admin/...`): platform operators, authenticated with `ADMIN_API_TOKEN`.\n* **Client API** (`/api/v1/converger/...`): end-user clients, authenticated with a Converger token\n  (`Authorization: Bearer`), issued from a channel secret.\n* **Inbound webhooks** (`/api/v1/channels/{channel_id}/inbound|status`): called by providers, verified by signature.\n\nEvery error response uses one envelope:\n`{\"error\": {\"code\", \"message\", \"details\", \"request_id\"}}` (schema `ErrorResponse`). See\n[errors](https://converger.aimtune.dev/api/errors) and the\n[versioning policy](https://converger.aimtune.dev/api/versioning).\n",
     "title": "Converger API",
     "version": "0.1.0"
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/v1/admin/tenants": {
+      "get": {
+        "callbacks": {},
+        "description": "Not paginated: every tenant, sorted by name, capped at `lookup_limit`.",
+        "operationId": "adminListTenants",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenantList"
+                }
+              }
+            },
+            "description": "Tenants"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "adminToken": []
+          }
+        ],
+        "summary": "List tenants",
+        "tags": [
+          "Admin"
+        ]
+      },
+      "post": {
+        "callbacks": {},
+        "description": "The response is the only one, besides rotate_api_key, with the primary `api_key`.",
+        "operationId": "adminCreateTenant",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TenantRequest"
+              }
+            }
+          },
+          "description": "The tenant",
+          "required": false
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenantWithApiKeyResponse"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "adminToken": []
+          }
+        ],
+        "summary": "Create a tenant",
+        "tags": [
+          "Admin"
+        ]
+      }
+    },
+    "/api/v1/admin/tenants/{id}": {
+      "delete": {
+        "callbacks": {},
+        "description": "Deletes the tenant with its channels, conversations, users and keys; activities and deliveries are purged in the background. Honours `If-Match`.",
+        "operationId": "adminDeleteTenant",
+        "parameters": [
+          {
+            "description": "Tenant id",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "adminToken": []
+          }
+        ],
+        "summary": "Delete a tenant",
+        "tags": [
+          "Admin"
+        ]
+      },
+      "get": {
+        "callbacks": {},
+        "operationId": "adminGetTenant",
+        "parameters": [
+          {
+            "description": "Tenant id",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenantResponse"
+                }
+              }
+            },
+            "description": "The tenant"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "adminToken": []
+          }
+        ],
+        "summary": "Get a tenant",
+        "tags": [
+          "Admin"
+        ]
+      },
+      "patch": {
+        "callbacks": {},
+        "description": "`limits`, when given, replaces every override. Setting `status` to `inactive` blocks the tenant's API keys. Honours `If-Match`.",
+        "operationId": "adminUpdateTenant",
+        "parameters": [
+          {
+            "description": "Tenant id",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TenantRequest"
+              }
+            }
+          },
+          "description": "Fields to change",
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenantResponse"
+                }
+              }
+            },
+            "description": "Updated"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "adminToken": []
+          }
+        ],
+        "summary": "Update a tenant",
+        "tags": [
+          "Admin"
+        ]
+      },
+      "put": {
+        "callbacks": {},
+        "description": "`limits`, when given, replaces every override. Setting `status` to `inactive` blocks the tenant's API keys. Honours `If-Match`.",
+        "operationId": "adminUpdateTenantPut",
+        "parameters": [
+          {
+            "description": "Tenant id",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TenantRequest"
+              }
+            }
+          },
+          "description": "Fields to change",
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenantResponse"
+                }
+              }
+            },
+            "description": "Updated"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "adminToken": []
+          }
+        ],
+        "summary": "Update a tenant",
+        "tags": [
+          "Admin"
+        ]
+      }
+    },
+    "/api/v1/admin/tenants/{tenant_id}/api_keys": {
+      "get": {
+        "callbacks": {},
+        "description": "Scoped keys, revoked ones included, newest first. Not paginated.",
+        "operationId": "adminListApiKeys",
+        "parameters": [
+          {
+            "description": "Tenant id",
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiKeyList"
+                }
+              }
+            },
+            "description": "API keys"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "adminToken": []
+          }
+        ],
+        "summary": "List a tenant's API keys",
+        "tags": [
+          "Admin"
+        ]
+      },
+      "post": {
+        "callbacks": {},
+        "description": "The response is the only one with the `key`.",
+        "operationId": "adminCreateApiKey",
+        "parameters": [
+          {
+            "description": "Tenant id",
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateApiKeyRequest"
+              }
+            }
+          },
+          "description": "The key",
+          "required": false
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiKeyWithKeyResponse"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "adminToken": []
+          }
+        ],
+        "summary": "Issue an API key for a tenant",
+        "tags": [
+          "Admin"
+        ]
+      }
+    },
+    "/api/v1/admin/tenants/{tenant_id}/api_keys/{id}": {
+      "delete": {
+        "callbacks": {},
+        "description": "The key stops working at once; it stays listed with `revoked_at`.",
+        "operationId": "adminRevokeApiKey",
+        "parameters": [
+          {
+            "description": "Tenant id",
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "API key id",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Revoked"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "adminToken": []
+          }
+        ],
+        "summary": "Revoke a tenant's API key",
+        "tags": [
+          "Admin"
+        ]
+      }
+    },
+    "/api/v1/admin/tenants/{tenant_id}/rotate_api_key": {
+      "post": {
+        "callbacks": {},
+        "description": "Issues a new primary key, returned once. The old key keeps working for the rotation grace period (24 h by default). Scoped keys are not affected.",
+        "operationId": "adminRotateTenantApiKey",
+        "parameters": [
+          {
+            "description": "Tenant id",
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenantWithApiKeyResponse"
+                }
+              }
+            },
+            "description": "The new key"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "adminToken": []
+          }
+        ],
+        "summary": "Rotate a tenant's primary API key",
+        "tags": [
+          "Admin"
+        ]
+      }
+    },
     "/api/v1/channels/{channel_id}/deliveries/retry": {
       "post": {
         "callbacks": {},
@@ -2740,6 +4322,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -2993,6 +4578,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
@@ -3061,6 +4649,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
@@ -3119,6 +4710,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
@@ -3173,6 +4767,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -3306,6 +4903,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -4261,6 +5861,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
@@ -4334,6 +5937,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
@@ -4400,6 +6006,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
@@ -4453,6 +6062,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -4508,6 +6120,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -4698,6 +6313,1047 @@
         ]
       }
     },
+    "/api/v1/manage/api_keys": {
+      "get": {
+        "callbacks": {},
+        "description": "The tenant's scoped keys, revoked ones included, newest first. Not paginated.",
+        "operationId": "manageListApiKeys",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiKeyList"
+                }
+              }
+            },
+            "description": "API keys"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "List API keys",
+        "tags": [
+          "Management"
+        ]
+      },
+      "post": {
+        "callbacks": {},
+        "description": "The response is the only one with the `key`. The scopes must be a subset of the calling key's scopes.",
+        "operationId": "manageCreateApiKey",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateApiKeyRequest"
+              }
+            }
+          },
+          "description": "The key",
+          "required": false
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiKeyWithKeyResponse"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Issue an API key",
+        "tags": [
+          "Management"
+        ]
+      }
+    },
+    "/api/v1/manage/api_keys/{id}": {
+      "delete": {
+        "callbacks": {},
+        "description": "The key stops working at once; it stays listed with `revoked_at`.",
+        "operationId": "manageRevokeApiKey",
+        "parameters": [
+          {
+            "description": "API key id",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Revoked"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Revoke an API key",
+        "tags": [
+          "Management"
+        ]
+      },
+      "get": {
+        "callbacks": {},
+        "operationId": "manageGetApiKey",
+        "parameters": [
+          {
+            "description": "API key id",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiKeyResponse"
+                }
+              }
+            },
+            "description": "The key"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Get an API key",
+        "tags": [
+          "Management"
+        ]
+      }
+    },
+    "/api/v1/manage/channels": {
+      "get": {
+        "callbacks": {},
+        "description": "Not paginated: every channel of the tenant, sorted by name.",
+        "operationId": "manageListChannels",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChannelList"
+                }
+              }
+            },
+            "description": "Channels"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "List channels",
+        "tags": [
+          "Management"
+        ]
+      },
+      "post": {
+        "callbacks": {},
+        "description": "The response is the only one, besides rotate_secret, with the channel `secret`.",
+        "operationId": "manageCreateChannel",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChannelRequest"
+              }
+            }
+          },
+          "description": "The channel",
+          "required": false
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChannelWithSecretResponse"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Create a channel",
+        "tags": [
+          "Management"
+        ]
+      }
+    },
+    "/api/v1/manage/channels/{channel_id}/rotate_secret": {
+      "post": {
+        "callbacks": {},
+        "description": "Generates a new channel secret, returned once; the old one stops working at once. Tokens already issued stay valid until they expire or are revoked.",
+        "operationId": "manageRotateChannelSecret",
+        "parameters": [
+          {
+            "description": "Channel id",
+            "in": "path",
+            "name": "channel_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChannelWithSecretResponse"
+                }
+              }
+            },
+            "description": "The new secret"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Rotate a channel's secret",
+        "tags": [
+          "Management"
+        ]
+      }
+    },
+    "/api/v1/manage/channels/{id}": {
+      "delete": {
+        "callbacks": {},
+        "description": "Deletes the channel with its conversations; their activities and deliveries are purged in the background. Honours `If-Match`.",
+        "operationId": "manageDeleteChannel",
+        "parameters": [
+          {
+            "description": "Channel id",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Delete a channel",
+        "tags": [
+          "Management"
+        ]
+      },
+      "get": {
+        "callbacks": {},
+        "operationId": "manageGetChannel",
+        "parameters": [
+          {
+            "description": "Channel id",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChannelResponse"
+                }
+              }
+            },
+            "description": "The channel"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Get a channel",
+        "tags": [
+          "Management"
+        ]
+      },
+      "patch": {
+        "callbacks": {},
+        "description": "`config`, when given, replaces the stored config; `[REDACTED]` values keep the stored secret. Honours `If-Match`.",
+        "operationId": "manageUpdateChannel",
+        "parameters": [
+          {
+            "description": "Channel id",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChannelRequest"
+              }
+            }
+          },
+          "description": "Fields to change",
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChannelResponse"
+                }
+              }
+            },
+            "description": "Updated"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Update a channel",
+        "tags": [
+          "Management"
+        ]
+      },
+      "put": {
+        "callbacks": {},
+        "description": "`config`, when given, replaces the stored config; `[REDACTED]` values keep the stored secret. Honours `If-Match`.",
+        "operationId": "manageUpdateChannelPut",
+        "parameters": [
+          {
+            "description": "Channel id",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChannelRequest"
+              }
+            }
+          },
+          "description": "Fields to change",
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChannelResponse"
+                }
+              }
+            },
+            "description": "Updated"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Update a channel",
+        "tags": [
+          "Management"
+        ]
+      }
+    },
+    "/api/v1/manage/settings": {
+      "get": {
+        "callbacks": {},
+        "operationId": "manageGetSettings",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenantResponse"
+                }
+              }
+            },
+            "description": "The tenant"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Get the tenant's settings",
+        "tags": [
+          "Management"
+        ]
+      },
+      "patch": {
+        "callbacks": {},
+        "description": "`limits`, when given, replaces every override. Honours `If-Match`.",
+        "operationId": "manageUpdateSettings",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TenantSettingsRequest"
+              }
+            }
+          },
+          "description": "Settings to change",
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenantResponse"
+                }
+              }
+            },
+            "description": "Updated"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Update the tenant's settings",
+        "tags": [
+          "Management"
+        ]
+      },
+      "put": {
+        "callbacks": {},
+        "description": "`limits`, when given, replaces every override. Honours `If-Match`.",
+        "operationId": "manageUpdateSettingsPut",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TenantSettingsRequest"
+              }
+            }
+          },
+          "description": "Settings to change",
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenantResponse"
+                }
+              }
+            },
+            "description": "Updated"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Update the tenant's settings",
+        "tags": [
+          "Management"
+        ]
+      }
+    },
+    "/api/v1/manage/users": {
+      "get": {
+        "callbacks": {},
+        "description": "Not paginated: the tenant's users, newest first, capped at `lookup_limit`.",
+        "operationId": "manageListUsers",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenantUserList"
+                }
+              }
+            },
+            "description": "Users"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "List portal users",
+        "tags": [
+          "Management"
+        ]
+      },
+      "post": {
+        "callbacks": {},
+        "operationId": "manageCreateUser",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TenantUserRequest"
+              }
+            }
+          },
+          "description": "The user",
+          "required": false
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenantUserResponse"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Create a portal user",
+        "tags": [
+          "Management"
+        ]
+      }
+    },
+    "/api/v1/manage/users/{id}": {
+      "delete": {
+        "callbacks": {},
+        "description": "Ends the user's sessions. Honours `If-Match`.",
+        "operationId": "manageDeleteUser",
+        "parameters": [
+          {
+            "description": "User id",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Delete a portal user",
+        "tags": [
+          "Management"
+        ]
+      },
+      "get": {
+        "callbacks": {},
+        "operationId": "manageGetUser",
+        "parameters": [
+          {
+            "description": "User id",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenantUserResponse"
+                }
+              }
+            },
+            "description": "The user"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Get a portal user",
+        "tags": [
+          "Management"
+        ]
+      },
+      "patch": {
+        "callbacks": {},
+        "description": "`password` is ignored. Deactivating a user ends their sessions. Honours `If-Match`.",
+        "operationId": "manageUpdateUser",
+        "parameters": [
+          {
+            "description": "User id",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TenantUserRequest"
+              }
+            }
+          },
+          "description": "Fields to change",
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenantUserResponse"
+                }
+              }
+            },
+            "description": "Updated"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Update a portal user",
+        "tags": [
+          "Management"
+        ]
+      },
+      "put": {
+        "callbacks": {},
+        "description": "`password` is ignored. Deactivating a user ends their sessions. Honours `If-Match`.",
+        "operationId": "manageUpdateUserPut",
+        "parameters": [
+          {
+            "description": "User id",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TenantUserRequest"
+              }
+            }
+          },
+          "description": "Fields to change",
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenantUserResponse"
+                }
+              }
+            },
+            "description": "Updated"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "summary": "Update a portal user",
+        "tags": [
+          "Management"
+        ]
+      }
+    },
     "/api/v1/routing_rules": {
       "get": {
         "callbacks": {},
@@ -4717,6 +7373,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "500": {
             "$ref": "#/components/responses/InternalError"
@@ -4766,6 +7425,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "422": {
             "$ref": "#/components/responses/UnprocessableEntity"
@@ -4822,6 +7484,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
@@ -4871,6 +7536,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -4923,6 +7591,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -4986,6 +7657,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -5052,6 +7726,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -5780,6 +8457,14 @@
     {
       "description": "Tenant API: platform event webhook subscriptions, event log and redelivery",
       "name": "Webhooks"
+    },
+    {
+      "description": "Management API (`/api/v1/manage`): channels, portal users, API keys and settings; `manage` scope",
+      "name": "Management"
+    },
+    {
+      "description": "Platform admin API (`/api/v1/admin`): tenants and API key issuance; `ADMIN_API_TOKEN`",
+      "name": "Admin"
     },
     {
       "description": "Provider webhooks",

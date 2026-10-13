@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### Management API and scoped API keys (#51)
+
+- **Scoped tenant API keys** (`api_keys`): a name, any of the scopes `read`, `write` and `manage`, an optional
+  expiry, revocation, and `last_used_at`. A `read` key cannot post activities (`403 insufficient_scope`); changing
+  configuration needs `manage`. The tenant's existing key is now its primary key and keeps every scope, so nothing
+  changes for current integrations.
+- **Management API** `/api/v1/manage` (scope `manage`): channels CRUD with `rotate_secret`, portal users, tenant
+  settings (retention, alert webhook URL, upload types, rate-limit overrides) and API keys. Creating, changing and
+  deleting routing rules and webhook subscriptions, and pausing and resuming channels, now need `manage` as well.
+- **Admin API** `/api/v1/admin`: tenants CRUD, primary key rotation and scoped key issuance, authenticated with the
+  new `ADMIN_API_TOKEN` (at least 32 characters) behind `ADMIN_IP_WHITELIST`. Off while the variable is unset.
+- `ETag` on managed resources and `If-Match` on `PUT`/`PATCH`/`DELETE` (`412 precondition_failed`). Secret channel
+  config values are returned as `[REDACTED]`, and sending them back keeps the stored value.
+- Every management call is audited, with the API key's id as the actor (actor type `admin_api` for the admin token).
+- New error codes `insufficient_scope` (403) and `precondition_failed` (412).
+- Docs: management API, authentication, errors, security, configuration, tenants; ADR-0061.
+
 ### Admin panel and tenant portal on Tailwind and daisyUI (#50, part 1)
 
 - The admin panel and tenant portal use the Phoenix 1.8 stack: Tailwind CSS v4, daisyUI 5 and heroicons, built by

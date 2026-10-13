@@ -240,6 +240,44 @@ defmodule Converger.Tenants do
     end
   end
 
+  @doc """
+  Updates a tenant's fields and, when `attrs` has `"limits"`, replaces its
+  rate-limit overrides (the management API, ADR-0061). The limits are
+  validated before anything is written, so an invalid request changes
+  nothing.
+  """
+  def update_tenant_and_limits(%Tenant{} = tenant, attrs, actor) when is_map(attrs) do
+    {limits, attrs} = Map.pop(attrs, "limits")
+
+    with :ok <- validate_limits(limits, tenant),
+         {:ok, tenant} <- maybe_update_tenant(tenant, attrs, actor) do
+      if is_nil(limits), do: {:ok, tenant}, else: update_tenant_limits(tenant, limits, actor)
+    end
+  end
+
+  @doc """
+  Checks rate-limit overrides without writing them: `:ok` (also for `nil`)
+  or `{:error, changeset}`.
+  """
+  def validate_limits(limits, tenant \\ %Tenant{})
+
+  def validate_limits(nil, _tenant), do: :ok
+
+  def validate_limits(limits, tenant) when is_map(limits) do
+    case Tenant.limits_changeset(tenant, limits) do
+      %Ecto.Changeset{valid?: true} -> :ok
+      changeset -> {:error, changeset}
+    end
+  end
+
+  def validate_limits(_limits, tenant) do
+    {:error,
+     tenant |> Ecto.Changeset.change() |> Ecto.Changeset.add_error(:limits, "must be an object")}
+  end
+
+  defp maybe_update_tenant(tenant, attrs, _actor) when map_size(attrs) == 0, do: {:ok, tenant}
+  defp maybe_update_tenant(tenant, attrs, actor), do: update_tenant(tenant, attrs, actor)
+
   def change_tenant(%Tenant{} = tenant, attrs \\ %{}) do
     Tenant.changeset(tenant, attrs)
   end

@@ -7,7 +7,11 @@ sidebar_position: 2
 The tenant API is the server-to-server API under `/api/v1`. Your backend, bots and agent tools use it to
 open conversations, post and read activities, close and reopen conversations, manage routing rules, and inspect and replay failed deliveries. It
 authenticates with the tenant API key (`x-api-key`) or a channel token (`x-channel-token`); see
-[authentication](overview.md#authentication). Shared conventions (errors, rate limits, pagination, idempotency)
+[authentication](overview.md#authentication). Each route needs a [scope](management-api.md#api-keys-and-scopes) of the key:
+`read` for `GET` (and the routing dry-run), `write` for changes to conversation data, and `manage` for changes to
+routing rules, webhook subscriptions and channel pause/resume. The primary key has every scope; a scoped key
+without the scope gets `403 insufficient_scope`. Channels, portal users, settings and scoped keys are managed in the
+[management API](management-api.md). Shared conventions (errors, rate limits, pagination, idempotency)
 are described in the [overview](overview.md).
 
 :::warning
@@ -580,7 +584,8 @@ Continue with `?watermark=c2VxOjI` until `has_more` is `false`. When there is no
 A routing rule copies the activities of a source channel's conversations to one or more target channels, optionally
 only when its conditions match, in priority order, with its own transformations; see
 [Routing rules](../concepts/routing-rules.md). Changes made through this API are recorded in the audit log with actor
-type `tenant_api`.
+type `tenant_api` and the key's id. Creating, updating and deleting rules needs the `manage` scope; listing, getting
+and the dry-run need `read`.
 
 ### Validation
 
@@ -876,7 +881,8 @@ curl -s -X POST "$CONVERGER/api/v1/channels/$CHANNEL_ID/resume" -H "x-api-key: $
 ```
 
 Both return `200 OK` with the delivery state above, are idempotent, and are written to the audit log as
-`pause_deliveries` / `resume_deliveries` (actor `tenant_api`). An unknown or foreign channel returns `404`.
+`pause_deliveries` / `resume_deliveries` (actor `tenant_api`). An unknown or foreign channel returns `404`. Pausing
+and resuming is a channel change: it needs the `manage` scope.
 
 ## Channel message templates
 
@@ -934,7 +940,8 @@ How to send a template is described in [WhatsApp: templates](../channels/whatsap
 
 Tenant-level subscriptions to [platform events](../platform-webhooks.md) (activities, delivery status,
 conversation lifecycle, channel health and circuit breaker, opt-outs) and their event log. These endpoints require
-the tenant API key (`x-api-key`); a channel token gets `403 forbidden`. Changes are audit-logged
+the tenant API key (`x-api-key`); a channel token gets `403 forbidden`. Creating, updating, deleting and rotating the secret of a
+subscription need the `manage` scope; reading needs `read`, redelivering an event `write`. Changes are audit-logged
 (`resource_type: "webhook_subscription"`, `"webhook_event"`). Errors use the [error envelope](errors.md):
 `422 validation_failed` with the invalid fields in `details`, `404 not_found` for an unknown id or one of another
 tenant, `400 bad_request` for a missing `webhook_subscription` object or an invalid filter or cursor.

@@ -224,6 +224,19 @@ if admin_ips = System.get_env("ADMIN_IP_WHITELIST") do
     admin_ip_whitelist: admin_ips |> String.split(",", trim: true) |> Enum.map(&String.trim/1)
 end
 
+# Platform admin API (/api/v1/admin, issue #51, ADR-0061): a bearer token of
+# at least 32 characters. Unset, the admin API answers 401 to everything.
+case System.get_env("ADMIN_API_TOKEN") do
+  token when token in [nil, ""] ->
+    :ok
+
+  token when byte_size(token) < 32 ->
+    raise "ADMIN_API_TOKEN must be at least 32 characters (e.g. `openssl rand -base64 48`)"
+
+  token ->
+    config :converger, admin_api_token: token
+end
+
 # Admin / tenant portal account security (issue #52, ADR-0058; defaults in
 # config/config.exs, see docs/operations/configuration.md):
 #   SESSION_MAX_AGE_SECONDS       absolute session lifetime (default 43200, 12 h)
