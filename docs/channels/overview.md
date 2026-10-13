@@ -384,12 +384,12 @@ The first check of a channel never alerts (there is no previous status). Health 
 
 ## Planned adapters
 
-Tracked in [#44](https://github.com/AimTune/converger/issues/44), not implemented yet:
+Tracked in [#44](https://github.com/AimTune/converger/issues/44), not implemented yet. (gRPC streaming is not a channel
+type but a transport of Protocol v1 for backend clients: [Protocol v1 over gRPC](../protocol/grpc.md).)
 
 | Adapter | Scope |
 | --- | --- |
 | MQTT | IoT-style duplex channel: topics per conversation, QoS 1 at-least-once. Needs an MQTT client dependency. |
-| gRPC streaming | Bidirectional stream alternative to the WebSocket for backend clients, sharing the [Protocol v1](../protocol/v1.md) frame definitions through protobuf. Needs the `grpc` and `protobuf` dependencies. |
 | Discord Gateway inbound | Plain channel messages over the Gateway WebSocket, in addition to the [Interactions Endpoint](discord.md). |
 
 ## Related

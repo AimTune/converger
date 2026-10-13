@@ -5,8 +5,10 @@ defmodule ConvergerWeb.Protocol do
 
   The frames themselves are built by `ConvergerWeb.Protocol.Frames`, encoded
   by `ConvergerWeb.Protocol.Codec`, and the replay/live ordering rules live in
-  `ConvergerWeb.Protocol.Feed`. The transports are the native WebSocket
-  endpoint (`ConvergerWeb.ProtocolSocket`) and the Server-Sent Events stream
+  `ConvergerWeb.Protocol.Feed`; a connection's session is
+  `ConvergerWeb.Protocol.Session`. The transports are the native WebSocket
+  endpoint (`ConvergerWeb.ProtocolSocket`), the gRPC stream
+  (`ConvergerWeb.GRPC`, ADR-0056) and the Server-Sent Events stream
   (`ConvergerWeb.ConvergerAPI.EventStreamController`).
 
   Limits are configured under `config :converger, ConvergerWeb.Protocol`:

@@ -30,12 +30,18 @@ ingress:
 metrics:
   podMonitor:
     enabled: true
+grpc:
+  enabled: true
 networkPolicy:
   enabled: true
   httpFrom:
     - namespaceSelector:
         matchLabels:
           kubernetes.io/metadata.name: ingress-nginx
+  grpcFrom:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: backend
 serviceAccount:
   annotations:
     eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/converger

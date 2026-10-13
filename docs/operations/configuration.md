@@ -189,6 +189,18 @@ All environments. Integers; unset or empty variables keep the `config :converger
 
 The hard frame cap, `config :converger, :websocket_max_frame_size` (`1_048_576`), is compile time.
 
+## gRPC transport
+
+All environments. Protocol v1 over a gRPC bidirectional stream ([Protocol v1 over gRPC](../protocol/grpc.md),
+`config :converger, ConvergerWeb.GRPC`). The WebSocket limits above apply to its streams too.
+
+| Variable | Config key | Default | Description |
+| --- | --- | --- | --- |
+| `GRPC_ENABLED` | `enabled` | `false` | `true` or `1` starts the gRPC server. |
+| `GRPC_PORT` | `port` | `50051` | Listening port (all interfaces, IPv4 and IPv6). |
+| `GRPC_TLS_CERTFILE` | `certfile` | unset | PEM certificate path. With `GRPC_TLS_KEYFILE` the server speaks TLS; otherwise plaintext HTTP/2 (h2c). |
+| `GRPC_TLS_KEYFILE` | `keyfile` | unset | PEM private key path. |
+
 ## Clustering
 
 Read in every environment except test (see [Clustering](clustering.md)). The Erlang distribution itself (node name,
@@ -442,7 +454,8 @@ config :converger, ConvergerWeb.Protocol,
   replay_max: 10_000
 ```
 
-Settings of the native WebSocket (`/socket/converger/v1`) and the Server-Sent Events stream, announced to
+Settings of the native WebSocket (`/socket/converger/v1`), the gRPC stream ([Protocol v1 over gRPC](../protocol/grpc.md))
+and the Server-Sent Events stream, announced to
 clients in `welcome.data.limits` ([Protocol v1](../protocol/v1.md), section 11). `heartbeat_interval_ms`: outbound
 silence before a `heartbeat` frame (also the SSE heartbeat period). `idle_timeout_ms`: inbound silence before the
 socket is closed with 4408. `replay_max`: frames replayed per handshake, `sync`

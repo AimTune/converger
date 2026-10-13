@@ -1,7 +1,8 @@
 defmodule ConvergerWeb.ProtocolConnections do
   @moduledoc """
   Node-local registry of the native Protocol v1 connections
-  (`ConvergerWeb.ProtocolSocket` WebSockets and Server-Sent Events streams),
+  (`ConvergerWeb.ProtocolSocket` WebSockets, Server-Sent Events streams and
+  gRPC streams, `ConvergerWeb.GRPC`),
   so they can be drained on shutdown.
 
   Phoenix's socket drainer only knows the sockets mounted with the endpoint
@@ -10,7 +11,9 @@ defmodule ConvergerWeb.ProtocolConnections do
   of `:drain_batch_size` every `:drain_batch_interval_ms`, at most for
   `:drain_shutdown_ms` (`config :converger, :websocket`), the same pacing as
   the Phoenix sockets. A WebSocket then closes with 1012 and a jittered
-  `retryAfterMs`; an SSE stream ends with an `error` `unavailable` event.
+  `retryAfterMs`; an SSE stream ends with an `error` `unavailable` event; a
+  gRPC stream gets a `Close` frame (1012, `retryAfterMs`) and ends with
+  `UNAVAILABLE`.
   """
 
   @registry __MODULE__

@@ -11,8 +11,9 @@ defmodule ConvergerWeb.Drain do
   drainer closes the remaining sockets in batches of `:drain_batch_size`
   every `:drain_batch_interval_ms`, each with close code 1012 and a jittered
   `retryAfterMs` (`ConvergerWeb.SocketGuard`). The native Protocol v1
-  connections (WebSocket and SSE), which Phoenix's drainer does not know, are
-  drained first, the same way, by `ConvergerWeb.ProtocolConnections.drain/0`.
+  connections (WebSocket, SSE and gRPC), which Phoenix's drainer does not know,
+  are drained first, the same way, by `ConvergerWeb.ProtocolConnections.drain/0`.
+  The gRPC server (`ConvergerWeb.GRPC`) is stopped after this process.
   """
 
   use GenServer

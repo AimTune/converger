@@ -114,6 +114,18 @@ ingress:
   #    hosts:
   #      - converger.example.com
 
+# Converger Protocol v1 over gRPC (ADR-0056): a bidirectional stream per
+# connection, for backend clients, on its own container port. When enabled
+# the chart sets GRPC_ENABLED and GRPC_PORT and adds a "grpc" port to the
+# Service (appProtocol kubernetes.io/h2c: plaintext HTTP/2). Serve TLS
+# yourself with GRPC_TLS_CERTFILE / GRPC_TLS_KEYFILE (extraEnv and a mounted
+# Secret) or terminate it at a gRPC-aware proxy. See docs/protocol/grpc.md.
+grpc:
+  enabled: false
+  port: 50051
+  # Service port for gRPC clients.
+  servicePort: 50051
+
 metrics:
   # Prometheus Operator PodMonitor scraping every pod at :4000/metrics with
   # the METRICS_TOKEN from the Secret. Needs the monitoring.coreos.com CRDs.
@@ -133,6 +145,9 @@ networkPolicy:
   #  - namespaceSelector:
   #      matchLabels:
   #        kubernetes.io/metadata.name: ingress-nginx
+  # Who may reach the gRPC port (grpc.port) when grpc.enabled. Empty allows
+  # every source.
+  grpcFrom: []
 
 podAnnotations: {}
 podLabels: {}

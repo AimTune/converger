@@ -100,6 +100,11 @@ defmodule Converger.MixProject do
       {:brod, "~> 4.7.0"},
       {:broadway_rabbitmq, "~> 0.8.2"},
       {:amqp, "~> 4.3.0"},
+      # gRPC transport for Protocol v1 (ADR-0056). Patch-level pins: the stream
+      # handler relies on the server adapter's send_reply / request-stream semantics.
+      {:grpc_server, "~> 1.0.5"},
+      {:grpc, "~> 1.0.5"},
+      {:protobuf, "~> 0.17.1"},
       {:hammer, "~> 7.5"},
       {:opentelemetry, "~> 1.5"},
       {:opentelemetry_exporter, "~> 1.8"},
