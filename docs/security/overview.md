@@ -390,11 +390,13 @@ The `:browser` pipeline (admin panel and portal) sets Phoenix's secure browser h
 `x-permitted-cross-domain-policies: none`) and this Content Security Policy:
 
 ```http
-content-security-policy: default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
+content-security-policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
 ```
 
-`'unsafe-inline'` and `cdn.jsdelivr.net` are needed because the layouts load Phoenix and LiveView from jsDelivr
-with an inline bootstrap script (there is no asset pipeline).
+The admin and portal CSS and JavaScript are built into the release and served from `/assets`, so no third-party
+origin is allowed ([ADR-0060](../adr/0060-tailwind-daisyui-admin-ui-without-node.md)). `'unsafe-inline'` remains for
+the small theme script in the page `<head>` (it applies the light or dark theme before the first paint) and for the
+Oban Web dashboard at `/admin/oban`, which inlines its own script and styles.
 
 Uploaded files are typed by magic bytes (the declared type is ignored), checked against an allowlist, and served
 only through the authenticated, tenant-scoped download endpoint with `nosniff`, a sandboxing CSP and a

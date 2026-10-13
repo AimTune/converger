@@ -222,41 +222,42 @@ defmodule ConvergerWeb.Admin.ConversationLive do
 
   defp render_index(assigns) do
     ~H"""
-    <h1>Conversations</h1>
+    <Layouts.app flash={@flash} nav={@nav}>
+      <.header>
+        Conversations
+        <:subtitle>Conversations across all tenants and channels.</:subtitle>
+      </.header>
 
-    <div class="card" style="margin-bottom: 20px;">
-      <form phx-change="filter" id="filter-form">
-        <div style="display: flex; gap: 15px; align-items: flex-end;">
-          <div class="input-group" style="margin-bottom: 0;">
-            <label>Tenant</label>
-            <select name="filters[tenant_id]">
-              <option value="">All Tenants</option>
-              <option :for={t <- @tenants} value={t.id} selected={@filters["tenant_id"] == t.id}>
-                <%= t.name %>
-              </option>
-            </select>
-          </div>
-
-          <div class="input-group" style="margin-bottom: 0;">
-            <label>Channel</label>
-            <select name="filters[channel_id]">
-              <option value="">All Channels</option>
-              <option :for={c <- @channels} value={c.id} selected={@filters["channel_id"] == c.id}>
-                <%= c.name %> (<%= c.type %> <%= mode_arrow(c.mode) %>) - <%= c.tenant.name %>
-              </option>
-            </select>
-          </div>
-
-          <div class="input-group" style="margin-bottom: 0;">
-            <label>Status</label>
-            <select name="filters[status]">
-              <option value="">All Statuses</option>
-              <option value="active" selected={@filters["status"] == "active"}>Active</option>
-              <option value="closed" selected={@filters["status"] == "closed"}>Closed</option>
-            </select>
-          </div>
-
-          <div style="margin-bottom: 0;">
+      <.panel title="Filters">
+        <form phx-change="filter" id="filter-form">
+          <div class="grid items-end gap-x-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
+            <.input
+              type="select"
+              id="filters_tenant_id"
+              name="filters[tenant_id]"
+              value={@filters["tenant_id"]}
+              label="Tenant"
+              prompt="All Tenants"
+              options={Enum.map(@tenants, &{&1.name, &1.id})}
+            />
+            <.input
+              type="select"
+              id="filters_channel_id"
+              name="filters[channel_id]"
+              value={@filters["channel_id"]}
+              label="Channel"
+              prompt="All Channels"
+              options={Enum.map(@channels, &{channel_option_label(&1), &1.id})}
+            />
+            <.input
+              type="select"
+              id="filters_status"
+              name="filters[status]"
+              value={@filters["status"]}
+              label="Status"
+              prompt="All Statuses"
+              options={[{"Active", "active"}, {"Closed", "closed"}]}
+            />
             <.input
               type="text"
               id="filters_q"
@@ -266,9 +267,6 @@ defmodule ConvergerWeb.Admin.ConversationLive do
               placeholder="Exact UUID"
               phx-debounce="400"
             />
-          </div>
-
-          <div style="margin-bottom: 0;">
             <.input
               type="select"
               id="filters_sort"
@@ -277,9 +275,6 @@ defmodule ConvergerWeb.Admin.ConversationLive do
               label="Sort"
               options={[{"Newest first", "desc"}, {"Oldest first", "asc"}]}
             />
-          </div>
-
-          <div style="margin-bottom: 0;">
             <.input
               type="select"
               id="filters_per_page"
@@ -288,147 +283,159 @@ defmodule ConvergerWeb.Admin.ConversationLive do
               label="Page size"
               options={Enum.map(@per_page_options, &{to_string(&1), to_string(&1)})}
             />
+            <div class="mb-2">
+              <.button href={~p"/admin/conversations"} variant="ghost">
+                <.icon name="hero-x-mark" /> Reset
+              </.button>
+            </div>
           </div>
+        </form>
+      </.panel>
 
-          <a href={~p"/admin/conversations"} class="button button-outline" style="margin-bottom: 2px;">Reset</a>
+      <.panel>
+        <div class="overflow-x-auto">
+          <.table id="conversations" rows={@streams.conversations}>
+            <:col :let={{_id, c}} label="ID">
+              <span class="font-mono text-xs break-all">{c.id}</span>
+            </:col>
+            <:col :let={{_id, c}} label="Tenant">{c.tenant.name}</:col>
+            <:col :let={{_id, c}} label="Channel">
+              <span class="inline-flex items-center gap-1">
+                {c.channel.name}
+                <.badge value={c.channel.mode} title={c.channel.mode}>
+                  {mode_arrow(c.channel.mode)}
+                </.badge>
+              </span>
+            </:col>
+            <:col :let={{_id, c}} label="Status"><.badge value={c.status} /></:col>
+            <:col :let={{_id, c}} label="Created">
+              <span class="text-xs whitespace-nowrap">{c.inserted_at}</span>
+            </:col>
+            <:action :let={{_id, c}}>
+              <.button patch={~p"/admin/conversations/#{c.id}"} size="xs" variant="neutral">
+                View Events
+              </.button>
+            </:action>
+          </.table>
         </div>
-      </form>
-    </div>
-
-    <div class="card">
-      <table>
-        <thead>
-          <tr>
-            <th>ID</th>
-            <th>Tenant</th>
-            <th>Channel</th>
-            <th>Status</th>
-            <th>Created</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody id="conversations" phx-update="stream">
-          <tr :for={{dom_id, c} <- @streams.conversations} id={dom_id}>
-            <td><small><%= c.id %></small></td>
-            <td><%= c.tenant.name %></td>
-            <td>
-              <%= c.channel.name %>
-              <span class={"badge badge-#{c.channel.mode}"} style="margin-left: 4px; font-size: 0.75em;">
-                <%= mode_arrow(c.channel.mode) %>
-              </span>
-            </td>
-            <td>
-              <span class={"badge badge-#{c.status}"}>
-                <%= c.status %>
-              </span>
-            </td>
-            <td><%= c.inserted_at %></td>
-            <td>
-              <.link patch={~p"/admin/conversations/#{c.id}"} class="button button-clear">View Events</.link>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-      <p :if={@loaded_count == 0} style="text-align: center; color: #999;">No conversations found</p>
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;">
-        <small style="color: #666;">Showing <%= @loaded_count %> conversations</small>
-        <button :if={@has_more} id="load-more-conversations" phx-click="load_more" class="button button-outline">
-          Load more
-        </button>
-      </div>
-    </div>
+        <.empty_state :if={@loaded_count == 0}>No conversations found</.empty_state>
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <span class="text-sm text-base-content/60">Showing {@loaded_count} conversations</span>
+          <.button
+            :if={@has_more}
+            id="load-more-conversations"
+            phx-click="load_more"
+            size="sm"
+            variant="neutral"
+          >
+            Load more
+          </.button>
+        </div>
+      </.panel>
+    </Layouts.app>
     """
+  end
+
+  defp channel_option_label(c) do
+    "#{c.name} (#{c.type} #{mode_arrow(c.mode)}) - #{c.tenant.name}"
   end
 
   defp render_show(assigns) do
     ~H"""
-    <div style="margin-bottom: 20px;">
-      <.link patch={~p"/admin/conversations"} class="button button-outline">&larr; Back to List</.link>
-    </div>
+    <Layouts.app flash={@flash} nav={@nav}>
+      <.header>
+        Conversation Details
+        <:subtitle><span class="font-mono text-xs break-all">{@conversation.id}</span></:subtitle>
+        <:actions>
+          <.button patch={~p"/admin/conversations"} size="sm" variant="ghost">
+            <.icon name="hero-arrow-left" /> Back to List
+          </.button>
+        </:actions>
+      </.header>
 
-    <h1>Conversation Details</h1>
+      <.panel>
+        <dl class="grid gap-4 sm:grid-cols-2">
+          <div>
+            <dt class="text-sm text-base-content/60">ID</dt>
+            <dd><code class="font-mono text-xs break-all">{@conversation.id}</code></dd>
+          </div>
+          <div>
+            <dt class="text-sm text-base-content/60">Channel</dt>
+            <dd class="flex flex-wrap items-center gap-1">
+              {@conversation.channel.name} ({@conversation.channel.type})
+              <.badge value={@conversation.channel.mode} title={@conversation.channel.mode}>
+                {mode_arrow(@conversation.channel.mode)}
+              </.badge>
+            </dd>
+          </div>
+          <div>
+            <dt class="text-sm text-base-content/60">Tenant</dt>
+            <dd>{@conversation.tenant.name}</dd>
+          </div>
+          <div>
+            <dt class="text-sm text-base-content/60">Status</dt>
+            <dd><.badge value={@conversation.status} /></dd>
+          </div>
+        </dl>
+      </.panel>
 
-    <div class="card" style="margin-bottom: 20px;">
-      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
-        <div>
-          <label>ID</label>
-          <p><code><%= @conversation.id %></code></p>
-          <label>Tenant</label>
-          <p><%= @conversation.tenant.name %></p>
+      <.panel title="Events (Activities)">
+        <div :if={@has_older} class="text-center">
+          <.button id="load-older-activities" phx-click="load_older" size="sm" variant="neutral">
+            <.icon name="hero-arrow-up" /> Load earlier activities
+          </.button>
         </div>
-        <div>
-          <label>Channel</label>
-          <p>
-            <%= @conversation.channel.name %> (<%= @conversation.channel.type %>)
-            <span class={"badge badge-#{@conversation.channel.mode}"}><%= mode_arrow(@conversation.channel.mode) %></span>
-          </p>
-          <label>Status</label>
-          <p>
-            <span class={"badge badge-#{@conversation.status}"}>
-              <%= @conversation.status %>
-            </span>
-          </p>
+        <div class="overflow-x-auto">
+          <table class="table table-sm table-zebra">
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Sender</th>
+                <th>Message</th>
+                <th>Delivery</th>
+              </tr>
+            </thead>
+            <tbody id="activities" phx-update="stream">
+              <tr :for={{dom_id, a} <- @streams.activities} id={dom_id}>
+                <td class="text-xs whitespace-nowrap">{a.inserted_at}</td>
+                <td class="font-semibold">{a.sender}</td>
+                <td class="break-words">{a.text}</td>
+                <td><.delivery_badge delivery={Map.get(@delivery_map, a.id)} /></td>
+              </tr>
+            </tbody>
+          </table>
         </div>
-      </div>
-    </div>
-
-    <h2>Events (Activities)</h2>
-    <div class="card">
-      <div :if={@has_older} style="text-align: center; margin-bottom: 10px;">
-        <button id="load-older-activities" phx-click="load_older" class="button button-outline">
-          &uarr; Load earlier activities
-        </button>
-      </div>
-      <table>
-        <thead>
-          <tr>
-            <th>Time</th>
-            <th>Sender</th>
-            <th>Message</th>
-            <th>Delivery</th>
-          </tr>
-        </thead>
-        <tbody id="activities" phx-update="stream">
-          <tr :for={{dom_id, a} <- @streams.activities} id={dom_id}>
-            <td style="white-space: nowrap;"><small><%= a.inserted_at %></small></td>
-            <td><strong><%= a.sender %></strong></td>
-            <td><%= a.text %></td>
-            <td><%= delivery_badge(Map.get(@delivery_map, a.id)) %></td>
-          </tr>
-        </tbody>
-      </table>
-      <p :if={@activity_count == 0} style="text-align: center; color: #999;">No activities found</p>
-    </div>
+        <.empty_state :if={@activity_count == 0}>No activities found</.empty_state>
+      </.panel>
+    </Layouts.app>
     """
   end
 
-  defp delivery_badge(nil), do: ""
+  attr :delivery, :any, required: true
 
-  defp delivery_badge(%{status: "pending"}) do
-    assigns = %{}
-    ~H|<span class="badge" title="Pending">...</span>|
+  defp delivery_badge(%{delivery: %{status: status}} = assigns)
+       when status in ~w(pending sent delivered read failed) do
+    ~H"""
+    <span
+      class={["badge badge-sm", delivery_badge_class(@delivery.status)]}
+      title={String.capitalize(@delivery.status)}
+    >
+      {delivery_symbol(@delivery.status)}
+    </span>
+    """
   end
 
-  defp delivery_badge(%{status: "sent"}) do
-    assigns = %{}
-    ~H|<span class="badge badge-outbound" title="Sent">&#10003;</span>|
-  end
+  defp delivery_badge(assigns), do: ~H""
 
-  defp delivery_badge(%{status: "delivered"}) do
-    assigns = %{}
-    ~H|<span class="badge badge-active" title="Delivered">&#10003;&#10003;</span>|
-  end
+  defp delivery_badge_class("pending"), do: "badge-ghost"
+  defp delivery_badge_class("sent"), do: "badge-secondary"
+  defp delivery_badge_class("delivered"), do: "badge-success"
+  defp delivery_badge_class("read"), do: "badge-info"
+  defp delivery_badge_class("failed"), do: "badge-error"
 
-  defp delivery_badge(%{status: "read"}) do
-    assigns = %{}
-
-    ~H|<span class="badge badge-active" title="Read" style="color: #2196F3;">&#10003;&#10003;</span>|
-  end
-
-  defp delivery_badge(%{status: "failed"}) do
-    assigns = %{}
-    ~H|<span class="badge badge-inactive" title="Failed">&#10007;</span>|
-  end
-
-  defp delivery_badge(_), do: ""
+  defp delivery_symbol("pending"), do: "..."
+  defp delivery_symbol("sent"), do: "✓"
+  defp delivery_symbol("delivered"), do: "✓✓"
+  defp delivery_symbol("read"), do: "✓✓"
+  defp delivery_symbol("failed"), do: "✗"
 end

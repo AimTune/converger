@@ -1,63 +1,40 @@
-<div style="max-width: 400px; margin: 80px auto;">
-  <div class="card" style="padding: 30px;">
-    <h2 style="text-align: center; margin-bottom: 20px;">Choose a new password</h2>
-    <p style="text-align: center; color: #666; margin-bottom: 25px;">
-      At least {@min_length} characters. Setting it signs you out of every device.
-    </p>
-
-    <div
-      :if={@errors != []}
-      style="background: #f8d7da; color: #721c24; padding: 10px 15px; border-radius: 4px; margin-bottom: 15px; font-size: 0.9em;"
-    >
+<Layouts.auth
+  flash={@flash}
+  title="Choose a new password"
+  subtitle={"At least #{@min_length} characters. Setting it signs you out of every device."}
+>
+  <div :if={@errors != []} role="alert" class="alert alert-error text-sm">
+    <.icon name="hero-exclamation-circle" class="size-5 shrink-0" />
+    <div>
       <div :for={error <- @errors}>{error}</div>
     </div>
-
-    <form action={@base <> "/password/reset/" <> @token} method="post">
-      <input type="hidden" name="_csrf_token" value={get_csrf_token()} />
-      <input type="hidden" name="_method" value="put" />
-
-      <div style="margin-bottom: 15px;">
-        <label
-          for="reset_password"
-          style="display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.85em; color: #555;"
-        >
-          New password
-        </label>
-        <input
-          type="password"
-          id="reset_password"
-          name="reset[password]"
-          autocomplete="new-password"
-          minlength={@min_length}
-          required
-          style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; font-size: 1em;"
-        />
-      </div>
-
-      <div style="margin-bottom: 20px;">
-        <label
-          for="reset_password_confirmation"
-          style="display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.85em; color: #555;"
-        >
-          Confirm new password
-        </label>
-        <input
-          type="password"
-          id="reset_password_confirmation"
-          name="reset[password_confirmation]"
-          autocomplete="new-password"
-          minlength={@min_length}
-          required
-          style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; font-size: 1em;"
-        />
-      </div>
-
-      <button
-        type="submit"
-        style="width: 100%; padding: 12px; background: #007bff; color: white; border: none; border-radius: 4px; font-size: 1em; cursor: pointer;"
-      >
-        Reset password
-      </button>
-    </form>
   </div>
-</div>
+
+  <form action={@base <> "/password/reset/" <> @token} method="post">
+    <input type="hidden" name="_csrf_token" value={get_csrf_token()} />
+    <input type="hidden" name="_method" value="put" />
+
+    <.input
+      type="password"
+      id="reset_password"
+      name="reset[password]"
+      value=""
+      label="New password"
+      autocomplete="new-password"
+      minlength={@min_length}
+      required
+    />
+    <.input
+      type="password"
+      id="reset_password_confirmation"
+      name="reset[password_confirmation]"
+      value=""
+      label="Confirm new password"
+      autocomplete="new-password"
+      minlength={@min_length}
+      required
+    />
+
+    <button type="submit" class="btn btn-primary mt-3 w-full">Reset password</button>
+  </form>
+</Layouts.auth>

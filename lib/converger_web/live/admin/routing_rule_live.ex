@@ -233,248 +233,190 @@ defmodule ConvergerWeb.Admin.RoutingRuleLive do
 
   def render(assigns) do
     ~H"""
-    <h1 style="margin-bottom: 5px;">Routing Rules</h1>
-    <p style="color: #666; margin-top: 0; margin-bottom: 20px;">
-      Route messages from a source channel to target channels, optionally only when conditions match.
-      Rules of a source channel run in ascending priority; a matching rule with "stop processing" ends the evaluation.
-      Replies written from a target channel go back to the conversation's origin channel.
-      <.link navigate={~p"/admin/routing_rules/dry_run"} style="margin-left: 6px;">Dry run an activity</.link>
-    </p>
+    <Layouts.app flash={@flash} nav={@nav}>
+      <.header>
+        Routing Rules
+        <:subtitle>
+          Route messages from a source channel to target channels, optionally only when conditions match.
+          Rules of a source channel run in ascending priority; a matching rule with "stop processing" ends the evaluation.
+          Replies written from a target channel go back to the conversation's origin channel.
+        </:subtitle>
+        <:actions>
+          <.button navigate={~p"/admin/routing_rules/dry_run"} size="sm" variant="neutral">
+            <.icon name="hero-beaker" /> Dry run an activity
+          </.button>
+        </:actions>
+      </.header>
 
-    <div class="card">
-      <h3 style="margin-top: 0; margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 10px;">
-        {if @editing, do: "Edit Routing Rule: #{@editing.name}", else: "Create Routing Rule"}
-      </h3>
-      <.form for={@form} id="routing-rule-form" phx-submit="save" phx-change="form_changed">
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
-          <div>
-            <label style="display: block; font-weight: 600; margin-bottom: 5px; font-size: 0.9em; color: #555;">
-              Tenant
-            </label>
-            <select
+      <.panel title={if @editing, do: "Edit Routing Rule: #{@editing.name}", else: "Create Routing Rule"}>
+        <.form for={@form} id="routing-rule-form" phx-submit="save" phx-change="form_changed">
+          <div class="grid items-end gap-x-4 sm:grid-cols-2 lg:grid-cols-5">
+            <.input
+              type="select"
+              id="routing_rule_tenant_id"
               name="routing_rule[tenant_id]"
+              label="Tenant"
+              prompt="Select Tenant"
+              options={Enum.map(@tenants, &{&1.name, &1.id})}
+              value={@selected_tenant_id}
               required
               disabled={@editing != nil}
-              style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; background: #fff;"
-            >
-              <option value="">Select Tenant</option>
-              <%= for tenant <- @tenants do %>
-                <option value={tenant.id} selected={@selected_tenant_id == tenant.id}>
-                  {tenant.name}
-                </option>
-              <% end %>
-            </select>
-          </div>
-
-          <div>
-            <label style="display: block; font-weight: 600; margin-bottom: 5px; font-size: 0.9em; color: #555;">
-              Rule Name
-            </label>
-            <.input
-              field={@form[:name]}
-              placeholder="e.g. WhatsApp to WebSocket"
-              style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;"
             />
-          </div>
-
-          <div>
-            <label style="display: block; font-weight: 600; margin-bottom: 5px; font-size: 0.9em; color: #555;">
-              Source Channel
-            </label>
-            <select
+            <.input field={@form[:name]} label="Rule Name" placeholder="e.g. WhatsApp to WebSocket" />
+            <.input
+              type="select"
+              id="routing_rule_source_channel_id"
               name="routing_rule[source_channel_id]"
+              label="Source Channel"
+              prompt={if @selected_tenant_id, do: "Select Source Channel", else: "Select a tenant first"}
+              options={Enum.map(@source_candidates, &{"#{&1.name} (#{&1.type}) #{mode_indicator(&1.mode)}", &1.id})}
+              value={@selected_source_channel_id}
               required
-              style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; background: #fff;"
-            >
-              <option value="">
-                {if @selected_tenant_id, do: "Select Source Channel", else: "Select a tenant first"}
-              </option>
-              <%= for ch <- @source_candidates do %>
-                <option value={ch.id} selected={@selected_source_channel_id == ch.id}>
-                  {ch.name} ({ch.type}) {mode_indicator(ch.mode)}
-                </option>
-              <% end %>
-            </select>
-          </div>
-
-          <div>
-            <label style="display: block; font-weight: 600; margin-bottom: 5px; font-size: 0.9em; color: #555;">
-              Priority (lower runs first)
-            </label>
-            <.input
-              field={@form[:priority]}
-              type="number"
-              style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;"
             />
-          </div>
-
-          <div style="display: flex; align-items: flex-end;">
+            <.input field={@form[:priority]} type="number" label="Priority (lower runs first)" />
             <.input field={@form[:stop_processing]} type="checkbox" label="Stop processing when matched" />
           </div>
-        </div>
 
-        <div
-          :if={
-            @selected_source_channel_id &&
-              target_channels(@target_candidates, @selected_source_channel_id) != []
-          }
-          style="margin-top: 20px; padding: 15px; background: #f8f9fa; border-radius: 6px; border: 1px solid #e9ecef;"
-        >
-          <label style="display: block; font-weight: 600; margin-bottom: 10px; font-size: 0.9em; color: #555;">
-            Target Channels (outbound/duplex only)
-          </label>
-          <div style="display: flex; gap: 12px; flex-wrap: wrap;">
-            <%= for ch <- target_channels(@target_candidates, @selected_source_channel_id) do %>
-              <label style="display: flex; align-items: center; gap: 6px; padding: 6px 12px; background: #fff; border: 1px solid #ddd; border-radius: 4px; cursor: pointer; font-size: 0.9em;">
+          <fieldset
+            :if={
+              @selected_source_channel_id &&
+                target_channels(@target_candidates, @selected_source_channel_id) != []
+            }
+            class="mt-4 rounded-box border border-base-300 bg-base-200 p-4"
+          >
+            <legend class="px-1 text-sm font-semibold">Target Channels (outbound/duplex only)</legend>
+            <div class="flex flex-wrap gap-2">
+              <label
+                :for={ch <- target_channels(@target_candidates, @selected_source_channel_id)}
+                class="flex cursor-pointer items-center gap-2 rounded-field border border-base-300 bg-base-100 px-3 py-1.5 text-sm"
+              >
                 <input
                   type="checkbox"
+                  class="checkbox checkbox-sm"
                   name="routing_rule[target_channel_ids][]"
                   value={ch.id}
                   checked={ch.id in @selected_target_ids}
                 />
                 {ch.name}
-                <span style="color: #888; font-size: 0.85em;">
+                <span class="text-xs text-base-content/60">
                   ({ch.type}) {mode_indicator(ch.mode)}
                 </span>
               </label>
-            <% end %>
-          </div>
-          <p
-            :for={message <- field_errors(@form, :target_channel_ids)}
-            style="color: #dc3545; font-size: 0.85em; margin: 6px 0 0;"
+            </div>
+            <.error :for={message <- field_errors(@form, :target_channel_ids)}>{message}</.error>
+          </fieldset>
+
+          <div
+            :if={
+              @selected_source_channel_id &&
+                target_channels(@target_candidates, @selected_source_channel_id) == []
+            }
+            role="alert"
+            class="alert alert-warning mt-4 text-sm"
           >
-            {message}
-          </p>
-        </div>
+            <.icon name="hero-exclamation-triangle" class="size-5" />
+            <span>No outbound-capable channels available for this tenant. Create more channels first.</span>
+          </div>
 
-        <div
-          :if={
-            @selected_source_channel_id &&
-              target_channels(@target_candidates, @selected_source_channel_id) == []
-          }
-          style="margin-top: 20px; padding: 15px; background: #fff3cd; border-radius: 6px; border: 1px solid #ffc107; color: #856404; font-size: 0.9em;"
-        >
-          No outbound-capable channels available for this tenant. Create more channels first.
-        </div>
-
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 15px; margin-top: 20px;">
-          <div :for={{field, label} <- [conditions: "Conditions (JSON, empty = every activity)", transformations: "Rule transformations (JSON middleware chain)"]}>
-            <label
-              for={"routing_rule_#{field}"}
-              style="display: block; font-weight: 600; margin-bottom: 5px; font-size: 0.9em; color: #555;"
-            >
-              {label}
-            </label>
-            <textarea
+          <div class="mt-4 grid gap-x-4 md:grid-cols-2">
+            <.input
+              :for={
+                {field, label} <- [
+                  conditions: "Conditions (JSON, empty = every activity)",
+                  transformations: "Rule transformations (JSON middleware chain)"
+                ]
+              }
+              type="textarea"
               id={"routing_rule_#{field}"}
               name={"routing_rule[#{field}]"}
+              label={label}
               rows="6"
               placeholder={placeholder(field)}
-              style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-family: monospace; font-size: 0.85em;"
-            >{if field == :conditions, do: @conditions_json, else: @transformations_json}</textarea>
-            <p
-              :for={message <- field_errors(@form, field)}
-              style="color: #dc3545; font-size: 0.85em; margin: 4px 0 0;"
-            >
-              {message}
-            </p>
+              class="textarea w-full font-mono text-xs"
+              value={if field == :conditions, do: @conditions_json, else: @transformations_json}
+              errors={field_errors(@form, field)}
+            />
           </div>
-        </div>
-        <p style="color: #888; font-size: 0.8em; margin: 6px 0 0;">
-          Fields: type, sender, text, metadata.*, conversation.metadata.*, conversation.status,
-          participant.external_id, participant.display_name, participant.metadata.*, time.hour,
-          time.minute, time.minute_of_day, time.weekday, time.date. Ops: eq, neq, in, contains, regex, exists, gt, lt.
-          Groups: all, any, not.
-        </p>
+          <p class="text-xs text-base-content/60">
+            Fields: type, sender, text, metadata.*, conversation.metadata.*, conversation.status,
+            participant.external_id, participant.display_name, participant.metadata.*, time.hour,
+            time.minute, time.minute_of_day, time.weekday, time.date. Ops: eq, neq, in, contains, regex, exists, gt, lt.
+            Groups: all, any, not.
+          </p>
 
-        <button type="submit" style="margin-top: 15px; padding: 8px 20px; font-size: 0.95em;">
-          {if @editing, do: "Save Rule", else: "Create Rule"}
-        </button>
-        <button
-          :if={@editing}
-          type="button"
-          phx-click="cancel_edit"
-          style="margin-top: 15px; margin-left: 6px; padding: 8px 20px; font-size: 0.95em; background: #6c757d;"
-        >
-          Cancel
-        </button>
-      </.form>
-    </div>
+          <div class="mt-4 flex gap-2">
+            <.button type="submit" variant="primary">
+              {if @editing, do: "Save Rule", else: "Create Rule"}
+            </.button>
+            <.button :if={@editing} type="button" phx-click="cancel_edit" variant="ghost">
+              Cancel
+            </.button>
+          </div>
+        </.form>
+      </.panel>
 
-    <div class="card">
-      <h3 style="margin-top: 0; margin-bottom: 10px; border-bottom: 1px solid #eee; padding-bottom: 10px;">
-        Existing Rules
-      </h3>
-      <div :if={@routing_rules == []} style="padding: 20px; text-align: center; color: #888;">
-        No routing rules yet. Create one above.
-      </div>
-      <table :if={@routing_rules != []}>
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>Tenant</th>
-            <th>Source</th>
-            <th>Targets</th>
-            <th>Priority</th>
-            <th>Conditions</th>
-            <th>Status</th>
-            <th style="text-align: right;">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr :for={rule <- @routing_rules} id={"rule-#{rule.id}"}>
-            <td style="font-weight: 500;">{rule.name}</td>
-            <td>{if rule.tenant, do: rule.tenant.name, else: "-"}</td>
-            <td>
-              <span class="badge" style="background: #e3f2fd; color: #1565c0;">
+      <.panel title="Existing Rules">
+        <div :if={@routing_rules != []} class="overflow-x-auto">
+          <.table id="routing-rules" rows={@routing_rules} row_id={&"rule-#{&1.id}"}>
+            <:col :let={rule} label="Name"><span class="font-medium">{rule.name}</span></:col>
+            <:col :let={rule} label="Tenant">{if rule.tenant, do: rule.tenant.name, else: "-"}</:col>
+            <:col :let={rule} label="Source">
+              <span class="badge badge-sm badge-info whitespace-nowrap">
                 {if rule.source_channel, do: rule.source_channel.name, else: "-"}
               </span>
-            </td>
-            <td>
-              <%= for tid <- rule.target_channel_ids do %>
-                <span class="badge" style="background: #f3e5f5; color: #7b1fa2; margin-right: 4px;">
+            </:col>
+            <:col :let={rule} label="Targets">
+              <div class="flex flex-wrap gap-1">
+                <span
+                  :for={tid <- rule.target_channel_ids}
+                  class="badge badge-sm badge-secondary whitespace-nowrap"
+                >
                   {channel_name(tid, @channels)}
                 </span>
-              <% end %>
-            </td>
-            <td>
-              {rule.priority}<span :if={rule.stop_processing} title="stop processing" style="color: #888;"> (stop)</span>
-            </td>
-            <td style="max-width: 280px;">
-              <code style="font-size: 0.8em; word-break: break-all;">{conditions_summary(rule.conditions)}</code>
-              <div :if={rule.transformations != []} style="color: #888; font-size: 0.8em;">
+              </div>
+            </:col>
+            <:col :let={rule} label="Priority">
+              {rule.priority}<span
+                :if={rule.stop_processing}
+                title="stop processing"
+                class="text-base-content/60"
+              > (stop)</span>
+            </:col>
+            <:col :let={rule} label="Conditions">
+              <code class="block max-w-72 font-mono text-xs break-all">
+                {conditions_summary(rule.conditions)}
+              </code>
+              <div :if={rule.transformations != []} class="text-xs text-base-content/60">
                 {length(rule.transformations)} transformation(s)
               </div>
-            </td>
-            <td>
-              <span class={"badge badge-#{if rule.enabled, do: "active", else: "inactive"}"}>
+            </:col>
+            <:col :let={rule} label="Status">
+              <.badge value={if rule.enabled, do: "enabled", else: "disabled"}>
                 {if rule.enabled, do: "Enabled", else: "Disabled"}
-              </span>
-            </td>
-            <td style="text-align: right; white-space: nowrap;">
-              <button phx-click="edit" phx-value-id={rule.id} style="font-size: 0.85em;">
-                Edit
-              </button>
-              <button
-                phx-click="toggle_enabled"
-                phx-value-id={rule.id}
-                style="background: #6c757d; font-size: 0.85em; margin-left: 5px;"
-              >
-                {if rule.enabled, do: "Disable", else: "Enable"}
-              </button>
-              <button
-                phx-click="delete"
-                phx-value-id={rule.id}
-                phx-confirm="Are you sure you want to delete this rule?"
-                style="background: #dc3545; font-size: 0.85em; margin-left: 5px;"
-              >
-                Delete
-              </button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
+              </.badge>
+            </:col>
+            <:action :let={rule}>
+              <div class="flex justify-end gap-1 whitespace-nowrap">
+                <.button phx-click="edit" phx-value-id={rule.id} size="xs">Edit</.button>
+                <.button phx-click="toggle_enabled" phx-value-id={rule.id} size="xs" variant="neutral">
+                  {if rule.enabled, do: "Disable", else: "Enable"}
+                </.button>
+                <.button
+                  phx-click="delete"
+                  phx-value-id={rule.id}
+                  data-confirm="Are you sure you want to delete this rule?"
+                  size="xs"
+                  variant="error"
+                >
+                  Delete
+                </.button>
+              </div>
+            </:action>
+          </.table>
+        </div>
+        <.empty_state :if={@routing_rules == []}>No routing rules yet. Create one above.</.empty_state>
+      </.panel>
+    </Layouts.app>
     """
   end
 end

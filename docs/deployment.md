@@ -10,6 +10,10 @@ deployment-specific settings are read from environment variables in
 `config/runtime.exs` when the release boots, so the same build can be promoted
 between environments without recompiling.
 
+The image build also compiles the admin panel and tenant portal CSS and JavaScript (`mix assets.deploy`, standalone
+tailwind and esbuild binaries downloaded during the build) into the release, so the running server needs no Node.js
+and loads nothing from a CDN; see [Admin panel and tenant portal](admin-ui.md#assets).
+
 Contents:
 
 - [Environment variables](#environment-variables)

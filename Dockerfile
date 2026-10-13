@@ -30,8 +30,14 @@ RUN mix deps.compile
 
 COPY priv priv
 COPY lib lib
+COPY assets assets
 
 RUN mix compile
+
+# Admin/portal CSS and JS (ADR-0060): the standalone tailwind and esbuild
+# binaries are downloaded here, minify into priv/static/assets and phx.digest
+# writes the cache manifest. Nothing is loaded from a CDN at runtime.
+RUN mix assets.deploy
 
 COPY config/runtime.exs config/
 # bin/server and bin/migrate overlays (see docs/deployment.md).

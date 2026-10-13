@@ -15,12 +15,12 @@ defmodule ConvergerWeb.Router do
     plug :put_root_layout, html: {ConvergerWeb.Layouts, :root}
     plug :protect_from_forgery
 
-    # The admin/portal layouts load phoenix + LiveView from jsDelivr and use an
-    # inline bootstrap <script> and <style> (there is no asset pipeline), hence
-    # the CDN origin and 'unsafe-inline'. Everything else is locked to 'self'.
+    # Admin/portal assets are served from /assets (ADR-0060). 'unsafe-inline'
+    # stays for the theme bootstrap <script> of root.html.heex and for the Oban
+    # Web dashboard, which inlines its own script and styles.
     plug :put_secure_browser_headers, %{
       "content-security-policy" =>
-        "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+        "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
     }
   end
 
@@ -268,8 +268,7 @@ defmodule ConvergerWeb.Router do
     pipe_through [:browser, :admin_auth, :admin_session, :require_admin]
 
     live_session :admin,
-      on_mount: [{ConvergerWeb.Live.AuthHooks, :ensure_admin_user}],
-      root_layout: {ConvergerWeb.Layouts, :admin_root} do
+      on_mount: [{ConvergerWeb.Live.AuthHooks, :ensure_admin_user}] do
       live "/", DashboardLive
       live "/tenants", TenantLive
       live "/channels", ChannelLive
@@ -329,8 +328,7 @@ defmodule ConvergerWeb.Router do
     pipe_through [:browser, :tenant_session, :require_tenant]
 
     live_session :portal,
-      on_mount: [{ConvergerWeb.Live.AuthHooks, :ensure_tenant_user}],
-      root_layout: {ConvergerWeb.Layouts, :portal_root} do
+      on_mount: [{ConvergerWeb.Live.AuthHooks, :ensure_tenant_user}] do
       live "/", DashboardLive
       live "/channels", ChannelLive
       live "/conversations", ConversationLive, :index

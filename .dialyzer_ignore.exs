@@ -4,10 +4,12 @@
   # Ecto.Multi.insert/update/... pipelines: on OTP 28 Dialyzer reports
   # "call_without_opaque" because Ecto.Multi's struct carries an opaque
   # :queue/MapSet internally. This is an upstream Ecto + OTP 28 issue, not a
-  # bug in our code. OTP 27, which CI uses, does not emit it, so these filters
-  # are unused there (mix.exs sets `list_unused_filters: false` so that does
-  # not fail the run).
+  # bug in our code. CI runs OTP 28, where every file with such a pipeline
+  # needs an entry here; OTP 27 does not emit it (mix.exs sets
+  # `list_unused_filters: false` so unused filters do not fail the run).
   {"lib/converger/accounts.ex", :call_without_opaque},
+  {"lib/converger/accounts/password_reset.ex", :call_without_opaque},
+  {"lib/converger/accounts/totp.ex", :call_without_opaque},
   {"lib/converger/channels.ex", :call_without_opaque},
   {"lib/converger/conversations.ex", :call_without_opaque},
   {"lib/converger/routing_rules.ex", :call_without_opaque},

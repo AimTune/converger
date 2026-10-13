@@ -139,97 +139,111 @@ defmodule ConvergerWeb.Portal.UserLive do
 
   def render(assigns) do
     ~H"""
-    <h1>Users</h1>
+    <Layouts.app flash={@flash} nav={@nav}>
+      <.header>
+        Users
+        <:subtitle>Team members who can sign in to this tenant's portal.</:subtitle>
+      </.header>
 
-    <div :if={@can_manage} class="card">
-      <h3>Add User</h3>
-      <.form for={@form} phx-submit="save">
-        <div style="display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap;">
-          <div>
-            <label style="display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.85em; color: #555;">Name</label>
-            <input type="text" name="tenant_user[name]" placeholder="Full Name" required
-              style="padding: 8px; border: 1px solid #ddd; border-radius: 4px;" />
+      <.panel :if={@can_manage} title="Add User">
+        <.form for={@form} id="portal-user-form" phx-submit="save">
+          <div class="grid gap-x-4 sm:grid-cols-2 lg:grid-cols-4">
+            <.input
+              id="tenant_user_name"
+              name="tenant_user[name]"
+              value=""
+              label="Name"
+              placeholder="Full Name"
+              required
+            />
+            <.input
+              id="tenant_user_email"
+              type="email"
+              name="tenant_user[email]"
+              value=""
+              label="Email"
+              placeholder="user@example.com"
+              required
+            />
+            <.input
+              id="tenant_user_password"
+              type="password"
+              name="tenant_user[password]"
+              value=""
+              label="Password"
+              placeholder={"Min #{@min_password_length} characters"}
+              autocomplete="new-password"
+              required
+              minlength={@min_password_length}
+            />
+            <.input
+              id="tenant_user_role"
+              type="select"
+              name="tenant_user[role]"
+              value="member"
+              label="Role"
+              options={~w(member viewer admin)}
+            />
           </div>
-          <div>
-            <label style="display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.85em; color: #555;">Email</label>
-            <input type="email" name="tenant_user[email]" placeholder="user@example.com" required
-              style="padding: 8px; border: 1px solid #ddd; border-radius: 4px;" />
-          </div>
-          <div>
-            <label style="display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.85em; color: #555;">Password</label>
-            <input type="password" name="tenant_user[password]" placeholder={"Min #{@min_password_length} characters"} required minlength={@min_password_length}
-              style="padding: 8px; border: 1px solid #ddd; border-radius: 4px;" />
-          </div>
-          <div>
-            <label style="display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.85em; color: #555;">Role</label>
-            <select name="tenant_user[role]" style="padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
-              <option value="member">member</option>
-              <option value="viewer">viewer</option>
-              <option value="admin">admin</option>
-            </select>
-          </div>
-          <button type="submit">Add User</button>
-        </div>
-      </.form>
-    </div>
+          <.button type="submit" variant="primary">Add User</.button>
+        </.form>
+      </.panel>
 
-    <div :if={!@can_manage} class="card" style="background: #fff3e0; color: #e65100;">
-      Only owner and admin users can manage team members.
-    </div>
+      <div :if={!@can_manage} role="alert" class="alert alert-warning">
+        <.icon name="hero-lock-closed" class="size-5" />
+        <span>Only owner and admin users can manage team members.</span>
+      </div>
 
-    <div class="card">
-      <table>
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>Email</th>
-            <th>Role</th>
-            <th>Status</th>
-            <th>2FA</th>
-            <th>Joined</th>
-            <th :if={@can_manage}>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr :for={user <- @tenant_users}>
-            <td><%= user.name %></td>
-            <td><%= user.email %></td>
-            <td>
-              <span class={"badge badge-#{user.role}"}><%= user.role %></span>
-            </td>
-            <td>
-              <span class={"badge badge-#{user.status}"}><%= user.status %></span>
-            </td>
-            <td>
-              <span :if={TOTP.enabled?(user)} class="badge badge-active">on</span>
-              <span :if={!TOTP.enabled?(user)} class="badge badge-inactive">off</span>
-            </td>
-            <td><small><%= Calendar.strftime(user.inserted_at, "%Y-%m-%d %H:%M") %></small></td>
-            <td :if={@can_manage}>
-              <button phx-click="toggle_status" phx-value-id={user.id} class="badge">
-                <%= if user.status == "active", do: "Disable", else: "Enable" %>
-              </button>
-              <button :if={TOTP.enabled?(user) && user.id != @current_tenant_user.id}
-                phx-click="reset_2fa" phx-value-id={user.id}
-                phx-confirm="Turn off two-factor authentication for this user?"
-                class="badge">
+      <.panel>
+        <div class="overflow-x-auto">
+          <.table id="portal-users" rows={@tenant_users} row_id={&"portal-user-#{&1.id}"}>
+            <:col :let={user} label="Name"><span class="font-medium">{user.name}</span></:col>
+            <:col :let={user} label="Email">{user.email}</:col>
+            <:col :let={user} label="Role"><.badge value={user.role} /></:col>
+            <:col :let={user} label="Status"><.badge value={user.status} /></:col>
+            <:col :let={user} label="2FA">
+              <.badge value={if TOTP.enabled?(user), do: "enabled", else: "disabled"}>
+                {if TOTP.enabled?(user), do: "on", else: "off"}
+              </.badge>
+            </:col>
+            <:col :let={user} label="Joined">
+              <span class="text-xs text-base-content/70">
+                {Calendar.strftime(user.inserted_at, "%Y-%m-%d %H:%M")}
+              </span>
+            </:col>
+            <:action :let={user} :if={@can_manage}>
+              <.button phx-click="toggle_status" phx-value-id={user.id} size="xs" variant="neutral">
+                {if user.status == "active", do: "Disable", else: "Enable"}
+              </.button>
+              <.button
+                :if={TOTP.enabled?(user) && user.id != @current_tenant_user.id}
+                phx-click="reset_2fa"
+                phx-value-id={user.id}
+                data-confirm="Turn off two-factor authentication for this user?"
+                size="xs"
+                variant="neutral"
+              >
                 Reset 2FA
-              </button>
-              <button :if={user.id != @current_tenant_user.id}
-                phx-click="delete" phx-value-id={user.id}
-                phx-confirm="Are you sure you want to remove this user?"
-                class="badge badge-inactive">
+              </.button>
+              <.button
+                :if={user.id != @current_tenant_user.id}
+                phx-click="delete"
+                phx-value-id={user.id}
+                data-confirm="Are you sure you want to remove this user?"
+                size="xs"
+                variant="error"
+              >
                 Delete
-              </button>
-              <span :if={user.id == @current_tenant_user.id} style="color: #999; font-size: 0.85em;">(you)</span>
-            </td>
-          </tr>
-          <tr :if={@tenant_users == []}>
-            <td colspan="7" style="text-align: center; color: #999;">No users found.</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
+              </.button>
+              <span :if={user.id == @current_tenant_user.id} class="text-xs text-base-content/60">
+                (you)
+              </span>
+            </:action>
+          </.table>
+        </div>
+        <.empty_state :if={@tenant_users == []}>No users found.</.empty_state>
+      </.panel>
+    </Layouts.app>
     """
   end
 end

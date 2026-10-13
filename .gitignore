@@ -34,6 +34,11 @@ converger-*.tar
 /.env.*
 !/.env.example
 
+# Admin/portal assets built by tailwind and esbuild (`mix assets.build`), and
+# the digests of `mix assets.deploy`.
+/priv/static/assets/
+/priv/static/cache_manifest.json
+
 # Local attachment storage (LocalStorage backend).
 /priv/uploads/
 
