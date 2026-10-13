@@ -22,7 +22,7 @@ specifics are on the [Kubernetes](kubernetes.md) page.
 | Tenant rate-limit override cache invalidation | PubSub | Stale overrides for up to 30 s on other nodes |
 | Oban jobs (deliveries, cron) | **Postgres** (`SKIP LOCKED`, leader election in the `oban_peers` table) | Works without a cluster: each job runs exactly once |
 | Broadway pipeline (`Converger.Pipeline.Broadway`, not the default) | Nothing: each node processes what it pushed itself | Same; retries go through Oban |
-| Broker channel consumers (`kafka`, `rabbitmq`) | `:global` registration (one consumer per channel), channel-change notifications over PubSub | Every node runs a consumer for every broker channel: still no duplicate activities (idempotency keys), but Kafka splits the partitions among them and RabbitMQ the messages, so ordering is per node |
+| Broker channel consumers (`kafka`, `rabbitmq`, `nats`, `redis_streams`) | `:global` registration (one consumer per channel), channel-change notifications over PubSub | Every node runs a consumer for every broker channel: still no duplicate activities (idempotency keys), but Kafka splits the partitions among them and RabbitMQ, NATS and Redis the messages, so ordering is per node |
 
 Oban needs no distribution, so deliveries are exactly-once even across a netsplit. Everything in the PubSub column
 degrades to per-node behaviour while nodes are disconnected and recovers when they reconnect.

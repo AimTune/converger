@@ -17,7 +17,7 @@ Table `channels`:
 | `id` | uuid | | Primary key. |
 | `tenant_id` | uuid | | Owner. `(tenant_id, name)` is unique. |
 | `name` | text | | Required. |
-| `type` | string | `"webhook"` | Adapter: `echo`, `webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram`, `email`, `sms_twilio`, `sms_vonage`, `kafka`, `rabbitmq`. |
+| `type` | string | `"webhook"` | Adapter: `echo`, `webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram`, `email`, `sms_twilio`, `sms_vonage`, `kafka`, `rabbitmq`, `nats`, `redis_streams`. |
 | `mode` | text | `"duplex"` | `inbound`, `outbound` or `duplex`. Must be supported by the type. |
 | `secret` | encrypted binary | generated | Encrypted at rest. Generated (32 random bytes, Base64) when not given. |
 | `secret_hash` | binary | | SHA-256 of `secret`, unique, used for lookups. |
@@ -50,6 +50,8 @@ Each type maps to a module implementing the `Converger.Channels.Adapter` behavio
 | `sms_vonage` | `inbound`, `outbound`, `duplex` | `from`, and `api_key` + `api_secret` or `application_id` + `private_key`, plus `signature_secret` when `require_signature` is true. Optional: `default_country_code`, `max_segments` | Vonage Messages API (SMS), status webhooks | [SMS](../channels/sms.md) |
 | `kafka` | `inbound`, `outbound`, `duplex` | `brokers`, plus `topic_in` (inbound, duplex) and `topic_out` (outbound, duplex). Optional: `group_id`, `start_offset`, `dlq_topic`, `concurrency`, SASL (`sasl_mechanism`, `sasl_username`, `sasl_password`), TLS (`tls`, `tls_verify`, `tls_ca_cert`) | Produces the activity envelope to `topic_out` keyed by conversation; consumes `topic_in` ([broker channel](../channels/brokers.md)) | [Kafka](../channels/kafka.md) |
 | `rabbitmq` | `inbound`, `outbound`, `duplex` | `url`, plus `queue` (inbound, duplex) and `routing_key` (outbound, duplex). Optional: `username`, `password`, `exchange`, `dlq_queue`, `declare`, `prefetch_count`, `concurrency`, `tls_verify`, `tls_ca_cert` | Publishes the activity envelope with publisher confirms; consumes `queue` ([broker channel](../channels/brokers.md)) | [RabbitMQ](../channels/rabbitmq.md) |
+| `nats` | `inbound`, `outbound`, `duplex` | `servers`, plus `stream` and `subject_in` (inbound, duplex) and `subject_out` (outbound, duplex). Optional: `durable_name`, `dlq_subject`, `declare`, `deliver_policy`, `batch_size`, `ack_wait_seconds`, `concurrency`, auth (`username` / `password`, `token`, `nkey_seed` or `creds`), `tls`, `tls_verify`, `tls_ca_cert` | JetStream publish of the activity envelope; pulls from a durable consumer ([broker channel](../channels/brokers.md)) | [NATS JetStream](../channels/nats.md) |
+| `redis_streams` | `inbound`, `outbound`, `duplex` | `url`, plus `stream_in` (inbound, duplex) and `stream_out` (outbound, duplex). Optional: `username`, `password`, `group`, `dlq_stream`, `maxlen`, `start_id`, `batch_size`, `concurrency`, `tls_verify`, `tls_ca_cert` | `XADD` of the activity envelope; reads `stream_in` with a consumer group ([broker channel](../channels/brokers.md)) | [Redis Streams](../channels/redis-streams.md) |
 | `echo` | `outbound` | none | Writes a reply activity from `"bot"` into the same conversation (testing) | [Echo](../channels/echo.md) |
 
 See the [channels overview](../channels/overview.md) for provider setup, and [writing an adapter](../channels/writing-an-adapter.md) to add a type. Each type is one adapter module: the type list, the config validation above and the admin form all come from the adapters' `capabilities/0` and `config_schema/0` ([ADR-0038](../adr/0038-adapter-behaviour-v2-and-config-driven-registry.md)).
@@ -145,7 +147,7 @@ Deleting a channel also disconnects its sockets, and cascades to its conversatio
 
 ## Health checks
 
-`Converger.Workers.ChannelHealthWorker` runs every 5 minutes (Oban cron). For each **active** channel of type `webhook`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram`, `email`, `sms_twilio`, `sms_vonage`, `kafka` or `rabbitmq`, it computes the delivery failure rate over the last 60 minutes and stores a row in `channel_health_checks`:
+`Converger.Workers.ChannelHealthWorker` runs every 5 minutes (Oban cron). For each **active** channel of type `webhook`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram`, `email`, `sms_twilio`, `sms_vonage`, `kafka`, `rabbitmq`, `nats` or `redis_streams`, it computes the delivery failure rate over the last 60 minutes and stores a row in `channel_health_checks`:
 
 | Status | Failure rate (failed / total deliveries in window) |
 | --- | --- |

@@ -94,12 +94,15 @@ defmodule Converger.MixProject do
       {:gettext, "~> 1.0"},
       {:cors_plug, "~> 3.0"},
       {:broadway, "~> 1.3"},
-      # Broker channels (kafka, rabbitmq adapters, ADR-0047). Patch-level pins:
-      # the consumers rely on their ack / offset-commit semantics.
+      # Broker channels (kafka, rabbitmq adapters, ADR-0047; nats, redis_streams,
+      # ADR-0054). Patch-level pins: the consumers rely on their ack /
+      # offset-commit semantics.
       {:broadway_kafka, "~> 0.7.0"},
       {:brod, "~> 4.7.0"},
       {:broadway_rabbitmq, "~> 0.8.2"},
       {:amqp, "~> 4.3.0"},
+      {:gnat, "~> 1.18.1"},
+      {:redix, "~> 1.9.2"},
       {:hammer, "~> 7.5"},
       {:opentelemetry, "~> 1.5"},
       {:opentelemetry_exporter, "~> 1.8"},

@@ -442,7 +442,9 @@ defmodule Converger.Channels.Adapter do
     Converger.Channels.Adapters.Teams,
     Converger.Channels.Adapters.HttpPull,
     Converger.Channels.Adapters.Kafka,
-    Converger.Channels.Adapters.RabbitMQ
+    Converger.Channels.Adapters.RabbitMQ,
+    Converger.Channels.Adapters.Nats,
+    Converger.Channels.Adapters.RedisStreams
   ]
 
   @required_functions [type: 0, supported_modes: 0, deliver_activity: 2, parse_inbound: 2]

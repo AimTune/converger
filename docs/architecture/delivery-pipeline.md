@@ -96,7 +96,7 @@ The RabbitMQ push module opens and closes an AMQP connection per message, which 
 :::tip Pipeline transport is not an integration point
 Kafka and RabbitMQ here are the **pipeline transport**: an internal queue between "activity committed" and "deliver to
 channels", carrying only `activity_id` / `channel_id` pointers. To exchange conversations with your own services over
-Kafka or RabbitMQ, create a **broker channel** (`kafka`, `rabbitmq`) instead: it has a documented envelope, consumes
+Kafka or RabbitMQ, create a **broker channel** (`kafka`, `rabbitmq`, `nats`, `redis_streams`) instead: it has a documented envelope, consumes
 inbound messages, is tenant-scoped and is tracked like every channel. See
 [pipeline transport or broker channel](../channels/brokers.md#pipeline-transport-or-broker-channel).
 :::
