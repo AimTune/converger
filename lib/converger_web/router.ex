@@ -198,6 +198,15 @@ defmodule ConvergerWeb.Router do
     get "/login", AdminSessionController, :new
     post "/login", AdminSessionController, :create
     delete "/logout", AdminSessionController, :delete
+
+    # Second login step for admins with 2FA, and password reset by email
+    # (ADR-0058). Still behind the IP whitelist.
+    get "/login/totp", TwoFactorLoginController, :new, assigns: %{user_type: "admin"}
+    post "/login/totp", TwoFactorLoginController, :create, assigns: %{user_type: "admin"}
+    get "/password/reset", PasswordResetController, :new, assigns: %{user_type: "admin"}
+    post "/password/reset", PasswordResetController, :create, assigns: %{user_type: "admin"}
+    get "/password/reset/:token", PasswordResetController, :edit, assigns: %{user_type: "admin"}
+    put "/password/reset/:token", PasswordResetController, :update, assigns: %{user_type: "admin"}
   end
 
   # Own password change (also the forced change for `must_change_password`)
@@ -206,6 +215,19 @@ defmodule ConvergerWeb.Router do
 
     get "/password", AdminPasswordController, :edit
     put "/password", AdminPasswordController, :update
+
+    # Security settings (2FA, sessions). Reachable before required 2FA is
+    # set up: admins whose role requires it are sent here.
+    get "/security", SecurityController, :show, assigns: %{user_type: "admin"}
+    post "/security/totp/setup", SecurityController, :setup_totp, assigns: %{user_type: "admin"}
+    post "/security/totp", SecurityController, :confirm_totp, assigns: %{user_type: "admin"}
+    delete "/security/totp", SecurityController, :disable_totp, assigns: %{user_type: "admin"}
+
+    delete "/security/sessions", SecurityController, :log_out_everywhere,
+      assigns: %{user_type: "admin"}
+
+    delete "/security/sessions/:id", SecurityController, :delete_session,
+      assigns: %{user_type: "admin"}
   end
 
   # Admin panel (IP whitelist + session auth)
@@ -256,6 +278,17 @@ defmodule ConvergerWeb.Router do
     get "/login", TenantSessionController, :new
     post "/login", TenantSessionController, :create
     delete "/logout", TenantSessionController, :delete
+
+    # Second login step for users with 2FA, and password reset by email
+    # (ADR-0058).
+    get "/login/totp", TwoFactorLoginController, :new, assigns: %{user_type: "tenant"}
+    post "/login/totp", TwoFactorLoginController, :create, assigns: %{user_type: "tenant"}
+    get "/password/reset", PasswordResetController, :new, assigns: %{user_type: "tenant"}
+    post "/password/reset", PasswordResetController, :create, assigns: %{user_type: "tenant"}
+    get "/password/reset/:token", PasswordResetController, :edit, assigns: %{user_type: "tenant"}
+
+    put "/password/reset/:token", PasswordResetController, :update,
+      assigns: %{user_type: "tenant"}
   end
 
   # Tenant portal (session auth)
@@ -281,6 +314,21 @@ defmodule ConvergerWeb.Router do
     pipe_through [:browser, :tenant_session, :require_tenant]
 
     get "/deliveries/export", DeliveryExportController, :portal
+
+    # Security settings: 2FA, sessions, own password (ADR-0058)
+    get "/security", SecurityController, :show, assigns: %{user_type: "tenant"}
+    post "/security/totp/setup", SecurityController, :setup_totp, assigns: %{user_type: "tenant"}
+    post "/security/totp", SecurityController, :confirm_totp, assigns: %{user_type: "tenant"}
+    delete "/security/totp", SecurityController, :disable_totp, assigns: %{user_type: "tenant"}
+
+    put "/security/password", SecurityController, :update_password,
+      assigns: %{user_type: "tenant"}
+
+    delete "/security/sessions", SecurityController, :log_out_everywhere,
+      assigns: %{user_type: "tenant"}
+
+    delete "/security/sessions/:id", SecurityController, :delete_session,
+      assigns: %{user_type: "tenant"}
   end
 
   # Enable Swoosh mailbox preview in development

@@ -247,7 +247,7 @@ defmodule Converger.PaginationTest do
             tenant_id: t.id,
             name: "User #{i}",
             email: "user#{i}-#{System.unique_integer([:positive])}@example.com",
-            password: "password123",
+            password: "password-123456",
             role: "member"
           })
       end

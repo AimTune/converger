@@ -141,7 +141,7 @@ rows with raw SQL bypasses the purge; retention archives such orphans eventually
 
 ## Admin users and tenant users
 
-Converger has two kinds of human accounts, both with bcrypt-hashed passwords (minimum 8 characters) and status `active`/`inactive`:
+Converger has two kinds of human accounts, both with bcrypt-hashed passwords ([password policy](../security/overview.md#password-policy): at least 12 characters by default), optional TOTP two-factor authentication, server-side sessions, password reset by email, and status `active`/`inactive`:
 
 | | Admin users (`admin_users`) | Tenant users (`tenant_users`) |
 | --- | --- | --- |
@@ -149,6 +149,8 @@ Converger has two kinds of human accounts, both with bcrypt-hashed passwords (mi
 | UI | Admin panel, `/admin` | Tenant portal, `/portal` |
 | Network | IP allowlist `ADMIN_IP_WHITELIST` (default `127.0.0.1,::1`), proxy-aware through `TRUSTED_PROXIES` | No IP allowlist |
 | Login | `/admin/login` with email and password | `/portal/login` with **tenant name**, email and password |
+| Security settings | `/admin/security`: 2FA, sessions, "Log out everywhere" (2FA required for the roles in `ADMIN_REQUIRE_2FA_ROLES`, default `super_admin`) | `/portal/security`: 2FA, sessions, own password, "Log out everywhere" |
+| Forgotten password | `/admin/password/reset` (email) | `/portal/password/reset` (tenant name and email) |
 | Roles | `super_admin`, `admin`, `viewer` | `owner`, `admin`, `member`, `viewer` |
 | Created by | `Converger.Release.seed_admin/0` or `priv/repo/seeds.exs` (first `super_admin`), then **Admin, Users** | **Admin, Tenant Users**, or portal users with role `owner`/`admin` |
 
@@ -157,6 +159,6 @@ Role effects in the current UI:
 - Admin: only a `super_admin` manages admin users. A `viewer` cannot change tenant users and has read-only access to the Oban dashboard (`/admin/oban`), and can browse and export the Deliveries page but not replay dead letters. `super_admin` and `admin` have full access.
 - Portal: `owner`, `admin` and `member` can toggle channel status, edit routing rules and replay the tenant's dead letters on the Deliveries page (`/portal/deliveries`). `owner` and `admin` manage the tenant's users. `viewer` is read-only. Portal users cannot create channels or rotate API keys.
 
-The first admin created without `ADMIN_PASSWORD` gets a generated password and `must_change_password: true`. It is redirected to `/admin/password` until the password is changed. Login attempts are throttled per IP and per account (5 failures per minute each). See [Getting started](../getting-started.md#4-create-the-first-admin-account) and [security](../security.md).
+The first admin created without `ADMIN_PASSWORD` gets a generated password and `must_change_password: true`. It is redirected to `/admin/password` until the password is changed. Login attempts are throttled per IP and per account (5 failures per minute each). A `super_admin` can reset another admin's 2FA and sign them out on **Admin, Users**; portal `owner`/`admin` users can reset a team member's 2FA on **Users**. See [Security model](../security/overview.md#two-factor-authentication-totp). See [Getting started](../getting-started.md#4-create-the-first-admin-account) and [security](../security.md).
 
 Create, update, delete, status-toggle and key-rotation operations made through the admin panel (and routing rule changes made through the tenant API), and every dead-letter replay (admin panel, portal or tenant API), write an audit log entry. Sensitive values are redacted ([ADR-0012](../adr/0012-secrets-at-rest-and-audit-redaction.md)).

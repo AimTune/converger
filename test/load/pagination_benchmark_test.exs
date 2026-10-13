@@ -94,7 +94,7 @@ defmodule Converger.PaginationBenchmarkTest do
     conn =
       conn
       |> Map.put(:remote_ip, {127, 0, 0, 1})
-      |> init_test_session(%{admin_user_id: admin.id})
+      |> log_in_admin(admin)
 
     {:ok, view, html} =
       timed("admin /conversations mount", fn -> live(conn, ~p"/admin/conversations") end)

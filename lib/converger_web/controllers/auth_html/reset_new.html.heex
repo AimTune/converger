@@ -1,0 +1,71 @@
+<div style="max-width: 400px; margin: 80px auto;">
+  <div class="card" style="padding: 30px;">
+    <h2 style="text-align: center; margin-bottom: 20px;">Forgot your password?</h2>
+
+    <div
+      :if={@sent}
+      style="background: #d4edda; color: #155724; padding: 10px 15px; border-radius: 4px; margin-bottom: 15px; font-size: 0.9em;"
+    >
+      If an account matches, we have sent it an email with a link to reset the password.
+      The link expires in one hour.
+    </div>
+
+    <div
+      :if={@error_message}
+      style="background: #f8d7da; color: #721c24; padding: 10px 15px; border-radius: 4px; margin-bottom: 15px; font-size: 0.9em;"
+    >
+      {@error_message}
+    </div>
+
+    <p :if={!@sent} style="text-align: center; color: #666; margin-bottom: 25px;">
+      Enter your account details and we will email you a reset link.
+    </p>
+
+    <form action={@base <> "/password/reset"} method="post">
+      <input type="hidden" name="_csrf_token" value={get_csrf_token()} />
+
+      <div :if={@base == "/portal"} style="margin-bottom: 15px;">
+        <label
+          for="reset_tenant_name"
+          style="display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.85em; color: #555;"
+        >
+          Tenant Name
+        </label>
+        <input
+          type="text"
+          id="reset_tenant_name"
+          name="reset[tenant_name]"
+          required
+          style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; font-size: 1em;"
+        />
+      </div>
+
+      <div style="margin-bottom: 20px;">
+        <label
+          for="reset_email"
+          style="display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.85em; color: #555;"
+        >
+          Email
+        </label>
+        <input
+          type="email"
+          id="reset_email"
+          name="reset[email]"
+          required
+          style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; font-size: 1em;"
+        />
+      </div>
+
+      <button
+        type="submit"
+        style="width: 100%; padding: 12px; background: #007bff; color: white; border: none; border-radius: 4px; font-size: 1em; cursor: pointer;"
+      >
+        Send reset link
+      </button>
+    </form>
+
+    <p style="text-align: center; margin-top: 15px; font-size: 0.85em;">
+      <a href={@base <> "/login"}>Back to sign in</a>
+    </p>
+  </div>
+</div>

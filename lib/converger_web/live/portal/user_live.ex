@@ -2,7 +2,7 @@ defmodule ConvergerWeb.Portal.UserLive do
   use ConvergerWeb, :live_view
 
   alias Converger.Accounts
-  alias Converger.Accounts.TenantUser
+  alias Converger.Accounts.{TenantUser, TOTP}
 
   def mount(_params, _session, socket) do
     tenant_id = socket.assigns.current_tenant.id
@@ -12,6 +12,7 @@ defmodule ConvergerWeb.Portal.UserLive do
      assign(socket,
        tenant_users: Accounts.list_tenant_users(tenant_id),
        page_title: "Users",
+       min_password_length: Converger.Accounts.PasswordPolicy.min_length(),
        form: to_form(Accounts.change_tenant_user(%TenantUser{})),
        can_manage: can_manage
      )}
@@ -73,6 +74,32 @@ defmodule ConvergerWeb.Portal.UserLive do
     end
   end
 
+  # Lost authenticator: an owner/admin turns a team member's 2FA off
+  # (audit-logged).
+  def handle_event("reset_2fa", %{"id" => id}, socket) do
+    user = Accounts.get_tenant_user!(id)
+
+    cond do
+      not socket.assigns.can_manage ->
+        {:noreply, put_flash(socket, :error, "You don't have permission to do this.")}
+
+      user.tenant_id != socket.assigns.current_tenant.id ->
+        {:noreply, put_flash(socket, :error, "Unauthorized")}
+
+      true ->
+        case TOTP.reset(user, build_actor(socket)) do
+          {:ok, _} ->
+            {:noreply,
+             socket
+             |> assign(tenant_users: Accounts.list_tenant_users(socket.assigns.current_tenant.id))
+             |> put_flash(:info, "Two-factor authentication reset for #{user.email}")}
+
+          {:error, _} ->
+            {:noreply, put_flash(socket, :error, "Failed to reset two-factor authentication")}
+        end
+    end
+  end
+
   defp toggle_user_status(socket, user) do
     new_status = if user.status == "active", do: "inactive", else: "active"
 
@@ -130,7 +157,7 @@ defmodule ConvergerWeb.Portal.UserLive do
           </div>
           <div>
             <label style="display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.85em; color: #555;">Password</label>
-            <input type="password" name="tenant_user[password]" placeholder="Min 8 characters" required minlength="8"
+            <input type="password" name="tenant_user[password]" placeholder={"Min #{@min_password_length} characters"} required minlength={@min_password_length}
               style="padding: 8px; border: 1px solid #ddd; border-radius: 4px;" />
           </div>
           <div>
@@ -158,6 +185,7 @@ defmodule ConvergerWeb.Portal.UserLive do
             <th>Email</th>
             <th>Role</th>
             <th>Status</th>
+            <th>2FA</th>
             <th>Joined</th>
             <th :if={@can_manage}>Actions</th>
           </tr>
@@ -172,10 +200,20 @@ defmodule ConvergerWeb.Portal.UserLive do
             <td>
               <span class={"badge badge-#{user.status}"}><%= user.status %></span>
             </td>
+            <td>
+              <span :if={TOTP.enabled?(user)} class="badge badge-active">on</span>
+              <span :if={!TOTP.enabled?(user)} class="badge badge-inactive">off</span>
+            </td>
             <td><small><%= Calendar.strftime(user.inserted_at, "%Y-%m-%d %H:%M") %></small></td>
             <td :if={@can_manage}>
               <button phx-click="toggle_status" phx-value-id={user.id} class="badge">
                 <%= if user.status == "active", do: "Disable", else: "Enable" %>
+              </button>
+              <button :if={TOTP.enabled?(user) && user.id != @current_tenant_user.id}
+                phx-click="reset_2fa" phx-value-id={user.id}
+                phx-confirm="Turn off two-factor authentication for this user?"
+                class="badge">
+                Reset 2FA
               </button>
               <button :if={user.id != @current_tenant_user.id}
                 phx-click="delete" phx-value-id={user.id}
@@ -187,7 +225,7 @@ defmodule ConvergerWeb.Portal.UserLive do
             </td>
           </tr>
           <tr :if={@tenant_users == []}>
-            <td colspan="6" style="text-align: center; color: #999;">No users found.</td>
+            <td colspan="7" style="text-align: center; color: #999;">No users found.</td>
           </tr>
         </tbody>
       </table>

@@ -69,8 +69,10 @@ kept for the next one.
 | `inbound` | 500 per 1 s | channel | `inbound:channel:<channel_id>` | `POST /api/v1/channels/:channel_id/inbound`, `POST /api/v1/channels/:channel_id/status` | yes |
 | `token_generate` | 10 per 60 s | channel | `token_generate:channel:<channel_id>` | `POST /api/v1/converger/tokens/generate`, `POST /api/v1/converger/tokens/refresh` | yes |
 | `token_create` | 10 per 60 s | client IP | `token_create:ip:<ip>` | `POST /api/v1/tokens` (legacy) | no |
-| `login_ip` | 5 failures per 60 s | client IP | `login_ip:<ip>` | `POST /admin/login`, `POST /portal/login` | no |
-| `login_account` | 5 failures per 60 s | account | `login_account:admin:<email>` or `login_account:tenant:<tenant name>:<email>` (trimmed, lowercased) | `POST /admin/login`, `POST /portal/login` | no |
+| `login_ip` | 5 failures per 60 s | client IP | `login_ip:<ip>` | `POST /admin/login`, `POST /portal/login`, wrong 2FA codes on `POST /admin/login/totp`, `POST /portal/login/totp` | no |
+| `login_account` | 5 failures per 60 s | account | `login_account:admin:<email>` or `login_account:tenant:<tenant name>:<email>` (trimmed, lowercased), `login_account:admin-2fa:<user id>` or `login_account:tenant-2fa:<user id>` for 2FA codes | `POST /admin/login`, `POST /portal/login`, `POST /admin/login/totp`, `POST /portal/login/totp` | no |
+| `password_reset_ip` | 5 per 60 s | client IP | `password_reset_ip:ip:<ip>` | `POST /admin/password/reset`, `POST /portal/password/reset` (429 when exceeded) | no |
+| `password_reset_account` | 3 per hour | account | `password_reset_account:admin::<email>` or `password_reset_account:tenant:<tenant name>:<email>` (lowercased) | same; over the limit no email is sent, but the answer is unchanged (no account enumeration) | no |
 
 How the identity is found (`ConvergerWeb.Plugs.RateLimit`):
 

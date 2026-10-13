@@ -45,7 +45,7 @@
           id="admin_password_password"
           name="admin_password[password]"
           autocomplete="new-password"
-          minlength="8"
+          minlength={@min_length}
           required
           style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; font-size: 1em;"
         />
@@ -63,7 +63,7 @@
           id="admin_password_password_confirmation"
           name="admin_password[password_confirmation]"
           autocomplete="new-password"
-          minlength="8"
+          minlength={@min_length}
           required
           style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; font-size: 1em;"
         />

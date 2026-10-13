@@ -224,6 +224,86 @@ if admin_ips = System.get_env("ADMIN_IP_WHITELIST") do
     admin_ip_whitelist: admin_ips |> String.split(",", trim: true) |> Enum.map(&String.trim/1)
 end
 
+# Admin / tenant portal account security (issue #52, ADR-0058; defaults in
+# config/config.exs, see docs/operations/configuration.md):
+#   SESSION_MAX_AGE_SECONDS       absolute session lifetime (default 43200, 12 h)
+#   SESSION_IDLE_TIMEOUT_SECONDS  idle timeout (default 1800, 30 min)
+#   PASSWORD_MIN_LENGTH           minimum password length (default 12)
+#   ADMIN_REQUIRE_2FA_ROLES       comma-separated admin roles that must use 2FA
+#                                 (default "super_admin"; "" for none)
+#   MAILER_FROM                   sender of account emails: "addr" or "Name <addr>"
+account_int = fn var ->
+  case System.get_env(var) do
+    nil ->
+      nil
+
+    value ->
+      case Integer.parse(String.trim(value)) do
+        {n, ""} when n > 0 -> n
+        _ -> raise "#{var} must be a positive integer, got: #{inspect(value)}"
+      end
+  end
+end
+
+session_overrides =
+  [
+    max_age_seconds: account_int.("SESSION_MAX_AGE_SECONDS"),
+    idle_timeout_seconds: account_int.("SESSION_IDLE_TIMEOUT_SECONDS")
+  ]
+  |> Enum.reject(fn {_key, value} -> is_nil(value) end)
+
+if session_overrides != [] do
+  config :converger, :sessions, session_overrides
+end
+
+if min_length = account_int.("PASSWORD_MIN_LENGTH") do
+  config :converger, :password_min_length, min_length
+end
+
+if roles = System.get_env("ADMIN_REQUIRE_2FA_ROLES") do
+  roles =
+    roles |> String.split(",", trim: true) |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == ""))
+
+  config :converger, :require_2fa_roles, roles
+end
+
+if mailer_from = System.get_env("MAILER_FROM") do
+  mailer_from = String.trim(mailer_from)
+
+  sender =
+    case Regex.run(~r/^(.*?)\s*<([^<>]+)>$/, mailer_from) do
+      [_, "", address] -> address
+      [_, name, address] -> {String.trim(name, "\""), address}
+      nil -> mailer_from
+    end
+
+  config :converger, :mailer_from, sender
+end
+
+# Outgoing mail for account emails (password reset). With SMTP_HOST set,
+# Converger.Mailer sends through SMTP; otherwise it keeps the adapter of the
+# environment (in prod: no delivery, the Local adapter without storage).
+if smtp_host = System.get_env("SMTP_HOST") do
+  smtp_ssl = System.get_env("SMTP_SSL") in ~w(true 1)
+
+  smtp_config =
+    [
+      adapter: Swoosh.Adapters.SMTP,
+      relay: smtp_host,
+      port: account_int.("SMTP_PORT") || 587,
+      username: System.get_env("SMTP_USERNAME"),
+      password: System.get_env("SMTP_PASSWORD"),
+      ssl: smtp_ssl,
+      tls: if(smtp_ssl, do: :never, else: :always),
+      auth: if(System.get_env("SMTP_USERNAME"), do: :always, else: :never),
+      retries: 2,
+      no_mx_lookups: true
+    ]
+    |> Enum.reject(fn {_key, value} -> is_nil(value) end)
+
+  config :converger, Converger.Mailer, smtp_config
+end
+
 # Pagination limits (defaults in config/config.exs), e.g. PAGINATION_MAX_LIMIT=200.
 pagination_env = [
   default_limit: "PAGINATION_DEFAULT_LIMIT",
