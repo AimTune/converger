@@ -9,7 +9,7 @@ description: Rich message frames and mekik-native frames are stored as message a
 | **Status** | Accepted |
 | **Date** | 2026-10-14 |
 | **Issue** | [#68](https://github.com/AimTune/converger/issues/68), [#63](https://github.com/AimTune/converger/issues/63) |
-| **Pull request** | (this PR) |
+| **Pull request** | [#166](https://github.com/AimTune/converger/pull/166) |
 | **Related** | [ADR-0024](0024-converger-protocol-v1-as-superset-of-mekik-1.md), [ADR-0036](0036-rich-activity-model.md), [ADR-0034](0034-monthly-partitioning-and-per-tenant-retention.md) |
 
 ## Context and problem statement
