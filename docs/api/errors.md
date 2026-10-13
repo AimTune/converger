@@ -50,6 +50,8 @@ says so. Codes that also exist in [Converger Protocol v1](../protocol/v1.md#122-
 | `unsupported_protocol` | 400 | 1002 | The WebSocket upgrade of `/socket/converger/v1` offered only subprotocols the server does not speak; `details.supported` lists them |
 | `unauthorized` | 401 | 2000 | Missing or invalid credential: API key, channel token, Converger token, channel secret, inbound signature |
 | `token_expired` | 401 | 2001 | The Converger token expired; refresh it (`POST /api/v1/converger/tokens/refresh` before expiry) or issue a new one |
+| `token_revoked` | 401 | 2005 | The Converger token was revoked (its family or its end user, `POST /api/v1/converger/tokens/revoke`), was refreshed longer ago than the rotation grace period, or was refreshed again after that, which revokes its family. Get a new token from your backend. See [client tokens](../security/client-tokens.md) |
+| `insufficient_permission` | 403 | 2004 | The Converger token's `perms` claim lacks the permission (`read`, `write`, `typing`) the operation needs; `details.required` names it |
 | `forbidden` | 403 | 2002 | Authenticated but not allowed: a conversation-bound token used for another conversation, a channel token where the tenant API key is required, an IP outside the admin allowlist, a failed webhook verification |
 | `not_found` | 404 | - | Unknown route or resource, or a resource of another tenant or channel: existence is never revealed. Protocol v1 uses `conversation_not_found` (4001) for conversations |
 | `method_not_allowed` | 405 | - | The route does not accept this method |

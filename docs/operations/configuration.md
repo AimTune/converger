@@ -91,6 +91,17 @@ All prod only. Boolean values accept `true`, `1`, `yes`, `on` (case-insensitive)
 | `CLOAK_KEY` | none | prod (required) | Current encryption key. |
 | `CLOAK_RETIRED_KEYS` | empty | prod | Comma-separated base64 keys that are still accepted for decryption during a rotation. Run `bin/converger eval "Converger.Release.reencrypt_secrets()"` after rotating, then remove them. |
 
+## Client tokens
+
+Converger client tokens (JWT): signing keys, refresh rotation and revocation. See
+[Client tokens](../security/client-tokens.md) and [ADR-0057](../adr/0057-client-token-keys-revocation-rotation-and-permissions.md).
+
+| Variable | Default | Environment | Meaning |
+| --- | --- | --- | --- |
+| `TOKEN_SIGNING_KEYS` | unset: `SECRET_KEY_BASE` under the kid `default` | all | Comma-separated `kid:secret` pairs, the signing key first; every listed key verifies. Secrets must be at least 32 bytes and kids unique, or the node refuses to boot. Rotate by prepending a new key and removing the old one after 30 minutes. |
+| `TOKEN_ROTATION_GRACE_SECONDS` | `30` | all | How long a refreshed token stays valid. Refreshing it again after that revokes its family (reuse detection). |
+| `TOKEN_ACCEPT_UNKEYED` | `true` | all | Accept Converger tokens without a `kid` header (issued before #52, signed with `SECRET_KEY_BASE`). Set to `false` 30 minutes after upgrading. |
+
 ## Network trust and admin access
 
 | Variable | Default | Environment | Meaning |
@@ -520,6 +531,8 @@ PgBouncer transaction pooling). See [Migrations and maintenance windows](migrati
 | `:conversation_inactivity_hours` | `24` | Open conversations idle longer than this are closed by the hourly expiration job. |
 | `:inbound_conversation_idle_timeout_seconds` | unset (no idle timeout) | Global default for starting a new conversation for an inbound participant after inactivity; channels override it with `conversation_idle_timeout_seconds` in their config. |
 | `:api_key_rotation_grace_period` | `86400` (seconds) | How long the previous tenant API key keeps working after a rotation. |
+| `:token_signing_keys`, `:token_rotation_grace_seconds`, `:token_accept_unkeyed` | `[]`, `30`, `true` | See `TOKEN_SIGNING_KEYS`, `TOKEN_ROTATION_GRACE_SECONDS`, `TOKEN_ACCEPT_UNKEYED`. |
+| `Converger.Auth.RevocationCache` | `sync_interval_ms: 60_000` (`nil` in test) | How often each node re-reads recently revoked tokens from `revoked_tokens`, in case a PubSub broadcast was missed. See [Client tokens](../security/client-tokens.md#how-a-revocation-reaches-every-node). |
 | `:extra_middleware` | `%{}` | Map of middleware type string to module, merged into the built-in middleware registry. |
 | `Converger.Cluster` | `strategy: :none` | `strategy:` and libcluster `options:` built from the `CLUSTER_*` variables; see [Clustering](clustering.md). |
 | `:dev_routes` | `true` in dev | Compile-time. Mounts the Swoosh mailbox preview at `/dev/mailbox`. |

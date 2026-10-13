@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+### Client token hardening (#52, part 1)
+
+- Converger tokens are signed with dedicated keys (`TOKEN_SIGNING_KEYS`, `kid:secret` pairs, the first signs, all
+  verify) and carry the key's `kid`: keys rotate without downtime, and rotating `SECRET_KEY_BASE` no longer
+  disconnects WebSocket clients. Unset: `SECRET_KEY_BASE` under kid `default`. Tokens issued before the upgrade
+  (no `kid`) are accepted while `TOKEN_ACCEPT_UNKEYED` is true (default).
+- Revocation: `POST /api/v1/converger/tokens/revoke` revokes a token and its family (with the token itself, e.g. on
+  logout, or with the channel secret and `{"token": ...}`) or every token of an end user (channel secret and
+  `{"user": {"id": ...}}`). Revoked tokens get `401 token_revoked` (WebSocket close 4401) on every node within a
+  second and the subject's sockets are disconnected. New table `revoked_tokens`, cached in ETS on each node and
+  synced over PubSub (`Converger.Auth.RevocationCache`), pruned daily.
+- Refresh rotation: a refreshed token stays valid for `TOKEN_ROTATION_GRACE_SECONDS` (30) and is then refused;
+  refreshing it again after that revokes its whole family (reuse detection). Tokens returned by
+  `POST /conversations` and `GET /conversations/:id` never outlive the token that asked for them.
+- Permissions: `permissions` on `tokens/generate` (`read`, `write`, `typing`; the `perms` claim) restricts a
+  token and everything derived from it, enforced on REST, the Phoenix socket and the native Protocol v1 / gRPC
+  session. New error codes `insufficient_permission` (403, protocol 2004) and `token_revoked` (401, protocol 2005).
+- Docs: [client tokens](docs/security/client-tokens.md), client API, protocol, errors, configuration; ADR-0057.
+
 ### MQTT channel and Discord Gateway inbound (#44)
 
 - New channel type `mqtt` (MQTT 3.1.1 over TCP or TLS, QoS 0 and 1): a subscriber per channel in the cluster on the

@@ -92,6 +92,7 @@ supersedes the old one and both are linked. Read
 | [0012](0012-secrets-at-rest-and-audit-redaction.md) | Secrets at rest (Cloak AES-GCM), hashed tenant API keys, recursive audit redaction | Accepted | [#12](https://github.com/AimTune/converger/issues/12) / [#79](https://github.com/AimTune/converger/pull/79) |
 | [0013](0013-cluster-wide-rate-limiting-with-hammer-and-pubsub.md) | Cluster-wide rate limiting with Hammer 7 ETS and PubSub sync | Accepted | [#13](https://github.com/AimTune/converger/issues/13) / [#83](https://github.com/AimTune/converger/pull/83) |
 | [0014](0014-webhook-ssrf-guard-and-outbound-signing.md) | Webhook SSRF guard with DNS pinning and outbound signing | Accepted | [#14](https://github.com/AimTune/converger/issues/14) / [#87](https://github.com/AimTune/converger/pull/87) |
+| [0057](0057-client-token-keys-revocation-rotation-and-permissions.md) | Client tokens: dedicated signing keys with `kid`, Postgres revocation list cached in ETS per node and fanned out over PubSub (rejected cluster-wide within 1 s), refresh rotation with a grace period and family-wide reuse detection, `perms` claim (`read`, `write`, `typing`) | Accepted | [#52](https://github.com/AimTune/converger/issues/52) |
 
 ### Platform, operations and process
 
