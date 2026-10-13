@@ -246,7 +246,7 @@ defmodule ConvergerWeb.ProtocolSocketTest do
       assert again["duplicate"] == true
 
       assert [%Activity{text: "hi", sender: "alice", idempotency_key: "ws:alice:c-1"}] =
-               Repo.all(Activity)
+               Activities.list_activities_since(ctx.conversation.id, nil)
 
       # Echo rule: the sending connection does not get its own turn back.
       Client.refute_frame(client, 200, ["deliveryStatus"])
@@ -383,16 +383,43 @@ defmodule ConvergerWeb.ProtocolSocketTest do
       assert {%{"type" => "heartbeat"}, _client} = Client.recv(client)
     end
 
-    test "bot frames draw bot_unavailable; rich types wait for #28", ctx do
+    test "bot frames draw bot_unavailable", ctx do
       {_welcome, client} = join(ctx.port, token(ctx.channel, ctx.conversation))
 
       client = Client.push(client, %{"type" => "resume", "data" => %{}})
-      assert {%{"data" => %{"code" => "bot_unavailable"}}, client} = Client.recv(client)
+      assert {%{"data" => %{"code" => "bot_unavailable"}}, _client} = Client.recv(client)
+    end
+
+    test "rich message types are stored as typed messages and replayed as sent (#68)", ctx do
+      {_welcome, client} = join(ctx.port, token(ctx.channel, ctx.conversation))
+
+      location = %{"latitude" => 41.0082, "longitude" => 28.9784, "name" => "Head office"}
 
       client =
-        Client.push(client, %{"type" => "image", "data" => %{"src" => "https://x.test/a.png"}})
+        Client.push(client, %{"type" => "location", "clientId" => "c-1", "data" => location})
 
-      assert {%{"data" => %{"code" => "invalid_message"}}, _client} = Client.recv(client)
+      assert {%{"type" => "ack", "clientId" => "c-1", "seq" => 1}, client} = Client.recv(client)
+
+      assert [%Activity{type: "message", message_type: "location"} = activity] =
+               Activities.list_activities_since(ctx.conversation.id, nil)
+
+      assert activity.payload == %{"data" => location}
+      assert activity.text == "Head office"
+
+      client =
+        Client.push(client, %{"type" => "image", "clientId" => "c-2", "data" => %{"alt" => "x"}})
+
+      assert {%{"data" => %{"code" => "invalid_message", "frameType" => "image"} = data}, _} =
+               Client.recv_type(client, "error")
+
+      assert %{"payload" => [message]} = data["details"]
+      assert message =~ "src"
+
+      {_welcome, other} =
+        join(ctx.port, token(ctx.channel, ctx.conversation, user_id: "bob"), %{"watermark" => 0})
+
+      assert {%{"type" => "location", "seq" => 1, "from" => "bot", "data" => ^location}, _} =
+               Client.recv(other)
     end
 
     test "frames above maxFrameBytes draw payload_too_large", ctx do

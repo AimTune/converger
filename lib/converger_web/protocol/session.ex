@@ -376,23 +376,14 @@ defmodule ConvergerWeb.Protocol.Session do
 
   defp handle_frame(%{"type" => type} = frame, state) when is_binary(type) do
     case Send.kind(type) do
-      :text when not is_map_key(state.permitted, "write") ->
+      kind when kind in [:text, :rich] and not is_map_key(state.permitted, "write") ->
         reply([insufficient_permission("write", type) |> with_client_id(frame)], state)
 
-      :text ->
+      kind when kind in [:text, :rich] ->
         send_message(frame, state)
 
       :reserved ->
         reply([error("bad_request", "#{type} is not a client frame", frame_type: type)], state)
-
-      :rich ->
-        # Rich message types (image, card, ...) are stored from #28 on.
-        message = "message type #{type} is not supported yet"
-
-        reply(
-          [error("invalid_message", message, frame_type: type) |> with_client_id(frame)],
-          state
-        )
 
       :unknown ->
         reply([error("bad_request", "unknown frame type")], state)
@@ -646,7 +637,7 @@ defmodule ConvergerWeb.Protocol.Session do
       persist(params, client_id, state)
     else
       {:error, code, message, opts} ->
-        reply([error(code, message, [frame_type: "text"] ++ opts)], state)
+        reply([error(code, message, [frame_type: frame["type"]] ++ opts)], state)
     end
   end
 
@@ -683,7 +674,7 @@ defmodule ConvergerWeb.Protocol.Session do
       "idempotency_key" => key
     }
 
-    opts = [client_id: client_id, frame_type: "text"]
+    opts = [client_id: client_id, frame_type: params["message_type"] || "text"]
 
     case store(params, system_attrs, state) do
       {:ok, activity} ->

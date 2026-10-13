@@ -337,15 +337,32 @@ defmodule ConvergerWeb.ConvergerChannelSendTest do
       assert is_integer(error["data"]["retryAfterMs"])
     end
 
-    test "rich message types are not supported yet", %{socket: socket} do
+    test "rich message types are stored as typed messages (#68)", %{
+      socket: socket,
+      conversation: conversation
+    } do
+      location = %{"latitude" => 41.0, "longitude" => 29.0}
+
+      push(socket, "frame", %{"type" => "location", "clientId" => "c-1", "data" => location})
+
+      assert %{"clientId" => "c-1", "seq" => 1} = assert_frame("ack")
+
+      assert [%Activity{message_type: "location", payload: %{"data" => ^location}} = activity] =
+               activities(conversation)
+
+      assert activity.text == "41.0, 29.0"
+
       push(socket, "frame", %{
-        "type" => "location",
-        "clientId" => "c-1",
-        "data" => %{"latitude" => 41.0, "longitude" => 29.0}
+        "type" => "buttons",
+        "clientId" => "c-2",
+        "data" => %{"buttons" => [%{"value" => "x"}]}
       })
 
-      assert %{"data" => %{"code" => "invalid_message", "frameType" => "location"}} =
+      assert %{"data" => %{"code" => "invalid_message", "frameType" => "buttons"} = data} =
                assert_frame("error")
+
+      assert %{payload: [message]} = data["details"]
+      assert message =~ "buttons/0"
     end
   end
 

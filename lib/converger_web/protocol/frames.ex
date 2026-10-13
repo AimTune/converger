@@ -8,7 +8,7 @@ defmodule ConvergerWeb.Protocol.Frames do
   the same source as REST and the Phoenix channel frames (section 5.4).
   """
 
-  alias Converger.Activities.{Activity, Downgrade, Serializer}
+  alias Converger.Activities.{Activity, Downgrade, MessagePayload, Serializer}
   alias ConvergerWeb.Protocol
 
   # code => {number, retryable} (section 12.2)
@@ -119,6 +119,32 @@ defmodule ConvergerWeb.Protocol.Frames do
     |> Map.merge(%{"type" => "event", "data" => data})
     |> put_timestamp(canonical)
     |> put_metadata(metadata)
+  end
+
+  # A typed message (#68): the stored frame body, with the server envelope.
+  # mekik-native frames get no envelope beyond `seq` (section 5.1), so they
+  # re-serialise byte-identically; message frames keep a bot-supplied `id`.
+  defp typed(
+         "message",
+         %{message_type: message_type, payload: payload} = canonical,
+         base,
+         role,
+         _
+       )
+       when is_binary(message_type) and is_map(payload) do
+    frame = MessagePayload.to_frame(message_type, payload)
+
+    if MessagePayload.native?(message_type) do
+      Map.put(frame, "seq", canonical.seq)
+    else
+      frame
+      |> Map.merge(Map.delete(base, "id"))
+      |> Map.put_new("id", canonical.id)
+      |> put_timestamp(canonical)
+      |> put_metadata(canonical.metadata)
+      |> put_reply_to(Map.get(canonical, :reply_to_id))
+      |> put_client_id(role, canonical.sender, canonical.idempotency_key)
+    end
   end
 
   # "message" and anything unknown: the text envelope.

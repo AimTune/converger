@@ -241,21 +241,8 @@ defmodule ConvergerWeb.ConvergerChannel do
   # have their own events on this binding.
   defp do_handle_in("frame", %{} = frame, socket) do
     case Send.kind(frame["type"]) do
-      :text ->
+      kind when kind in [:text, :rich] ->
         send_frame(frame, socket)
-
-      :rich ->
-        # Rich message types (image, card, ...) are stored from #28 on.
-        type = frame["type"]
-
-        push_frames(socket, [
-          Frames.error("invalid_message", "message type #{type} is not supported yet",
-            frame_type: type,
-            client_id: valid_client_id(frame)
-          )
-        ])
-
-        {:reply, :ok, socket}
 
       :reserved ->
         type = frame["type"]
@@ -426,7 +413,7 @@ defmodule ConvergerWeb.ConvergerChannel do
         :reject ->
           [
             Frames.error("too_many_in_flight", "more than #{max} sends are unacked",
-              frame_type: "text",
+              frame_type: frame["type"],
               client_id: valid_client_id(frame)
             )
           ]
@@ -436,7 +423,7 @@ defmodule ConvergerWeb.ConvergerChannel do
     {:reply, :ok, socket}
   end
 
-  defp send_frame?(%{"type" => type}), do: Send.kind(type) == :text
+  defp send_frame?(%{"type" => type}), do: Send.kind(type) in [:text, :rich]
   defp send_frame?(_payload), do: false
 
   defp persist_frame(frame, socket) do
@@ -456,15 +443,15 @@ defmodule ConvergerWeb.ConvergerChannel do
 
       channel
       |> receive_message(message, conversation_id)
-      |> send_result(client_id)
+      |> send_result(client_id, frame["type"])
     else
       {:error, code, message, opts} ->
-        [Frames.error(code, message, [frame_type: "text"] ++ opts)]
+        [Frames.error(code, message, [frame_type: frame["type"]] ++ opts)]
 
       {:error, %{reason: "rate_limited", retry_after_ms: retry_after_ms}} ->
         [
           Frames.error("rate_limited", "too many messages",
-            frame_type: "text",
+            frame_type: frame["type"],
             client_id: valid_client_id(frame),
             retry_after_ms: retry_after_ms
           )
@@ -476,20 +463,20 @@ defmodule ConvergerWeb.ConvergerChannel do
 
       [
         Frames.error("unavailable", "the database is unavailable, retry",
-          frame_type: "text",
+          frame_type: frame["type"],
           client_id: valid_client_id(frame),
           retry_after_ms: Pressure.retry_after_ms()
         )
       ]
   end
 
-  defp send_result({tag, _activity}, nil) when tag in [:created, :duplicate], do: []
+  defp send_result({tag, _activity}, nil, _frame_type) when tag in [:created, :duplicate], do: []
 
-  defp send_result({tag, activity}, client_id) when tag in [:created, :duplicate],
+  defp send_result({tag, activity}, client_id, _frame_type) when tag in [:created, :duplicate],
     do: [Frames.ack(activity, client_id, tag == :duplicate)]
 
-  defp send_result(result, client_id) do
-    opts = [frame_type: "text", client_id: client_id]
+  defp send_result(result, client_id, frame_type) do
+    opts = [frame_type: frame_type, client_id: client_id]
 
     frame =
       case result do

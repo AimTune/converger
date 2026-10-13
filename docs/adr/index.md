@@ -46,6 +46,7 @@ supersedes the old one and both are linked. Read
 | [0031](0031-per-channel-circuit-breaker-rate-limit-and-tier-queues.md) | Per-channel circuit breaker on the channel row, priority-based parking, Hammer rate limits and tier queues | Accepted | [#31](https://github.com/AimTune/converger/issues/31) / [#120](https://github.com/AimTune/converger/pull/120) |
 | [0034](0034-monthly-partitioning-and-per-tenant-retention.md) | Monthly partitioning of activities and deliveries, per-tenant retention and verified archives | Accepted | [#30](https://github.com/AimTune/converger/issues/30) / [#124](https://github.com/AimTune/converger/pull/124) |
 | [0036](0036-rich-activity-model.md) | Rich activity model: closed type vocabulary, validated attachments, append-only edits and deletes, adapter capabilities with downgrade | Accepted | [#28](https://github.com/AimTune/converger/issues/28) / [#125](https://github.com/AimTune/converger/pull/125) |
+| [0062](0062-typed-message-payloads-on-message-activities.md) | Typed message payloads: rich message and mekik-native frames stored losslessly as `message` activities with `message_type` and `payload`, validated against the Protocol v1 schemas, text fallback and `message_types` capability for channels | Accepted | [#68](https://github.com/AimTune/converger/issues/68) |
 
 ### Channels, middleware and real time
 

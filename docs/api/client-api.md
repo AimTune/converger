@@ -297,6 +297,8 @@ REST and socket payloads are identical ([ADR-0004](../adr/0004-single-canonical-
   "conversationId": "3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10",
   "channelData": {},
   "replyToId": null,
+  "messageType": null,
+  "payload": null,
   "editedAt": null,
   "deletedAt": null
 }
@@ -309,6 +311,7 @@ REST and socket payloads are identical ([ADR-0004](../adr/0004-single-canonical-
 | `conversationId` | `conversation_id` |
 | `channelData` | `metadata` |
 | `replyToId` | `reply_to_id`: the activity this one replies to, reacts to, edits or deletes |
+| `messageType`, `payload` | `message_type`, `payload`: a typed message (buttons, card, image, tool_call, ...), null for a plain message ([typed messages](../concepts/activities.md#typed-messages)) |
 | `editedAt`, `deletedAt` | `edited_at`, `deleted_at`: set on a message once a `messageUpdate` / `messageDelete` for it was accepted. The message keeps its original content; apply the update yourself. |
 
 The shape is published as a JSON Schema,
@@ -334,10 +337,12 @@ See [activities](../concepts/activities.md#references-replies-reactions-edits-an
 | `attachments` | array | `[]` | At most 10 objects, each at most 4,096 bytes as JSON, each with a required `contentType` ([attachment schema](../concepts/activities.md#attachments)). Use the upload endpoint for files. |
 | `replyToId` | string | `null` | An activity of this conversation. Required for `messageReaction`, `messageUpdate` and `messageDelete`. |
 | `channelData` | object | `{}` | Stored as `metadata` (16,384 bytes max). `metadata` is accepted as an alias when `channelData` is absent. |
+| `messageType` | string | `null` | A typed message of [the vocabulary](../protocol/messages.md) (`buttons`, `card`, `image`, `location`, ...), a mekik-native type (`tool_call`, `genui`, `interrupt`, ...) or an open renderer name. Needs `payload` and `type: message`. |
+| `payload` | object | `null` | The typed message as its frame body without `type` and `seq`, for example `{"data": {"buttons": [...]}}`. Validated against the Protocol v1 schemas (`422` with per-field details); at most 131,072 bytes. `text` is filled from it when absent. |
 | `from.id` | string | `"user"` | Stored as the activity's `sender` |
 
 These are the only fields read from the body. The client changeset casts only `type`, `text`, `attachments`,
-`metadata` and `reply_to_id`; `tenant_id`, `conversation_id` and the idempotency key come from the token and headers
+`metadata`, `reply_to_id`, `message_type` and `payload`; `tenant_id`, `conversation_id` and the idempotency key come from the token and headers
 ([ADR-0005](../adr/0005-separate-client-and-system-changesets.md)). `from.id` is a display identity chosen by the
 client and is not verified against the token's `user_id`.
 

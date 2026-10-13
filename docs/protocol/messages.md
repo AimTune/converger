@@ -12,8 +12,9 @@ description: Typed message payloads compatible with chativa and mekik/1, and how
 > The activity model underneath (a closed set of activity types, validated attachments, reactions,
 > edits, deletes and replies) is **Implemented (#28)**, see
 > [activities](../concepts/activities.md) and [ADR-0036](../adr/0036-rich-activity-model.md).
-> Storing the typed message payloads of this page and the per-channel rendering are **Planned (#68)**
-> (section 7).
+> Storing the typed message payloads of this page is **Implemented (#68)** (section 4,
+> [ADR-0062](../adr/0062-typed-message-payloads-on-message-activities.md)); channels without a native
+> renderer get the text fallback, and native per-channel rendering is **Planned (#68)** (section 5).
 
 The schemas are in
 [`priv/protocol/v1/messages/`](https://github.com/AimTune/converger/tree/main/priv/protocol/v1/messages);
@@ -184,28 +185,51 @@ Approve and Cancel.
 
 `skill` (mekik/1 section 12.5) is adopted the same way.
 
-## 4. Storage: **Planned (#68)**
+## 4. Storage: **Implemented (#68)**
 
 - `activities.type` stays Converger's closed activity vocabulary (#28): an unknown activity type is
-  rejected with `422`. A message frame of any message type is stored as a `message` activity; the
-  message type and its typed payload are stored alongside it (an `application/vnd.converger.card.*`
-  attachment is the interim representation of a card). Mekik-native frames get their mapping with #64.
-- The typed payload is stored losslessly. For message frames that is `data` plus the frame-level
-  `actions`; for mekik-native frames it is every top-level field except `type` and `seq` (`genui`
-  keeps `streamId`, `done` and `chunk` at the top level). Re-serialising a stored frame MUST give
-  canonical JSON identical to what was received, except `seq` (#63 conformance).
-- `activities.text` stays a denormalised column, filled from `data.text`, a caption, a title or
-  the labels, for search and for channel fallbacks.
+  rejected with `422`. A frame of any message type, and a mekik-native frame (`tool_call`, `genui`,
+  `interrupt`, `interrupt_resolved`, `skill`), is stored as a `message` activity with
+  `message_type` (the frame type) and `payload` (the typed payload), [ADR-0062](../adr/0062-typed-message-payloads-on-message-activities.md).
+  A `text` frame whose `data` has only `text` (and `attachments`) and no `actions` keeps the plain
+  columns (`message_type` is null), as before.
+- The typed payload is stored losslessly. For message frames it is every top-level field except
+  `type`, `seq` and the envelope the server owns (`from`, `timestamp`, `sender`, `metadata`,
+  `clientId`, `replyTo`, `meta`): `data`, `actions` and any unknown field. A bot's message `id` is
+  kept; a client's `id` is its clientId and is not. For mekik-native frames it is every top-level field
+  except `type` and `seq` (`genui` keeps `streamId`, `done` and `chunk` at the top level).
+  Re-serialising a stored frame gives canonical JSON identical to what was received, except `seq`
+  and, on message frames, the server's `timestamp` and the additive `sender`. The vendored mekik/1
+  fixtures are tested this way (`test/protocol/mekik_storage_round_trip_test.exs`, #63).
+- `activities.text` stays a denormalised column for search and channel fallbacks. When the sender
+  gives no `text` it is filled from `data.text`, a caption, a title, the action labels, or an
+  interrupt's `payload.title`. Tool traces, GenUI chunks, skills and resolved interrupts have none.
 - Known types are validated against these schemas on write; failures draw `invalid_message`
-  with per-field `details`. Unknown renderer-named types are stored opaquely (rule 5).
+  (WebSocket) or `422 invalid_message` (REST) with per-field `details`, for example
+  `{"payload": ["data/buttons/0: property 'label' is required"]}`. A whole frame is at most 128 KiB
+  (`max_payload_bytes`). Unknown renderer-named types are stored opaquely (rule 5) and counted in
+  `converger.activities.unknown_type.count`.
+- Clients send rich types as frames on the native endpoint and the Phoenix binding (`frame` event).
+  The REST APIs take `messageType` and `payload` (Converger API) or `message_type` and `payload`
+  (tenant API) next to `type: "message"`, and return them on every activity (null for plain
+  messages).
 
-## 5. Per-channel downgrade matrix: **Planned (#68, adapters)**
+```json schema=frames/client/message.schema.json
+{ "type": "location", "clientId": "c-18", "data": { "latitude": 41.0082, "longitude": 28.9784, "name": "Head office" } }
+```
+
+## 5. Per-channel downgrade matrix: **text fallback Implemented (#68); native rendering Planned (#68, adapters)**
 
 Each adapter declares what it renders natively through `capabilities/0`: activity types since #28
-(an `activity_types: [...]` entry, unsupported types downgraded to text or skipped per channel), message
-types with #68 and #36. The pipeline hands
-the adapter the typed message; the adapter renders natively or downgrades as below, keeping enough
-state to map the user's answer back (section 6).
+(an `activity_types: [...]` entry, unsupported types downgraded to text or skipped per channel), and
+message types with a `message_types: [...]` entry (or `:all`). Without one, an adapter that lists its
+`activity_types` (end-user messaging: WhatsApp, Telegram, Slack, email, SMS, ...) renders no message type
+natively, and every other adapter (WebSocket, webhook, brokers, HTTP pull) receives typed messages as they
+are. **Implemented today:** a channel that does not render a type gets a plain `message` with the text
+fallback of section 4, or nothing when there is none; `tool_call` only with `show_tool_traces`. The
+native rendering below is **Planned**. The pipeline will hand the adapter the typed message; the
+adapter renders natively or downgrades as below, keeping enough state to map the user's answer back
+(section 6).
 
 | type | web (chativa) | WhatsApp | Telegram | email | SMS |
 | --- | --- | --- | --- | --- | --- |
@@ -273,6 +297,7 @@ and `replyToId` / `editedAt` / `deletedAt`. The Converger API shows them as
 WhatsApp inbound buttons arrive as `message` activities with the button payload in `metadata`,
 reactions as `messageReaction` referencing the reacted-to activity.
 
-With #28 the activity model gains typed payloads. Existing `message` activities are presented as
-`text` frames carrying their attachments ([v1.md section 5.4](./v1.md#54-activities-as-frames)); new
-writes store typed payloads. REST keeps the current shape and adds `data` as an additive field.
+With #68 the activity model gains typed payloads (section 4). Existing `message` activities are
+presented as `text` frames carrying their attachments ([v1.md section 5.4](./v1.md#54-activities-as-frames));
+typed writes store `message_type` and `payload`. REST keeps the current shape and adds `messageType` and
+`payload` as additive fields (null for plain messages).
