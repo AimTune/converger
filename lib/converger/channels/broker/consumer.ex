@@ -1,8 +1,11 @@
 defmodule Converger.Channels.Broker.Consumer do
   @moduledoc """
-  Supervisor of one broker channel's consumer pipeline
-  (`Converger.Channels.Broker.Pipeline`), started under
-  `Converger.Channels.Consumers`.
+  Supervisor of one channel's consumer, started under
+  `Converger.Channels.Consumers`: the Broadway pipeline
+  (`Converger.Channels.Broker.Pipeline`) of a Kafka or RabbitMQ channel, or
+  the process the adapter names with
+  `c:Converger.Channels.Broker.consumer_child_spec/1` (an MQTT subscriber,
+  a Discord Gateway connection).
 
   It is registered globally as `{Converger.Channels.Broker.Consumer,
   channel_id}` (`:global`), so a channel has at most one consumer in the
@@ -15,14 +18,14 @@ defmodule Converger.Channels.Broker.Consumer do
   (`fingerprint/1`), so the consumer manager can tell that a channel's
   config changed and restart it.
 
-  It is `:temporary`: when the pipeline keeps crashing (broker unreachable)
+  It is `:temporary`: when the consumer keeps crashing (broker unreachable)
   the supervisor gives up, and `Converger.Channels.Consumers.Manager` starts
   it again on its next reconciliation, which spaces out the attempts.
   """
 
   use Supervisor, restart: :temporary
 
-  alias Converger.Channels.Broker.Pipeline
+  alias Converger.Channels.Broker
 
   def start_link(channel) do
     Supervisor.start_link(__MODULE__, channel, name: global_name(channel.id))
@@ -60,7 +63,7 @@ defmodule Converger.Channels.Broker.Consumer do
         fingerprint(channel)
       )
 
-    Supervisor.init([{Pipeline, channel}],
+    Supervisor.init([Broker.consumer_child_spec(channel)],
       strategy: :one_for_one,
       max_restarts: 3,
       max_seconds: 60

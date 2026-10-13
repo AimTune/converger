@@ -1,14 +1,18 @@
 defmodule Converger.Channels.Broker do
   @moduledoc """
   Broker channels: message brokers (Kafka, RabbitMQ, NATS JetStream, Redis
-  Streams) as first-class channels.
+  Streams, MQTT) as first-class channels, and the consumers of every channel
+  whose inbound messages Converger pulls instead of receiving webhooks (the
+  Discord Gateway).
 
   A broker channel produces the activities the pipeline delivers to it to a
   topic or exchange (`deliver_activity/2`), and consumes a topic or queue for
-  inbound messages. The consumer is a Broadway pipeline
-  (`Converger.Channels.Broker.Pipeline`) run for each active `inbound` or
+  inbound messages. The consumer is run for each active `inbound` or
   `duplex` channel by `Converger.Channels.Consumers`, exactly once in the
-  cluster. Messages use the JSON envelope of
+  cluster: a Broadway pipeline (`Converger.Channels.Broker.Pipeline`, Kafka
+  and RabbitMQ), or the process the adapter names with
+  `c:consumer_child_spec/1` (an MQTT subscriber, a Discord Gateway
+  connection). Broker messages use the JSON envelope of
   `Converger.Channels.Broker.Envelope`.
 
   This module is the behaviour broker adapters implement on top of
@@ -73,27 +77,58 @@ defmodule Converger.Channels.Broker do
           optional(:headers) => [{String.t(), String.t()}]
         }
 
-  @typedoc "Outcome of `handle/3`."
+  @typedoc """
+  Outcome of `handle/4` and `handle_message/5`. `:dropped` is a message that
+  could not be accepted on a channel without a dead-letter destination (an
+  adapter without `c:dead_letter/3`): it is logged and counted, not stored.
+  """
   @type outcome ::
           {:ok, :created | :duplicate, Activity.t()}
-          | {:dead_lettered, :poison | :retries_exhausted, String.t()}
+          | {:dead_lettered | :dropped, :poison | :retries_exhausted, String.t()}
 
   @doc """
   Broadway options of the channel's consumer: `:producer` (the Broadway
   producer spec for the channel's topic or queue), `:processors` and
   optionally `:partition_by`. `Converger.Channels.Broker.Pipeline` adds the
-  name and the context.
+  name and the context. Needed unless the adapter implements
+  `c:consumer_child_spec/1`.
   """
   @callback consumer_options(channel) :: {:ok, keyword()} | {:error, String.t()}
 
-  @doc "Extract the payload and the broker message id of a consumed message."
+  @doc """
+  Extract the payload and the broker message id of a consumed message
+  (Broadway consumers).
+  """
   @callback message_info(channel, Broadway.Message.t()) :: info()
 
   @doc """
   Move a message to the channel's dead-letter topic or queue, with `reason`.
   Called until it returns `:ok`; the consumed message is acknowledged after.
+  Without it, messages that cannot be accepted are logged and dropped.
   """
   @callback dead_letter(channel, info(), reason :: String.t()) :: :ok | {:error, term()}
+
+  @doc """
+  The consumer process of the channel, as a child spec, when it is not a
+  Broadway pipeline (an MQTT subscriber, a Discord Gateway connection). It
+  is started under `Converger.Channels.Broker.Consumer`, so it gets the same
+  cluster-wide single instance, restarts and reconciliation. Its
+  `start_link` returns `{:error, reason}` for a channel it cannot consume.
+  """
+  @callback consumer_child_spec(channel) :: Supervisor.child_spec() | {module(), term()}
+
+  @doc """
+  Whether this particular channel needs a consumer, for adapters where it
+  depends on the config (a Discord channel only with `gateway: true`).
+  Without it, every active `inbound` or `duplex` channel of the type does.
+  """
+  @callback consume?(channel) :: boolean()
+
+  @optional_callbacks consumer_options: 1,
+                      message_info: 2,
+                      dead_letter: 3,
+                      consumer_child_spec: 1,
+                      consume?: 1
 
   @doc "The broker adapter (a module with the `:consumer` capability) of `channel`."
   @spec adapter(channel) :: {:ok, module()} | :error
@@ -108,13 +143,38 @@ defmodule Converger.Channels.Broker do
 
   @doc """
   Whether `channel` needs a consumer: an active `inbound` or `duplex`
-  channel of a broker type.
+  channel of a type with the `:consumer` capability (whose adapter's
+  `c:consume?/1`, when it has one, agrees).
   """
   @spec consumes?(channel) :: boolean()
-  def consumes?(%{status: "active", mode: mode} = channel) when mode in ["inbound", "duplex"],
-    do: adapter(channel) != :error
+  def consumes?(%{status: "active", mode: mode} = channel) when mode in ["inbound", "duplex"] do
+    case adapter(channel) do
+      {:ok, mod} -> not exported?(mod, :consume?, 1) or mod.consume?(channel) == true
+      :error -> false
+    end
+  end
 
   def consumes?(_channel), do: false
+
+  @doc """
+  The child spec of the consumer of `channel`: the adapter's
+  `c:consumer_child_spec/1`, else the Broadway pipeline.
+  """
+  @spec consumer_child_spec(channel) :: Supervisor.child_spec() | {module(), term()}
+  def consumer_child_spec(channel) do
+    case adapter(channel) do
+      {:ok, mod} ->
+        if exported?(mod, :consumer_child_spec, 1),
+          do: mod.consumer_child_spec(channel),
+          else: {Converger.Channels.Broker.Pipeline, channel}
+
+      :error ->
+        {Converger.Channels.Broker.Pipeline, channel}
+    end
+  end
+
+  defp exported?(mod, name, arity),
+    do: Code.ensure_loaded?(mod) and function_exported?(mod, name, arity)
 
   @doc """
   Handle one consumed message: accept it, or dead-letter it (see the module
@@ -126,24 +186,70 @@ defmodule Converger.Channels.Broker do
   """
   @spec handle(channel, module(), info(), keyword()) :: outcome()
   def handle(channel, adapter, info, opts \\ []) do
+    run(channel, adapter, info, fn -> process(channel, info) end, opts)
+  end
+
+  @doc """
+  Like `handle/4`, for a consumer that parsed the message itself (the
+  Discord Gateway): `message` is passed to
+  `Converger.Inbound.receive_message/3` as it is (it carries its own
+  `idempotency_key`), with the same retries and dead-lettering. `info`
+  names the message in logs (`:source`) and, when the adapter has a
+  dead-letter destination, is what is written there.
+  """
+  @spec handle_message(channel, module(), map(), info(), keyword()) :: outcome()
+  def handle_message(channel, adapter, message, info, opts \\ []) do
+    run(channel, adapter, info, fn -> process_message(channel, message) end, opts)
+  end
+
+  defp run(channel, adapter, info, process, opts) do
     opts = Keyword.merge(settings(), opts)
 
-    case process_with_retries(channel, info, opts, 1) do
+    case process_with_retries(channel, info, process, opts, 1) do
       {:ok, _outcome, _activity} = ok ->
         ok
 
       {:dead_letter, kind, reason} ->
-        dead_letter!(channel, adapter, info, reason, opts, 1)
-        emit_dead_lettered(channel, kind)
+        if exported?(adapter, :dead_letter, 3) do
+          dead_letter!(channel, adapter, info, reason, opts, 1)
+          emit_dead_lettered(channel, kind)
 
-        Logger.warning("Broker message dead-lettered",
-          channel_id: channel.id,
-          source: info.source,
-          reason: reason
-        )
+          Logger.warning("Broker message dead-lettered",
+            channel_id: channel.id,
+            source: info.source,
+            reason: reason
+          )
 
-        {:dead_lettered, kind, reason}
+          {:dead_lettered, kind, reason}
+        else
+          emit_dead_lettered(channel, kind)
+
+          Logger.error("Inbound message dropped: the channel has no dead-letter destination",
+            channel_id: channel.id,
+            source: info.source,
+            reason: reason
+          )
+
+          {:dropped, kind, reason}
+        end
     end
+  end
+
+  @doc """
+  Process a message parsed by the consumer once, see `process/2`.
+  """
+  @spec process_message(channel, map()) ::
+          {:ok, :created | :duplicate, Activity.t()}
+          | {:poison, String.t()}
+          | {:retry, String.t()}
+  def process_message(channel, message) do
+    channel
+    |> Inbound.receive_message(message)
+    |> classify()
+  rescue
+    exception -> {:retry, Exception.message(exception)}
+  catch
+    kind, reason -> {:retry, Exception.format_banner(kind, reason)}
   end
 
   @doc """
@@ -248,8 +354,8 @@ defmodule Converger.Channels.Broker do
 
   ## Retries
 
-  defp process_with_retries(channel, info, opts, attempt) do
-    case process(channel, info) do
+  defp process_with_retries(channel, info, process, opts, attempt) do
+    case process.() do
       {:ok, _outcome, _activity} = ok ->
         ok
 
@@ -276,7 +382,7 @@ defmodule Converger.Channels.Broker do
           )
 
           sleep(opts, backoff(opts, :backoff_ms, :max_backoff_ms, attempt))
-          process_with_retries(channel, info, opts, attempt + 1)
+          process_with_retries(channel, info, process, opts, attempt + 1)
         end
     end
   end

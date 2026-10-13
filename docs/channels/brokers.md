@@ -1,6 +1,6 @@
 ---
 title: Broker channels
-description: Kafka, RabbitMQ, NATS JetStream and Redis Streams as first-class channels - when to use a broker channel instead of the Broadway pipeline transport, the message envelope, consumers, idempotency, dead letters, cluster behaviour and how to run the broker tests.
+description: Kafka, RabbitMQ, NATS JetStream, Redis Streams and MQTT as first-class channels - when to use a broker channel instead of the Broadway pipeline transport, the message envelope, consumers, idempotency, dead letters, cluster behaviour and how to run the broker tests.
 sidebar_position: 3.5
 ---
 
@@ -15,9 +15,12 @@ broker channel types are:
 | `rabbitmq` | RabbitMQ (AMQP 0-9-1) | [RabbitMQ](rabbitmq.md) |
 | `nats` | NATS JetStream | [NATS JetStream](nats.md) |
 | `redis_streams` | Redis Streams with consumer groups | [Redis Streams](redis-streams.md) |
+| `mqtt` | MQTT 3.1.1 brokers (Mosquitto, EMQX, HiveMQ, AWS IoT Core, ...) | [MQTT](mqtt.md) |
 
 The design is recorded in [ADR-0047](../adr/0047-broker-channels-kafka-and-rabbitmq.md) (Kafka, RabbitMQ and the shared
-machinery) and [ADR-0054](../adr/0054-nats-and-redis-streams-channels.md) (NATS, Redis Streams).
+machinery), [ADR-0054](../adr/0054-nats-and-redis-streams-channels.md) (NATS, Redis Streams) and
+[ADR-0055](../adr/0055-mqtt-channel-and-discord-gateway.md) (MQTT, and the generalisation of the consumers that also
+runs [Discord Gateway](discord.md#gateway-mode) connections).
 
 ## Pipeline transport or broker channel?
 
@@ -67,15 +70,17 @@ flowchart LR
 ```
 
 - **Inbound** (modes `inbound` and `duplex`): a consumer reads `topic_in` (Kafka), `queue` (RabbitMQ), a durable pull
-  consumer on `stream` / `subject_in` (NATS JetStream) or `stream_in` with a consumer group (Redis) and passes every
+  consumer on `stream` / `subject_in` (NATS JetStream), `stream_in` with a consumer group (Redis) or a subscription to
+  the topic filter `topic_in` (MQTT) and passes every
   message to `Converger.Inbound.receive_message/3`, the path of every inbound message (webhooks, WebSocket clients). The
   activity is created in a conversation of the channel, or in the conversation named by the message's `conversation_id`,
   and routing rules, middleware and deliveries apply to it as to any other inbound message.
 - **Outbound** (modes `outbound` and `duplex`): the pipeline delivers activities to the channel like to any channel
   (Oban jobs, retry policy, circuit breaker, rate limit, dead letters), and the adapter produces the envelope to
   `topic_out` (Kafka, keyed by `conversation_id`), publishes it to `exchange` with `routing_key` (RabbitMQ, with
-  publisher confirms), publishes it to `subject_out` (NATS, JetStream publish acknowledged by the stream) or appends it
-  to `stream_out` (Redis, `XADD`). A delivery is `sent` once the broker has acknowledged the message.
+  publisher confirms), publishes it to `subject_out` (NATS, JetStream publish acknowledged by the stream), appends it
+  to `stream_out` (Redis, `XADD`) or publishes it with QoS 1 to the conversation's `topic_out` (MQTT, waiting for the
+  `PUBACK`). A delivery is `sent` once the broker has acknowledged the message.
 - **No echo:** a message consumed from a channel is not produced back to the same channel, although the channel is the
   primary channel of the conversation it created. Replies in the conversation (an agent's, a bot's) are.
 
@@ -145,7 +150,7 @@ echo 'cust-1:{"text":"Where is my order?","participant":{"external_id":"cust-1"}
 
 Inbound processing is **at-least-once with idempotent activity creation**:
 
-1. A message is acknowledged (Kafka: its offset committed; RabbitMQ: `basic.ack`; NATS: `+ACK`; Redis: `XACK`) only after it was accepted or written
+1. A message is acknowledged (Kafka: its offset committed; RabbitMQ: `basic.ack`; NATS: `+ACK`; Redis: `XACK`; MQTT: `PUBACK`) only after it was accepted or written
    to the dead-letter destination. A crash or a restart before that redelivers it.
 2. Every message gets an idempotency key: the envelope's `idempotency_key`, else `<type>:<broker message id>`:
 
@@ -155,6 +160,7 @@ Inbound processing is **at-least-once with idempotent activity creation**:
    | `rabbitmq` | the AMQP `message_id` property | `rabbitmq:9b1c...` |
    | `nats` | `stream/stream sequence` | `nats:CRM/41` |
    | `redis_streams` | `stream/entry id` | `redis_streams:bot.in/1760000000000-0` |
+   | `mqtt` | none (packet ids are reused): the SHA-256 of topic and payload, see [MQTT idempotency](mqtt.md#idempotency) | `mqtt:5e2a...` |
 
 3. A redelivered message carries the same key and is recognised as a duplicate: no second activity, no second delivery
    (`converger.inbound.received.count` with `outcome: duplicate`).
@@ -181,6 +187,7 @@ The dead-letter destination is per channel:
 | `rabbitmq` | queue `dlq_queue` (`<queue>.dlq`), through the default exchange | the original body, `message_id` and headers, plus the same `x-converger-*` headers; published persistent, with confirms and `mandatory` |
 | `nats` | subject `dlq_subject` (`<subject_in>.dlq`), JetStream publish | the original body and headers, plus `X-Converger-Error`, `X-Converger-Source` (`stream/sequence`), `X-Converger-Channel-Id` |
 | `redis_streams` | stream `dlq_stream` (`<stream_in>.dlq`), `XADD` | the original fields (`payload` and the others), plus `x-converger-error`, `x-converger-source` (`stream/entry id`), `x-converger-channel-id` |
+| `mqtt` | topic `topic_dlq` (`converger/dlq/{channel_id}`) | a JSON object with `error`, `source` (the topic), `channel_id`, `message_id` and the original `payload` (MQTT 3.1.1 has no headers), QoS 1 |
 
 Writing to the dead-letter destination is retried (same backoff, at most 30 s between attempts) until it succeeds, and
 only then is the message acknowledged, so a message is never dropped. While the dead-letter destination is unavailable
@@ -198,7 +205,9 @@ to `concurrency: 1`, which keeps the queue or stream order.
 ## Consumers in a cluster
 
 `Converger.Channels.Consumers` (a `DynamicSupervisor`) runs **one consumer per channel in the cluster**, for every
-active channel of a broker type in mode `inbound` or `duplex`:
+active channel of a broker type in mode `inbound` or `duplex` (and every `discord` channel with `gateway: true`, whose
+Gateway connection is run the same way). A consumer is a Broadway pipeline (Kafka, RabbitMQ) or the process the adapter
+names (`consumer_child_spec/1`: the MQTT subscriber, the Discord Gateway connection):
 
 - **Exactly one.** Each consumer (`Converger.Channels.Broker.Consumer`) is registered with `:global` under
   `{Converger.Channels.Broker.Consumer, channel_id}`; a second start on any node is refused. If a network partition
@@ -259,7 +268,7 @@ Configuration: [configuration](../operations/configuration.md#broker-channels).
   run on a private network: allow them with `WEBHOOK_ALLOWED_TARGETS` (host names or CIDR ranges, for example
   `kafka-*.internal,10.20.0.0/16`). The guard checks the configured bootstrap hosts; Kafka clients then connect to the
   addresses the cluster advertises.
-- Use TLS (`tls: true` for Kafka and NATS, an `amqps://` URL for RabbitMQ, a `rediss://` URL for Redis) and SASL or
+- Use TLS (`tls: true` for Kafka, NATS and MQTT, an `amqps://` URL for RabbitMQ, a `rediss://` URL for Redis) and SASL or
   broker credentials (NATS: user/password, token, NKey or creds; Redis: an ACL user) with access limited to the
   channel's topics, queues, subjects or streams.
 - A message on the inbound topic, queue, subject or stream is trusted like a signed inbound webhook: anyone who can produce to it can write into the
@@ -275,7 +284,7 @@ channels work everywhere.
 ## Running the broker tests
 
 Unit tests (config, envelope, idempotency, dead-lettering, consumer lifecycle) run with `mix test` and need no broker.
-The end-to-end suites run against real brokers and are excluded by default (tags `:kafka`, `:rabbitmq`, `:nats` and `:redis_streams`). They check
+The end-to-end suites run against real brokers and are excluded by default (tags `:kafka`, `:rabbitmq`, `:nats`, `:redis_streams` and `:mqtt`). They check
 that a message produced to `topic_in` reaches a WebSocket client through a routing rule, that the WebSocket reply is
 produced to `topic_out`, that a restarted consumer resumes from its committed offsets without duplicates, and that
 poison messages reach the dead-letter destination; the Redis suite also checks that entries a dead consumer left pending are recovered.
@@ -292,12 +301,19 @@ NATS_URL=nats://localhost:4222 mix test --only nats
 REDIS_URL=redis://localhost:6379 mix test --only redis_streams
 ```
 
+The MQTT suite: see [running the MQTT tests](mqtt.md#running-the-mqtt-tests).
+
+```bash
+docker run -d --name mosquitto -p 1883:1883 eclipse-mosquitto:2 mosquitto -c /mosquitto-no-auth.conf
+MQTT_HOST=localhost MQTT_PORT=1883 mix test --only mqtt
+```
+
 The suites create uniquely named topics, queues, streams and subjects and allow private broker addresses for their duration. CI runs them
 in the optional "Broker channel suites" job (`.github/workflows/ci.yml`).
 
 ## Related
 
-- [Kafka](kafka.md), [RabbitMQ](rabbitmq.md), [NATS JetStream](nats.md), [Redis Streams](redis-streams.md)
+- [Kafka](kafka.md), [RabbitMQ](rabbitmq.md), [NATS JetStream](nats.md), [Redis Streams](redis-streams.md), [MQTT](mqtt.md)
 - [Channels and adapters](overview.md), [Routing rules](../concepts/routing-rules.md)
 - [Delivery pipeline](../architecture/delivery-pipeline.md) (the pipeline transport)
 - [ADR-0047](../adr/0047-broker-channels-kafka-and-rabbitmq.md), [ADR-0054](../adr/0054-nats-and-redis-streams-channels.md)

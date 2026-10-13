@@ -260,6 +260,36 @@ defmodule Converger.Channels.BrokerTest do
     end
   end
 
+  describe "handle_message/5 (consumers that parse messages themselves)" do
+    test "creates the activity with the message's own idempotency key", %{channel: channel} do
+      message = %{"text" => "parsed", "sender" => "u1", "idempotency_key" => "message:1"}
+      info = %{payload: "", message_id: "1", source: "gateway/1"}
+
+      assert {:ok, :created, activity} =
+               Broker.handle_message(channel, TestBrokerAdapter, message, info)
+
+      assert activity.idempotency_key == "message:1"
+
+      assert {:ok, :duplicate, ^activity} =
+               Broker.handle_message(channel, TestBrokerAdapter, message, info)
+    end
+
+    test "drops a message that cannot be accepted when the adapter has no dead-letter destination",
+         %{channel: channel} do
+      message = %{"type" => "nope", "text" => "x", "sender" => "u1"}
+      info = %{payload: "", message_id: "2", source: "gateway/2"}
+
+      assert {:dropped, :poison, "rejected: " <> _} =
+               Broker.handle_message(channel, Converger.Channels.Adapters.Discord, message, info)
+
+      # With one, it is dead-lettered.
+      assert {:dead_lettered, :poison, _} =
+               Broker.handle_message(channel, TestBrokerAdapter, message, info)
+
+      assert_received {:test_broker_dead_letter, _, %{source: "gateway/2"}, _}
+    end
+  end
+
   test "backoff doubles up to the maximum" do
     opts = [base: 500, max: 30_000]
     assert Broker.backoff(opts, :base, :max, 1) == 500

@@ -3,7 +3,10 @@ defmodule Converger.Channels.Consumers do
   The `DynamicSupervisor` of broker channel consumers
   (`Converger.Channels.Broker.Consumer`, one per active `inbound` or
   `duplex` broker channel, exactly one in the cluster), and the functions to
-  start, stop and find them.
+  start, stop and find them. A consumer is a Broadway pipeline (Kafka,
+  RabbitMQ) or the process the adapter names: the MQTT subscriber, the
+  Gateway connection of a Discord channel with `gateway: true` (see
+  `Converger.Channels.Broker.consumes?/1`).
 
   `Converger.Channels.Consumers.Manager` keeps the running consumers in line
   with the channels: it starts and stops them as channels are created,
