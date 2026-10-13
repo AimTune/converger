@@ -25,6 +25,9 @@ config :converger, ConvergerWeb.Endpoint,
   secret_key_base: "9Ov2AhAq9kITaSWzIOHQlF0OjtggqukSSK19U94ghQsnmuWqnKNRkQ/2PjUT9xNm",
   server: false
 
+# Tests sync the token revocation cache explicitly (RevocationCache.sync/0).
+config :converger, Converger.Auth.RevocationCache, sync_interval_ms: nil
+
 # No readiness grace period when the test app stops.
 config :converger, :websocket, drain_delay_ms: 0
 
