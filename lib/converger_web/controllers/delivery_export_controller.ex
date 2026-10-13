@@ -1,7 +1,8 @@
 defmodule ConvergerWeb.DeliveryExportController do
   @moduledoc """
   CSV export of the Deliveries pages (`/admin/deliveries/export`,
-  `/portal/deliveries/export`), with the same filters as the page.
+  `/portal/deliveries/export`), with the same filters, search (`q`) and
+  sort as the page.
 
   The portal export is always scoped to the logged-in user's tenant. Rows are
   read in keyset pages and streamed as a chunked response, capped at
@@ -32,7 +33,7 @@ defmodule ConvergerWeb.DeliveryExportController do
   end
 
   defp export(conn, params, tenant_id) do
-    case Deliveries.cast_filters(params) do
+    case Deliveries.cast_search_params(params) do
       {:ok, filters} ->
         filters = if tenant_id, do: Map.put(filters, :tenant_id, tenant_id), else: filters
         stream_csv(conn, filters)

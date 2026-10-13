@@ -4,11 +4,19 @@ defmodule ConvergerWeb.Admin.ChannelLive do
   alias Converger.Channels
   alias Converger.Channels.Channel
   alias Converger.Channels.Adapter
-  alias Converger.Channels.Health
+  alias Converger.Channels.TestMessage
   alias Converger.Tenants
   alias Converger.Auth.Token
+  alias ConvergerWeb.Live.ChannelList
+
+  import ConvergerWeb.ChannelComponents
 
   @default_type "webhook"
+
+  # Admin `viewer`s browse only (docs/security/overview.md); every other event
+  # mutates a channel or reveals a secret.
+  @read_only_events ~w(filter load_more)
+  @manager_roles ~w(super_admin admin)
 
   @middleware_types [
     {"add_prefix", "Add Prefix"},
@@ -24,56 +32,62 @@ defmodule ConvergerWeb.Admin.ChannelLive do
       ConvergerWeb.Endpoint.subscribe("channel_health")
     end
 
-    tenants = Tenants.list_tenants()
-    actor = build_actor(socket)
     supported = Adapter.supported_modes(@default_type)
-    channels = Channels.list_channels()
-    health_map = load_health_map(channels)
 
     {:ok,
-     assign(socket,
-       channels: channels,
-       tenants: tenants,
+     socket
+     |> ChannelList.init(base_path: "/admin/channels")
+     |> assign(
+       tenants: Tenants.list_tenants(),
        form: to_form(Channels.change_channel(%Channel{})),
-       mode_filter: "all",
        selected_type: @default_type,
        supported_modes: supported,
        selected_mode: default_mode(supported),
-       health_map: health_map,
        transformations: [],
-       revealed_secret: nil,
        page_title: "Channels",
-       actor: actor
+       can_manage: socket.assigns[:admin_role] in @manager_roles,
+       actor: build_actor(socket)
      )}
   end
 
-  def handle_info(%{event: "health_changed", payload: payload}, socket) do
-    health_map =
-      Map.put(socket.assigns.health_map, payload.channel_id, %{
-        status: payload.status,
-        failure_rate: payload.failure_rate,
-        total_deliveries: payload.total_deliveries,
-        failed_deliveries: payload.failed_deliveries
-      })
+  def handle_params(params, _url, socket) do
+    {:noreply, ChannelList.apply_params(socket, params)}
+  end
 
-    {:noreply, assign(socket, health_map: health_map)}
+  def handle_info(%{event: "health_changed", payload: payload}, socket) do
+    {:noreply, ChannelList.health_changed(socket, payload)}
   end
 
   def handle_info(%{event: "circuit_changed", payload: payload}, socket) do
-    channels =
-      Enum.map(socket.assigns.channels, fn
-        %{id: id} = channel when id == payload.channel_id ->
-          %{
-            channel
-            | circuit_state: payload.circuit_state,
-              circuit_changed_at: payload.changed_at
-          }
+    {:noreply, ChannelList.refresh_row(socket, payload.channel_id)}
+  end
 
-        channel ->
-          channel
-      end)
+  def handle_info(
+        %{topic: "conversation:" <> _, event: "delivery_status", payload: payload},
+        socket
+      ) do
+    {:noreply, ChannelList.delivery_status(socket, payload)}
+  end
 
-    {:noreply, assign(socket, channels: channels)}
+  def handle_info({:poll_test_delivery, activity_id, n}, socket) do
+    {:noreply, ChannelList.poll_test(socket, activity_id, n)}
+  end
+
+  def handle_info(_message, socket), do: {:noreply, socket}
+
+  def handle_event(event, _params, %{assigns: %{can_manage: false}} = socket)
+      when event not in @read_only_events do
+    {:noreply, put_flash(socket, :error, "Viewers have read-only access to channels.")}
+  end
+
+  def handle_event("filter", %{"filters" => filters}, socket) do
+    {:noreply, push_patch(socket, to: ChannelList.filter_path(socket, filters))}
+  end
+
+  def handle_event("load_more", _params, socket) do
+    if socket.assigns.has_more,
+      do: {:noreply, ChannelList.load(socket, reset: false)},
+      else: {:noreply, socket}
   end
 
   def handle_event("pause_deliveries", %{"id" => id}, socket) do
@@ -82,7 +96,7 @@ defmodule ConvergerWeb.Admin.ChannelLive do
 
     {:noreply,
      socket
-     |> assign(channels: load_channels(socket.assigns.mode_filter))
+     |> ChannelList.refresh_row(channel.id)
      |> put_flash(:info, "Deliveries paused")}
   end
 
@@ -92,8 +106,42 @@ defmodule ConvergerWeb.Admin.ChannelLive do
 
     {:noreply,
      socket
-     |> assign(channels: load_channels(socket.assigns.mode_filter))
+     |> ChannelList.refresh_row(channel.id)
      |> put_flash(:info, "Deliveries resumed")}
+  end
+
+  def handle_event("rotate_secret", %{"id" => id}, socket) do
+    channel = Channels.get_channel!(id)
+
+    case Channels.rotate_secret(channel, socket.assigns.actor) do
+      {:ok, updated} ->
+        {:noreply,
+         socket
+         |> assign(revealed_secret: %{channel_name: updated.name, secret: updated.secret})
+         |> ChannelList.refresh_row(updated.id)
+         |> put_flash(:info, "Secret rotated")}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Failed to rotate the secret")}
+    end
+  end
+
+  def handle_event("open_test", %{"id" => id}, socket) do
+    {:noreply, ChannelList.open_test(socket, Channels.get_channel!(id))}
+  end
+
+  def handle_event("close_test", _params, socket) do
+    {:noreply, ChannelList.close_test(socket)}
+  end
+
+  def handle_event("send_test_message", %{"test" => %{"channel_id" => id} = test}, socket) do
+    case Channels.get_channel(id) do
+      nil ->
+        {:noreply, put_flash(socket, :error, "Channel not found")}
+
+      channel ->
+        {:noreply, ChannelList.send_test(socket, channel, test["text"], socket.assigns.actor)}
+    end
   end
 
   def handle_event("save", %{"channel" => params}, socket) do
@@ -103,21 +151,19 @@ defmodule ConvergerWeb.Admin.ChannelLive do
     case Channels.create_channel(params, socket.assigns.actor) do
       {:ok, channel} ->
         supported = Adapter.supported_modes(@default_type)
-        channels = load_channels(socket.assigns.mode_filter)
 
         {:noreply,
          socket
          |> put_flash(:info, "Channel created")
          |> assign(
-           channels: channels,
-           health_map: load_health_map(channels),
            form: to_form(Channels.change_channel(%Channel{})),
            selected_type: @default_type,
            supported_modes: supported,
            selected_mode: default_mode(supported),
            transformations: [],
            revealed_secret: %{channel_name: channel.name, secret: channel.secret}
-         )}
+         )
+         |> ChannelList.load(reset: true)}
 
       {:error, changeset} ->
         {:noreply, assign(socket, form: to_form(changeset))}
@@ -157,23 +203,15 @@ defmodule ConvergerWeb.Admin.ChannelLive do
     {:noreply, assign(socket, transformations: updated)}
   end
 
-  def handle_event("filter_mode", %{"mode" => mode}, socket) do
-    channels = load_channels(mode)
-
-    {:noreply,
-     assign(socket, channels: channels, health_map: load_health_map(channels), mode_filter: mode)}
-  end
-
   def handle_event("toggle_status", %{"id" => id}, socket) do
     channel = Channels.get_channel!(id)
     new_status = if channel.status == "active", do: "inactive", else: "active"
 
     case Channels.update_channel(channel, %{status: new_status}, socket.assigns.actor) do
       {:ok, _} ->
-        channels = load_channels(socket.assigns.mode_filter)
-
         {:noreply,
-         assign(socket, channels: channels, health_map: load_health_map(channels))
+         socket
+         |> ChannelList.refresh_row(channel.id)
          |> put_flash(:info, "Status updated")}
 
       {:error, _} ->
@@ -190,10 +228,9 @@ defmodule ConvergerWeb.Admin.ChannelLive do
            socket.assigns.actor
          ) do
       {:ok, _} ->
-        channels = load_channels(socket.assigns.mode_filter)
-
         {:noreply,
-         assign(socket, channels: channels, health_map: load_health_map(channels))
+         socket
+         |> ChannelList.refresh_row(channel.id)
          |> put_flash(:info, "Signature requirement updated")}
 
       {:error, %Ecto.Changeset{} = changeset} ->
@@ -232,10 +269,15 @@ defmodule ConvergerWeb.Admin.ChannelLive do
 
     case Channels.delete_channel(channel, socket.assigns.actor) do
       {:ok, _} ->
-        channels = load_channels(socket.assigns.mode_filter)
+        socket =
+          case socket.assigns.test_channel do
+            %{id: ^id} -> ChannelList.close_test(socket)
+            _ -> socket
+          end
 
         {:noreply,
-         assign(socket, channels: channels, health_map: load_health_map(channels))
+         socket
+         |> ChannelList.drop_row(channel.id)
          |> put_flash(:info, "Channel deleted")}
 
       {:error, _} ->
@@ -277,14 +319,6 @@ defmodule ConvergerWeb.Admin.ChannelLive do
       _, acc ->
         acc
     end)
-  end
-
-  defp load_channels("all"), do: Channels.list_channels()
-  defp load_channels(mode), do: Channels.list_channels_by_mode(mode)
-
-  defp load_health_map(channels) do
-    channel_ids = Enum.map(channels, & &1.id)
-    Health.get_latest_health_map(channel_ids)
   end
 
   # Status dot + text colour classes (literal so Tailwind picks them up).
@@ -443,15 +477,6 @@ defmodule ConvergerWeb.Admin.ChannelLive do
       else: field_label(field)
   end
 
-  defp mode_filters do
-    [
-      {"all", "All"},
-      {"inbound", "← Inbound"},
-      {"outbound", "→ Outbound"},
-      {"duplex", "↔ Duplex"}
-    ]
-  end
-
   attr :class, :any, required: true
   slot :inner_block, required: true
 
@@ -522,6 +547,14 @@ defmodule ConvergerWeb.Admin.ChannelLive do
     """
   end
 
+  # Why the "Send test" button is disabled for a channel, or nil.
+  defp test_blocked_reason(channel) do
+    case TestMessage.check_sendable(channel) do
+      :ok -> nil
+      {:error, reason} -> TestMessage.error_message(reason)
+    end
+  end
+
   def render(assigns) do
     ~H"""
     <Layouts.app flash={@flash} nav={@nav}>
@@ -532,26 +565,9 @@ defmodule ConvergerWeb.Admin.ChannelLive do
         </:subtitle>
       </.header>
 
-      <div
-        :if={@revealed_secret}
-        id="revealed-channel-secret"
-        role="alert"
-        class="alert alert-warning items-start"
-      >
-        <.icon name="hero-key" class="size-6 shrink-0" />
-        <div class="min-w-0 flex-1 space-y-2">
-          <h3 class="font-semibold">Secret for {@revealed_secret.channel_name}</h3>
-          <p class="text-sm">
-            Copy this channel secret now. It is stored encrypted and will not be shown again.
-          </p>
-          <code class="block rounded bg-base-100 p-2 font-mono text-sm break-all text-base-content">{@revealed_secret.secret}</code>
-          <.button phx-click="dismiss_secret" size="sm" variant="neutral">
-            I have saved the secret
-          </.button>
-        </div>
-      </div>
+      <.revealed_secret :if={@revealed_secret} secret={@revealed_secret} />
 
-      <.panel title="Create Channel">
+      <.panel :if={@can_manage} title="Create Channel">
         <.form for={@form} id="channel-form" phx-submit="save" phx-change="form_changed">
           <div class="grid gap-x-4 sm:grid-cols-2 lg:grid-cols-3">
             <.input
@@ -746,21 +762,20 @@ defmodule ConvergerWeb.Admin.ChannelLive do
         </.form>
       </.panel>
 
+
+      <.test_message_panel
+        :if={@test_channel}
+        channel={@test_channel}
+        text={@test_text}
+        result={@test_result}
+        error={@test_error}
+      />
+
       <.panel>
-        <div role="group" aria-label="Filter by mode" class="flex flex-wrap gap-2">
-          <.button
-            :for={{mode, label} <- mode_filters()}
-            phx-click="filter_mode"
-            phx-value-mode={mode}
-            size="xs"
-            variant={if @mode_filter == mode, do: "primary", else: "ghost"}
-          >
-            {label}
-          </.button>
-        </div>
+        <.channel_filters filters={@filters} tenants={@tenants} reset_path={~p"/admin/channels"} />
 
         <div class="overflow-x-auto">
-          <.table id="channels" rows={@channels} row_id={&"channel-#{&1.id}"}>
+          <.table id="channels" rows={@streams.channels} row_item={fn {_id, channel} -> channel end}>
             <:col :let={channel} label="Name">
               <span class="font-medium">{channel.name}</span>
             </:col>
@@ -773,9 +788,15 @@ defmodule ConvergerWeb.Admin.ChannelLive do
             </:col>
             <:col :let={channel} label="Status"><.badge value={channel.status} /></:col>
             <:col :let={channel} label="Health">
-              <.status_dot class={health_class(channel_health_status(@health_map, channel.id))}>
-                {health_label(channel_health_status(@health_map, channel.id))}
-              </.status_dot>
+              <div class="flex flex-col gap-1">
+                <.status_dot class={health_class(channel_health_status(@health_map, channel.id))}>
+                  {health_label(channel_health_status(@health_map, channel.id))}
+                </.status_dot>
+                <.health_sparkline
+                  id={"health-sparkline-#{channel.id}"}
+                  history={Map.get(@history_map, channel.id, [])}
+                />
+              </div>
             </:col>
             <:col :let={channel} label="Delivery">
               <span
@@ -810,7 +831,7 @@ defmodule ConvergerWeb.Admin.ChannelLive do
               </span>
             </:col>
             <:col :let={channel} label="Token"><.channel_token channel={channel} /></:col>
-            <:action :let={channel}>
+            <:action :let={channel} :if={@can_manage}>
               <div class="flex flex-wrap gap-1">
                 <.button
                   phx-click="toggle_status"
@@ -841,6 +862,17 @@ defmodule ConvergerWeb.Admin.ChannelLive do
                   Resume deliveries
                 </.button>
                 <.button
+                  id={"send-test-#{channel.id}"}
+                  phx-click="open_test"
+                  phx-value-id={channel.id}
+                  size="xs"
+                  variant="neutral"
+                  disabled={test_blocked_reason(channel) != nil}
+                  title={test_blocked_reason(channel) || "Send a test message through the pipeline"}
+                >
+                  Send test
+                </.button>
+                <.button
                   phx-click="toggle_require_signature"
                   phx-value-id={channel.id}
                   size="xs"
@@ -863,6 +895,17 @@ defmodule ConvergerWeb.Admin.ChannelLive do
                   Register webhook
                 </.button>
                 <.button
+                  id={"rotate-secret-#{channel.id}"}
+                  phx-click="rotate_secret"
+                  phx-value-id={channel.id}
+                  data-confirm="Rotate this channel's secret? The current secret stops working immediately."
+                  size="xs"
+                  variant="neutral"
+                  title="Generate a new channel secret (shown once)"
+                >
+                  Rotate secret
+                </.button>
+                <.button
                   phx-click="delete"
                   phx-value-id={channel.id}
                   data-confirm="Are you sure?"
@@ -875,7 +918,19 @@ defmodule ConvergerWeb.Admin.ChannelLive do
             </:action>
           </.table>
         </div>
-        <.empty_state :if={@channels == []}>No channels found.</.empty_state>
+        <.empty_state :if={@loaded_count == 0}>No channels found.</.empty_state>
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <span class="text-sm text-base-content/60">Showing {@loaded_count} channels</span>
+          <.button
+            :if={@has_more}
+            id="load-more-channels"
+            phx-click="load_more"
+            size="sm"
+            variant="neutral"
+          >
+            Load more
+          </.button>
+        </div>
       </.panel>
     </Layouts.app>
     """

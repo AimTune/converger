@@ -14,6 +14,9 @@ defmodule ConvergerWeb.Live.DeliveriesPage do
     * `:tenants` - tenants offered in the filter (admin only), or `nil`
 
   Keyset pagination on `(updated_at, id)` with "Load more", like the audit log.
+  Filters, the `q` search (activity id or error text) and the `sort`
+  (newest/oldest) live in the URL; the CSV export and "Retry all failed" use
+  the same filters and search.
   """
   use ConvergerWeb, :html
 
@@ -21,7 +24,7 @@ defmodule ConvergerWeb.Live.DeliveriesPage do
 
   alias Converger.Deliveries
 
-  @filter_keys ~w(tenant_id status channel_id from to)
+  @filter_keys ~w(tenant_id status channel_id from to q sort)
 
   def mount(socket, opts) do
     assign(socket,
@@ -62,7 +65,7 @@ defmodule ConvergerWeb.Live.DeliveriesPage do
   end
 
   defp filters_for(params, socket) do
-    with {:ok, filters} <- Deliveries.cast_filters(params) do
+    with {:ok, filters} <- Deliveries.cast_search_params(params) do
       case socket.assigns.scope_tenant_id || tenant_param(params["tenant_id"]) do
         nil -> {:ok, filters}
         tenant_id -> {:ok, Map.put(filters, :tenant_id, tenant_id)}
@@ -183,6 +186,8 @@ defmodule ConvergerWeb.Live.DeliveriesPage do
   defp channel_options(channels),
     do: [{"All Channels", ""} | Enum.map(channels, &{&1.name, &1.id})]
 
+  defp sort_options, do: [{"Newest first", "newest"}, {"Oldest first", "oldest"}]
+
   defp status_options,
     do: [{"All", ""} | Enum.map(Converger.Deliveries.Delivery.statuses(), &{&1, &1})]
 
@@ -196,6 +201,25 @@ defmodule ConvergerWeb.Live.DeliveriesPage do
 
       <.panel title="Filters">
         <form phx-change="filter" id="delivery-filter-form">
+          <div class="grid gap-x-4 sm:grid-cols-[1fr_auto]">
+            <.input
+              type="search"
+              id="delivery-filter-q"
+              name="filters[q]"
+              label="Search"
+              value={@params["q"]}
+              placeholder="Activity id or error text"
+              phx-debounce="300"
+            />
+            <.input
+              type="select"
+              id="delivery-filter-sort"
+              name="filters[sort]"
+              label="Sort"
+              value={@params["sort"]}
+              options={sort_options()}
+            />
+          </div>
           <div class="grid gap-x-4 sm:grid-cols-2 lg:grid-cols-5">
             <.input
               :if={@tenants}
@@ -254,7 +278,7 @@ defmodule ConvergerWeb.Live.DeliveriesPage do
               type="button"
               id="bulk-retry"
               phx-click="bulk_retry"
-              data-confirm="Re-enqueue every failed delivery matching these filters?"
+              data-confirm="Re-enqueue every failed delivery matching these filters and search?"
               size="sm"
               variant="error"
             >

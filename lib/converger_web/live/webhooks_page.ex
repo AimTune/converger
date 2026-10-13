@@ -2,9 +2,11 @@ defmodule ConvergerWeb.Live.WebhooksPage do
   @moduledoc """
   Shared implementation of the admin (`/admin/webhooks`) and portal
   (`/portal/webhooks`) platform event webhook pages (ADR-0053): the
-  subscriptions, a create form (the signing secret is shown once), enable,
-  disable and delete, and the recent events with their status and a
-  "Redeliver" button for dead-lettered (`failed`) events.
+  subscriptions (searchable by URL), a create form and "Rotate secret" (the
+  signing secret is shown once), enable, disable and delete, and the recent
+  events with their status and a
+  "Redeliver" button for dead-lettered (`failed`) events, keyset-paged with
+  "Load more".
 
   Options passed by the two LiveViews:
 
@@ -18,7 +20,7 @@ defmodule ConvergerWeb.Live.WebhooksPage do
   import Phoenix.LiveView
 
   alias Converger.Webhooks
-  alias Converger.Webhooks.{Catalog, Event}
+  alias Converger.Webhooks.{Catalog, Event, Subscription}
 
   @recent_events 50
 
@@ -33,9 +35,27 @@ defmodule ConvergerWeb.Live.WebhooksPage do
       event_types: Catalog.types(),
       new_secret: nil,
       form_errors: [],
-      event_filters: %{"status" => "", "subscription_id" => ""}
+      event_filters: %{"status" => "", "subscription_id" => ""},
+      subscription_query: "",
+      events: [],
+      events_cursor: nil,
+      events_has_more: false
     )
     |> load()
+  end
+
+  @doc """
+  Applies the subscription search kept in the URL (`?q=`), so a filtered view
+  can be bookmarked like the other admin/portal lists.
+  """
+  def handle_params(params, socket) do
+    query = Map.get(params, "q", "")
+
+    {:noreply,
+     assign(socket,
+       subscription_query: query,
+       subscriptions: search_subscriptions(socket.assigns.all_subscriptions, query)
+     )}
   end
 
   def handle_event("create", %{"subscription" => params}, socket) do
@@ -108,9 +128,46 @@ defmodule ConvergerWeb.Live.WebhooksPage do
     end
   end
 
+  def handle_event("rotate_secret", %{"id" => id}, socket) do
+    with :ok <- authorize(socket),
+         {:ok, subscription} <- fetch_subscription(socket, id),
+         {:ok, subscription} <-
+           Webhooks.update_subscription(
+             subscription,
+             %{"secret" => Subscription.generate_secret()},
+             socket.assigns.actor
+           ) do
+      {:noreply,
+       socket
+       |> assign(new_secret: %{id: subscription.id, secret: subscription.secret})
+       |> put_flash(:info, "Signing secret rotated. Copy the new secret now.")
+       |> load()}
+    else
+      {:error, message} when is_binary(message) -> {:noreply, put_flash(socket, :error, message)}
+      {:error, _} -> {:noreply, put_flash(socket, :error, "Failed to rotate the secret")}
+    end
+  end
+
   def handle_event("filter_events", %{"events" => filters}, socket) do
     filters = Map.take(filters, ["status", "subscription_id"])
-    {:noreply, socket |> assign(event_filters: filters) |> load()}
+    {:noreply, socket |> assign(event_filters: filters) |> load_events(reset: true)}
+  end
+
+  def handle_event("load_more_events", _params, socket) do
+    if socket.assigns.events_has_more,
+      do: {:noreply, load_events(socket, reset: false)},
+      else: {:noreply, socket}
+  end
+
+  def handle_event("search_subscriptions", %{"subscriptions" => %{"q" => query}}, socket) do
+    path = socket.assigns.nav.path
+
+    to =
+      if String.trim(query) == "",
+        do: path,
+        else: path <> "?" <> URI.encode_query(%{"q" => query})
+
+    {:noreply, push_patch(socket, to: to)}
   end
 
   def handle_event("dismiss_secret", _params, socket),
@@ -152,6 +209,9 @@ defmodule ConvergerWeb.Live.WebhooksPage do
   defp in_scope?(%{assigns: %{scope_tenant_id: nil}}, _tenant_id), do: true
   defp in_scope?(%{assigns: %{scope_tenant_id: scope}}, tenant_id), do: scope == tenant_id
 
+  # Subscriptions are a small, bounded list (`Converger.Pagination.bounded_all/2`),
+  # so the search box filters them in memory; the event log is keyset-paged
+  # ("Load more").
   defp load(socket) do
     scope = socket.assigns.scope_tenant_id
 
@@ -160,18 +220,48 @@ defmodule ConvergerWeb.Live.WebhooksPage do
         do: Webhooks.list_subscriptions(scope),
         else: Webhooks.list_all_subscriptions()
 
+    socket
+    |> assign(
+      all_subscriptions: subscriptions,
+      subscriptions: search_subscriptions(subscriptions, socket.assigns.subscription_query),
+      subscription_urls: Map.new(subscriptions, &{&1.id, &1.url})
+    )
+    |> load_events(reset: true)
+  end
+
+  defp search_subscriptions(subscriptions, query) do
+    case String.trim(query || "") do
+      "" ->
+        subscriptions
+
+      term ->
+        term = String.downcase(term)
+        Enum.filter(subscriptions, &String.contains?(String.downcase(&1.url), term))
+    end
+  end
+
+  defp load_events(socket, reset: reset) do
     filters = socket.assigns.event_filters
+    cursor = if reset, do: nil, else: socket.assigns.events_cursor
 
     event_filters = %{
-      tenant_id: scope,
+      tenant_id: socket.assigns.scope_tenant_id,
       status: blank_to_nil(filters["status"]),
       subscription_id: uuid_or_nil(filters["subscription_id"])
     }
 
+    page =
+      case Webhooks.paginate_events(event_filters, limit: @recent_events, cursor: cursor) do
+        {:ok, page} -> page
+        {:error, :invalid_cursor} -> %Converger.Pagination.Page{}
+      end
+
+    events = if reset, do: page.entries, else: socket.assigns.events ++ page.entries
+
     assign(socket,
-      subscriptions: subscriptions,
-      subscription_urls: Map.new(subscriptions, &{&1.id, &1.url}),
-      events: Webhooks.list_recent_events(event_filters, @recent_events)
+      events: events,
+      events_cursor: page.next_cursor,
+      events_has_more: page.has_more
     )
   end
 
@@ -278,6 +368,17 @@ defmodule ConvergerWeb.Live.WebhooksPage do
       </.panel>
 
       <.panel title="Subscriptions">
+        <form phx-change="search_subscriptions" id="webhook-subscription-search">
+          <.input
+            type="search"
+            id="webhook-subscription-search-q"
+            name="subscriptions[q]"
+            label="Search"
+            value={@subscription_query}
+            placeholder="URL contains..."
+            phx-debounce="300"
+          />
+        </form>
         <div class="overflow-x-auto">
           <.table id="webhook-subscriptions" rows={@subscriptions} row_id={&"subscription-#{&1.id}"}>
             <:col :let={s} :if={@tenants} label="Tenant">{tenant_name(s)}</:col>
@@ -304,6 +405,16 @@ defmodule ConvergerWeb.Live.WebhooksPage do
                 {if s.enabled, do: "Disable", else: "Enable"}
               </.button>
               <.button
+                id={"rotate-secret-#{s.id}"}
+                phx-click="rotate_secret"
+                phx-value-id={s.id}
+                data-confirm="Rotate the signing secret? The current secret stops working immediately."
+                size="xs"
+                variant="neutral"
+              >
+                Rotate secret
+              </.button>
+              <.button
                 phx-click="delete"
                 phx-value-id={s.id}
                 data-confirm="Delete this subscription and its event log?"
@@ -315,7 +426,10 @@ defmodule ConvergerWeb.Live.WebhooksPage do
             </:action>
           </.table>
         </div>
-        <.empty_state :if={@subscriptions == []}>No subscriptions yet.</.empty_state>
+        <.empty_state :if={@all_subscriptions == []}>No subscriptions yet.</.empty_state>
+        <.empty_state :if={@all_subscriptions != [] and @subscriptions == []}>
+          No subscriptions match the search.
+        </.empty_state>
       </.panel>
 
       <.panel title="Recent events">
@@ -335,7 +449,7 @@ defmodule ConvergerWeb.Live.WebhooksPage do
               name="events[subscription_id]"
               label="Subscription"
               value={@event_filters["subscription_id"]}
-              options={subscription_options(@subscriptions)}
+              options={subscription_options(@all_subscriptions)}
             />
           </div>
         </form>
@@ -369,6 +483,18 @@ defmodule ConvergerWeb.Live.WebhooksPage do
           </.table>
         </div>
         <.empty_state :if={@events == []}>No events.</.empty_state>
+        <div class="flex items-center justify-between gap-2">
+          <span class="text-sm text-base-content/60">Showing {length(@events)} events</span>
+          <.button
+            :if={@events_has_more}
+            id="load-more-webhook-events"
+            phx-click="load_more_events"
+            size="sm"
+            variant="neutral"
+          >
+            Load more
+          </.button>
+        </div>
       </.panel>
     </Layouts.app>
     """

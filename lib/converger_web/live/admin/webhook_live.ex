@@ -15,6 +15,8 @@ defmodule ConvergerWeb.Admin.WebhookLive do
      )}
   end
 
+  def handle_params(params, _url, socket), do: WebhooksPage.handle_params(params, socket)
+
   def handle_event(event, params, socket), do: WebhooksPage.handle_event(event, params, socket)
 
   defp build_actor(socket) do

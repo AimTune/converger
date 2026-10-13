@@ -17,6 +17,53 @@ defmodule Converger.Tenants do
     |> Converger.Pagination.bounded_all()
   end
 
+  @doc """
+  Keyset-paginated tenants (`Converger.Pagination.keyset/2`), the admin
+  Tenants page.
+
+  Filters (string or atom keys, blank values ignored):
+
+    * `"q"` - case-insensitive "contains" match on the name, or the exact
+      tenant id when the term is a UUID
+    * `"status"` - `active` / `inactive`
+
+  Options: `:limit`, `:cursor`, `:direction` (`:desc` newest first, default,
+  or `:asc`). Returns `{:ok, %Converger.Pagination.Page{}}` or
+  `{:error, :invalid_cursor}`.
+  """
+  def paginate_tenants(filters \\ %{}, opts \\ []) do
+    Tenant
+    |> filter_tenants(filters)
+    |> Converger.Pagination.keyset(opts)
+  end
+
+  defp filter_tenants(query, filters) do
+    query
+    |> search_tenants(filter_value(filters, :q))
+    |> filter_tenant_status(filter_value(filters, :status))
+  end
+
+  defp search_tenants(query, nil), do: query
+
+  defp search_tenants(query, term) do
+    pattern = Converger.Pagination.contains(term)
+
+    case Ecto.UUID.cast(String.trim(term)) do
+      {:ok, id} -> where(query, [t], t.id == ^id or ilike(t.name, ^pattern))
+      :error -> where(query, [t], ilike(t.name, ^pattern))
+    end
+  end
+
+  defp filter_tenant_status(query, nil), do: query
+  defp filter_tenant_status(query, status), do: where(query, [t], t.status == ^status)
+
+  defp filter_value(filters, key) do
+    case Map.get(filters, Atom.to_string(key), Map.get(filters, key)) do
+      value when is_binary(value) -> if String.trim(value) == "", do: nil, else: value
+      _ -> nil
+    end
+  end
+
   def get_tenant!(id), do: Repo.get!(Tenant, id)
 
   @doc "Returns the tenant with `id`, or `nil` (also for a malformed id)."

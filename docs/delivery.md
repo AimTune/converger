@@ -235,7 +235,7 @@ Retrying a cancelled job from Oban Web also re-runs the delivery, but it does no
 
 ### Deliveries page
 
-`/admin/deliveries` (all tenants) and `/portal/deliveries` (the user's tenant) list deliveries, most recently changed first, with **Load more**. The filters (tenant for admins, channel, status, from and to date) are kept in the URL. The status filter defaults to `failed`. The from and to dates are UTC days and filter on `updated_at`, the time of the last status change.
+`/admin/deliveries` (all tenants) and `/portal/deliveries` (the user's tenant) list deliveries, most recently changed first, with **Load more**. The filters (tenant for admins, channel, status, from and to date), a search box and the sort order are kept in the URL. The search matches the exact activity id or a part of `last_error`; **Sort** is newest or oldest status change first. **Export CSV** and **Retry all failed** apply the same filters and search. The status filter defaults to `failed`. The from and to dates are UTC days and filter on `updated_at`, the time of the last status change.
 
 Each row shows the channel, the activity, the status, `attempts`, `retry_count` with `retried_by` and `retried_at`, `last_error`, and a **Payload** preview: the canonical activity ([ADR-0004](adr/0004-single-canonical-activity-serializer.md)) with sensitive keys such as `api_key`, `password` and `*_token` replaced by `"[REDACTED]"` (`Converger.Secrets.redact/1`). This is the stored activity, before the channel's middleware transformed its copy.
 

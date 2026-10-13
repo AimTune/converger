@@ -1,9 +1,16 @@
 defmodule ConvergerWeb.Admin.TenantUserLive do
+  @moduledoc """
+  Admin Tenant Users page: users of every tenant, filtered by tenant, role,
+  status and a name/email search, sorted and keyset-paginated ("Load more").
+  Viewers can browse but not change anything.
+  """
   use ConvergerWeb, :live_view
 
   alias Converger.Accounts
   alias Converger.Accounts.TenantUser
   alias Converger.Tenants
+
+  @filter_keys ~w(tenant_id q role status sort)
 
   def mount(_params, _session, socket) do
     tenants = Tenants.list_tenants()
@@ -12,19 +19,26 @@ defmodule ConvergerWeb.Admin.TenantUserLive do
       socket.assigns[:current_admin_user] && socket.assigns.current_admin_user.role == "viewer"
 
     {:ok,
-     socket
-     |> assign(
+     assign(socket,
        tenants: tenants,
        page_title: "Tenant Users",
        min_password_length: Converger.Accounts.PasswordPolicy.min_length(),
        form: to_form(Accounts.change_tenant_user(%TenantUser{})),
-       filter_tenant_id: "",
+       filters: default_filters(),
        is_viewer: is_viewer,
        next_cursor: nil,
        has_more: false,
        loaded_count: 0
-     )
-     |> load_users(reset: true)}
+     )}
+  end
+
+  defp default_filters do
+    %{"tenant_id" => "", "q" => "", "role" => "", "status" => "", "sort" => "desc"}
+  end
+
+  def handle_params(params, _url, socket) do
+    filters = Map.merge(default_filters(), Map.take(params, @filter_keys))
+    {:noreply, socket |> assign(filters: filters) |> load_users(reset: true)}
   end
 
   def handle_event("save", %{"tenant_user" => params}, socket) do
@@ -45,11 +59,13 @@ defmodule ConvergerWeb.Admin.TenantUserLive do
     end
   end
 
-  def handle_event("filter", %{"tenant_id" => tenant_id}, socket) do
-    {:noreply,
-     socket
-     |> assign(filter_tenant_id: tenant_id)
-     |> load_users(reset: true)}
+  def handle_event("filter", %{"filters" => filters}, socket) do
+    query =
+      filters
+      |> Map.take(@filter_keys)
+      |> Enum.reject(fn {k, v} -> v == "" or {k, v} == {"sort", "desc"} end)
+
+    {:noreply, push_patch(socket, to: ~p"/admin/tenant_users?#{query}")}
   end
 
   def handle_event("load_more", _params, socket) do
@@ -68,10 +84,10 @@ defmodule ConvergerWeb.Admin.TenantUserLive do
       new_status = if user.status == "active", do: "inactive", else: "active"
 
       case Accounts.update_tenant_user(user, %{status: new_status}, build_actor(socket)) do
-        {:ok, _} ->
+        {:ok, updated} ->
           {:noreply,
            socket
-           |> stream_insert(:tenant_users, Accounts.get_tenant_user!(id))
+           |> stream_insert(:tenant_users, updated)
            |> put_flash(:info, "Status updated")}
 
         {:error, _} ->
@@ -100,13 +116,16 @@ defmodule ConvergerWeb.Admin.TenantUserLive do
     end
   end
 
-  # Keyset page of tenant users (newest first); `reset: true` starts over.
+  # Keyset page of tenant users; `reset: true` starts over (filter change).
   defp load_users(socket, reset: reset) do
     cursor = if reset, do: nil, else: socket.assigns.next_cursor
-    filters = %{"tenant_id" => socket.assigns.filter_tenant_id}
+    filters = socket.assigns.filters
 
     page =
-      case Accounts.paginate_tenant_users(filters, cursor: cursor) do
+      case Accounts.paginate_tenant_users(Map.take(filters, ~w(tenant_id q role status)),
+             cursor: cursor,
+             direction: sort_direction(filters)
+           ) do
         {:ok, page} -> page
         {:error, :invalid_cursor} -> %Converger.Pagination.Page{}
       end
@@ -121,6 +140,9 @@ defmodule ConvergerWeb.Admin.TenantUserLive do
       loaded_count: loaded + length(page.entries)
     )
   end
+
+  defp sort_direction(%{"sort" => "asc"}), do: :asc
+  defp sort_direction(_), do: :desc
 
   defp build_actor(socket) do
     case socket.assigns[:current_admin_user] do
@@ -192,20 +214,52 @@ defmodule ConvergerWeb.Admin.TenantUserLive do
       </.panel>
 
       <.panel title="Tenant Users">
-        <:actions>
-          <form id="tenant-user-filter" phx-change="filter" class="w-56">
+        <form id="tenant-user-filter" phx-change="filter" phx-submit="filter">
+          <div class="grid gap-x-4 sm:grid-cols-2 lg:grid-cols-5">
+            <.input
+              type="search"
+              id="tenant_user_filter_q"
+              name="filters[q]"
+              value={@filters["q"]}
+              label="Search"
+              placeholder="Name or email"
+              phx-debounce="300"
+            />
             <.input
               id="tenant_user_filter_tenant_id"
               type="select"
-              name="tenant_id"
-              value={@filter_tenant_id}
-              label="Filter by Tenant"
+              name="filters[tenant_id]"
+              value={@filters["tenant_id"]}
+              label="Tenant"
               prompt="All Tenants"
               options={Enum.map(@tenants, &{&1.name, &1.id})}
-              class="select select-sm w-full"
             />
-          </form>
-        </:actions>
+            <.input
+              id="tenant_user_filter_role"
+              type="select"
+              name="filters[role]"
+              value={@filters["role"]}
+              label="Role"
+              options={[{"All", ""} | ~w(owner admin member viewer)]}
+            />
+            <.input
+              id="tenant_user_filter_status"
+              type="select"
+              name="filters[status]"
+              value={@filters["status"]}
+              label="Status"
+              options={[{"All", ""} | ~w(active inactive)]}
+            />
+            <.input
+              id="tenant_user_filter_sort"
+              type="select"
+              name="filters[sort]"
+              value={@filters["sort"]}
+              label="Sort"
+              options={[{"Newest first", "desc"}, {"Oldest first", "asc"}]}
+            />
+          </div>
+        </form>
         <div class="overflow-x-auto">
           <.table id="tenant-users" rows={@streams.tenant_users}>
             <:col :let={{_id, user}} label="Name"><span class="font-medium">{user.name}</span></:col>

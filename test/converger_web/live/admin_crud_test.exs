@@ -34,7 +34,7 @@ defmodule ConvergerWeb.Admin.CrudTest do
       # Create
       html =
         view
-        |> form("form", tenant: %{name: "New Tenant"})
+        |> form("#tenant-form", tenant: %{name: "New Tenant"})
         |> render_submit()
 
       assert html =~ "Tenant created"
@@ -93,7 +93,7 @@ defmodule ConvergerWeb.Admin.CrudTest do
 
       # Create
       assert view
-             |> form("form",
+             |> form("#channel-form",
                channel: %{
                  name: "New Channel",
                  tenant_id: tenant.id,

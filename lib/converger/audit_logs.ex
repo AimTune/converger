@@ -4,6 +4,13 @@ defmodule Converger.AuditLogs do
 
   Provides functions to create and query audit log entries.
   Audit logs are immutable records of actions performed on resources.
+
+  Filters (string or atom keys; blank values are ignored): `tenant_id`,
+  `actor_type`, `action`, `resource_type`, `resource_id`, plus, for the admin
+  page's search, `q` (the exact `resource_id` when it is a UUID, or else a
+  case-insensitive substring of `actor_id`), `from` and `to` (ISO 8601 dates,
+  inclusive, UTC, on `inserted_at`). Invalid UUIDs and dates match nothing
+  rather than raising.
   """
 
   import Ecto.Query, warn: false
@@ -41,15 +48,20 @@ defmodule Converger.AuditLogs do
   end
 
   @doc """
-  Keyset-paginated audit log entries on `(inserted_at, id)`, newest first.
+  Keyset-paginated audit log entries on `(inserted_at, id)`, newest first, or
+  oldest first when `filters` has `sort: "oldest"` (or the `:direction`
+  option is `:asc`).
 
-  Options: `:limit`, `:cursor`. Returns `{:ok, %Converger.Pagination.Page{}}`
-  or `{:error, :invalid_cursor}`. See `Converger.Pagination.keyset/2`.
+  Options: `:limit`, `:cursor`, `:direction`. Returns
+  `{:ok, %Converger.Pagination.Page{}}` or `{:error, :invalid_cursor}`. See
+  `Converger.Pagination.keyset/2`.
   """
   def paginate_audit_logs(filters \\ %{}, opts \\ []) do
+    direction = if filter(filters, :sort) == "oldest", do: :asc, else: :desc
+
     AuditLog
     |> apply_filters(filters)
-    |> Converger.Pagination.keyset(opts)
+    |> Converger.Pagination.keyset(Keyword.put_new(opts, :direction, direction))
   end
 
   def count_audit_logs(filters \\ %{}) do
@@ -58,17 +70,60 @@ defmodule Converger.AuditLogs do
     |> Repo.aggregate(:count, :id)
   end
 
+  @filter_keys ~w(tenant_id actor_type action resource_type resource_id q from to)a
+
   defp apply_filters(query, filters) do
-    Enum.reduce(filters, query, fn
-      {"tenant_id", value}, q when value != "" -> where(q, tenant_id: ^value)
-      {:tenant_id, value}, q when value != "" -> where(q, tenant_id: ^value)
-      {"actor_type", value}, q when value != "" -> where(q, actor_type: ^value)
-      {:actor_type, value}, q when value != "" -> where(q, actor_type: ^value)
-      {"action", value}, q when value != "" -> where(q, action: ^value)
-      {:action, value}, q when value != "" -> where(q, action: ^value)
-      {"resource_type", value}, q when value != "" -> where(q, resource_type: ^value)
-      {:resource_type, value}, q when value != "" -> where(q, resource_type: ^value)
-      {_, _}, q -> q
+    Enum.reduce(@filter_keys, query, fn key, q ->
+      case filter(filters, key) do
+        value when value in [nil, ""] -> q
+        value -> apply_filter(q, key, value)
+      end
     end)
   end
+
+  defp filter(filters, key) do
+    case Map.get(filters, key, Map.get(filters, Atom.to_string(key))) do
+      value when is_binary(value) -> String.trim(value)
+      value -> value
+    end
+  end
+
+  defp apply_filter(q, key, value) when key in [:tenant_id, :resource_id] do
+    case Ecto.UUID.cast(value) do
+      {:ok, id} -> where(q, [a], field(a, ^key) == ^id)
+      :error -> where(q, [_a], false)
+    end
+  end
+
+  defp apply_filter(q, key, value) when key in [:actor_type, :action, :resource_type],
+    do: where(q, [a], field(a, ^key) == ^value)
+
+  defp apply_filter(q, :q, value) do
+    pattern = Converger.Pagination.contains(value)
+
+    case Ecto.UUID.cast(value) do
+      {:ok, id} -> where(q, [a], a.resource_id == ^id or ilike(a.actor_id, ^pattern))
+      :error -> where(q, [a], ilike(a.actor_id, ^pattern))
+    end
+  end
+
+  defp apply_filter(q, key, value) when key in [:from, :to] do
+    case date_bound(key, value) do
+      {:ok, bound} when key == :from -> where(q, [a], a.inserted_at >= ^bound)
+      {:ok, bound} -> where(q, [a], a.inserted_at <= ^bound)
+      :error -> where(q, [_a], false)
+    end
+  end
+
+  defp date_bound(_key, %DateTime{} = dt), do: {:ok, dt}
+
+  defp date_bound(key, value) when is_binary(value) do
+    case Date.from_iso8601(value) do
+      {:ok, date} when key == :from -> DateTime.new(date, ~T[00:00:00.000000])
+      {:ok, date} -> DateTime.new(date, ~T[23:59:59.999999])
+      _ -> :error
+    end
+  end
+
+  defp date_bound(_key, _value), do: :error
 end

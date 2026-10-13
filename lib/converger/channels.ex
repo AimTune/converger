@@ -23,7 +23,61 @@ defmodule Converger.Channels do
     |> Converger.Pagination.bounded_all()
   end
 
+  @doc """
+  Keyset-paginated channels on `(inserted_at, id)`, newest first by default
+  (the admin and portal channel lists).
+
+  Filters (string or atom keys, `""` and `nil` ignored): `tenant_id`, `mode`,
+  `status`, `type`, and `q` (a case-insensitive "contains" search on the
+  name or the type, see `Converger.Pagination.contains/1`). An invalid
+  `tenant_id` matches nothing. Options: `:limit`, `:cursor`, `:direction`
+  (`:desc` | `:asc`), `:preload` (see `Converger.Pagination.keyset/2`).
+
+  Returns `{:ok, %Converger.Pagination.Page{}}` or `{:error, :invalid_cursor}`.
+  """
+  def paginate_channels(filters \\ %{}, opts \\ []) do
+    Channel
+    |> apply_filters(filters)
+    |> Converger.Pagination.keyset(opts)
+  end
+
+  defp apply_filters(query, filters) do
+    Enum.reduce(filters, query, fn {key, value}, q ->
+      apply_filter(q, to_string(key), value)
+    end)
+  end
+
+  defp apply_filter(q, _key, value) when value in [nil, ""], do: q
+
+  defp apply_filter(q, "q", value) when is_binary(value) do
+    case Converger.Pagination.contains(value) do
+      nil -> q
+      pattern -> where(q, [c], ilike(c.name, ^pattern) or ilike(c.type, ^pattern))
+    end
+  end
+
+  defp apply_filter(q, "tenant_id", value) do
+    case Ecto.UUID.cast(value) do
+      {:ok, id} -> where(q, tenant_id: ^id)
+      :error -> where(q, [c], false)
+    end
+  end
+
+  defp apply_filter(q, "mode", value) when is_binary(value), do: where(q, mode: ^value)
+  defp apply_filter(q, "status", value) when is_binary(value), do: where(q, status: ^value)
+  defp apply_filter(q, "type", value) when is_binary(value), do: where(q, type: ^value)
+
+  defp apply_filter(q, _key, _value), do: q
+
   def get_channel!(id), do: Repo.get!(Channel, id)
+
+  @doc "The channel with `id` in tenant `tenant_id`, or nil (also for a malformed id)."
+  def get_channel(id, tenant_id) do
+    case Ecto.UUID.cast(id) do
+      {:ok, uuid} -> Repo.get_by(Channel, id: uuid, tenant_id: tenant_id)
+      :error -> nil
+    end
+  end
 
   def get_channel!(id, tenant_id) do
     Repo.get_by!(Channel, id: id, tenant_id: tenant_id)
@@ -181,6 +235,56 @@ defmodule Converger.Channels do
     audit_circuit(channel, updated, "resume_deliveries", actor)
     {:ok, updated}
   end
+
+  @doc """
+  Replace the channel's secret with a freshly generated one (like the one
+  generated on insert). The old secret stops working at once: inbound
+  signatures and secret-authenticated requests must use the new one.
+
+  The rotation is audit-logged (action `rotate_secret`, secret values
+  redacted, with `"rotated" => ["secret"]`) when an actor is given. Returns
+  `{:ok, channel}` with the new plaintext `secret` (show it once) or
+  `{:error, changeset}`.
+  """
+  def rotate_secret(%Channel{} = channel, actor \\ nil) do
+    changeset = Channel.rotate_secret_changeset(channel)
+
+    result =
+      if actor do
+        Multi.new()
+        |> Multi.update(:channel, changeset)
+        |> Multi.insert(:audit_log, fn %{channel: updated} ->
+          AuditLogs.build_audit_log_entry(%{
+            tenant_id: channel.tenant_id,
+            actor_type: actor.type,
+            actor_id: actor.id,
+            action: "rotate_secret",
+            resource_type: "channel",
+            resource_id: channel.id,
+            changes:
+              channel
+              |> Changes.for_update(updated)
+              |> Map.put("rotated", ["secret"])
+          })
+        end)
+        |> Repo.transaction()
+        |> case do
+          {:ok, %{channel: updated}} -> {:ok, updated}
+          {:error, :channel, changeset, _} -> {:error, changeset}
+        end
+      else
+        Repo.update(changeset)
+      end
+
+    notify_consumers(result)
+  end
+
+  @doc """
+  Send a test message to `channel` through the normal pipeline, see
+  `Converger.Channels.TestMessage.send_test_message/3`.
+  """
+  defdelegate send_test_message(channel, text, actor \\ nil),
+    to: Converger.Channels.TestMessage
 
   @doc """
   Point the provider's webhook at `inbound_url` with the channel's adapter

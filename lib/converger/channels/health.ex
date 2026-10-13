@@ -195,6 +195,36 @@ defmodule Converger.Channels.Health do
   end
 
   @doc """
+  Batched `list_health_history/2`: `%{channel_id => [%HealthCheck{}]}` with
+  the `limit` most recent checks of each given channel, newest first, in one
+  query. Channels without checks are absent from the map.
+  """
+  def list_health_history_map(channel_ids, limit \\ 20)
+
+  def list_health_history_map(channel_ids, limit)
+      when is_list(channel_ids) and channel_ids != [] and is_integer(limit) and limit > 0 do
+    ranked =
+      from(h in HealthCheck,
+        where: h.channel_id in ^channel_ids,
+        select: %{
+          id: h.id,
+          rank: over(row_number(), partition_by: h.channel_id, order_by: [desc: h.checked_at])
+        }
+      )
+
+    from(h in HealthCheck,
+      join: r in subquery(ranked),
+      on: r.id == h.id,
+      where: r.rank <= ^limit,
+      order_by: [asc: h.channel_id, desc: h.checked_at]
+    )
+    |> Repo.all()
+    |> Enum.group_by(& &1.channel_id)
+  end
+
+  def list_health_history_map(_channel_ids, _limit), do: %{}
+
+  @doc """
   Delete health checks older than the given number of days (default: the
   `:health_check_days` window of `Converger.Retention`), in batches. Runs
   daily from `Converger.Workers.PruneWorker`.
