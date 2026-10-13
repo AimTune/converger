@@ -9,7 +9,7 @@ description: Password hashing goes through Converger.Accounts.PasswordHasher (bc
 | **Status** | Accepted |
 | **Date** | 2026-10-13 |
 | **Issue** | [#53](https://github.com/AimTune/converger/issues/53) |
-| **Pull request** | (this PR) |
+| **Pull request** | [#159](https://github.com/AimTune/converger/pull/159) |
 | **Related** | [ADR-0021](0021-ci-quality-gates-and-lf-line-endings.md), [ADR-0023](0023-platform-and-dependency-baseline.md) |
 
 ## Context and problem statement
