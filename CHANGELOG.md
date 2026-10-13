@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Windows developer setup: pure-Elixir password hashing and a dev container (#53)
+
+- Password hashing goes through `Converger.Accounts.PasswordHasher` (`config :converger, :password_hasher`, any
+  `Comeonin` module). bcrypt stays the default; stored hashes are verified by their prefix, so bcrypt and PBKDF2
+  hashes can coexist.
+- `CONVERGER_PASSWORD_HASHER=pbkdf2` (compile time) leaves the `bcrypt_elixir` NIF out of the build and hashes with
+  `pbkdf2_elixir` (pure Elixir, now always a dependency), so the project builds and tests on Windows without the MSVC
+  build tools.
+- `.devcontainer/` (VS Code Dev Containers, Codespaces, `devcontainer` CLI): the pinned Elixir/OTP image with the C
+  tools and a Postgres 17 service; `deps/` and the build root live in volumes.
+- Docs: getting started (Windows), contributing (dev container), configuration, security; ADR-0057.
+
 ### MQTT channel and Discord Gateway inbound (#44)
 
 - New channel type `mqtt` (MQTT 3.1.1 over TCP or TLS, QoS 0 and 1): a subscriber per channel in the cluster on the

@@ -117,7 +117,9 @@ defmodule Converger.MixProject do
       {:opentelemetry_oban, "~> 1.2"},
       {:opentelemetry_req, "~> 1.0"},
       {:telemetry_metrics_prometheus_core, "~> 1.2"},
-      {:bcrypt_elixir, "~> 3.0"},
+      # Password hashing (Converger.Accounts.PasswordHasher, ADR-0057). Both implement
+      # Comeonin; pbkdf2_elixir is pure Elixir, see password_hasher_deps/0.
+      {:pbkdf2_elixir, "~> 2.3"},
       {:cloak, "~> 1.1"},
       {:cloak_ecto, "~> 1.3"},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
@@ -125,7 +127,23 @@ defmodule Converger.MixProject do
       {:sobelow, "~> 0.13", only: [:dev, :test], runtime: false},
       {:mix_audit, "~> 2.1", only: [:dev, :test], runtime: false},
       {:excoveralls, "~> 0.18", only: :test}
-    ]
+    ] ++ password_hasher_deps()
+  end
+
+  # bcrypt_elixir is a C NIF; on Windows it needs the MSVC build tools (#53).
+  # CONVERGER_PASSWORD_HASHER=pbkdf2 leaves it out and hashes with pbkdf2_elixir
+  # instead (config/config.exs reads the same variable). Default: bcrypt.
+  defp password_hasher_deps do
+    case System.get_env("CONVERGER_PASSWORD_HASHER", "bcrypt") do
+      "bcrypt" ->
+        [{:bcrypt_elixir, "~> 3.0"}]
+
+      "pbkdf2" ->
+        []
+
+      other ->
+        Mix.raise("CONVERGER_PASSWORD_HASHER must be bcrypt or pbkdf2, got: #{inspect(other)}")
+    end
   end
 
   # Aliases are shortcuts or tasks specific to the current project.
