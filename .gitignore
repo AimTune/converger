@@ -1,6 +1,9 @@
 # The directory Mix will write compiled artifacts to.
 /_build/
 
+# Build root of the CONVERGER_PASSWORD_HASHER=pbkdf2 mode (docs/contributing.md).
+/_build_pbkdf2/
+
 # If you run "mix test --cover", coverage assets end up here.
 /cover/
 
