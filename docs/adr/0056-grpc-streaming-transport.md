@@ -9,7 +9,7 @@ description: Backend clients can speak Protocol v1 over a gRPC bidirectional str
 | **Status** | Accepted |
 | **Date** | 2026-10-13 |
 | **Issue** | [#44](https://github.com/AimTune/converger/issues/44) |
-| **Pull request** | to be linked on merge |
+| **Pull request** | [#156](https://github.com/AimTune/converger/pull/156) |
 | **Related** | [ADR-0024](0024-converger-protocol-v1-as-superset-of-mekik-1.md), [ADR-0027](0027-websocket-limits-backpressure-and-draining.md), [ADR-0030](0030-native-websocket-endpoint-and-fallback-transports.md), [ADR-0035](0035-native-transports-share-signals-limits-and-draining.md) |
 
 ## Context and problem statement
