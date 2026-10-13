@@ -9,7 +9,7 @@ description: Converger tokens get dedicated signing keys with kid, a Postgres-ba
 | **Status** | Accepted |
 | **Date** | 2026-10-13 |
 | **Issue** | [#52](https://github.com/AimTune/converger/issues/52) |
-| **Pull request** | to be linked |
+| **Pull request** | [#158](https://github.com/AimTune/converger/pull/158) |
 | **Related** | [ADR-0013](0013-cluster-wide-rate-limiting-with-hammer-and-pubsub.md), [ADR-0020](0020-per-subject-socket-ids-and-presence.md), [ADR-0026](0026-one-client-socket-stack-and-shape-checked-legacy-tokens.md), [ADR-0050](0050-openapi-spec-error-envelope-and-api-versioning.md) |
 
 ## Context and problem statement
