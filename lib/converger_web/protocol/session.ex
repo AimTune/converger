@@ -97,7 +97,7 @@ defmodule ConvergerWeb.Protocol.Session do
       last_in: now,
       last_out: now,
       claims: nil,
-      # The token's permissions (ADR-0057), as a set for frame guards.
+      # The token's permissions (ADR-0059), as a set for frame guards.
       permitted: %{},
       conversation_id: nil,
       user_id: nil,
@@ -327,7 +327,7 @@ defmodule ConvergerWeb.Protocol.Session do
   defp handle_frame(%{"type" => "sync"} = frame, state), do: sync(frame, state)
   defp handle_frame(%{"type" => "auth"} = frame, state), do: refresh_token(frame, state)
 
-  # Token permissions (ADR-0057): typing needs `typing`, sends need `write`.
+  # Token permissions (ADR-0059): typing needs `typing`, sends need `write`.
   defp handle_frame(%{"type" => "typing"}, state)
        when not is_map_key(state.permitted, "typing"),
        do: reply([insufficient_permission("typing", "typing")], state)

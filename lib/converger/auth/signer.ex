@@ -6,7 +6,7 @@ defmodule Converger.Auth.Signer do
       (`Converger.Auth.Token`), and of Converger tokens issued before #52
       (no `kid` header).
     * `converger_signer/0` and `converger_verifier/1`: the dedicated keys of
-      Converger client tokens (`Converger.Auth.ConvergerToken`, ADR-0057).
+      Converger client tokens (`Converger.Auth.ConvergerToken`, ADR-0059).
 
   Converger token keys come from `config :converger, :token_signing_keys`
   (`TOKEN_SIGNING_KEYS`): a list of `{kid, secret}`. The first key signs every

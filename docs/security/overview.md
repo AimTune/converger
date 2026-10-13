@@ -28,8 +28,10 @@ in depth in [Security: client IPs, proxies and admin access](../security.md); th
 
 Admin accounts live in `admin_users` with the roles `super_admin`, `admin` and `viewer`
 ([`Converger.Accounts.AdminUser`](https://github.com/AimTune/converger/blob/main/lib/converger/accounts/admin_user.ex)).
-Passwords are hashed with bcrypt (`bcrypt_elixir`, default cost) and must be at least 8 characters.
-`Converger.Accounts.authenticate_admin/2` runs `Bcrypt.no_user_verify/0` when the email is unknown, so response
+Passwords are hashed with bcrypt (`bcrypt_elixir`, default cost) through `Converger.Accounts.PasswordHasher` and must be
+at least 8 characters. Development builds without a C compiler can use PBKDF2-SHA512 instead
+(`CONVERGER_PASSWORD_HASHER=pbkdf2`, [ADR-0057](../adr/0057-pluggable-password-hasher-and-dev-container.md)).
+`Converger.Accounts.authenticate_admin/2` runs `PasswordHasher.no_user_verify/0` when the email is unknown, so response
 time does not reveal whether an account exists.
 
 Every `/admin` route goes through two layers:
@@ -112,7 +114,7 @@ The legacy tokens and the legacy socket are deprecated; see
 
 Converger tokens are rejected unless `type` is `"converger"`, and every authenticated request re-checks that the
 token's channel is still `active` (`403` otherwise) and that the token was not revoked (`401 token_revoked`), with
-one ETS lookup per node ([ADR-0057](../adr/0057-client-token-keys-revocation-rotation-and-permissions.md)):
+one ETS lookup per node ([ADR-0059](../adr/0059-client-token-keys-revocation-rotation-and-permissions.md)):
 
 - **Revocation:** `POST /api/v1/converger/tokens/revoke` revokes a token's family (logout) or, with the channel
   secret, every token of an end user (a ban). Every node refuses the token within a second and the subject's sockets
@@ -185,7 +187,7 @@ configured key can decrypt them.
 | `webhook_subscriptions.secret`, `webhook_subscriptions.headers` | Encrypted (`Converger.Encrypted.Binary`, `Converger.Encrypted.Map`); the API returns header names only and the secret only on create or rotation |
 | `channels.config` (provider access tokens, `app_secret`, `verify_token`, Infobip `api_key`, webhook headers, ...) | Encrypted as a whole map (`Converger.Encrypted.Map`) |
 | `tenants.api_key_hash`, `previous_api_key_hash` | SHA-256 digest only; plaintext never stored |
-| `admin_users.password_hash`, `tenant_users.password_hash` | bcrypt |
+| `admin_users.password_hash`, `tenant_users.password_hash` | bcrypt (PBKDF2-SHA512 in a `CONVERGER_PASSWORD_HASHER=pbkdf2` build) |
 | Activities, attachments, `tenants.alert_webhook_url`, webhook subscription URLs, `webhook_events` payloads, audit logs | Not encrypted by the application; rely on database and storage encryption |
 
 Sensitive schema fields are also declared with `redact: true`, so `inspect/1` (and therefore crash reports) does

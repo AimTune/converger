@@ -17,6 +17,7 @@ config :converger, Converger.Repo,
 # Full-cost hashing makes login tests slow enough to straddle the 60 s
 # login-lockout window (see test/converger_web/controllers/rate_limiting_test.exs).
 config :bcrypt_elixir, :log_rounds, 1
+config :pbkdf2_elixir, :rounds, 1
 
 # We don't run a server during test. If one is required,
 # you can enable the server option below.

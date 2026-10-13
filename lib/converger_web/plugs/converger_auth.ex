@@ -49,7 +49,7 @@ defmodule ConvergerWeb.Plugs.ConvergerAuth do
   end
 
   # `allow_rotated: true` (the refresh endpoint) also accepts a token that was
-  # refreshed before, so the endpoint can detect the reuse (ADR-0057).
+  # refreshed before, so the endpoint can detect the reuse (ADR-0059).
   defp authenticate(conn, bearer, :token, opts) do
     verify_opts = [allow_rotated: Keyword.get(opts, :allow_rotated, false)]
 

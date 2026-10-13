@@ -1,7 +1,7 @@
 defmodule ConvergerWeb.ProtocolTokenSecurityTest do
   @moduledoc """
   Token permissions and revocation on the native Protocol v1 WebSocket
-  (issue #52, ADR-0057), over a real connection.
+  (issue #52, ADR-0059), over a real connection.
   """
 
   use ConvergerWeb.ConnCase, async: false

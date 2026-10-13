@@ -1,5 +1,5 @@
 defmodule ConvergerWeb.ConvergerChannelPermissionsTest do
-  @moduledoc "Token permissions and revocation on the Phoenix binding (issue #52, ADR-0057)."
+  @moduledoc "Token permissions and revocation on the Phoenix binding (issue #52, ADR-0059)."
 
   use ConvergerWeb.ChannelCase
 

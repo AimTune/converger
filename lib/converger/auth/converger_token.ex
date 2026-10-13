@@ -2,7 +2,7 @@ defmodule Converger.Auth.ConvergerToken do
   @moduledoc """
   Converger client tokens (JWT, HS256), held by end users and agent consoles.
 
-  Claims (ADR-0057 for `jti`, `fam`, `perms` and the `kid` header):
+  Claims (ADR-0059 for `jti`, `fam`, `perms` and the `kid` header):
 
     * `type: "converger"`, `channel_id`, `tenant_id`, `sub`, `exp`, `iat`;
     * `jti`: unique per token; `fam`: the family id, the `jti` of the token

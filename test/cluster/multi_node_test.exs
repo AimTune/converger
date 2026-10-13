@@ -8,7 +8,7 @@ defmodule Converger.MultiNodeTest do
       (Phoenix.PubSub across nodes);
     * rate limits are shared (the `:cluster` backend, ADR-0013);
     * a client token revoked on one node is rejected by the other within a
-      second (ADR-0057);
+      second (ADR-0059);
     * every delivery job is executed exactly once although both nodes run
       the Oban queues.
 

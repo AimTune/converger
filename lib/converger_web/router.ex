@@ -132,7 +132,7 @@ defmodule ConvergerWeb.Router do
   end
 
   # Refresh also accepts a token refreshed before (past the rotation grace
-  # period), so reuse can be detected and the family revoked (ADR-0057).
+  # period), so reuse can be detected and the family revoked (ADR-0059).
   pipeline :converger_refresh_auth do
     plug ConvergerWeb.Plugs.ConvergerAuth, mode: :token, allow_rotated: true
   end

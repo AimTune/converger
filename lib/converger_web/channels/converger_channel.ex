@@ -68,7 +68,7 @@ defmodule ConvergerWeb.ConvergerChannel do
   alias ConvergerWeb.{ConversationSignals, SocketGuard}
   alias ConvergerWeb.Protocol.{Frames, InFlight, Send}
 
-  # Receiving a conversation needs the token's `read` permission (ADR-0057).
+  # Receiving a conversation needs the token's `read` permission (ADR-0059).
   @impl true
   def join(topic, payload, socket) do
     if ConvergerToken.permitted?(socket.assigns.converger_claims, "read"),
@@ -306,7 +306,7 @@ defmodule ConvergerWeb.ConvergerChannel do
 
   defp bad_request(socket), do: {:reply, {:error, %{reason: "bad_request"}}, socket}
 
-  # Token permissions (ADR-0057): sending needs `write`, typing needs
+  # Token permissions (ADR-0059): sending needs `write`, typing needs
   # `typing`; acks and read receipts come with `read`, checked on join.
   defp required_permission(event) when event in ["postActivity", "frame"], do: "write"
   defp required_permission("typing"), do: "typing"

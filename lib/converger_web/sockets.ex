@@ -61,7 +61,7 @@ defmodule ConvergerWeb.Sockets do
   Disconnect every Converger socket of the subject of a token (its end user,
   channel console or conversation), e.g. after the token was revoked. Holders
   of other, still valid tokens of the same subject reconnect; the revoked
-  token is refused (ADR-0057).
+  token is refused (ADR-0059).
   """
   def disconnect_claims(claims) do
     case converger_socket_id(claims) do

@@ -6,8 +6,8 @@ The full contributing guide is part of the documentation site:
 The short version:
 
 1. Set up the toolchain from `.tool-versions` and follow
-   [Getting started](https://converger.aimtune.dev/getting-started) (Windows: `bcrypt_elixir` needs the MSVC build
-   tools).
+   [Getting started](https://converger.aimtune.dev/getting-started) (Windows without the MSVC build
+   tools: `CONVERGER_PASSWORD_HASHER=pbkdf2`, or use the `.devcontainer/`).
 2. Use conventional commits (`feat:`, `fix:`, `docs:`, `ci:`, `chore:` ...) and run `mix precommit` before pushing.
 3. **Documentation with every change.** Every PR updates the relevant pages under [`docs/`](docs/). An architectural
    decision (made or changed) needs a new or superseding ADR in [`docs/adr/`](docs/adr/) based on

@@ -1,7 +1,7 @@
 defmodule ConvergerWeb.Plugs.RequirePermission do
   @moduledoc """
   Requires a permission (`read`, `write`, `typing`) of the Converger token
-  (`perms` claim, ADR-0057), after `ConvergerWeb.Plugs.ConvergerAuth`:
+  (`perms` claim, ADR-0059), after `ConvergerWeb.Plugs.ConvergerAuth`:
 
       plug ConvergerWeb.Plugs.RequirePermission, "write" when action in [:create]
 

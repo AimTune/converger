@@ -94,13 +94,19 @@ All prod only. Boolean values accept `true`, `1`, `yes`, `on` (case-insensitive)
 ## Client tokens
 
 Converger client tokens (JWT): signing keys, refresh rotation and revocation. See
-[Client tokens](../security/client-tokens.md) and [ADR-0057](../adr/0057-client-token-keys-revocation-rotation-and-permissions.md).
+[Client tokens](../security/client-tokens.md) and [ADR-0059](../adr/0059-client-token-keys-revocation-rotation-and-permissions.md).
 
 | Variable | Default | Environment | Meaning |
 | --- | --- | --- | --- |
 | `TOKEN_SIGNING_KEYS` | unset: `SECRET_KEY_BASE` under the kid `default` | all | Comma-separated `kid:secret` pairs, the signing key first; every listed key verifies. Secrets must be at least 32 bytes and kids unique, or the node refuses to boot. Rotate by prepending a new key and removing the old one after 30 minutes. |
 | `TOKEN_ROTATION_GRACE_SECONDS` | `30` | all | How long a refreshed token stays valid. Refreshing it again after that revokes its family (reuse detection). |
 | `TOKEN_ACCEPT_UNKEYED` | `true` | all | Accept Converger tokens without a `kid` header (issued before #52, signed with `SECRET_KEY_BASE`). Set to `false` 30 minutes after upgrading. |
+
+## Password hashing
+
+| Variable | Default | Read at | Meaning |
+| --- | --- | --- | --- |
+| `CONVERGER_PASSWORD_HASHER` | `bcrypt` | compile time (`mix.exs`, `config/config.exs`) | `bcrypt` (`bcrypt_elixir`, a C NIF) or `pbkdf2` (`pbkdf2_elixir`, pure Elixir). `pbkdf2` leaves `bcrypt_elixir` out of the build, for development machines without a C compiler. Existing hashes are verified by their own prefix; bcrypt hashes cannot be verified in a `pbkdf2` build. Release images use the default. See [ADR-0057](../adr/0057-pluggable-password-hasher-and-dev-container.md). |
 
 ## Network trust and admin access
 
@@ -502,6 +508,7 @@ PgBouncer transaction pooling). See [Migrations and maintenance windows](migrati
 | `:admin_ip_whitelist` | `["127.0.0.1", "::1"]` | See `ADMIN_IP_WHITELIST`. |
 | `:trusted_proxies` | `[]` | See `TRUSTED_PROXIES`. |
 | `:inbound_signature_tolerance_seconds` | `300` | Allowed clock skew for `x-converger-signature` timestamps. |
+| `:password_hasher` | `Bcrypt`; `Pbkdf2` with `CONVERGER_PASSWORD_HASHER=pbkdf2` | `Comeonin` module that hashes new admin and tenant user passwords. See [Password hashing](#password-hashing). |
 | `:pagination` | see [Pagination](#pagination) | Page size defaults and caps. |
 | `:dead_letters` | `bulk_retry_limit: 10_000`, `export_limit: 10_000` | Max deliveries replayed by one bulk retry call, and max rows in one Deliveries CSV export. See [Replaying dead letters](../delivery.md#replaying-dead-letters). |
 | `:circuit_breaker` | `failure_threshold: 5`, `cooldown_ms: 30_000`, `park_seconds: 600`, `replay_dead_letters_on_close: false`, `replay_window_ms: 3_600_000` | Per-channel delivery circuit breaker and opt-in dead-letter replay on close. See [Circuit breaker](../delivery.md#circuit-breaker). |

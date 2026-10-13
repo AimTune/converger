@@ -1,0 +1,20 @@
+{
+  "name": "Converger",
+  "dockerComposeFile": "compose.yml",
+  "service": "app",
+  "runServices": ["app", "db"],
+  "workspaceFolder": "/workspaces/converger",
+  "shutdownAction": "stopCompose",
+  "remoteUser": "vscode",
+  "updateRemoteUserUID": true,
+  "forwardPorts": [4000],
+  "portsAttributes": {
+    "4000": { "label": "Phoenix" }
+  },
+  "postCreateCommand": "mix deps.get && mix compile",
+  "customizations": {
+    "vscode": {
+      "extensions": ["JakeBecker.elixir-ls"]
+    }
+  }
+}

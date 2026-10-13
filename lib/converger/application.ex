@@ -43,7 +43,7 @@ defmodule Converger.Application do
           ConvergerWeb.ProtocolConnections,
           # Open client connections, for the connection gauge (ConvergerWeb.Telemetry).
           ConvergerWeb.ClientConnections,
-          # Per-node cache of revoked Converger tokens (ADR-0057), before the
+          # Per-node cache of revoked Converger tokens (ADR-0059), before the
           # endpoint so no token is verified without it.
           Converger.Auth.RevocationCache,
           {Task.Supervisor, name: Converger.TaskSupervisor},

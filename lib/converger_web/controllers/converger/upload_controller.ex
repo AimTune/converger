@@ -14,7 +14,7 @@ defmodule ConvergerWeb.ConvergerAPI.UploadController do
 
   plug ConvergerWeb.Plugs.RateLimit, bucket: :upload, scope: :tenant
 
-  # Token permissions (ADR-0057).
+  # Token permissions (ADR-0059).
   plug ConvergerWeb.Plugs.RequirePermission, "write"
 
   action_fallback ConvergerWeb.FallbackController

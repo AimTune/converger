@@ -8,7 +8,7 @@ Converger tokens are the credential of end-user clients (widgets, apps, agent co
 [client API](../api/client-api.md), the WebSocket, the native Protocol v1 endpoint, Server-Sent Events and gRPC.
 They are short-lived HS256 JWTs (1800 s). Since [#52](https://github.com/AimTune/converger/issues/52) they are
 signed with dedicated keys, carry permissions, rotate on refresh and can be revoked
-([ADR-0057](../adr/0057-client-token-keys-revocation-rotation-and-permissions.md)).
+([ADR-0059](../adr/0059-client-token-keys-revocation-rotation-and-permissions.md)).
 
 ## Claims
 

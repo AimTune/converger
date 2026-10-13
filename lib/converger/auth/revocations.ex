@@ -1,6 +1,6 @@
 defmodule Converger.Auth.Revocations do
   @moduledoc """
-  Revocation of Converger client tokens (issue #52, ADR-0057).
+  Revocation of Converger client tokens (issue #52, ADR-0059).
 
   Every Converger token carries a `jti` and a family id (`fam`): the `jti` of
   the token generated from the channel secret, inherited by every token

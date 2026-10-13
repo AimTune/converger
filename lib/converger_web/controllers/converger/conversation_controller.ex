@@ -9,7 +9,7 @@ defmodule ConvergerWeb.ConvergerAPI.ConversationController do
   import ConvergerWeb.Helpers.Authorization,
     only: [authorize_channel: 2, authorize_conversation: 2]
 
-  # Token permissions (ADR-0057).
+  # Token permissions (ADR-0059).
   plug ConvergerWeb.Plugs.RequirePermission, "write" when action in [:create, :close, :reopen]
   plug ConvergerWeb.Plugs.RequirePermission, "read" when action in [:show]
 

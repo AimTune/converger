@@ -1,6 +1,6 @@
 defmodule Converger.Repo.Migrations.CreateRevokedTokens do
   @moduledoc """
-  Converger token revocations (issue #52, ADR-0057): one row per revoked
+  Converger token revocations (issue #52, ADR-0059): one row per revoked
   token family, rotated token (`jti`) or revoked end user. Rows are only
   needed until every token they can match has expired (`expires_at`), and are
   then deleted by `Converger.Retention.prune/1`. Each node keeps them in an

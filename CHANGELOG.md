@@ -19,7 +19,19 @@
 - Permissions: `permissions` on `tokens/generate` (`read`, `write`, `typing`; the `perms` claim) restricts a
   token and everything derived from it, enforced on REST, the Phoenix socket and the native Protocol v1 / gRPC
   session. New error codes `insufficient_permission` (403, protocol 2004) and `token_revoked` (401, protocol 2005).
-- Docs: [client tokens](docs/security/client-tokens.md), client API, protocol, errors, configuration; ADR-0057.
+- Docs: [client tokens](docs/security/client-tokens.md), client API, protocol, errors, configuration; ADR-0059.
+
+### Windows developer setup: pure-Elixir password hashing and a dev container (#53)
+
+- Password hashing goes through `Converger.Accounts.PasswordHasher` (`config :converger, :password_hasher`, any
+  `Comeonin` module). bcrypt stays the default; stored hashes are verified by their prefix, so bcrypt and PBKDF2
+  hashes can coexist.
+- `CONVERGER_PASSWORD_HASHER=pbkdf2` (compile time) leaves the `bcrypt_elixir` NIF out of the build and hashes with
+  `pbkdf2_elixir` (pure Elixir, now always a dependency), so the project builds and tests on Windows without the MSVC
+  build tools.
+- `.devcontainer/` (VS Code Dev Containers, Codespaces, `devcontainer` CLI): the pinned Elixir/OTP image with the C
+  tools and a Postgres 17 service; `deps/` and the build root live in volumes.
+- Docs: getting started (Windows), contributing (dev container), configuration, security; ADR-0057.
 
 ### MQTT channel and Discord Gateway inbound (#44)
 

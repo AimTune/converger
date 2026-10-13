@@ -1,6 +1,6 @@
 defmodule ConvergerWeb.ClientTokenSecurityTest do
   @moduledoc """
-  Client token hardening over the REST API (issue #52, ADR-0057): token
+  Client token hardening over the REST API (issue #52, ADR-0059): token
   permissions, refresh rotation and reuse detection, revocation.
   """
 

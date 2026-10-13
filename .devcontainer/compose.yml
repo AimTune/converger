@@ -1,0 +1,41 @@
+# Dev container services (docs/contributing.md#dev-container): the toolchain
+# image and Postgres 17 with the dev/test defaults of config/dev.exs and
+# config/test.exs. Separate from the root docker-compose.yml, which runs the
+# release image.
+name: converger-devcontainer
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: sleep infinity
+    volumes:
+      - ..:/workspaces/converger:cached
+      - mix_deps:/home/vscode/mix/deps
+      - mix_build:/home/vscode/mix/build
+    environment:
+      DB_HOSTNAME: db
+      DB_USERNAME: postgres
+      DB_PASSWORD: postgres
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  mix_deps:
+  mix_build:
+  postgres_data:

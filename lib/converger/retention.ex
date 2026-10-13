@@ -415,7 +415,7 @@ defmodule Converger.Retention do
           Keyword.get(opts, :webhook_event_days, webhook_event_days()),
           now
         ),
-      # Revocations outlive their tokens by a minute (ADR-0057).
+      # Revocations outlive their tokens by a minute (ADR-0059).
       revoked_tokens: Converger.Auth.Revocations.prune(now)
     }
   end

@@ -18,6 +18,13 @@ config :converger,
   # Allowed clock skew for timestamped `x-converger-signature` inbound signatures
   inbound_signature_tolerance_seconds: 300
 
+# Hasher for new admin/tenant user passwords (Converger.Accounts.PasswordHasher,
+# ADR-0057). CONVERGER_PASSWORD_HASHER=pbkdf2 is for machines without a C
+# toolchain: mix.exs then leaves out the bcrypt_elixir NIF. Default: bcrypt.
+config :converger,
+       :password_hasher,
+       if(System.get_env("CONVERGER_PASSWORD_HASHER") == "pbkdf2", do: Pbkdf2, else: Bcrypt)
+
 # Page sizes for every list query (see Converger.Pagination). Request-supplied
 # `limit` params are clamped to the max; omitted/invalid ones use the default.
 config :converger, :pagination,
@@ -180,7 +187,7 @@ config :converger, :websocket,
   drain_batch_interval_ms: 1_000,
   drain_shutdown_ms: 30_000
 
-# Converger client tokens (ADR-0057, docs/security/client-tokens.md); TOKEN_*
+# Converger client tokens (ADR-0059, docs/security/client-tokens.md); TOKEN_*
 # env vars in config/runtime.exs. Signing keys (`:token_signing_keys`, a list
 # of {kid, secret}, signing key first) default to secret_key_base under the kid
 # "default". A refreshed token stays usable for the rotation grace period.

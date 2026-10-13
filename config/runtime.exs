@@ -43,7 +43,7 @@ if metrics_config != [] do
   config :converger, :metrics, metrics_config
 end
 
-# Converger client token signing keys (ADR-0057): comma-separated kid:secret
+# Converger client token signing keys (ADR-0059): comma-separated kid:secret
 # pairs, the signing key first; every listed key verifies. Rotate by putting a
 # new key first, then removing the old one after a token lifetime (30 min).
 # Secrets must be at least 32 bytes. Unset: secret_key_base, kid "default".

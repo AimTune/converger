@@ -1,6 +1,6 @@
 ---
-title: "ADR-0057: Client token signing keys, revocation, refresh rotation and permissions"
-sidebar_label: "0057 Client token hardening"
+title: "ADR-0059: Client token signing keys, revocation, refresh rotation and permissions"
+sidebar_label: "0059 Client token hardening"
 description: Converger tokens get dedicated signing keys with kid, a Postgres-backed revocation list cached in ETS on every node and fanned out over PubSub, refresh rotation with family-wide reuse detection, and a perms claim.
 ---
 
