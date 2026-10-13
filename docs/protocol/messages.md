@@ -252,6 +252,10 @@ adapter renders natively or downgrades as below, keeping enough state to map the
 `tool_call` is shown on end-user channels only when the channel config enables
 `show_tool_traces`, and then as a one-line text (`name: status`).
 
+**Admin panel and portal: Implemented (#68).** The conversation transcripts render every type of this
+page natively, server-side (not through chativa's web component), see
+[Admin panel and tenant portal](../admin-ui.md#rich-messages-implemented-68).
+
 Provider limits the downgrade enforces (current published limits; adapters keep them in one place):
 
 - **WhatsApp Cloud API**: at most 3 reply buttons with titles up to 20 characters; list messages
