@@ -159,6 +159,18 @@ defmodule Converger.Channels.Channel do
     end
   end
 
+  @doc """
+  A changeset replacing the channel's secret with a freshly generated one
+  (and its lookup hash). The old secret stops matching immediately.
+  """
+  def rotate_secret_changeset(channel) do
+    channel
+    |> change()
+    |> put_change(:secret, generate_secret())
+    |> put_secret_hash()
+    |> unique_constraint(:secret_hash)
+  end
+
   defp ensure_secret(changeset) do
     if get_field(changeset, :secret) do
       changeset

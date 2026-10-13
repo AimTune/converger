@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+### Admin panel and tenant portal: search, test-send, secret rotation, live tail (#50, part 2)
+
+- Every list page (tenants, channels, conversations, routing rules, deliveries, audit logs, admin/tenant/portal
+  users, webhook subscriptions) has a search box, filters, *Newest/Oldest first* sort and keyset **Load more**;
+  the filters are in the URL. New context functions: `Tenants.paginate_tenants/2`, `Channels.paginate_channels/2`,
+  `RoutingRules.paginate_routing_rules/2`, `Accounts.paginate_admin_users/2`; search added to
+  `paginate_conversations` (participant external id / display name), `paginate_tenant_users`,
+  `search_deliveries` (activity id, `last_error`; also applied by CSV export and **Retry all failed**) and
+  `paginate_audit_logs` (resource id, actor id, date range).
+- Channels: **Send test** (a message through the pipeline into a dedicated test conversation, delivery status
+  live), **Rotate secret** (`Channels.rotate_secret/2`, shown once, the old secret stops working at once), a
+  health-history sparkline, and pause/resume in the portal for owners and admins.
+- Tenants: **Edit** retention, tier, alert webhook and rate limit overrides after creation.
+- Conversations: live tail of new activities and delivery statuses, participant panel, delivery badges in the
+  portal, close/reopen on the admin panel (audited); the portal transcript now refreshes after close/reopen.
+- Webhooks: rotate a subscription's secret from the UI; the event log pages with **Load more** (was capped at 50).
+- Dashboards: tiles link to the matching filtered lists.
+- **Behaviour change:** admin `viewer`s are now read-only on the Tenants, Channels and Routing Rules pages (they
+  could create, edit and delete there before), and portal `viewer`s can no longer close or reopen conversations,
+  as documented in the security model.
+- New audit actions: `rotate_secret`, `send_test_message`, `close`, `reopen` (resource `conversation`).
+- Docs: [Admin panel and tenant portal](docs/admin-ui.md) (lists, channels, conversations, permissions),
+  deliveries, platform webhooks, tenants, channels.
+
 ### Management API and scoped API keys (#51)
 
 - **Scoped tenant API keys** (`api_keys`): a name, any of the scopes `read`, `write` and `manage`, an optional

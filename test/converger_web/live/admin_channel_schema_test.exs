@@ -61,7 +61,7 @@ defmodule ConvergerWeb.Admin.ChannelSchemaTest do
     render_change(view, "form_changed", %{"channel" => %{"type" => "teams"}})
 
     assert view
-           |> form("form",
+           |> form("#channel-form",
              channel: %{
                name: "Teams bot",
                tenant_id: tenant.id,
@@ -96,7 +96,7 @@ defmodule ConvergerWeb.Admin.ChannelSchemaTest do
     assert html =~ ~r/type="number"[^>]*name="channel\[config\]\[max_parts\]"/
 
     assert view
-           |> form("form",
+           |> form("#channel-form",
              channel: %{
                name: "SMS",
                tenant_id: tenant.id,

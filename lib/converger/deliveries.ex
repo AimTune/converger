@@ -326,12 +326,23 @@ defmodule Converger.Deliveries do
   (`DateTime`, inclusive bounds on `updated_at`, the time of the last status
   change, i.e. when a dead letter failed).
 
+  `:q` is a text search (the Deliveries pages): the exact activity id when
+  it is a UUID, or else a case-insensitive substring of `last_error` (see
+  `Converger.Pagination.contains/1`). `:direction` (`:desc`, the default, or
+  `:asc`) is the order on `updated_at`.
+
   Options: `:limit`, `:cursor`, `:preload` (see `Converger.Pagination.keyset/2`).
   """
   def search_deliveries(filters \\ %{}, opts \\ []) do
+    direction = if Map.get(filters, :direction) == :asc, do: :asc, else: :desc
+
     Delivery
     |> apply_filters(filters)
-    |> Converger.Pagination.keyset(Keyword.put(opts, :field, :updated_at))
+    |> Converger.Pagination.keyset(
+      opts
+      |> Keyword.put(:field, :updated_at)
+      |> Keyword.put_new(:direction, direction)
+    )
   end
 
   @doc """
@@ -353,6 +364,30 @@ defmodule Converger.Deliveries do
       end
     end)
   end
+
+  @doc """
+  `cast_filters/1` plus the search params of the Deliveries pages and their
+  CSV export: `q` (see `search_deliveries/2`) and `sort` (`"newest"`, the
+  default, or `"oldest"`), cast to `:q` and `:direction`.
+  """
+  def cast_search_params(params) when is_map(params) do
+    with {:ok, filters} <- cast_filters(params),
+         {:ok, direction} <- cast_sort(Map.get(params, "sort")) do
+      filters = Map.put(filters, :direction, direction)
+
+      case Map.get(params, "q") do
+        q when is_binary(q) ->
+          {:ok, if(String.trim(q) == "", do: filters, else: Map.put(filters, :q, q))}
+
+        _ ->
+          {:ok, filters}
+      end
+    end
+  end
+
+  defp cast_sort(value) when value in [nil, "", "newest"], do: {:ok, :desc}
+  defp cast_sort("oldest"), do: {:ok, :asc}
+  defp cast_sort(_), do: {:error, "Invalid sort"}
 
   defp cast_filter(_key, value) when value in [nil, ""], do: :skip
 
@@ -923,9 +958,26 @@ defmodule Converger.Deliveries do
       {:to, %DateTime{} = to}, q ->
         where(q, [d], d.updated_at <= ^to)
 
+      {:q, term}, q when is_binary(term) ->
+        search(q, term)
+
       _, q ->
         q
     end)
+  end
+
+  # The exact activity id when `term` is a UUID, or a substring of the last error.
+  defp search(query, term) do
+    case {Ecto.UUID.cast(String.trim(term)), Converger.Pagination.contains(term)} do
+      {_, nil} ->
+        query
+
+      {{:ok, activity_id}, pattern} ->
+        where(query, [d], d.activity_id == ^activity_id or ilike(d.last_error, ^pattern))
+
+      {:error, pattern} ->
+        where(query, [d], ilike(d.last_error, ^pattern))
+    end
   end
 
   defp tenant_channel_ids(tenant_id) do

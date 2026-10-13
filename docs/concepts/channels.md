@@ -19,7 +19,7 @@ Table `channels`:
 | `name` | text | | Required. |
 | `type` | string | `"webhook"` | Adapter: `echo`, `webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram`, `email`, `sms_twilio`, `sms_vonage`, `messenger`, `instagram`, `viber`, `discord`, `teams`, `http_pull`, `kafka`, `rabbitmq`, `nats`, `redis_streams`, `mqtt`. |
 | `mode` | text | `"duplex"` | `inbound`, `outbound` or `duplex`. Must be supported by the type. |
-| `secret` | encrypted binary | generated | Encrypted at rest. Generated (32 random bytes, Base64) when not given. |
+| `secret` | encrypted binary | generated | Encrypted at rest. Generated (32 random bytes, Base64) when not given. **Rotate secret** in the admin panel or portal (`Channels.rotate_secret/2`) replaces it; the old secret stops working at once. |
 | `secret_hash` | binary | | SHA-256 of `secret`, unique, used for lookups. |
 | `config` | encrypted map | `{}` | Adapter configuration, including provider credentials. Encrypted at rest. |
 | `transformations` | jsonb array | `[]` | [Middleware](middleware.md) chain applied before delivery to this channel. |

@@ -35,7 +35,60 @@ defmodule Converger.RoutingRules do
     |> Converger.Pagination.bounded_all()
   end
 
+  @doc """
+  Keyset-paginated routing rules on `(inserted_at, id)`, newest first by
+  default (the admin and portal lists).
+
+  Filters (string or atom keys, `""` ignored): `tenant_id`, `enabled`
+  (`"true"` / `"false"` or a boolean) and `q` (case-insensitive "contains"
+  on the rule name). Options: `:limit`, `:cursor`, `:direction`
+  (`:desc` | `:asc`), `:preload`. See `Converger.Pagination.keyset/2`.
+
+  Returns `{:ok, %Converger.Pagination.Page{}}` or `{:error, :invalid_cursor}`.
+  """
+  def paginate_routing_rules(filters \\ %{}, opts \\ []) do
+    RoutingRule
+    |> apply_list_filters(filters)
+    |> Converger.Pagination.keyset(opts)
+  end
+
+  defp apply_list_filters(query, filters) do
+    Enum.reduce(filters, query, fn {key, value}, q ->
+      apply_list_filter(q, to_string(key), value)
+    end)
+  end
+
+  defp apply_list_filter(query, "tenant_id", value) when is_binary(value) and value != "" do
+    case Ecto.UUID.cast(value) do
+      {:ok, tenant_id} -> where(query, tenant_id: ^tenant_id)
+      :error -> where(query, [r], false)
+    end
+  end
+
+  defp apply_list_filter(query, "enabled", value) when value in [true, "true"],
+    do: where(query, enabled: true)
+
+  defp apply_list_filter(query, "enabled", value) when value in [false, "false"],
+    do: where(query, enabled: false)
+
+  defp apply_list_filter(query, "q", value) do
+    case Converger.Pagination.contains(value) do
+      nil -> query
+      pattern -> where(query, [r], ilike(r.name, ^pattern))
+    end
+  end
+
+  defp apply_list_filter(query, _key, _value), do: query
+
   def get_routing_rule!(id), do: Repo.get!(RoutingRule, id)
+
+  @doc "The routing rule `id` of `tenant_id`, or `nil` (also for a malformed id)."
+  def get_routing_rule(id, tenant_id) do
+    case Ecto.UUID.cast(id) do
+      {:ok, id} -> Repo.get_by(RoutingRule, id: id, tenant_id: tenant_id)
+      :error -> nil
+    end
+  end
 
   def get_routing_rule!(id, tenant_id) do
     Repo.get_by!(RoutingRule, id: id, tenant_id: tenant_id)

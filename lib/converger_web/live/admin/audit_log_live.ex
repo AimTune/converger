@@ -4,11 +4,12 @@ defmodule ConvergerWeb.Admin.AuditLogLive do
   alias Converger.AuditLogs
   alias Converger.Tenants
 
-  @filter_keys ~w(tenant_id actor_type action resource_type)
+  @filter_keys ~w(tenant_id actor_type action resource_type q sort from to)
 
   # Keyset pagination on (inserted_at, id) with "Load more": unlike OFFSET,
   # every page costs the same however deep, and no COUNT(*) over the whole
-  # (append-only, ever-growing) table is needed.
+  # (append-only, ever-growing) table is needed. Filters, the `q` search
+  # (resource id or actor), the date range and the sort live in the URL.
   def mount(_params, _session, socket) do
     {:ok,
      assign(socket,
@@ -53,7 +54,12 @@ defmodule ConvergerWeb.Admin.AuditLogLive do
   end
 
   def handle_event("filter", %{"filters" => filters}, socket) do
-    {:noreply, push_patch(socket, to: ~p"/admin/audit_logs?#{Map.take(filters, @filter_keys)}")}
+    query =
+      filters
+      |> Map.take(@filter_keys)
+      |> Enum.reject(fn {_k, v} -> v in [nil, ""] end)
+
+    {:noreply, push_patch(socket, to: ~p"/admin/audit_logs?#{query}")}
   end
 
   def handle_event("load_more", _, socket) do
@@ -82,24 +88,28 @@ defmodule ConvergerWeb.Admin.AuditLogLive do
     {"Admin", "admin"},
     {"Admin API", "admin_api"},
     {"Tenant API", "tenant_api"},
+    {"Tenant user", "tenant_user"},
     {"System", "system"}
   ]
 
   @action_options [{"All Actions", ""}] ++
-                    Enum.map(
-                      ~w(create update delete toggle_status toggle_enabled rotate_api_key),
-                      &{&1, &1}
-                    )
+                    Enum.map(Converger.AuditLogs.AuditLog.valid_actions(), &{&1, &1})
 
   @resource_type_options [{"All Resources", ""}] ++
-                           Enum.map(~w(tenant channel routing_rule), &{&1, &1})
+                           Enum.map(
+                             Converger.AuditLogs.AuditLog.valid_resource_types(),
+                             &{&1, &1}
+                           )
+
+  @sort_options [{"Newest first", "newest"}, {"Oldest first", "oldest"}]
 
   def render(assigns) do
     assigns =
       assign(assigns,
         actor_type_options: @actor_type_options,
         action_options: @action_options,
-        resource_type_options: @resource_type_options
+        resource_type_options: @resource_type_options,
+        sort_options: @sort_options
       )
 
     ~H"""
@@ -112,6 +122,33 @@ defmodule ConvergerWeb.Admin.AuditLogLive do
       <.panel title="Filters">
         <form phx-change="filter" id="audit-filter-form">
           <div class="grid gap-x-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div class="sm:col-span-2">
+              <.input
+                type="search"
+                id="audit-filter-q"
+                name="filters[q]"
+                label="Search"
+                value={@filters["q"]}
+                placeholder="Resource id or actor"
+                phx-debounce="300"
+              />
+            </div>
+            <.input
+              type="date"
+              id="audit-filter-from"
+              name="filters[from]"
+              label="From"
+              value={@filters["from"]}
+            />
+            <.input
+              type="date"
+              id="audit-filter-to"
+              name="filters[to]"
+              label="To"
+              value={@filters["to"]}
+            />
+          </div>
+          <div class="grid gap-x-4 sm:grid-cols-2 lg:grid-cols-5">
             <.input
               type="select"
               id="audit-filter-tenant"
@@ -144,6 +181,14 @@ defmodule ConvergerWeb.Admin.AuditLogLive do
               value={@filters["resource_type"]}
               options={@resource_type_options}
             />
+            <.input
+              type="select"
+              id="audit-filter-sort"
+              name="filters[sort]"
+              label="Sort"
+              value={@filters["sort"]}
+              options={@sort_options}
+            />
           </div>
           <.button href={~p"/admin/audit_logs"} size="sm" variant="ghost">
             <.icon name="hero-x-mark" class="size-4" /> Reset
@@ -159,7 +204,7 @@ defmodule ConvergerWeb.Admin.AuditLogLive do
             </:col>
             <:col :let={{_id, log}} label="Actor">
               <.badge value={log.actor_type} />
-              <span class="block font-mono text-xs text-base-content/60">
+              <span class="block font-mono text-xs text-base-content/60" title={log.actor_id}>
                 {truncate_id(log.actor_id)}
               </span>
             </:col>
@@ -170,7 +215,9 @@ defmodule ConvergerWeb.Admin.AuditLogLive do
             </:col>
             <:col :let={{_id, log}} label="Resource">{log.resource_type}</:col>
             <:col :let={{_id, log}} label="Resource ID">
-              <span class="font-mono text-xs">{truncate_id(to_string(log.resource_id))}</span>
+              <span class="font-mono text-xs" title={log.resource_id}>
+                {truncate_id(to_string(log.resource_id))}
+              </span>
             </:col>
             <:col :let={{_id, log}} label="Changes">
               <details :if={log.changes}>

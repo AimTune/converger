@@ -35,7 +35,7 @@ A subscription has:
 
 Manage subscriptions with the [tenant API](api/tenant-api.md#platform-event-webhooks), in the tenant portal
 (**Webhooks**, owners and admins; members and viewers can look) or in the admin panel (**Webhooks**, super admins
-and admins). Every change is audit-logged (`resource_type: "webhook_subscription"`). The endpoints are in the
+and admins). Both UIs can also rotate a subscription's signing secret (shown once) and page through the event log. Every change is audit-logged (`resource_type: "webhook_subscription"`). The endpoints are in the
 [OpenAPI document](api/openapi.md) (tag `Webhooks`) and answer errors with the [error envelope](api/errors.md), for
 example `422 validation_failed` with the invalid fields in `details`.
 

@@ -9,6 +9,13 @@ defmodule ConvergerWeb.Admin.RoutingRuleLive do
   @conditions_placeholder ~s({"all": [{"field": "metadata.vip", "op": "eq", "value": true}]})
   @transformations_placeholder ~s([{"type": "add_prefix", "prefix": "[VIP] "}])
 
+  @filter_keys ~w(q enabled tenant_id sort)
+  @list_preloads [:tenant, :source_channel]
+
+  # Admin `viewer`s browse only (docs/security/overview.md).
+  @read_only_events ~w(filter load_more)
+  @manager_roles ~w(super_admin admin)
+
   def mount(_params, _session, socket) do
     tenants = Tenants.list_tenants()
     channels = Channels.list_channels()
@@ -17,13 +24,65 @@ defmodule ConvergerWeb.Admin.RoutingRuleLive do
     {:ok,
      socket
      |> assign(
-       routing_rules: RoutingRules.list_routing_rules(),
        tenants: tenants,
        channels: channels,
        page_title: "Routing Rules",
-       actor: actor
+       can_manage: socket.assigns[:admin_role] in @manager_roles,
+       actor: actor,
+       filters: default_filters(),
+       next_cursor: nil,
+       has_more: false,
+       loaded_count: 0
      )
+     |> stream_configure(:routing_rules, dom_id: &"rule-#{&1.id}")
+     |> stream(:routing_rules, [])
      |> reset_form()}
+  end
+
+  defp default_filters, do: %{"q" => "", "enabled" => "", "tenant_id" => "", "sort" => "desc"}
+
+  def handle_params(params, _url, socket) do
+    filters = Map.merge(default_filters(), Map.take(params, @filter_keys))
+    {:noreply, socket |> assign(filters: filters) |> load_rules(reset: true)}
+  end
+
+  # Keyset page of rules; `reset: true` starts over (filter change, create).
+  defp load_rules(socket, reset: reset) do
+    filters = socket.assigns.filters
+    cursor = if reset, do: nil, else: socket.assigns.next_cursor
+
+    page =
+      case RoutingRules.paginate_routing_rules(Map.take(filters, ~w(q enabled tenant_id)),
+             cursor: cursor,
+             direction: if(filters["sort"] == "asc", do: :asc, else: :desc),
+             preload: @list_preloads
+           ) do
+        {:ok, page} -> page
+        {:error, :invalid_cursor} -> %Converger.Pagination.Page{}
+      end
+
+    loaded = if reset, do: 0, else: socket.assigns.loaded_count
+
+    socket
+    |> stream(:routing_rules, page.entries, reset: reset)
+    |> assign(
+      next_cursor: page.next_cursor,
+      has_more: page.has_more,
+      loaded_count: loaded + length(page.entries)
+    )
+  end
+
+  # Re-render a changed row, or drop it when it no longer matches the
+  # enabled filter (e.g. disabled while listing enabled rules).
+  defp refresh_rule(socket, rule) do
+    if socket.assigns.filters["enabled"] in ["true", "false"] and
+         to_string(rule.enabled) != socket.assigns.filters["enabled"] do
+      socket
+      |> stream_delete(:routing_rules, rule)
+      |> assign(loaded_count: max(socket.assigns.loaded_count - 1, 0))
+    else
+      stream_insert(socket, :routing_rules, Converger.Repo.preload(rule, @list_preloads))
+    end
   end
 
   defp reset_form(socket) do
@@ -39,6 +98,11 @@ defmodule ConvergerWeb.Admin.RoutingRuleLive do
       transformations_json: "",
       form: to_form(RoutingRules.change_routing_rule(%RoutingRule{}))
     )
+  end
+
+  def handle_event(event, _params, %{assigns: %{can_manage: false}} = socket)
+      when event not in @read_only_events do
+    {:noreply, put_flash(socket, :error, "Viewers have read-only access to routing rules.")}
   end
 
   def handle_event("form_changed", %{"routing_rule" => params}, socket) do
@@ -96,13 +160,25 @@ defmodule ConvergerWeb.Admin.RoutingRuleLive do
     {:noreply, reset_form(socket)}
   end
 
+  def handle_event("filter", %{"filters" => filters}, socket) do
+    query = filters |> Map.take(@filter_keys) |> Enum.reject(fn {_k, v} -> v in ["", nil] end)
+    {:noreply, push_patch(socket, to: "/admin/routing_rules?#{URI.encode_query(query)}")}
+  end
+
+  def handle_event("load_more", _params, socket) do
+    if socket.assigns.has_more,
+      do: {:noreply, load_rules(socket, reset: false)},
+      else: {:noreply, socket}
+  end
+
   def handle_event("toggle_enabled", %{"id" => id}, socket) do
     rule = RoutingRules.get_routing_rule!(id)
 
     case RoutingRules.toggle_routing_rule(rule, socket.assigns.actor) do
-      {:ok, _} ->
+      {:ok, updated} ->
         {:noreply,
-         assign(socket, routing_rules: RoutingRules.list_routing_rules())
+         socket
+         |> refresh_rule(updated)
          |> put_flash(:info, "Rule toggled")}
 
       {:error, _} ->
@@ -116,7 +192,9 @@ defmodule ConvergerWeb.Admin.RoutingRuleLive do
     case RoutingRules.delete_routing_rule(rule, socket.assigns.actor) do
       {:ok, _} ->
         {:noreply,
-         assign(socket, routing_rules: RoutingRules.list_routing_rules())
+         socket
+         |> stream_delete(:routing_rules, rule)
+         |> assign(loaded_count: max(socket.assigns.loaded_count - 1, 0))
          |> put_flash(:info, "Rule deleted")}
 
       {:error, _} ->
@@ -126,8 +204,12 @@ defmodule ConvergerWeb.Admin.RoutingRuleLive do
 
   defp save(socket, nil, params) do
     case RoutingRules.create_routing_rule(params, socket.assigns.actor) do
-      {:ok, _rule} -> {:noreply, saved(socket, "Routing rule created")}
-      {:error, changeset} -> {:noreply, assign(socket, form: to_form(changeset))}
+      {:ok, _rule} ->
+        # Reload the first page so the new rule lands where the sort puts it.
+        {:noreply, socket |> load_rules(reset: true) |> saved("Routing rule created")}
+
+      {:error, changeset} ->
+        {:noreply, assign(socket, form: to_form(changeset))}
     end
   end
 
@@ -135,15 +217,17 @@ defmodule ConvergerWeb.Admin.RoutingRuleLive do
     params = Map.drop(params, ["tenant_id"])
 
     case RoutingRules.update_routing_rule(rule, params, socket.assigns.actor) do
-      {:ok, _rule} -> {:noreply, saved(socket, "Routing rule updated")}
-      {:error, changeset} -> {:noreply, assign(socket, form: to_form(changeset))}
+      {:ok, updated} ->
+        {:noreply, socket |> refresh_rule(updated) |> saved("Routing rule updated")}
+
+      {:error, changeset} ->
+        {:noreply, assign(socket, form: to_form(changeset))}
     end
   end
 
   defp saved(socket, message) do
     socket
     |> put_flash(:info, message)
-    |> assign(routing_rules: RoutingRules.list_routing_rules())
     |> reset_form()
   end
 
@@ -248,7 +332,7 @@ defmodule ConvergerWeb.Admin.RoutingRuleLive do
         </:actions>
       </.header>
 
-      <.panel title={if @editing, do: "Edit Routing Rule: #{@editing.name}", else: "Create Routing Rule"}>
+      <.panel :if={@can_manage} title={if @editing, do: "Edit Routing Rule: #{@editing.name}", else: "Create Routing Rule"}>
         <.form for={@form} id="routing-rule-form" phx-submit="save" phx-change="form_changed">
           <div class="grid items-end gap-x-4 sm:grid-cols-2 lg:grid-cols-5">
             <.input
@@ -356,8 +440,51 @@ defmodule ConvergerWeb.Admin.RoutingRuleLive do
       </.panel>
 
       <.panel title="Existing Rules">
-        <div :if={@routing_rules != []} class="overflow-x-auto">
-          <.table id="routing-rules" rows={@routing_rules} row_id={&"rule-#{&1.id}"}>
+        <form id="routing-rule-filter" phx-change="filter">
+          <div class="grid items-end gap-x-4 sm:grid-cols-2 lg:grid-cols-4">
+            <.input
+              type="search"
+              id="rule_filters_q"
+              name="filters[q]"
+              value={@filters["q"]}
+              label="Search"
+              placeholder="Rule name"
+              phx-debounce="300"
+            />
+            <.input
+              type="select"
+              id="rule_filters_tenant_id"
+              name="filters[tenant_id]"
+              value={@filters["tenant_id"]}
+              label="Tenant"
+              prompt="All Tenants"
+              options={Enum.map(@tenants, &{&1.name, &1.id})}
+            />
+            <.input
+              type="select"
+              id="rule_filters_enabled"
+              name="filters[enabled]"
+              value={@filters["enabled"]}
+              label="Status"
+              prompt="All"
+              options={[{"Enabled", "true"}, {"Disabled", "false"}]}
+            />
+            <.input
+              type="select"
+              id="rule_filters_sort"
+              name="filters[sort]"
+              value={@filters["sort"]}
+              label="Sort"
+              options={[{"Newest first", "desc"}, {"Oldest first", "asc"}]}
+            />
+          </div>
+        </form>
+        <div class="overflow-x-auto">
+          <.table
+            id="routing-rules"
+            rows={@streams.routing_rules}
+            row_item={fn {_dom_id, rule} -> rule end}
+          >
             <:col :let={rule} label="Name"><span class="font-medium">{rule.name}</span></:col>
             <:col :let={rule} label="Tenant">{if rule.tenant, do: rule.tenant.name, else: "-"}</:col>
             <:col :let={rule} label="Source">
@@ -395,7 +522,7 @@ defmodule ConvergerWeb.Admin.RoutingRuleLive do
                 {if rule.enabled, do: "Enabled", else: "Disabled"}
               </.badge>
             </:col>
-            <:action :let={rule}>
+            <:action :let={rule} :if={@can_manage}>
               <div class="flex justify-end gap-1 whitespace-nowrap">
                 <.button phx-click="edit" phx-value-id={rule.id} size="xs">Edit</.button>
                 <.button phx-click="toggle_enabled" phx-value-id={rule.id} size="xs" variant="neutral">
@@ -414,7 +541,19 @@ defmodule ConvergerWeb.Admin.RoutingRuleLive do
             </:action>
           </.table>
         </div>
-        <.empty_state :if={@routing_rules == []}>No routing rules yet. Create one above.</.empty_state>
+        <.empty_state :if={@loaded_count == 0}>No routing rules found.</.empty_state>
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <span class="text-sm text-base-content/60">Showing {@loaded_count} rules</span>
+          <.button
+            :if={@has_more}
+            id="load-more-routing-rules"
+            phx-click="load_more"
+            size="sm"
+            variant="neutral"
+          >
+            Load more
+          </.button>
+        </div>
       </.panel>
     </Layouts.app>
     """

@@ -114,8 +114,9 @@ no Node.js or CDN dependency, while still giving one component set with themes.
 
 ### Follow-ups
 
-- [#50](https://github.com/AimTune/converger/issues/50): server-side search and sort on every list, channel
-  test-send, secret rotation and config forms from `config_schema/0`, conversation live tail, accessibility pass.
+- [#50](https://github.com/AimTune/converger/issues/50) part 2 (done): search, filters, sort and keyset **Load more** on every
+  list, channel test-send and secret rotation, health sparkline, tenant editing, conversation live tail, viewer
+  read-only enforcement; see [Admin panel and tenant portal](../admin-ui.md).
 - A CSP nonce for the theme script and Oban Web (`csp_nonce_assign_key`) would allow dropping `'unsafe-inline'`.
 
 ## Implementation

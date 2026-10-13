@@ -17,6 +17,57 @@ defmodule Converger.Accounts do
     |> Converger.Pagination.bounded_all()
   end
 
+  @doc """
+  Keyset-paginated admin users (`Converger.Pagination.keyset/2`), the admin
+  Users page.
+
+  Filters (string or atom keys, blank values ignored): `"q"` (case-insensitive
+  "contains" match on name or email), `"role"`, `"status"`.
+
+  Options: `:limit`, `:cursor`, `:direction` (`:desc` newest first, default,
+  or `:asc`). Returns `{:ok, %Converger.Pagination.Page{}}` or
+  `{:error, :invalid_cursor}`.
+  """
+  def paginate_admin_users(filters \\ %{}, opts \\ []) do
+    AdminUser
+    |> filter_users(filters)
+    |> Converger.Pagination.keyset(opts)
+  end
+
+  # Shared list filters of the admin and tenant user tables.
+  defp filter_users(query, filters) do
+    query
+    |> search_users(Converger.Pagination.contains(filter_value(filters, :q)))
+    |> filter_field(:role, filter_value(filters, :role))
+    |> filter_field(:status, filter_value(filters, :status))
+    |> filter_tenant(filter_value(filters, :tenant_id))
+  end
+
+  defp filter_tenant(query, nil), do: query
+
+  defp filter_tenant(query, tenant_id) do
+    case Ecto.UUID.cast(tenant_id) do
+      {:ok, id} -> where(query, [u], u.tenant_id == ^id)
+      :error -> where(query, [u], false)
+    end
+  end
+
+  defp search_users(query, nil), do: query
+
+  defp search_users(query, pattern) do
+    where(query, [u], ilike(u.name, ^pattern) or ilike(u.email, ^pattern))
+  end
+
+  defp filter_field(query, _field, nil), do: query
+  defp filter_field(query, field, value), do: where(query, [u], field(u, ^field) == ^value)
+
+  defp filter_value(filters, key) do
+    case Map.get(filters, Atom.to_string(key), Map.get(filters, key)) do
+      value when is_binary(value) -> if String.trim(value) == "", do: nil, else: value
+      _ -> nil
+    end
+  end
+
   def get_admin_user!(id), do: Repo.get!(AdminUser, id)
 
   def get_admin_user_by_email(email) when is_binary(email) do
@@ -276,19 +327,21 @@ defmodule Converger.Accounts do
   end
 
   @doc """
-  Keyset-paginated tenant users, newest first (`Converger.Pagination.keyset/2`).
+  Keyset-paginated tenant users (`Converger.Pagination.keyset/2`), the admin
+  Tenant Users page and (scoped with `"tenant_id"`) the portal Users page.
 
-  Filters: `"tenant_id"`. Options: `:limit`, `:cursor`.
-  Returns `{:ok, %Converger.Pagination.Page{}}` or `{:error, :invalid_cursor}`.
+  Filters (string or atom keys, blank values ignored): `"tenant_id"` (a
+  malformed id matches nothing), `"q"` (case-insensitive "contains" match on
+  name or email), `"role"`, `"status"`.
+
+  Options: `:limit`, `:cursor`, `:direction` (`:desc` newest first, default,
+  or `:asc`). Entries come with `:tenant` preloaded. Returns
+  `{:ok, %Converger.Pagination.Page{}}` or `{:error, :invalid_cursor}`.
   """
   def paginate_tenant_users(filters \\ %{}, opts \\ []) do
-    query =
-      case Map.get(filters, "tenant_id", Map.get(filters, :tenant_id)) do
-        id when is_binary(id) and id != "" -> from(u in TenantUser, where: u.tenant_id == ^id)
-        _ -> TenantUser
-      end
-
-    Converger.Pagination.keyset(query, Keyword.put(opts, :preload, [:tenant]))
+    TenantUser
+    |> filter_users(filters)
+    |> Converger.Pagination.keyset(Keyword.put(opts, :preload, [:tenant]))
   end
 
   def get_tenant_user!(id) do

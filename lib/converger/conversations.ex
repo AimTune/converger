@@ -75,8 +75,10 @@ defmodule Converger.Conversations do
   Keyset-paginated conversations on `(inserted_at, id)`, newest first by default.
 
   Filters (string or atom keys, `""` ignored): `tenant_id`, `channel_id`,
-  `status`, `external_id` (the participant's provider id), and `q` (a
-  conversation id; anything that is not a UUID matches nothing). Options: `:limit`, `:cursor`, `:direction` (`:desc` | `:asc`),
+  `status`, `external_id` (the participant's provider id, exact), and `q`
+  (the list search box: an exact conversation id, or a case-insensitive
+  "contains" match on the participant's `external_id` or `display_name`).
+  Options: `:limit`, `:cursor`, `:direction` (`:desc` | `:asc`),
   `:preload`. See `Converger.Pagination.keyset/2`.
 
   Returns `{:ok, %Converger.Pagination.Page{}}` or `{:error, :invalid_cursor}`.
@@ -89,11 +91,8 @@ defmodule Converger.Conversations do
 
   defp apply_filters(query, filters) do
     Enum.reduce(filters, query, fn
-      {key, value}, q when key in ["q", :q] and is_binary(value) and value != "" ->
-        case Ecto.UUID.cast(String.trim(value)) do
-          {:ok, id} -> where(q, id: ^id)
-          :error -> where(q, [c], false)
-        end
+      {key, value}, q when key in ["q", :q] and is_binary(value) ->
+        where_search(q, value)
 
       {"tenant_id", value}, q when value != "" ->
         where(q, tenant_id: ^value)
@@ -122,6 +121,34 @@ defmodule Converger.Conversations do
       {_, _}, q ->
         q
     end)
+  end
+
+  # The list search box: a conversation id (exact UUID) or the participant's
+  # external id / display name (case-insensitive "contains").
+  defp where_search(query, term) do
+    case Converger.Pagination.contains(term) do
+      nil ->
+        query
+
+      pattern ->
+        query = join(query, :left, [c], p in assoc(c, :participant), as: :search_participant)
+
+        case Ecto.UUID.cast(String.trim(term)) do
+          {:ok, id} ->
+            where(
+              query,
+              [c, search_participant: p],
+              c.id == ^id or ilike(p.external_id, ^pattern)
+            )
+
+          :error ->
+            where(
+              query,
+              [search_participant: p],
+              ilike(p.external_id, ^pattern) or ilike(p.display_name, ^pattern)
+            )
+        end
+    end
   end
 
   # Conversations whose participant (on the conversation's channel) has this
@@ -244,7 +271,10 @@ defmodule Converger.Conversations do
   ones are rejected with `:conversation_closed`. The emitted
   `conversationUpdate` activity is therefore the last one in the conversation.
 
-  Options: `:reason` (string, default `"manual"`), stored in the event's metadata.
+  Options: `:reason` (string, default `"manual"`), stored in the event's
+  metadata, and `:actor` (`%{type: ..., id: ...}`): when given, the status
+  change is recorded in the audit log (action `"close"`, resource
+  `"conversation"`). An idempotent no-op writes no audit entry.
   """
   def close_conversation(%Conversation{} = conversation, opts \\ []) do
     transition(conversation, @open, @closed, opts)
@@ -252,7 +282,8 @@ defmodule Converger.Conversations do
 
   @doc """
   Reopen a closed conversation so it accepts activities again. Idempotent.
-  Options: `:reason` (string, default `"manual"`).
+  Options: `:reason` (string, default `"manual"`) and `:actor` (audited as
+  action `"reopen"`, see `close_conversation/2`).
   """
   def reopen_conversation(%Conversation{} = conversation, opts \\ []) do
     transition(conversation, @closed, @open, opts)
@@ -263,6 +294,7 @@ defmodule Converger.Conversations do
 
     case Repo.update_all(query, set: [status: to, updated_at: DateTime.utc_now()]) do
       {1, [conversation]} ->
+        audit_transition(Keyword.get(opts, :actor), conversation)
         emit_lifecycle_event(conversation, Keyword.get(opts, :reason, "manual"))
         {:ok, conversation}
 
@@ -273,6 +305,43 @@ defmodule Converger.Conversations do
         end
     end
   end
+
+  defp audit_transition(nil, _conversation), do: :ok
+
+  defp audit_transition(%{type: type, id: actor_id}, %Conversation{} = updated) do
+    %{
+      tenant_id: updated.tenant_id,
+      actor_type: type,
+      actor_id: actor_id,
+      action: transition_action(updated.status),
+      resource_type: "conversation",
+      resource_id: updated.id,
+      changes: %{
+        "before" => %{"status" => previous_status(updated.status)},
+        "after" => %{"status" => updated.status}
+      }
+    }
+    |> Converger.AuditLogs.create_audit_log()
+    |> case do
+      {:ok, _} ->
+        :ok
+
+      {:error, error} ->
+        Logger.error("Failed to audit conversation status change",
+          conversation_id: updated.id,
+          error: inspect(error)
+        )
+
+        :error
+    end
+  end
+
+  defp transition_action(@closed), do: "close"
+  defp transition_action(@open), do: "reopen"
+
+  # A transition only succeeds from the opposite status.
+  defp previous_status(@closed), do: @open
+  defp previous_status(@open), do: @closed
 
   @doc """
   Open conversations with no activity (no `updated_at` change) since `threshold`.

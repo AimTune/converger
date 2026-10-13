@@ -201,4 +201,24 @@ defmodule Converger.Pagination do
   end
 
   def decode_cursor(_), do: {:error, :invalid_cursor}
+
+  @doc ~S"""
+  The `ILIKE` pattern for a case-insensitive "contains" search on `term`
+  (the admin/portal list search boxes), or `nil` for a blank term. `%`, `_`
+  and `\` in the term are escaped, so they match literally.
+
+      iex> Converger.Pagination.contains(" 50%_off ")
+      "%50\\%\\_off%"
+      iex> Converger.Pagination.contains("  ")
+      nil
+  """
+  @spec contains(term()) :: String.t() | nil
+  def contains(term) when is_binary(term) do
+    case String.trim(term) do
+      "" -> nil
+      trimmed -> "%" <> String.replace(trimmed, ["\\", "%", "_"], &("\\" <> &1)) <> "%"
+    end
+  end
+
+  def contains(_term), do: nil
 end

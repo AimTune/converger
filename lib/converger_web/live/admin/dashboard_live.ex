@@ -82,26 +82,30 @@ defmodule ConvergerWeb.Admin.DashboardLive do
       </.header>
 
       <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <.stat title="Tenants" value={@stats.tenants} />
-        <.stat title="Channels" value={@stats.channels}>
-          <.mode_badges channel_modes={@channel_modes} />
-        </.stat>
-        <.stat title="Conversations" value={@stats.conversations} />
+        <.tile_link id="tile-tenants" to={~p"/admin/tenants"}>
+          <.stat title="Tenants" value={@stats.tenants} />
+        </.tile_link>
+        <.tile_link id="tile-channels" to={~p"/admin/channels"}>
+          <.stat title="Channels" value={@stats.channels}>
+            <.mode_badges channel_modes={@channel_modes} />
+          </.stat>
+        </.tile_link>
+        <.tile_link id="tile-conversations" to={~p"/admin/conversations"}>
+          <.stat title="Conversations" value={@stats.conversations} />
+        </.tile_link>
         <.stat title="Activities" value={@stats.activities} />
       </div>
 
       <section class="space-y-3">
         <h2 class="text-base font-semibold">Deliveries</h2>
         <div class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
-        <.stat title="Pending" value={Map.get(@delivery_stats, "pending", 0)} class="text-warning" />
-        <.stat title="Sent" value={Map.get(@delivery_stats, "sent", 0)} class="text-info" />
-        <.stat
-          title="Delivered"
-          value={Map.get(@delivery_stats, "delivered", 0)}
-          class="text-success"
-        />
-        <.stat title="Read" value={Map.get(@delivery_stats, "read", 0)} class="text-success" />
-        <.stat title="Failed" value={Map.get(@delivery_stats, "failed", 0)} class="text-error" />
+          <.tile_link
+            :for={{status, title, class} <- delivery_tiles()}
+            id={"tile-deliveries-#{status}"}
+            to={~p"/admin/deliveries?#{[status: status]}"}
+          >
+            <.stat title={title} value={Map.get(@delivery_stats, status, 0)} class={class} />
+          </.tile_link>
         </div>
       </section>
 
@@ -110,7 +114,18 @@ defmodule ConvergerWeb.Admin.DashboardLive do
         <div :if={@channels != []} class="overflow-x-auto">
           <.table id="channel-health" rows={@channels} row_id={&"channel-health-#{&1.id}"}>
             <:col :let={channel} label="Channel">
-              <span class="font-medium">{channel.name}</span>
+              <.link
+                navigate={~p"/admin/channels?#{[q: channel.name]}"}
+                class="link link-hover font-medium"
+              >
+                {channel.name}
+              </.link>
+              <.link
+                navigate={~p"/admin/deliveries?#{[channel_id: channel.id, status: "failed"]}"}
+                class="link link-hover block text-xs text-base-content/60"
+              >
+                Failed deliveries
+              </.link>
             </:col>
             <:col :let={channel} label="Type">
               <span class="badge badge-sm badge-ghost">{channel.type}</span>
@@ -145,6 +160,32 @@ defmodule ConvergerWeb.Admin.DashboardLive do
         </div>
       </.panel>
     </Layouts.app>
+    """
+  end
+
+  defp delivery_tiles do
+    [
+      {"pending", "Pending", "text-warning"},
+      {"sent", "Sent", "text-info"},
+      {"delivered", "Delivered", "text-success"},
+      {"read", "Read", "text-success"},
+      {"failed", "Failed", "text-error"}
+    ]
+  end
+
+  attr :id, :string, required: true
+  attr :to, :string, required: true
+  slot :inner_block, required: true
+
+  defp tile_link(assigns) do
+    ~H"""
+    <.link
+      id={@id}
+      navigate={@to}
+      class="block rounded-box transition hover:shadow-md focus-visible:outline-2 focus-visible:outline-primary"
+    >
+      {render_slot(@inner_block)}
+    </.link>
     """
   end
 

@@ -40,6 +40,10 @@ defmodule ConvergerWeb.Portal.DashboardLive do
      )}
   end
 
+  defp tile_class,
+    do:
+      "block rounded-box transition hover:shadow-md focus-visible:outline-2 focus-visible:outline-primary"
+
   def render(assigns) do
     ~H"""
     <Layouts.app flash={@flash} nav={@nav}>
@@ -49,17 +53,33 @@ defmodule ConvergerWeb.Portal.DashboardLive do
       </.header>
 
       <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <.stat title="Channels" value={@stats.channels}>
-          <div class="flex flex-wrap gap-2">
-            <.badge value="inbound" title="Inbound">← {Map.get(@channel_modes, "inbound", 0)}</.badge>
-            <.badge value="outbound" title="Outbound">
-              → {Map.get(@channel_modes, "outbound", 0)}
-            </.badge>
-            <.badge value="duplex" title="Duplex">↔ {Map.get(@channel_modes, "duplex", 0)}</.badge>
-          </div>
-        </.stat>
-        <.stat title="Conversations" value={@stats.conversations} />
+        <.link id="tile-channels" navigate={~p"/portal/channels"} class={tile_class()}>
+          <.stat title="Channels" value={@stats.channels}>
+            <div class="flex flex-wrap gap-2">
+              <.badge value="inbound" title="Inbound">
+                ← {Map.get(@channel_modes, "inbound", 0)}
+              </.badge>
+              <.badge value="outbound" title="Outbound">
+                → {Map.get(@channel_modes, "outbound", 0)}
+              </.badge>
+              <.badge value="duplex" title="Duplex">↔ {Map.get(@channel_modes, "duplex", 0)}</.badge>
+            </div>
+          </.stat>
+        </.link>
+        <.link id="tile-conversations" navigate={~p"/portal/conversations"} class={tile_class()}>
+          <.stat title="Conversations" value={@stats.conversations} />
+        </.link>
         <.stat title="Activities" value={@stats.activities} />
+      </div>
+      <div class="flex flex-wrap gap-2">
+        <.button
+          id="dashboard-failed-deliveries"
+          navigate={~p"/portal/deliveries?#{[status: "failed"]}"}
+          size="sm"
+          variant="neutral"
+        >
+          <.icon name="hero-exclamation-triangle" class="size-4" /> Failed deliveries
+        </.button>
       </div>
     </Layouts.app>
     """

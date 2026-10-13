@@ -4,27 +4,81 @@ defmodule ConvergerWeb.Portal.RoutingRuleLive do
   alias Converger.Channels
   alias Converger.RoutingRules
 
+  # Keyset-paginated ("Load more") with URL-driven filters, scoped to the
+  # current tenant.
+  @filter_keys ~w(q enabled sort)
+
   def mount(_params, _session, socket) do
     tenant_id = socket.assigns.current_tenant.id
     can_edit = socket.assigns.tenant_role in ~w(owner admin member)
 
     {:ok,
-     assign(socket,
-       routing_rules: RoutingRules.list_routing_rules_for_tenant(tenant_id),
+     socket
+     |> assign(
        channels: Channels.list_channels_for_tenant(tenant_id),
        page_title: "Routing Rules",
-       can_edit: can_edit
-     )}
+       can_edit: can_edit,
+       filters: default_filters(),
+       next_cursor: nil,
+       has_more: false,
+       loaded_count: 0
+     )
+     |> stream_configure(:routing_rules, dom_id: &"rule-#{&1.id}")
+     |> stream(:routing_rules, [])}
+  end
+
+  defp default_filters, do: %{"q" => "", "enabled" => "", "sort" => "desc"}
+
+  def handle_params(params, _url, socket) do
+    filters = Map.merge(default_filters(), Map.take(params, @filter_keys))
+    {:noreply, socket |> assign(filters: filters) |> load_rules(reset: true)}
+  end
+
+  defp load_rules(socket, reset: reset) do
+    filters = socket.assigns.filters
+    cursor = if reset, do: nil, else: socket.assigns.next_cursor
+
+    scope =
+      filters
+      |> Map.take(~w(q enabled))
+      |> Map.put("tenant_id", socket.assigns.current_tenant.id)
+
+    page =
+      case RoutingRules.paginate_routing_rules(scope,
+             cursor: cursor,
+             direction: if(filters["sort"] == "asc", do: :asc, else: :desc)
+           ) do
+        {:ok, page} -> page
+        {:error, :invalid_cursor} -> %Converger.Pagination.Page{}
+      end
+
+    loaded = if reset, do: 0, else: socket.assigns.loaded_count
+
+    socket
+    |> stream(:routing_rules, page.entries, reset: reset)
+    |> assign(
+      next_cursor: page.next_cursor,
+      has_more: page.has_more,
+      loaded_count: loaded + length(page.entries)
+    )
+  end
+
+  def handle_event("filter", %{"filters" => filters}, socket) do
+    query = filters |> Map.take(@filter_keys) |> Enum.reject(fn {_k, v} -> v in ["", nil] end)
+    {:noreply, push_patch(socket, to: "/portal/routing_rules?#{URI.encode_query(query)}")}
+  end
+
+  def handle_event("load_more", _params, socket) do
+    if socket.assigns.has_more,
+      do: {:noreply, load_rules(socket, reset: false)},
+      else: {:noreply, socket}
   end
 
   def handle_event("toggle_enabled", %{"id" => id}, socket) do
     if socket.assigns.can_edit do
-      rule = RoutingRules.get_routing_rule!(id)
-
-      if rule.tenant_id == socket.assigns.current_tenant.id do
-        toggle_rule_enabled(socket, rule)
-      else
-        {:noreply, put_flash(socket, :error, "Unauthorized")}
+      case RoutingRules.get_routing_rule(id, socket.assigns.current_tenant.id) do
+        nil -> {:noreply, put_flash(socket, :error, "Unauthorized")}
+        rule -> toggle_rule_enabled(socket, rule)
       end
     else
       {:noreply, put_flash(socket, :error, "You don't have permission to do this.")}
@@ -33,16 +87,27 @@ defmodule ConvergerWeb.Portal.RoutingRuleLive do
 
   defp toggle_rule_enabled(socket, rule) do
     case RoutingRules.update_routing_rule(rule, %{enabled: !rule.enabled}, build_actor(socket)) do
-      {:ok, _} ->
+      {:ok, updated} ->
         {:noreply,
-         assign(socket,
-           routing_rules:
-             RoutingRules.list_routing_rules_for_tenant(socket.assigns.current_tenant.id)
-         )
+         socket
+         |> refresh_rule(updated)
          |> put_flash(:info, "Rule updated")}
 
       {:error, _} ->
         {:noreply, put_flash(socket, :error, "Failed to update rule")}
+    end
+  end
+
+  # Re-render a changed row, or drop it when it no longer matches the
+  # enabled filter.
+  defp refresh_rule(socket, rule) do
+    if socket.assigns.filters["enabled"] in ["true", "false"] and
+         to_string(rule.enabled) != socket.assigns.filters["enabled"] do
+      socket
+      |> stream_delete(:routing_rules, rule)
+      |> assign(loaded_count: max(socket.assigns.loaded_count - 1, 0))
+    else
+      stream_insert(socket, :routing_rules, rule)
     end
   end
 
@@ -69,8 +134,42 @@ defmodule ConvergerWeb.Portal.RoutingRuleLive do
       </.header>
 
       <.panel>
-        <div :if={@routing_rules != []} class="overflow-x-auto">
-          <.table id="routing-rules" rows={@routing_rules} row_id={&"rule-#{&1.id}"}>
+        <form id="routing-rule-filter" phx-change="filter">
+          <div class="grid items-end gap-x-4 sm:grid-cols-3">
+            <.input
+              type="search"
+              id="rule_filters_q"
+              name="filters[q]"
+              value={@filters["q"]}
+              label="Search"
+              placeholder="Rule name"
+              phx-debounce="300"
+            />
+            <.input
+              type="select"
+              id="rule_filters_enabled"
+              name="filters[enabled]"
+              value={@filters["enabled"]}
+              label="Status"
+              prompt="All"
+              options={[{"Enabled", "true"}, {"Disabled", "false"}]}
+            />
+            <.input
+              type="select"
+              id="rule_filters_sort"
+              name="filters[sort]"
+              value={@filters["sort"]}
+              label="Sort"
+              options={[{"Newest first", "desc"}, {"Oldest first", "asc"}]}
+            />
+          </div>
+        </form>
+        <div class="overflow-x-auto">
+          <.table
+            id="routing-rules"
+            rows={@streams.routing_rules}
+            row_item={fn {_dom_id, rule} -> rule end}
+          >
             <:col :let={rule} label="Name"><span class="font-medium">{rule.name}</span></:col>
             <:col :let={rule} label="Source Channel">
               {channel_name(@channels, rule.source_channel_id)}
@@ -103,7 +202,19 @@ defmodule ConvergerWeb.Portal.RoutingRuleLive do
             </:col>
           </.table>
         </div>
-        <.empty_state :if={@routing_rules == []}>No routing rules found.</.empty_state>
+        <.empty_state :if={@loaded_count == 0}>No routing rules found.</.empty_state>
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <span class="text-sm text-base-content/60">Showing {@loaded_count} rules</span>
+          <.button
+            :if={@has_more}
+            id="load-more-routing-rules"
+            phx-click="load_more"
+            size="sm"
+            variant="neutral"
+          >
+            Load more
+          </.button>
+        </div>
       </.panel>
     </Layouts.app>
     """
