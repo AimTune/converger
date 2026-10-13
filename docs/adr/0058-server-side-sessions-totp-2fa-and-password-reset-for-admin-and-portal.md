@@ -10,7 +10,7 @@ description: Admin and portal logins become hashed server-side session rows with
 | **Date** | 2026-10-13 |
 | **Issue** | [#52](https://github.com/AimTune/converger/issues/52) (part 2: admin panel and tenant portal) |
 | **Pull request** | [#160](https://github.com/AimTune/converger/pull/160) |
-| **Related** | [ADR-0012](0012-secrets-at-rest-and-audit-redaction.md), [ADR-0013](0013-cluster-wide-rate-limiting-with-hammer-and-pubsub.md), [ADR-0022](0022-deployment-hardening.md), [ADR-0057](https://github.com/AimTune/converger/issues/52) (part 1: client tokens) |
+| **Related** | [ADR-0012](0012-secrets-at-rest-and-audit-redaction.md), [ADR-0013](0013-cluster-wide-rate-limiting-with-hammer-and-pubsub.md), [ADR-0022](0022-deployment-hardening.md), [ADR-0059](https://github.com/AimTune/converger/pull/158) (part 1: client tokens) |
 
 ## Context and problem statement
 
@@ -28,7 +28,7 @@ the user id in the signed Phoenix cookie session. That had several gaps, collect
 - **Weak policy.** The only rule was eight characters; bcrypt silently ignores everything after 72 bytes.
 
 Part 1 of #52 (token revocation, refresh rotation and scoped client tokens,
-[ADR-0057](https://github.com/AimTune/converger/issues/52)) covers the JWT side and is a separate pull request.
+[ADR-0059](https://github.com/AimTune/converger/pull/158)) covers the JWT side and is a separate pull request.
 
 ## Decision drivers
 
