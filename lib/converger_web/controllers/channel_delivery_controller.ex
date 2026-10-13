@@ -10,7 +10,8 @@ defmodule ConvergerWeb.ChannelDeliveryController do
 
   alias Converger.Channels
 
-  plug ConvergerWeb.Plugs.TenantAuth
+  # Pausing and resuming a channel is a channel change: `manage` (ADR-0061).
+  plug ConvergerWeb.Plugs.TenantAuth, scopes: [pause: "manage", resume: "manage"]
 
   action_fallback ConvergerWeb.FallbackController
 
@@ -65,7 +66,5 @@ defmodule ConvergerWeb.ChannelDeliveryController do
     render(conn, :show, channel: channel)
   end
 
-  defp build_actor(conn) do
-    %{type: "tenant_api", id: conn.assigns.tenant.id}
-  end
+  defp build_actor(conn), do: ConvergerWeb.Plugs.TenantAuth.actor(conn)
 end

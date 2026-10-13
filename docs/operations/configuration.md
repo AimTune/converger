@@ -113,7 +113,8 @@ Converger client tokens (JWT): signing keys, refresh rotation and revocation. Se
 | Variable | Default | Environment | Meaning |
 | --- | --- | --- | --- |
 | `TRUSTED_PROXIES` | empty (forwarding headers ignored) | all | Comma-separated IPs/CIDRs whose `X-Forwarded-For` / `X-Forwarded-Proto` are honoured. See [../security.md](../security.md). |
-| `ADMIN_IP_WHITELIST` | `127.0.0.1,::1` | all | Comma-separated IPs/CIDRs allowed to reach `/admin`. |
+| `ADMIN_IP_WHITELIST` | `127.0.0.1,::1` | all | Comma-separated IPs/CIDRs allowed to reach `/admin` and the admin API `/api/v1/admin`. |
+| `ADMIN_API_TOKEN` | unset (admin API off) | all | Bearer token of the platform [admin API](../api/management-api.md#admin-api) (`/api/v1/admin`): at least 32 characters (`openssl rand -base64 48`); shorter values stop the boot. Unset, the admin API answers `401`. |
 
 ## Accounts, sessions and email
 
@@ -531,6 +532,7 @@ PgBouncer transaction pooling). See [Migrations and maintenance windows](migrati
 | --- | --- | --- |
 | `:cors_origins` | `["http://127.0.0.1:5500", "http://localhost:5500"]` | See `CORS_ORIGINS`. |
 | `:admin_ip_whitelist` | `["127.0.0.1", "::1"]` | See `ADMIN_IP_WHITELIST`. |
+| `:admin_api_token` | `nil` | See `ADMIN_API_TOKEN`. |
 | `:trusted_proxies` | `[]` | See `TRUSTED_PROXIES`. |
 | `:sessions` | `max_age_seconds: 43_200`, `idle_timeout_seconds: 1_800` | See `SESSION_MAX_AGE_SECONDS`, `SESSION_IDLE_TIMEOUT_SECONDS`. |
 | `:password_min_length` | `12` | See `PASSWORD_MIN_LENGTH`. |

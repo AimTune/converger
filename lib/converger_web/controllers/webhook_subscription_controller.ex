@@ -24,7 +24,9 @@ defmodule ConvergerWeb.WebhookSubscriptionController do
   alias Converger.Webhooks.{Catalog, Subscription}
   alias ConvergerWeb.APIError
 
-  plug ConvergerWeb.Plugs.TenantAuth
+  plug ConvergerWeb.Plugs.TenantAuth,
+    scopes: [create: "manage", update: "manage", delete: "manage", rotate_secret: "manage"]
+
   plug :require_api_key
 
   action_fallback ConvergerWeb.FallbackController
@@ -183,5 +185,5 @@ defmodule ConvergerWeb.WebhookSubscriptionController do
     end
   end
 
-  defp build_actor(conn), do: %{type: "tenant_api", id: conn.assigns.tenant.id}
+  defp build_actor(conn), do: ConvergerWeb.Plugs.TenantAuth.actor(conn)
 end

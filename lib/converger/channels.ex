@@ -163,6 +163,41 @@ defmodule Converger.Channels do
   end
 
   @doc """
+  Replaces the channel's secret with a new random one; the old secret stops
+  working at once. Audited as `rotate_secret` (the secrets themselves are
+  redacted). Returns the channel with the new plaintext `secret`.
+  """
+  def rotate_secret(%Channel{} = channel, actor) do
+    changeset = Ecto.Changeset.change(channel, secret: Channel.generate_secret())
+
+    changeset =
+      Ecto.Changeset.put_change(
+        changeset,
+        :secret_hash,
+        Converger.Secrets.hash(Ecto.Changeset.get_change(changeset, :secret))
+      )
+
+    Multi.new()
+    |> Multi.update(:channel, changeset)
+    |> Multi.insert(:audit_log, fn %{channel: updated} ->
+      AuditLogs.build_audit_log_entry(%{
+        tenant_id: channel.tenant_id,
+        actor_type: actor.type,
+        actor_id: actor.id,
+        action: "rotate_secret",
+        resource_type: "channel",
+        resource_id: channel.id,
+        changes: Changes.for_update(channel, updated)
+      })
+    end)
+    |> Repo.transaction()
+    |> case do
+      {:ok, %{channel: updated}} -> notify_consumers({:ok, updated})
+      {:error, :channel, changeset, _} -> {:error, changeset}
+    end
+  end
+
+  @doc """
   Pause deliveries to a channel: new and pending deliveries are parked
   (`status: "paused"`) until `resume_deliveries/2`. See `Converger.Channels.Circuit`.
   """

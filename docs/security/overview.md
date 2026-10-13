@@ -15,7 +15,8 @@ in depth in [Security: client IPs, proxies and admin access](../security.md); th
 | --- | --- | --- | --- |
 | Operator (admin panel `/admin`) | Email + password, plus a TOTP code when 2FA is on; server-side session | `ConvergerWeb.Plugs.AdminAuth` (IP whitelist), `ConvergerWeb.Plugs.Auth` (session), LiveView `on_mount` hooks | `admin_users.password_hash` (bcrypt), `admin_users.totp_secret` (AES-GCM encrypted), `user_sessions.token_hash` (SHA-256) |
 | Tenant staff (portal `/portal`) | Tenant name + email + password, plus a TOTP code when 2FA is on; server-side session | `ConvergerWeb.Plugs.Auth`, LiveView `on_mount` hooks | `tenant_users.password_hash` (bcrypt), `tenant_users.totp_secret` (AES-GCM encrypted), `user_sessions.token_hash` (SHA-256) |
-| Tenant backend (server to server) | `x-api-key: cvg_live_...` | `ConvergerWeb.Plugs.TenantAuth` | `tenants.api_key_hash` (SHA-256) |
+| Tenant backend (server to server) | `x-api-key: cvg_live_...`: the primary key (every scope) or a scoped key (`read`, `write`, `manage`) | `ConvergerWeb.Plugs.TenantAuth` (authentication and scope) | `tenants.api_key_hash`, `api_keys.key_hash` (SHA-256) |
+| Platform automation (admin API `/api/v1/admin`) | `ADMIN_API_TOKEN` as `Authorization: Bearer ...` | `ConvergerWeb.Plugs.AdminAuth` (IP whitelist), `ConvergerWeb.Plugs.AdminApiAuth` | Environment variable only |
 | Channel integration | Channel secret as `Authorization: Bearer ...` on `POST /api/v1/converger/tokens/generate` | `ConvergerWeb.Plugs.ConvergerAuth` (`mode: :secret`) | `channels.secret` (AES-GCM encrypted) + `channels.secret_hash` (SHA-256, for lookup) |
 | End-user client (widget, SDK) | Converger token (JWT) as Bearer or socket `token` param | `ConvergerWeb.Plugs.ConvergerAuth` (`mode: :token`), `ConvergerWeb.ConvergerSocket` | Not stored (JWT); revocations and rotations in `revoked_tokens` ([client tokens](client-tokens.md)) |
 | Backend client on the gRPC transport | Converger token (JWT) as `authorization: Bearer` metadata or `Hello.token` | `ConvergerWeb.Protocol.Session` on `hello` ([Protocol v1 over gRPC](../protocol/grpc.md)) | Not stored (JWT); revocations in `revoked_tokens` |
@@ -141,6 +142,21 @@ Rotation (`Converger.Tenants.rotate_api_key/2`) keeps the previous key valid for
 `config :converger, :api_key_rotation_grace_period` in seconds) through `previous_api_key_hash` and
 `previous_api_key_expires_at`, so clients can be switched without downtime. Lookups hash the presented key and
 compare digests in the database; inactive tenants are rejected with `401`.
+
+**Scoped keys** (`api_keys`, [ADR-0061](../adr/0061-scoped-api-keys-and-the-management-api.md)) have the same format
+and are stored the same way (SHA-256 `key_hash`, display `prefix`). Each has a subset of the scopes `read`, `write`
+and `manage`, an optional `expires_at`, and a `revoked_at` once revoked (revocation is immediate; the row stays so
+audit entries resolve). `TenantAuth` requires a scope for every action, `read` for `GET` and `write` otherwise unless
+the controller says otherwise, and refuses a missing one with `403 insufficient_scope`; the primary key and the
+deprecated channel token have every scope. A key can only issue keys with scopes it has. `last_used_at` is updated
+at most once a minute. See the [management API](../api/management-api.md#api-keys-and-scopes).
+
+### Admin API token
+
+`/api/v1/admin` (tenants, API key issuance) authenticates with `ADMIN_API_TOKEN` as a bearer token: at least 32
+characters, compared as SHA-256 digests in constant time, and only from addresses in `ADMIN_IP_WHITELIST`. Unset,
+the admin API answers `401` to everything. Tenant credentials never reach it. Audit entries record actor
+`admin_api`.
 
 ### Channel secrets
 
@@ -288,8 +304,9 @@ If the old key may have leaked, also rotate the channel secrets themselves. Deta
 ## Audit logs and log redaction
 
 Administrative changes to tenants (including API key rotation and rate-limit overrides), channels, routing
-rules, admin users and tenant users are written to `audit_logs` (resource types `tenant`, `channel`,
-`routing_rule`, `admin_user`, `tenant_user`). When the change is made with an actor (admin panel, portal), the
+rules, admin users, tenant users, webhook subscriptions and API keys are written to `audit_logs` (resource types
+`tenant`, `channel`, `routing_rule`, `admin_user`, `tenant_user`, `webhook_subscription`, `api_key`). When the change
+is made with an actor (admin panel, portal, tenant API with the key id as `actor_id`, admin API as `admin_api`), the
 entry is inserted in the same `Ecto.Multi` transaction as the change, with the actor and a before/after snapshot. [`Converger.AuditLogs.Changes`](https://github.com/AimTune/converger/blob/main/lib/converger/audit_logs/changes.ex)
 serializes the structs, drops associations (they are audited as their own resources), and passes the result
 through `Converger.Secrets.redact/1`, which replaces values **recursively**, including inside nested maps such as

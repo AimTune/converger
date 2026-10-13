@@ -6,7 +6,9 @@ defmodule ConvergerWeb.RoutingRuleController do
 
   alias Converger.RoutingRules
 
-  plug ConvergerWeb.Plugs.TenantAuth
+  # Rule changes are configuration (`manage`); a dry-run only reads (ADR-0061).
+  plug ConvergerWeb.Plugs.TenantAuth,
+    scopes: [create: "manage", update: "manage", delete: "manage", dry_run: "read"]
 
   action_fallback ConvergerWeb.FallbackController
 
@@ -132,7 +134,5 @@ defmodule ConvergerWeb.RoutingRuleController do
     end
   end
 
-  defp build_actor(conn) do
-    %{type: "tenant_api", id: conn.assigns.tenant.id}
-  end
+  defp build_actor(conn), do: ConvergerWeb.Plugs.TenantAuth.actor(conn)
 end

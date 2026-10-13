@@ -52,6 +52,7 @@ says so. Codes that also exist in [Converger Protocol v1](../protocol/v1.md#122-
 | `token_expired` | 401 | 2001 | The Converger token expired; refresh it (`POST /api/v1/converger/tokens/refresh` before expiry) or issue a new one |
 | `token_revoked` | 401 | 2005 | The Converger token was revoked (its family or its end user, `POST /api/v1/converger/tokens/revoke`), was refreshed longer ago than the rotation grace period, or was refreshed again after that, which revokes its family. Get a new token from your backend. See [client tokens](../security/client-tokens.md) |
 | `insufficient_permission` | 403 | 2004 | The Converger token's `perms` claim lacks the permission (`read`, `write`, `typing`) the operation needs; `details.required` names it |
+| `insufficient_scope` | 403 | - | The tenant API key lacks the scope (`read`, `write`, `manage`) the operation needs, or tries to issue a key with a scope it lacks; `details.required` names it ([management API](management-api.md#api-keys-and-scopes)) |
 | `forbidden` | 403 | 2002 | Authenticated but not allowed: a conversation-bound token used for another conversation, a channel token where the tenant API key is required, an IP outside the admin allowlist, a failed webhook verification |
 | `not_found` | 404 | - | Unknown route or resource, or a resource of another tenant or channel: existence is never revealed. Protocol v1 uses `conversation_not_found` (4001) for conversations |
 | `method_not_allowed` | 405 | - | The route does not accept this method |
@@ -59,6 +60,7 @@ says so. Codes that also exist in [Converger Protocol v1](../protocol/v1.md#122-
 | `conflict` | 409 | - | The request conflicts with the current state of the resource |
 | `conversation_closed` | 409 | 4000 | The conversation is closed; reopen it before posting activities ([ADR-0017](../adr/0017-conversation-lifecycle-enforced-under-the-seq-lock.md)) |
 | `not_failed` | 409 | - | Replay of a delivery (`POST /api/v1/deliveries/:id/retry`) or redelivery of a platform webhook event (`POST /api/v1/webhook_events/:id/redeliver`) that is not `failed` |
+| `precondition_failed` | 412 | - | The `If-Match` ETag of a management call does not match the resource's current one; `details.current_etag` has it. Fetch the resource again and retry ([management API](management-api.md#conventions)) |
 | `payload_too_large` | 413 | 3001 | A size limit was exceeded (upload size, raw inbound body) |
 | `unsupported_media_type` | 415 | - | The uploaded file's sniffed type is not allow-listed; `details.content_type` |
 | `invalid_message` | 422 | 1004 | The activity failed validation; `details` has the errors per field |
@@ -80,6 +82,8 @@ the generic code of its status (`4xx` as a client error, `5xx` as retryable).
 | --- | --- |
 | `invalid_message`, `validation_failed` | Errors per field: `{"text": ["should be at most 65536 byte(s)"], "attachments": ["attachment 0: contentType can't be blank"]}` (the same map Protocol v1 puts in `error.data.details`) |
 | `rate_limited` | `{"retry_after_ms": 830}` (CORS does not expose `Retry-After` to browsers on another origin; this is readable) |
+| `insufficient_permission`, `insufficient_scope` | `{"required": "write"}` |
+| `precondition_failed` | `{"current_etag": "\"q1Vw..\""}` |
 | `unavailable` | `{"reason": "draining" \| "database_unavailable" \| "delivery_enqueue_failed", "retry_after_ms": 1400}` (`retry_after_ms` absent for `delivery_enqueue_failed`) |
 | `unsupported_protocol` | `{"supported": ["converger.v1", "converger.v1+json", "converger.v1+msgpack"]}` |
 | `payload_too_large` | `{"max_bytes": 10485760}` for uploads |

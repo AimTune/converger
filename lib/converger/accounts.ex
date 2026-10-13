@@ -295,6 +295,14 @@ defmodule Converger.Accounts do
     Repo.get!(TenantUser, id) |> Repo.preload(:tenant)
   end
 
+  @doc "The tenant's user with `id`, or `nil` (also for a malformed id)."
+  def get_tenant_user(tenant_id, id) do
+    case Ecto.UUID.cast(id) do
+      {:ok, uuid} -> Repo.get_by(TenantUser, id: uuid, tenant_id: tenant_id)
+      :error -> nil
+    end
+  end
+
   def get_tenant_user_by_email_and_tenant(email, tenant_id) do
     Repo.get_by(TenantUser, email: email, tenant_id: tenant_id)
   end

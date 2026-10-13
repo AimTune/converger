@@ -97,6 +97,7 @@ defmodule ConvergerWeb.Admin.AuditLogLive do
             <select name="filters[actor_type]" style="padding: 6px; border: 1px solid #ddd; border-radius: 4px;">
               <option value="">All Actors</option>
               <option value="admin" selected={@filters["actor_type"] == "admin"}>Admin</option>
+              <option value="admin_api" selected={@filters["actor_type"] == "admin_api"}>Admin API</option>
               <option value="tenant_api" selected={@filters["actor_type"] == "tenant_api"}>Tenant API</option>
               <option value="system" selected={@filters["actor_type"] == "system"}>System</option>
             </select>

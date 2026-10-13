@@ -23,9 +23,11 @@ defmodule ConvergerWeb.ApiSpec do
   alias OpenApiSpex.{Components, Info, OpenApi, Paths, SecurityScheme, Server, Tag}
 
   @description """
-  Converger's HTTP API. Three families share the `/api/v1` prefix:
+  Converger's HTTP API. Four families share the `/api/v1` prefix:
 
-  * **Tenant API** (`/api/v1/...`): server to server, authenticated with the tenant API key (`x-api-key`).
+  * **Tenant API** (`/api/v1/...`): server to server, authenticated with a tenant API key (`x-api-key`) whose
+    scopes (`read`, `write`, `manage`) gate each operation; `/api/v1/manage/...` holds the tenant's configuration.
+  * **Admin API** (`/api/v1/admin/...`): platform operators, authenticated with `ADMIN_API_TOKEN`.
   * **Client API** (`/api/v1/converger/...`): end-user clients, authenticated with a Converger token
     (`Authorization: Bearer`), issued from a channel secret.
   * **Inbound webhooks** (`/api/v1/channels/{channel_id}/inbound|status`): called by providers, verified by signature.
@@ -44,6 +46,10 @@ defmodule ConvergerWeb.ApiSpec do
     {"Deliveries", "Tenant API: dead-letter inspection and replay"},
     {"Channels", "Tenant API: delivery state, templates, pull outbox"},
     {"Webhooks", "Tenant API: platform event webhook subscriptions, event log and redelivery"},
+    {"Management",
+     "Management API (`/api/v1/manage`): channels, portal users, API keys and settings; `manage` scope"},
+    {"Admin",
+     "Platform admin API (`/api/v1/admin`): tenants and API key issuance; `ADMIN_API_TOKEN`"},
     {"Inbound", "Provider webhooks"},
     {"Client: Tokens", "Client API: Converger tokens"},
     {"Client: Conversations", "Client API: conversations"},
@@ -64,7 +70,11 @@ defmodule ConvergerWeb.ApiSpec do
       servers: [%Server{url: "/", description: "This Converger instance"}],
       tags:
         Enum.map(@tags, fn {name, description} -> %Tag{name: name, description: description} end),
-      paths: ConvergerWeb.Router |> Paths.from_router() |> distinct_put_operation_ids(),
+      paths:
+        ConvergerWeb.Router
+        |> Paths.from_router()
+        |> distinct_put_operation_ids()
+        |> scope_errors(),
       components: %Components{
         schemas: ApiSchemas.schemas(),
         responses: ApiSchemas.responses(),
@@ -90,6 +100,31 @@ defmodule ConvergerWeb.ApiSpec do
     end)
   end
 
+  # Every operation behind a tenant API key can answer 403
+  # `insufficient_scope` (ADR-0061).
+  defp scope_errors(paths) do
+    Map.new(paths, fn {path, item} ->
+      {path,
+       Map.new(Map.from_struct(item), fn
+         {method, %OpenApiSpex.Operation{} = op} ->
+           if api_key_operation?(op),
+             do: {method, %{op | responses: Map.put_new(op.responses, 403, forbidden())}},
+             else: {method, op}
+
+         other ->
+           other
+       end)
+       |> then(&struct!(OpenApiSpex.PathItem, &1))}
+    end)
+  end
+
+  defp api_key_operation?(%OpenApiSpex.Operation{security: security}) when is_list(security),
+    do: Enum.any?(security, &Map.has_key?(&1, "apiKey"))
+
+  defp api_key_operation?(_op), do: false
+
+  defp forbidden, do: ApiSchemas.response_ref("Forbidden")
+
   defp security_schemes do
     %{
       "apiKey" => %SecurityScheme{
@@ -97,6 +132,11 @@ defmodule ConvergerWeb.ApiSpec do
         in: "header",
         name: "x-api-key",
         description: "Tenant API key (server side only)"
+      },
+      "adminToken" => %SecurityScheme{
+        type: "http",
+        scheme: "bearer",
+        description: "`ADMIN_API_TOKEN` (platform admin API only), behind the admin IP allowlist"
       },
       "channelToken" => %SecurityScheme{
         type: "apiKey",
