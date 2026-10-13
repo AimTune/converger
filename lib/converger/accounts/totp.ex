@@ -176,6 +176,25 @@ defmodule Converger.Accounts.TOTP do
     end
   end
 
+  @doc """
+  Rewrites every stored TOTP secret with the current `CLOAK_KEY` (after a
+  key rotation, `Converger.Release.reencrypt_secrets/0`). Returns the count.
+  """
+  @spec reencrypt_all() :: non_neg_integer()
+  def reencrypt_all do
+    for module <- [AdminUser, TenantUser],
+        user <- Repo.all(from(u in module, where: not is_nil(u.totp_secret))),
+        reduce: 0 do
+      count ->
+        user
+        |> Ecto.Changeset.change()
+        |> Ecto.Changeset.force_change(:totp_secret, user.totp_secret)
+        |> Repo.update!()
+
+        count + 1
+    end
+  end
+
   @doc false
   # The time step of `code` (now or one step back) newer than `last_step`.
   def match_step(secret, code, last_step, now) when is_binary(secret) and is_binary(code) do

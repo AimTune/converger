@@ -13,6 +13,8 @@ defmodule Converger.Release do
   docs/deployment.md.
   """
 
+  alias Converger.Accounts
+  alias Converger.Accounts.{Sessions, TOTP}
   alias Converger.Partitions.Conversion
 
   @app :converger
@@ -61,15 +63,21 @@ defmodule Converger.Release do
   def reencrypt_secrets do
     load_app()
 
-    {:ok, {channels, subscriptions}, _} =
+    {:ok, {channels, subscriptions, totp_secrets}, _} =
       Ecto.Migrator.with_repo(Converger.Repo, fn _repo ->
         {:ok, _} = Application.ensure_all_started(:cloak)
         start_vault()
-        {Converger.Channels.reencrypt_all(), Converger.Webhooks.reencrypt_all()}
+
+        {Converger.Channels.reencrypt_all(), Converger.Webhooks.reencrypt_all(),
+         TOTP.reencrypt_all()}
       end)
 
-    IO.puts("Re-encrypted #{channels} channel(s) and #{subscriptions} webhook subscription(s)")
-    channels + subscriptions
+    IO.puts(
+      "Re-encrypted #{channels} channel(s), #{subscriptions} webhook subscription(s) " <>
+        "and #{totp_secrets} TOTP secret(s)"
+    )
+
+    channels + subscriptions + totp_secrets
   end
 
   defp start_vault do
@@ -190,7 +198,7 @@ defmodule Converger.Release do
     {:ok, result, _} =
       Ecto.Migrator.with_repo(Converger.Repo, fn _repo ->
         result =
-          Converger.Accounts.bootstrap_super_admin(
+          Accounts.bootstrap_super_admin(
             email: System.get_env("ADMIN_EMAIL"),
             password: System.get_env("ADMIN_PASSWORD")
           )
@@ -219,13 +227,13 @@ defmodule Converger.Release do
         start_vault()
 
         result =
-          case Converger.Accounts.get_admin_user_by_email(String.trim(email)) do
+          case Accounts.get_admin_user_by_email(String.trim(email)) do
             nil ->
               {:error, :not_found}
 
             user ->
-              {:ok, _} = Converger.Accounts.TOTP.reset(user, %{type: "system", id: "release"})
-              Converger.Accounts.Sessions.delete_all("admin", user.id)
+              {:ok, _} = TOTP.reset(user, %{type: "system", id: "release"})
+              Sessions.delete_all("admin", user.id)
               :ok
           end
 

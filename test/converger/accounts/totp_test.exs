@@ -121,6 +121,15 @@ defmodule Converger.Accounts.TOTPTest do
     assert resource_id == admin.id
   end
 
+  test "reencrypt_all rewrites every stored secret, keeping its value" do
+    admin = admin_user_fixture() |> enable_totp()
+    user = tenant_user_fixture(tenant_fixture()) |> enable_totp()
+
+    assert TOTP.reencrypt_all() >= 2
+    assert Repo.get!(AdminUser, admin.id).totp_secret == admin.totp_secret
+    assert Repo.get!(TenantUser, user.id).totp_secret == user.totp_secret
+  end
+
   test "enrollment is required for the configured admin roles only" do
     super_admin = admin_user_fixture(%{role: "super_admin"})
     admin = admin_user_fixture(%{role: "admin"})
