@@ -293,13 +293,13 @@ If the provider registers its webhook through an API call (Telegram `setWebhook`
 
 ### Broker adapters (optional)
 
-An adapter whose inbound side is a broker topic or queue (the built-in [`kafka`](kafka.md) and
-[`rabbitmq`](rabbitmq.md)) declares the `:consumer` capability and implements the `Converger.Channels.Broker`
+An adapter whose inbound side is a broker topic or queue (the built-in [`kafka`](kafka.md),
+[`rabbitmq`](rabbitmq.md), [`nats`](nats.md) and [`redis_streams`](redis-streams.md)) declares the `:consumer` capability and implements the `Converger.Channels.Broker`
 behaviour next to the adapter one:
 
 | Callback | Returns | Purpose |
 | --- | --- | --- |
-| `consumer_options(channel)` | `{:ok, keyword}` or `{:error, message}` | Broadway options of the channel's consumer: `producer: [module: {ProducerModule, opts}, concurrency: 1]` and `processors: [default: [concurrency: n]]`. |
+| `consumer_options(channel)` | `{:ok, keyword}` or `{:error, message}` | Broadway options of the channel's consumer: `producer: [module: {ProducerModule, opts}, concurrency: 1]` and `processors: [default: [concurrency: n]]`. The producer can be an existing Broadway producer (`BroadwayKafka.Producer`, `BroadwayRabbitMQ.Producer`) or a GenStage producer of your own that implements `Broadway.Producer` and acknowledges through a `Broadway.Acknowledger` (`NatsProducer`, `RedisStreamsProducer`). |
 | `message_info(channel, %Broadway.Message{})` | `%{payload:, message_id:, source:, key:, headers:}` | The body and the broker message id (stable across redeliveries: it becomes the idempotency key), plus what dead-lettering keeps. |
 | `dead_letter(channel, info, reason)` | `:ok` or `{:error, term}` | Write a poison message to the channel's dead-letter destination. Retried until it returns `:ok`. |
 
@@ -307,8 +307,8 @@ Everything else is shared: `Converger.Channels.Consumers` starts one consumer pe
 cluster and follows channel changes, and `Converger.Channels.Broker.handle/4` decodes the
 [envelope](brokers.md#envelope), applies idempotency, retries transient failures and dead-letters poison messages.
 `deliver_activity/2` should skip activities consumed from the same channel (`Broker.echo?/2`). Use `required: :inbound`
-and `required: :outbound` for the topics in `config_schema/0`. See [Broker channels](brokers.md) and
-[ADR-0047](../adr/0047-broker-channels-kafka-and-rabbitmq.md).
+and `required: :outbound` for the topics in `config_schema/0`. See [Broker channels](brokers.md),
+[ADR-0047](../adr/0047-broker-channels-kafka-and-rabbitmq.md) and [ADR-0054](../adr/0054-nats-and-redis-streams-channels.md).
 
 ## 2. Register the type
 
@@ -318,7 +318,7 @@ Add the module to the registry with one config line, in `config/config.exs` of y
 config :converger, :adapters, [Converger.Channels.Adapters.AcmeSms]
 ```
 
-The registry (`Converger.Channels.Adapter.adapters/0`) is the built-in adapters (`echo`, `webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram`, `email`, `sms_twilio`, `sms_vonage`, `kafka`, `rabbitmq`) followed by this list, in order. An adapter whose `type/0` equals a built-in type replaces the built-in, so a fork can swap an implementation without patching core. A built-in adapter that ships with Converger itself is added to `@builtin_adapters` in `adapter.ex` instead.
+The registry (`Converger.Channels.Adapter.adapters/0`) is the built-in adapters (`echo`, `webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram`, `email`, `sms_twilio`, `sms_vonage`, `kafka`, `rabbitmq`, `nats`, `redis_streams`) followed by this list, in order. An adapter whose `type/0` equals a built-in type replaces the built-in, so a fork can swap an implementation without patching core. A built-in adapter that ships with Converger itself is added to `@builtin_adapters` in `adapter.ex` instead.
 
 That is all. From the registry and the adapter's declarations:
 

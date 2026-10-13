@@ -1,6 +1,7 @@
 defmodule Converger.Channels.Broker.Envelope do
   @moduledoc """
-  The JSON envelope of broker channel messages (`kafka`, `rabbitmq`).
+  The JSON envelope of broker channel messages (`kafka`, `rabbitmq`, `nats`,
+  `redis_streams`).
 
   ## Outbound (`topic_out`, exchange)
 
@@ -91,6 +92,7 @@ defmodule Converger.Channels.Broker.Envelope do
     end
   end
 
+  def decode(nil, _channel), do: {:error, "message has no payload"}
   def decode(_payload, _channel), do: {:error, "message body is not a binary"}
 
   defp json(payload) do
