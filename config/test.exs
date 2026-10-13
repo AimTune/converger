@@ -123,3 +123,7 @@ config :converger, Converger.Repo.Pressure, degraded_queue_ms: 0
 
 # Swagger UI and /api/openapi.json are served in tests (ADR-0050).
 config :converger, :api_docs, enabled: true
+
+# No role is forced to enroll in 2FA (ADR-0058); tests that cover the
+# enforcement set :require_2fa_roles themselves.
+config :converger, :require_2fa_roles, []

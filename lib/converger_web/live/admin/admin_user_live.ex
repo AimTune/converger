@@ -2,13 +2,14 @@ defmodule ConvergerWeb.Admin.AdminUserLive do
   use ConvergerWeb, :live_view
 
   alias Converger.Accounts
-  alias Converger.Accounts.AdminUser
+  alias Converger.Accounts.{AdminUser, TOTP}
 
   def mount(_params, _session, socket) do
     {:ok,
      assign(socket,
        admin_users: Accounts.list_admin_users(),
        page_title: "Admin Users",
+       min_password_length: Converger.Accounts.PasswordPolicy.min_length(),
        form: to_form(Accounts.change_admin_user(%AdminUser{})),
        show_form: can_manage_users?(socket)
      )}
@@ -65,6 +66,38 @@ defmodule ConvergerWeb.Admin.AdminUserLive do
       end
     else
       {:noreply, put_flash(socket, :error, "Only super_admin can delete admin users.")}
+    end
+  end
+
+  # Lost authenticator: a super_admin turns another admin's 2FA off
+  # (audit-logged). An admin whose role requires 2FA enrolls again at their
+  # next request.
+  def handle_event("reset_2fa", %{"id" => id}, socket) do
+    if can_manage_users?(socket) do
+      user = Accounts.get_admin_user!(id)
+
+      case TOTP.reset(user, build_actor(socket)) do
+        {:ok, _} ->
+          {:noreply,
+           socket
+           |> assign(admin_users: Accounts.list_admin_users())
+           |> put_flash(:info, "Two-factor authentication reset for #{user.email}")}
+
+        {:error, _} ->
+          {:noreply, put_flash(socket, :error, "Failed to reset two-factor authentication")}
+      end
+    else
+      {:noreply, put_flash(socket, :error, "Only super_admin can reset 2FA.")}
+    end
+  end
+
+  def handle_event("revoke_sessions", %{"id" => id}, socket) do
+    if can_manage_users?(socket) do
+      user = Accounts.get_admin_user!(id)
+      count = Accounts.revoke_sessions(user, build_actor(socket))
+      {:noreply, put_flash(socket, :info, "Signed #{user.email} out of #{count} session(s)")}
+    else
+      {:noreply, put_flash(socket, :error, "Only super_admin can sign out admin users.")}
     end
   end
 
@@ -125,10 +158,10 @@ defmodule ConvergerWeb.Admin.AdminUserLive do
               name="admin_user[password]"
               value=""
               label="Password"
-              placeholder="Min 8 characters"
+              placeholder={"Min #{@min_password_length} characters"}
               autocomplete="new-password"
               required
-              minlength="8"
+              minlength={@min_password_length}
             />
             <.input
               id="admin_user_role"
@@ -155,6 +188,11 @@ defmodule ConvergerWeb.Admin.AdminUserLive do
             <:col :let={user} label="Email">{user.email}</:col>
             <:col :let={user} label="Role"><.badge value={user.role} /></:col>
             <:col :let={user} label="Status"><.badge value={user.status} /></:col>
+            <:col :let={user} label="2FA">
+              <.badge value={if TOTP.enabled?(user), do: "enabled", else: "disabled"}>
+                {if TOTP.enabled?(user), do: "on", else: "off"}
+              </.badge>
+            </:col>
             <:col :let={user} label="Created">
               <span class="text-xs text-base-content/70">
                 {Calendar.strftime(user.inserted_at, "%Y-%m-%d %H:%M")}
@@ -169,6 +207,26 @@ defmodule ConvergerWeb.Admin.AdminUserLive do
                 variant="neutral"
               >
                 {if user.status == "active", do: "Disable", else: "Enable"}
+              </.button>
+              <.button
+                :if={@show_form && TOTP.enabled?(user) && user.id != @current_admin_user.id}
+                phx-click="reset_2fa"
+                phx-value-id={user.id}
+                data-confirm="Turn off two-factor authentication for this admin? They can log in with the password only until they set it up again."
+                size="xs"
+                variant="neutral"
+              >
+                Reset 2FA
+              </.button>
+              <.button
+                :if={@show_form && user.id != @current_admin_user.id}
+                phx-click="revoke_sessions"
+                phx-value-id={user.id}
+                data-confirm="Sign this admin out of every session?"
+                size="xs"
+                variant="neutral"
+              >
+                Sign out
               </.button>
               <.button
                 :if={@show_form && user.id != @current_admin_user.id}

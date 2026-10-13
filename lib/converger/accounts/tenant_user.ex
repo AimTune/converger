@@ -2,7 +2,9 @@ defmodule Converger.Accounts.TenantUser do
   use Ecto.Schema
   import Ecto.Changeset
 
-  alias Converger.Accounts.PasswordHasher
+  alias Converger.Accounts.{PasswordHasher, PasswordPolicy}
+
+  @type t :: %__MODULE__{}
 
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
@@ -13,6 +15,13 @@ defmodule Converger.Accounts.TenantUser do
     field :name, :string
     field :role, :string, default: "member"
     field :status, :string, default: "active"
+    # TOTP two-factor authentication (ADR-0058). The secret is encrypted at
+    # rest; 2FA is on once `totp_enabled_at` is set (a secret without it is a
+    # pending enrollment). `totp_last_step` is the last accepted 30 s time
+    # step, so a code cannot be used twice.
+    field :totp_secret, Converger.Encrypted.Binary, redact: true
+    field :totp_enabled_at, :utc_datetime_usec
+    field :totp_last_step, :integer
 
     belongs_to :tenant, Converger.Tenants.Tenant
 
@@ -26,7 +35,7 @@ defmodule Converger.Accounts.TenantUser do
     |> cast(attrs, [:email, :password, :name, :role, :status, :tenant_id])
     |> validate_required([:email, :password, :name, :tenant_id])
     |> validate_format(:email, ~r/^[^\s]+@[^\s]+$/, message: "must be a valid email")
-    |> validate_length(:password, min: 8, message: "must be at least 8 characters")
+    |> PasswordPolicy.validate()
     |> validate_inclusion(:role, @valid_roles)
     |> validate_inclusion(:status, ~w(active inactive))
     |> foreign_key_constraint(:tenant_id)
@@ -48,7 +57,8 @@ defmodule Converger.Accounts.TenantUser do
     user
     |> cast(attrs, [:password])
     |> validate_required([:password])
-    |> validate_length(:password, min: 8, message: "must be at least 8 characters")
+    |> PasswordPolicy.validate()
+    |> validate_confirmation(:password, message: "does not match password")
     |> hash_password()
   end
 

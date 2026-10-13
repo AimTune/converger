@@ -1,0 +1,40 @@
+<Layouts.auth
+  flash={@flash}
+  title="Choose a new password"
+  subtitle={"At least #{@min_length} characters. Setting it signs you out of every device."}
+>
+  <div :if={@errors != []} role="alert" class="alert alert-error text-sm">
+    <.icon name="hero-exclamation-circle" class="size-5 shrink-0" />
+    <div>
+      <div :for={error <- @errors}>{error}</div>
+    </div>
+  </div>
+
+  <form action={@base <> "/password/reset/" <> @token} method="post">
+    <input type="hidden" name="_csrf_token" value={get_csrf_token()} />
+    <input type="hidden" name="_method" value="put" />
+
+    <.input
+      type="password"
+      id="reset_password"
+      name="reset[password]"
+      value=""
+      label="New password"
+      autocomplete="new-password"
+      minlength={@min_length}
+      required
+    />
+    <.input
+      type="password"
+      id="reset_password_confirmation"
+      name="reset[password_confirmation]"
+      value=""
+      label="Confirm new password"
+      autocomplete="new-password"
+      minlength={@min_length}
+      required
+    />
+
+    <button type="submit" class="btn btn-primary mt-3 w-full">Reset password</button>
+  </form>
+</Layouts.auth>

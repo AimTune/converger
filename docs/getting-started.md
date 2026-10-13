@@ -113,7 +113,7 @@ docker compose exec \
 | Variable | Default | Behavior |
 | --- | --- | --- |
 | `ADMIN_EMAIL` | `admin@converger.local` | Email of the account. |
-| `ADMIN_PASSWORD` | generated | At least 8 characters. When unset, a random password is printed **once**. The account is then flagged `must_change_password`, and after the first login you are sent to `/admin/password` until you change it. |
+| `ADMIN_PASSWORD` | generated | At least 12 characters (`PASSWORD_MIN_LENGTH`), not containing the email. When unset, a random password is printed **once**. The account is then flagged `must_change_password`, and after the first login you are sent to `/admin/password` until you change it. A `super_admin` is then sent to `/admin/security` to set up TOTP two-factor authentication (required for the roles in `ADMIN_REQUIRE_2FA_ROLES`). |
 
 The task does nothing if an admin user already exists, and prints `Admin users already exist; nothing to seed`.
 

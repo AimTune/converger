@@ -138,6 +138,8 @@ defmodule Converger.MixProject do
       # Password hashing (Converger.Accounts.PasswordHasher, ADR-0057). Both implement
       # Comeonin; pbkdf2_elixir is pure Elixir, see password_hasher_deps/0.
       {:pbkdf2_elixir, "~> 2.3"},
+      # TOTP two-factor authentication for admin and portal users (ADR-0058).
+      {:nimble_totp, "~> 1.0"},
       {:cloak, "~> 1.1"},
       {:cloak_ecto, "~> 1.3"},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},

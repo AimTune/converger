@@ -242,7 +242,7 @@ defmodule ConvergerWeb.Integration.TelegramChannelTest do
       conn =
         conn
         |> Map.put(:remote_ip, {127, 0, 0, 1})
-        |> init_test_session(%{admin_user_id: admin.id})
+        |> log_in_admin(admin)
 
       %{conn: conn, admin: admin}
     end

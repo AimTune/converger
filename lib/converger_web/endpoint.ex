@@ -4,6 +4,10 @@ defmodule ConvergerWeb.Endpoint do
   # The session will be stored in the cookie and signed,
   # this means its contents can be read but not tampered with.
   # Set :encryption_salt if you would also like to encrypt it.
+  # Admin / portal logins are server-side sessions (ADR-0058): the cookie
+  # only carries the session token. Its max_age (the absolute session
+  # lifetime, SESSION_MAX_AGE_SECONDS) is added at runtime, see
+  # session_options/0.
   @session_options [
     store: :cookie,
     key: "_converger_key",
@@ -38,8 +42,8 @@ defmodule ConvergerWeb.Endpoint do
     drainer: {ConvergerWeb.Drain, :drainer_config, []}
 
   socket "/live", Phoenix.LiveView.Socket,
-    websocket: [connect_info: [:peer_data, session: @session_options]],
-    longpoll: [connect_info: [session: @session_options]]
+    websocket: [connect_info: [:peer_data, session: {__MODULE__, :session_options, []}]],
+    longpoll: [connect_info: [session: {__MODULE__, :session_options, []}]]
 
   # GET /health/live and /health/ready for load balancers and Kubernetes.
   # First, so probes are not redirected to HTTPS or logged per request.
@@ -96,10 +100,24 @@ defmodule ConvergerWeb.Endpoint do
 
   plug Plug.MethodOverride
   plug Plug.Head
-  plug Plug.Session, @session_options
+  plug :session
   # The router, with requests that fail because the database is unavailable
   # answered 503 + Retry-After instead of 500 (issue #35).
   plug ConvergerWeb.Plugs.DbUnavailable, ConvergerWeb.Router
+
+  @doc """
+  Cookie session options, with `max_age` set to the absolute session
+  lifetime (`Converger.Accounts.Sessions.max_age_seconds/0`), read at
+  runtime so `SESSION_MAX_AGE_SECONDS` works on releases.
+  """
+  @spec session_options() :: keyword()
+  def session_options do
+    Keyword.put(@session_options, :max_age, Converger.Accounts.Sessions.max_age_seconds())
+  end
+
+  defp session(conn, _opts) do
+    Plug.Session.call(conn, Plug.Session.init(session_options()))
+  end
 
   @doc """
   Returns the allowed CORS origins, read from the `:cors_origins` application

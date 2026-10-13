@@ -1,0 +1,48 @@
+<Layouts.auth flash={@flash} title="Forgot your password?">
+  <div :if={@sent} role="alert" class="alert alert-success text-sm">
+    <.icon name="hero-check-circle" class="size-5 shrink-0" />
+    <span>
+      If an account matches, we have sent it an email with a link to reset the password.
+      The link expires in one hour.
+    </span>
+  </div>
+
+  <div :if={@error_message} role="alert" class="alert alert-error text-sm">
+    <.icon name="hero-exclamation-circle" class="size-5 shrink-0" />
+    <span>{@error_message}</span>
+  </div>
+
+  <p :if={!@sent} class="text-sm text-base-content/70">
+    Enter your account details and we will email you a reset link.
+  </p>
+
+  <form action={@base <> "/password/reset"} method="post">
+    <input type="hidden" name="_csrf_token" value={get_csrf_token()} />
+
+    <.input
+      :if={@base == "/portal"}
+      type="text"
+      id="reset_tenant_name"
+      name="reset[tenant_name]"
+      value=""
+      label="Tenant Name"
+      autocomplete="organization"
+      required
+    />
+    <.input
+      type="email"
+      id="reset_email"
+      name="reset[email]"
+      value=""
+      label="Email"
+      autocomplete="username"
+      required
+    />
+
+    <button type="submit" class="btn btn-primary mt-3 w-full">Send reset link</button>
+  </form>
+
+  <p class="text-center text-sm">
+    <.link href={@base <> "/login"} class="link link-primary">Back to sign in</.link>
+  </p>
+</Layouts.auth>

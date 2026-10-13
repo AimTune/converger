@@ -112,7 +112,8 @@ of the published values (checked by SHA-256 fingerprint in
    cookie and every token signed with the old key (admin/portal sessions,
    conversation and channel JWTs issued by Converger) becomes invalid: users
    log in again and clients request new tokens. Anyone who knew the old key
-   could forge sessions and tokens, so also review the audit log
+   could forge tokens (admin/portal sessions are server-side rows since
+   ADR-0058, so a forged cookie needs a valid session token as well), so also review the audit log
    (`/admin/audit_logs`) for unexpected admin activity. Converger client
    tokens signed with `TOKEN_SIGNING_KEYS` are not affected; once all
    pre-#52 tokens have expired, set `TOKEN_ACCEPT_UNKEYED=false` so a leaked

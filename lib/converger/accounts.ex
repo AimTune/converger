@@ -4,7 +4,7 @@ defmodule Converger.Accounts do
   """
 
   import Ecto.Query, warn: false
-  alias Converger.Accounts.{AdminUser, TenantUser}
+  alias Converger.Accounts.{AdminUser, Audit, PasswordReset, Sessions, TenantUser}
   alias Converger.AuditLogs
   alias Converger.AuditLogs.Changes
   alias Converger.Repo
@@ -83,11 +83,11 @@ defmodule Converger.Accounts do
       end)
       |> Repo.transaction()
       |> case do
-        {:ok, %{admin_user: updated}} -> {:ok, updated}
+        {:ok, %{admin_user: updated}} -> {:ok, end_sessions_if_inactive(updated)}
         {:error, :admin_user, changeset, _} -> {:error, changeset}
       end
     else
-      Repo.update(changeset)
+      changeset |> Repo.update() |> end_sessions_if_inactive()
     end
   end
 
@@ -107,11 +107,11 @@ defmodule Converger.Accounts do
       |> Multi.delete(:admin_user, user)
       |> Repo.transaction()
       |> case do
-        {:ok, %{admin_user: user}} -> {:ok, user}
+        {:ok, %{admin_user: user}} -> {:ok, end_sessions(user)}
         {:error, :admin_user, changeset, _} -> {:error, changeset}
       end
     else
-      Repo.delete(user)
+      user |> Repo.delete() |> end_sessions()
     end
   end
 
@@ -122,28 +122,45 @@ defmodule Converger.Accounts do
   @doc """
   Changes an admin user's own password after verifying the current one.
   Clears `must_change_password`. `attrs` takes `"password"` and
-  `"password_confirmation"`.
+  `"password_confirmation"`. See `change_own_password/4`.
   """
-  def change_admin_password(%AdminUser{} = user, current_password, attrs) do
-    changeset = AdminUser.password_changeset(user, attrs)
+  def change_admin_password(%AdminUser{} = user, current_password, attrs, opts \\ []) do
+    change_own_password(user, current_password, attrs, opts)
+  end
 
-    if AdminUser.valid_password?(user, current_password) do
+  @doc """
+  Changes a tenant user's own password after verifying the current one. See
+  `change_own_password/4`.
+  """
+  def change_tenant_password(%TenantUser{} = user, current_password, attrs, opts \\ []) do
+    change_own_password(user, current_password, attrs, opts)
+  end
+
+  @doc """
+  Changes a user's own password after verifying the current one. Deletes the
+  user's password reset tokens and every session except
+  `opts[:keep_session_id]` (the caller's own). Audit-logged.
+  """
+  def change_own_password(user, current_password, attrs, opts \\ []) do
+    module = user.__struct__
+    changeset = module.password_changeset(user, attrs)
+
+    if module.valid_password?(user, current_password) do
       Multi.new()
-      |> Multi.update(:admin_user, changeset)
-      |> Multi.insert(:audit_log, fn _ ->
-        AuditLogs.build_audit_log_entry(%{
-          actor_type: "admin",
-          actor_id: user.id,
-          action: "update",
-          resource_type: "admin_user",
-          resource_id: user.id,
-          changes: %{"password" => "[changed]"}
-        })
-      end)
+      |> Multi.update(:user, changeset)
+      |> Multi.delete_all(:tokens, PasswordReset.tokens_query(user_type(user), user.id))
+      |> Multi.insert(
+        :audit_log,
+        Audit.entry(user, Audit.self_actor(user), "update", %{"password" => "[changed]"})
+      )
       |> Repo.transaction()
       |> case do
-        {:ok, %{admin_user: updated}} -> {:ok, updated}
-        {:error, :admin_user, changeset, _} -> {:error, changeset}
+        {:ok, %{user: updated}} ->
+          Sessions.delete_all(user_type(user), user.id, except: opts[:keep_session_id])
+          {:ok, updated}
+
+        {:error, :user, changeset, _} ->
+          {:error, changeset}
       end
     else
       {:error,
@@ -152,6 +169,38 @@ defmodule Converger.Accounts do
        |> Map.put(:action, :update)}
     end
   end
+
+  @doc """
+  Signs a user out of every session ("log out everywhere", or an admin
+  revoking another user's sessions). Audit-logged with `actor`. Returns the
+  number of sessions ended.
+  """
+  def revoke_sessions(user, actor) do
+    count = Sessions.delete_all(user_type(user), user.id)
+    Audit.log(user, actor, "revoke_sessions", %{"sessions" => count})
+    count
+  end
+
+  @doc "The `user_type` of sessions and tokens: `admin` or `tenant`."
+  def user_type(%AdminUser{}), do: "admin"
+  def user_type(%TenantUser{}), do: "tenant"
+
+  # Deactivated and deleted users lose their sessions and reset tokens.
+  defp end_sessions_if_inactive({:ok, user}), do: {:ok, end_sessions_if_inactive(user)}
+  defp end_sessions_if_inactive(%{status: "active"} = user), do: user
+  defp end_sessions_if_inactive(%{} = user), do: end_sessions(user)
+  defp end_sessions_if_inactive(other), do: other
+
+  defp end_sessions({:ok, user}), do: {:ok, end_sessions(user)}
+
+  defp end_sessions(%{id: id} = user)
+       when is_struct(user, AdminUser) or is_struct(user, TenantUser) do
+    Sessions.delete_all(user_type(user), id)
+    user |> user_type() |> PasswordReset.tokens_query(id) |> Repo.delete_all()
+    user
+  end
+
+  defp end_sessions(other), do: other
 
   @doc """
   Creates the initial `super_admin` if no admin user exists.
@@ -332,12 +381,15 @@ defmodule Converger.Accounts do
       end)
       |> Repo.transaction()
       |> case do
-        {:ok, %{tenant_user: updated}} -> {:ok, Repo.preload(updated, :tenant)}
-        {:error, :tenant_user, changeset, _} -> {:error, changeset}
+        {:ok, %{tenant_user: updated}} ->
+          {:ok, updated |> end_sessions_if_inactive() |> Repo.preload(:tenant)}
+
+        {:error, :tenant_user, changeset, _} ->
+          {:error, changeset}
       end
     else
       case Repo.update(changeset) do
-        {:ok, user} -> {:ok, Repo.preload(user, :tenant)}
+        {:ok, user} -> {:ok, user |> end_sessions_if_inactive() |> Repo.preload(:tenant)}
         error -> error
       end
     end
@@ -360,11 +412,11 @@ defmodule Converger.Accounts do
       |> Multi.delete(:tenant_user, user)
       |> Repo.transaction()
       |> case do
-        {:ok, %{tenant_user: user}} -> {:ok, user}
+        {:ok, %{tenant_user: user}} -> {:ok, end_sessions(user)}
         {:error, :tenant_user, changeset, _} -> {:error, changeset}
       end
     else
-      Repo.delete(user)
+      user |> Repo.delete() |> end_sessions()
     end
   end
 

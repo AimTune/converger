@@ -33,11 +33,11 @@ defmodule ConvergerWeb.WebhookLiveTest do
         tenant_id: tenant.id,
         name: "Portal",
         email: "wh-#{System.unique_integer([:positive])}@example.com",
-        password: "password123",
+        password: "password-123456",
         role: role
       })
 
-    init_test_session(conn, %{tenant_user_id: user.id})
+    log_in_tenant_user(conn, user)
   end
 
   defp admin_conn(conn) do
@@ -51,7 +51,7 @@ defmodule ConvergerWeb.WebhookLiveTest do
 
     conn
     |> Map.put(:remote_ip, {127, 0, 0, 1})
-    |> init_test_session(%{admin_user_id: admin.id})
+    |> log_in_admin(admin)
   end
 
   defp failed_event(tenant) do

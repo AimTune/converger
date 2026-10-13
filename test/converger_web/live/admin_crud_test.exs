@@ -23,7 +23,7 @@ defmodule ConvergerWeb.Admin.CrudTest do
   defp admin_conn(conn, admin) do
     conn
     |> Map.put(:remote_ip, @admin_user_ip)
-    |> init_test_session(%{admin_user_id: admin.id})
+    |> log_in_admin(admin)
   end
 
   describe "Tenant CRUD" do

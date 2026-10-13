@@ -19,6 +19,9 @@ defmodule ConvergerWeb.ConnCase do
 
   import ExUnit.Assertions
 
+  alias Converger.Accounts.Sessions
+  alias ConvergerWeb.UserAuth
+
   using do
     quote do
       # The default endpoint for testing
@@ -89,6 +92,24 @@ defmodule ConvergerWeb.ConnCase do
     conn
     |> Plug.Conn.put_private(:open_api_spex, %{spec_module: ConvergerWeb.ApiSpec})
     |> OpenApiSpex.TestAssertions.assert_operation_response(operation_id)
+  end
+
+  @doc """
+  Logs `admin` in: creates a server-side session (ADR-0058) and puts its
+  token in the test session. Returns the conn.
+  """
+  def log_in_admin(conn, admin), do: log_in_user(conn, "admin", admin)
+
+  @doc "Logs a tenant user in, like `log_in_admin/2`."
+  def log_in_tenant_user(conn, user), do: log_in_user(conn, "tenant", user)
+
+  defp log_in_user(conn, user_type, user) do
+    {:ok, token, session} = Sessions.create(user_type, user)
+
+    Phoenix.ConnTest.init_test_session(conn, %{
+      UserAuth.token_key(user_type) => token,
+      :live_socket_id => Sessions.live_socket_id(session)
+    })
   end
 
   setup tags do

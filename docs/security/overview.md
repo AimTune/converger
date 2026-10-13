@@ -13,8 +13,8 @@ in depth in [Security: client IPs, proxies and admin access](../security.md); th
 
 | Actor | Credential | Where it is checked | Stored as |
 | --- | --- | --- | --- |
-| Operator (admin panel `/admin`) | Email + password, cookie session | `ConvergerWeb.Plugs.AdminAuth` (IP whitelist), `ConvergerWeb.Plugs.Auth` (session), LiveView `on_mount` hooks | `admin_users.password_hash` (bcrypt) |
-| Tenant staff (portal `/portal`) | Tenant name + email + password, cookie session | `ConvergerWeb.Plugs.Auth`, LiveView `on_mount` hooks | `tenant_users.password_hash` (bcrypt) |
+| Operator (admin panel `/admin`) | Email + password, plus a TOTP code when 2FA is on; server-side session | `ConvergerWeb.Plugs.AdminAuth` (IP whitelist), `ConvergerWeb.Plugs.Auth` (session), LiveView `on_mount` hooks | `admin_users.password_hash` (bcrypt), `admin_users.totp_secret` (AES-GCM encrypted), `user_sessions.token_hash` (SHA-256) |
+| Tenant staff (portal `/portal`) | Tenant name + email + password, plus a TOTP code when 2FA is on; server-side session | `ConvergerWeb.Plugs.Auth`, LiveView `on_mount` hooks | `tenant_users.password_hash` (bcrypt), `tenant_users.totp_secret` (AES-GCM encrypted), `user_sessions.token_hash` (SHA-256) |
 | Tenant backend (server to server) | `x-api-key: cvg_live_...` | `ConvergerWeb.Plugs.TenantAuth` | `tenants.api_key_hash` (SHA-256) |
 | Channel integration | Channel secret as `Authorization: Bearer ...` on `POST /api/v1/converger/tokens/generate` | `ConvergerWeb.Plugs.ConvergerAuth` (`mode: :secret`) | `channels.secret` (AES-GCM encrypted) + `channels.secret_hash` (SHA-256, for lookup) |
 | End-user client (widget, SDK) | Converger token (JWT) as Bearer or socket `token` param | `ConvergerWeb.Plugs.ConvergerAuth` (`mode: :token`), `ConvergerWeb.ConvergerSocket` | Not stored (JWT); revocations and rotations in `revoked_tokens` ([client tokens](client-tokens.md)) |
@@ -28,9 +28,9 @@ in depth in [Security: client IPs, proxies and admin access](../security.md); th
 
 Admin accounts live in `admin_users` with the roles `super_admin`, `admin` and `viewer`
 ([`Converger.Accounts.AdminUser`](https://github.com/AimTune/converger/blob/main/lib/converger/accounts/admin_user.ex)).
-Passwords are hashed with bcrypt (`bcrypt_elixir`, default cost) through `Converger.Accounts.PasswordHasher` and must be
-at least 8 characters. Development builds without a C compiler can use PBKDF2-SHA512 instead
-(`CONVERGER_PASSWORD_HASHER=pbkdf2`, [ADR-0057](../adr/0057-pluggable-password-hasher-and-dev-container.md)).
+Passwords are hashed with bcrypt (`bcrypt_elixir`, default cost) through `Converger.Accounts.PasswordHasher` and
+follow the [password policy](#password-policy). Development builds without a C compiler can use PBKDF2-SHA512
+instead (`CONVERGER_PASSWORD_HASHER=pbkdf2`, [ADR-0057](../adr/0057-pluggable-password-hasher-and-dev-container.md)).
 `Converger.Accounts.authenticate_admin/2` runs `PasswordHasher.no_user_verify/0` when the email is unknown, so response
 time does not reveal whether an account exists.
 
@@ -40,7 +40,9 @@ Every `/admin` route goes through two layers:
    `127.0.0.1,::1`) with `403`. The client IP is only taken from `X-Forwarded-For` when the TCP peer is in
    `TRUSTED_PROXIES` (see [../security.md](../security.md)).
 2. The session plugs (`fetch_admin_user`, `require_admin_user`) and the LiveView hook
-   `ConvergerWeb.Live.AuthHooks.ensure_admin_user` require an active admin user in the session.
+   `ConvergerWeb.Live.AuthHooks.ensure_admin_user` require a valid [server-side session](#sessions) of an active
+   admin user. Admins whose role must use [2FA](#two-factor-authentication-totp) and have not enabled it are
+   sent to `/admin/security` first.
 
 There is no default password. The first `super_admin` is created by `Converger.Release.seed_admin/0` (or
 `priv/repo/seeds.exs` in development) from `ADMIN_EMAIL` / `ADMIN_PASSWORD`. When `ADMIN_PASSWORD` is unset a
@@ -58,13 +60,76 @@ Tenant users (`tenant_users`, roles `owner`, `admin`, `member`, `viewer`) sign i
 tenant name, email and password. The portal is not behind the IP whitelist. Email uniqueness is scoped to the
 tenant, and the tenant must be `active`. Authorization inside the portal is role based (viewers are read-only,
 owners and admins manage users).
+Tenant users can enable [2FA](#two-factor-authentication-totp) and [reset a forgotten
+password](#password-reset) like admins; the portal's own password change is on `/portal/security`.
 
 ### Sessions
 
-Both panels use Phoenix cookie sessions (`_converger_key`, signed with `SECRET_KEY_BASE`, `SameSite=Lax`).
-The cookie is signed, not encrypted: it holds only the user id. Sessions are renewed (`configure_session(renew:
-true)`) on login and logout, and the `:browser` pipeline enables CSRF protection (`protect_from_forgery`).
-Sessions have no server-side expiry yet; see [Planned hardening](#planned-hardening).
+Logins are server-side sessions (`user_sessions`, [ADR-0058](../adr/0058-server-side-sessions-totp-2fa-and-password-reset-for-admin-and-portal.md)).
+A login stores a random 32-byte token in the Phoenix cookie session (`_converger_key`, signed with
+`SECRET_KEY_BASE`, `SameSite=Lax`) and only its SHA-256 in the table, with the client IP, user agent, login time
+and last activity. `ConvergerWeb.Plugs.Auth` and the LiveView `on_mount` hooks check on every request and mount
+that the row exists, belongs to an active user and is within:
+
+- the **absolute lifetime** (`SESSION_MAX_AGE_SECONDS`, default 12 hours from login; also the cookie `max_age`),
+- the **idle timeout** (`SESSION_IDLE_TIMEOUT_SECONDS`, default 30 minutes since the last request; `last_seen_at`
+  is updated at most once a minute).
+
+Each LiveView connects with the session's `live_socket_id` (`user_sessions:<id>`). Deleting a session
+broadcasts `disconnect` to it, so open LiveViews close at once. Sessions are deleted on logout, by **Log out
+everywhere** and per-device **Sign out** on `/admin/security` and `/portal/security`, on a password change (all
+but the current one), on a password reset, when the user is deactivated or deleted, and by a `super_admin`
+from the admin users page. `Converger.Workers.SessionPruneWorker` deletes expired rows every 10 minutes and
+disconnects their LiveViews. The cookie session is renewed (`configure_session(renew: true)`) on login and
+logout, and the `:browser` pipeline enables CSRF protection (`protect_from_forgery`).
+
+### Two-factor authentication (TOTP)
+
+Admin and tenant users can turn on TOTP (RFC 6238: 6 digits, 30-second steps, SHA-1, any authenticator app) on
+their security page (`/admin/security`, `/portal/security`). Enrollment stores a random 20-byte secret,
+encrypted at rest like other secrets ([Secrets at rest](#secrets-at-rest)), shows it in base32 together with an
+`otpauth://` URI for manual entry, and turns 2FA on only after a valid code. Turning it off needs a current code
+or the password.
+
+With 2FA on, a correct password only creates a pending login (five minutes, in the cookie session); the session
+is created after `/admin/login/totp` or `/portal/login/totp` accepts a code. Codes of the current and the
+previous step are accepted, and the accepted step is stored (`totp_last_step`) with a conditional update, so a
+code works once, even under concurrent requests. Wrong codes count as failed logins
+([login lockout](#rate-limiting-and-login-lockout)) for the client IP and the account `<type>-2fa:<user id>`.
+
+Admin roles listed in `ADMIN_REQUIRE_2FA_ROLES` (default `super_admin`) must enable 2FA: until they do, every
+admin page redirects to `/admin/security`. Lost authenticator: a `super_admin` resets another admin's 2FA from
+**Admin Users**, a tenant `owner` or `admin` resets a team member's on **Users**, and an operator can reset any
+admin from a release shell:
+
+```bash
+bin/converger eval 'Converger.Release.reset_admin_2fa("admin.com")'
+```
+
+Enabling, disabling and resetting 2FA are audit-logged (`enable_2fa`, `disable_2fa`, `reset_2fa`).
+
+### Password policy
+
+`Converger.Accounts.PasswordPolicy` applies whenever a password is set (account creation, password change,
+reset) for both admins and tenant users:
+
+- at least `PASSWORD_MIN_LENGTH` characters (default 12);
+- at most 72 bytes, the bcrypt input limit (longer passwords would be truncated silently);
+- it must not equal or contain the account's email address.
+
+Existing password hashes are not re-checked: users keep their passwords until they change them.
+
+### Password reset
+
+`/admin/password/reset` (behind the admin IP whitelist) and `/portal/password/reset` (tenant name + email) mail a
+reset link from `MAILER_FROM` through `Converger.Mailer` (`SMTP_*`, see
+[Configuration](../operations/configuration.md#accounts-sessions-and-email)). The form answers the same way
+whether or not an account matches, and requests are rate limited per client IP (`password_reset_ip`, 429) and per
+account (`password_reset_account`; over the limit no mail is sent, the answer does not change). The link carries
+a random 32-byte token (URL-safe base64); only its SHA-256 is stored (`account_tokens`). A link works once, for
+one hour, and only while the account still has the email it was sent to; any password change voids it. A reset
+clears `must_change_password`, ends every session of the user and is audit-logged (`reset_password`). Password
+changes are audit-logged too.
 
 ### Tenant API keys
 
@@ -188,6 +253,8 @@ configured key can decrypt them.
 | `channels.config` (provider access tokens, `app_secret`, `verify_token`, Infobip `api_key`, webhook headers, ...) | Encrypted as a whole map (`Converger.Encrypted.Map`) |
 | `tenants.api_key_hash`, `previous_api_key_hash` | SHA-256 digest only; plaintext never stored |
 | `admin_users.password_hash`, `tenant_users.password_hash` | bcrypt (PBKDF2-SHA512 in a `CONVERGER_PASSWORD_HASHER=pbkdf2` build) |
+| `admin_users.totp_secret`, `tenant_users.totp_secret` | Encrypted (`Converger.Encrypted.Binary`) |
+| `user_sessions.token_hash`, `account_tokens.token_hash` | SHA-256 digest only; the session token lives in the signed cookie, the reset token in the mailed link |
 | Activities, attachments, `tenants.alert_webhook_url`, webhook subscription URLs, `webhook_events` payloads, audit logs | Not encrypted by the application; rely on database and storage encryption |
 
 Sensitive schema fields are also declared with `redact: true`, so `inspect/1` (and therefore crash reports) does
@@ -207,13 +274,13 @@ Back the key up separately from the database: a database backup cannot decrypt c
 
 1. Generate a new key and set it as `CLOAK_KEY`.
 2. Move the old key into `CLOAK_RETIRED_KEYS` (comma-separated; still accepted for decryption).
-3. Deploy, then re-encrypt every channel with the new key:
+3. Deploy, then re-encrypt every channel, webhook subscription and TOTP secret with the new key:
 
    ```bash
    bin/converger eval "Converger.Release.reencrypt_secrets()"
    ```
 
-4. Remove the retired key once the command reports the re-encrypted channel count.
+4. Remove the retired key once the command reports the re-encrypted counts.
 
 If the old key may have leaked, also rotate the channel secrets themselves. Details:
 [ADR-0012](../adr/0012-secrets-at-rest-and-audit-redaction.md).
@@ -279,7 +346,8 @@ checked when saved and again, with the connection pinned, before every request.
 
 Hammer 7 counters (node-local ETS, optionally replicated across the cluster over PubSub) protect activity
 creation, uploads, inbound webhooks and token endpoints, and failed logins are counted per client IP and per
-account (5 failures per minute each by default) with a lockout before the password is checked. Rejected requests
+account (5 failures per minute each by default) with a lockout before the password is checked. Wrong 2FA codes
+count the same way. Password reset requests are limited per IP and per account. Rejected requests
 get `429` with `Retry-After`. See [Rate limiting](../operations/rate-limiting.md) and
 [ADR-0013](../adr/0013-cluster-wide-rate-limiting-with-hammer-and-pubsub.md).
 
@@ -358,15 +426,12 @@ The Docker workflow builds the image on every pull request and scans it with Tri
 uploaded to code scanning). Dependabot opens dependency updates. See
 [ADR-0021](../adr/0021-ci-quality-gates-and-lf-line-endings.md).
 
-## Planned hardening
+## Known limitations
 
-Tracked in [#52](https://github.com/AimTune/converger/issues/52) (Planned):
-
-- TOTP two-factor authentication for admins (required for `super_admin`), password reset, password policy;
-- session `max_age`, idle timeout and "log out everywhere".
-
-Other known limitations: the login form reports "Your account has been deactivated" for an inactive account
-before the password is checked.
+- 2FA has no recovery codes and no WebAuthn; a locked-out admin is reset by a `super_admin` or with
+  `Converger.Release.reset_admin_2fa/1` ([ADR-0058](../adr/0058-server-side-sessions-totp-2fa-and-password-reset-for-admin-and-portal.md)).
+- The login form reports "Your account has been deactivated" for an inactive account
+  before the password is checked.
 
 ## Reporting a vulnerability
 
@@ -384,6 +449,7 @@ with the affected version or commit, reproduction steps and impact. There is no 
 - [ADR-0014: Webhook SSRF guard and outbound signing](../adr/0014-webhook-ssrf-guard-and-outbound-signing.md)
 - [ADR-0022: Deployment hardening](../adr/0022-deployment-hardening.md)
 - [ADR-0037: libcluster clustering, health endpoints and metrics on the main port](../adr/0037-libcluster-clustering-health-endpoints-and-metrics-on-the-main-port.md)
+- [ADR-0058: Server-side sessions, TOTP 2FA and password reset for the admin panel and the portal](../adr/0058-server-side-sessions-totp-2fa-and-password-reset-for-admin-and-portal.md)
 
 ## Authorization boundaries
 

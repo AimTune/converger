@@ -16,6 +16,26 @@
 - `mix setup` also installs and builds the assets. Docs: [Admin panel and tenant portal](docs/admin-ui.md),
   security overview, contributing, deployment; ADR-0060.
 
+### Admin and portal auth hardening (#52, part 2)
+
+- Admin and tenant portal logins are **server-side sessions** (`user_sessions`; only a SHA-256 of the cookie's
+  token is stored). They end after `SESSION_MAX_AGE_SECONDS` (12 h, also the cookie `max_age`) or
+  `SESSION_IDLE_TIMEOUT_SECONDS` (30 min) without activity. `/admin/security` and `/portal/security` list the
+  sessions with **Sign out** per session and **Log out everywhere**; a password change ends the other sessions, a
+  reset, deactivation or deletion all of them; open LiveViews are disconnected. Expired rows are pruned every 10
+  minutes. Upgrading logs everyone out once.
+- **TOTP two-factor authentication** (`nimble_totp`) for admins and tenant users: enrollment with base32 secret
+  and `otpauth://` URI, confirmed with a code; secret encrypted at rest; codes single use; wrong codes throttled.
+  `ADMIN_REQUIRE_2FA_ROLES` (default `super_admin`) forces enrollment before any admin page. A `super_admin` (or a
+  tenant `owner`/`admin`) can reset another user's 2FA; `Converger.Release.reset_admin_2fa/1` for lockouts.
+- **Password reset by email** at `/admin/password/reset` and `/portal/password/reset`: single-use hashed tokens,
+  valid one hour, same answer whether the account exists, rate limited per IP and per account; clears
+  `must_change_password` and all sessions. `MAILER_FROM` and `SMTP_*` configure the mailer.
+- **Password policy** for both account types: at least `PASSWORD_MIN_LENGTH` (default 12, was 8) characters, at
+  most 72 bytes, must not contain the email. Existing passwords keep working.
+- Audit log actions `enable_2fa`, `disable_2fa`, `reset_2fa`, `reset_password`, `revoke_sessions`.
+- Docs: security model, configuration, rate limiting, upgrades, tenants; ADR-0058.
+
 ### Client token hardening (#52, part 1)
 
 - Converger tokens are signed with dedicated keys (`TOKEN_SIGNING_KEYS`, `kid:secret` pairs, the first signs, all

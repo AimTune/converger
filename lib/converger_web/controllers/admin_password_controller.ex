@@ -7,9 +7,14 @@ defmodule ConvergerWeb.AdminPasswordController do
   use ConvergerWeb, :controller
 
   alias Converger.Accounts
+  alias Converger.Accounts.PasswordPolicy
 
   def edit(conn, _params) do
-    render(conn, :edit, errors: [], forced: forced?(conn))
+    render(conn, :edit,
+      errors: [],
+      forced: forced?(conn),
+      min_length: PasswordPolicy.min_length()
+    )
   end
 
   def update(conn, %{"admin_password" => params}) do
@@ -20,23 +25,33 @@ defmodule ConvergerWeb.AdminPasswordController do
       "password_confirmation" => params["password_confirmation"]
     }
 
-    case Accounts.change_admin_password(user, params["current_password"] || "", new_attrs) do
+    case Accounts.change_admin_password(user, params["current_password"] || "", new_attrs,
+           keep_session_id: conn.assigns.current_user_session.id
+         ) do
       {:ok, _user} ->
         conn
-        |> put_flash(:info, "Password updated.")
+        |> put_flash(:info, "Password updated. Your other sessions were signed out.")
         |> redirect(to: "/admin")
 
       {:error, changeset} ->
         conn
         |> put_status(:unprocessable_entity)
-        |> render(:edit, errors: error_messages(changeset), forced: forced?(conn))
+        |> render(:edit,
+          errors: error_messages(changeset),
+          forced: forced?(conn),
+          min_length: PasswordPolicy.min_length()
+        )
     end
   end
 
   def update(conn, _params) do
     conn
     |> put_status(:unprocessable_entity)
-    |> render(:edit, errors: ["All fields are required."], forced: forced?(conn))
+    |> render(:edit,
+      errors: ["All fields are required."],
+      forced: forced?(conn),
+      min_length: PasswordPolicy.min_length()
+    )
   end
 
   defp forced?(conn), do: conn.assigns.current_admin_user.must_change_password

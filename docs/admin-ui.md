@@ -26,7 +26,8 @@ components and [heroicons](https://heroicons.com), the Phoenix 1.8 default stack
 | `/admin/deliveries` | `/portal/deliveries` | Dead letters and replay, CSV export ([Deliveries page](delivery.md#deliveries-page)) |
 | `/admin/webhooks` | `/portal/webhooks` | [Platform event webhooks](platform-webhooks.md) |
 | `/admin/audit_logs` | | Audit log |
-| `/admin/users`, `/admin/tenant_users` | `/portal/users` | Admin users, tenant users |
+| `/admin/users`, `/admin/tenant_users` | `/portal/users` | Admin users, tenant users, 2FA reset, sign out |
+| `/admin/security` | `/portal/security` | Own 2FA, password and active sessions ([ADR-0058](adr/0058-server-side-sessions-totp-2fa-and-password-reset-for-admin-and-portal.md)) |
 | `/admin/oban` | | Oban Web job dashboard ([Delivery](delivery.md#oban-web-dashboard)) |
 
 Planned in [#50](https://github.com/AimTune/converger/issues/50): search and sort on every list, a "send test

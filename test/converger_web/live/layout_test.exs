@@ -31,7 +31,7 @@ defmodule ConvergerWeb.LayoutTest do
         tenant_id: tenant.id,
         name: "Layout Owner",
         email: "layout-owner-#{System.unique_integer([:positive])}@test.com",
-        password: "password123",
+        password: "password123456",
         role: "owner"
       })
 
@@ -41,7 +41,7 @@ defmodule ConvergerWeb.LayoutTest do
   defp admin_conn(conn, admin) do
     conn
     |> Map.put(:remote_ip, {127, 0, 0, 1})
-    |> init_test_session(%{admin_user_id: admin.id})
+    |> log_in_admin(admin)
   end
 
   @admin_pages ~w(/admin /admin/tenants /admin/channels /admin/conversations /admin/routing_rules
@@ -91,7 +91,7 @@ defmodule ConvergerWeb.LayoutTest do
     tenant_user: tenant_user,
     conversation: conversation
   } do
-    conn = init_test_session(conn, %{tenant_user_id: tenant_user.id})
+    conn = log_in_tenant_user(conn, tenant_user)
 
     for path <- @portal_pages ++ ["/portal/conversations/#{conversation.id}"] do
       {:ok, view, html} = live(conn, path)
@@ -110,8 +110,26 @@ defmodule ConvergerWeb.LayoutTest do
     assert has_element?(view, "#flash-info", "Status updated")
   end
 
+  test "the security pages render in the admin and portal frames", %{
+    conn: conn,
+    admin: admin,
+    tenant_user: tenant_user
+  } do
+    html = conn |> admin_conn(admin) |> get(~p"/admin/security") |> html_response(200)
+    assert html =~ ~s(id="current-user")
+    assert html =~ ~r{<a[^>]*href="/admin/security"[^>]*aria-current="page"}
+    refute html =~ ~r/sstyle="/
+
+    html =
+      conn |> log_in_tenant_user(tenant_user) |> get(~p"/portal/security") |> html_response(200)
+
+    assert html =~ ~s(id="current-tenant")
+    assert html =~ "Log out everywhere"
+    refute html =~ ~r/sstyle="/
+  end
+
   test "login pages use the auth frame and the built assets", %{conn: conn} do
-    for path <- ["/admin/login", "/portal/login"] do
+    for path <- ~w(/admin/login /portal/login /admin/password/reset /portal/password/reset) do
       html = conn |> Map.put(:remote_ip, {127, 0, 0, 1}) |> get(path) |> html_response(200)
 
       assert html =~ ~s(href="/assets/css/app.css")

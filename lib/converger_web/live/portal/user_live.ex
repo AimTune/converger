@@ -2,7 +2,7 @@ defmodule ConvergerWeb.Portal.UserLive do
   use ConvergerWeb, :live_view
 
   alias Converger.Accounts
-  alias Converger.Accounts.TenantUser
+  alias Converger.Accounts.{TenantUser, TOTP}
 
   def mount(_params, _session, socket) do
     tenant_id = socket.assigns.current_tenant.id
@@ -12,6 +12,7 @@ defmodule ConvergerWeb.Portal.UserLive do
      assign(socket,
        tenant_users: Accounts.list_tenant_users(tenant_id),
        page_title: "Users",
+       min_password_length: Converger.Accounts.PasswordPolicy.min_length(),
        form: to_form(Accounts.change_tenant_user(%TenantUser{})),
        can_manage: can_manage
      )}
@@ -70,6 +71,32 @@ defmodule ConvergerWeb.Portal.UserLive do
       end
     else
       {:noreply, put_flash(socket, :error, "You don't have permission to delete users.")}
+    end
+  end
+
+  # Lost authenticator: an owner/admin turns a team member's 2FA off
+  # (audit-logged).
+  def handle_event("reset_2fa", %{"id" => id}, socket) do
+    user = Accounts.get_tenant_user!(id)
+
+    cond do
+      not socket.assigns.can_manage ->
+        {:noreply, put_flash(socket, :error, "You don't have permission to do this.")}
+
+      user.tenant_id != socket.assigns.current_tenant.id ->
+        {:noreply, put_flash(socket, :error, "Unauthorized")}
+
+      true ->
+        case TOTP.reset(user, build_actor(socket)) do
+          {:ok, _} ->
+            {:noreply,
+             socket
+             |> assign(tenant_users: Accounts.list_tenant_users(socket.assigns.current_tenant.id))
+             |> put_flash(:info, "Two-factor authentication reset for #{user.email}")}
+
+          {:error, _} ->
+            {:noreply, put_flash(socket, :error, "Failed to reset two-factor authentication")}
+        end
     end
   end
 
@@ -144,10 +171,10 @@ defmodule ConvergerWeb.Portal.UserLive do
               name="tenant_user[password]"
               value=""
               label="Password"
-              placeholder="Min 8 characters"
+              placeholder={"Min #{@min_password_length} characters"}
               autocomplete="new-password"
               required
-              minlength="8"
+              minlength={@min_password_length}
             />
             <.input
               id="tenant_user_role"
@@ -174,6 +201,11 @@ defmodule ConvergerWeb.Portal.UserLive do
             <:col :let={user} label="Email">{user.email}</:col>
             <:col :let={user} label="Role"><.badge value={user.role} /></:col>
             <:col :let={user} label="Status"><.badge value={user.status} /></:col>
+            <:col :let={user} label="2FA">
+              <.badge value={if TOTP.enabled?(user), do: "enabled", else: "disabled"}>
+                {if TOTP.enabled?(user), do: "on", else: "off"}
+              </.badge>
+            </:col>
             <:col :let={user} label="Joined">
               <span class="text-xs text-base-content/70">
                 {Calendar.strftime(user.inserted_at, "%Y-%m-%d %H:%M")}
@@ -182,6 +214,16 @@ defmodule ConvergerWeb.Portal.UserLive do
             <:action :let={user} :if={@can_manage}>
               <.button phx-click="toggle_status" phx-value-id={user.id} size="xs" variant="neutral">
                 {if user.status == "active", do: "Disable", else: "Enable"}
+              </.button>
+              <.button
+                :if={TOTP.enabled?(user) && user.id != @current_tenant_user.id}
+                phx-click="reset_2fa"
+                phx-value-id={user.id}
+                data-confirm="Turn off two-factor authentication for this user?"
+                size="xs"
+                variant="neutral"
+              >
+                Reset 2FA
               </.button>
               <.button
                 :if={user.id != @current_tenant_user.id}

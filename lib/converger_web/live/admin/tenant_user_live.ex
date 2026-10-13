@@ -16,6 +16,7 @@ defmodule ConvergerWeb.Admin.TenantUserLive do
      |> assign(
        tenants: tenants,
        page_title: "Tenant Users",
+       min_password_length: Converger.Accounts.PasswordPolicy.min_length(),
        form: to_form(Accounts.change_tenant_user(%TenantUser{})),
        filter_tenant_id: "",
        is_viewer: is_viewer,
@@ -172,10 +173,10 @@ defmodule ConvergerWeb.Admin.TenantUserLive do
               name="tenant_user[password]"
               value=""
               label="Password"
-              placeholder="Min 8 characters"
+              placeholder={"Min #{@min_password_length} characters"}
               autocomplete="new-password"
               required
-              minlength="8"
+              minlength={@min_password_length}
             />
             <.input
               id="tenant_user_role"

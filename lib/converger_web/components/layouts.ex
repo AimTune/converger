@@ -21,6 +21,7 @@ defmodule ConvergerWeb.Layouts do
     {"Audit Logs", "/admin/audit_logs", "hero-clipboard-document-list"},
     {"Admin Users", "/admin/users", "hero-shield-check"},
     {"Tenant Users", "/admin/tenant_users", "hero-users"},
+    {"Security", "/admin/security", "hero-lock-closed"},
     {"Jobs (Oban)", "/admin/oban", "hero-queue-list"}
   ]
 
@@ -31,7 +32,8 @@ defmodule ConvergerWeb.Layouts do
     {"Deliveries", "/portal/deliveries", "hero-paper-airplane"},
     {"Routing Rules", "/portal/routing_rules", "hero-arrows-right-left"},
     {"Webhooks", "/portal/webhooks", "hero-bolt"},
-    {"Users", "/portal/users", "hero-users"}
+    {"Users", "/portal/users", "hero-users"},
+    {"Security", "/portal/security", "hero-lock-closed"}
   ]
 
   @doc """
