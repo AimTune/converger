@@ -10,7 +10,7 @@ defmodule Converger.Channels.AdapterTest do
   import Converger.ConversationsFixtures
   import Converger.ActivitiesFixtures
 
-  @builtin ~w(echo webhook websocket whatsapp_meta whatsapp_infobip slack telegram email sms_twilio sms_vonage messenger instagram viber discord teams http_pull kafka rabbitmq)
+  @builtin ~w(echo webhook websocket whatsapp_meta whatsapp_infobip slack telegram email sms_twilio sms_vonage messenger instagram viber discord teams http_pull kafka rabbitmq nats redis_streams)
 
   defp put_env(key, value) do
     previous = Application.get_env(:converger, key)
@@ -45,15 +45,15 @@ defmodule Converger.Channels.AdapterTest do
 
     test "derives the externally delivering types from capabilities" do
       assert Adapter.types_with(:external_delivery) ==
-               ~w(webhook whatsapp_meta whatsapp_infobip slack telegram email sms_twilio sms_vonage messenger instagram viber discord teams kafka rabbitmq)
+               ~w(webhook whatsapp_meta whatsapp_infobip slack telegram email sms_twilio sms_vonage messenger instagram viber discord teams kafka rabbitmq nats redis_streams)
 
       assert Adapter.types_with(:provider_ack) ==
                ~w(whatsapp_meta whatsapp_infobip slack telegram email sms_twilio sms_vonage messenger instagram viber discord teams)
 
       assert Adapter.types_with(:lifecycle_events) ==
-               ~w(webhook websocket http_pull kafka rabbitmq)
+               ~w(webhook websocket http_pull kafka rabbitmq nats redis_streams)
 
-      assert Adapter.types_with(:consumer) == ~w(kafka rabbitmq)
+      assert Adapter.types_with(:consumer) == ~w(kafka rabbitmq nats redis_streams)
     end
 
     test "derives supported modes from capabilities" do

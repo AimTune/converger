@@ -20,6 +20,25 @@
 - New dependencies: `grpc_server` and `grpc` 1.0.5, `protobuf` 0.17.1 (patch-level pins).
 - Docs: [Protocol v1 over gRPC](docs/protocol/grpc.md); ADR-0056.
 
+### Broker channels: NATS JetStream and Redis Streams (#42)
+
+- New channel types `nats` and `redis_streams` on the broker channel machinery of the Kafka and RabbitMQ channels
+  (one consumer per channel in the cluster, `Converger.Inbound`, idempotency, dead letters, retries, echo
+  suppression, health probes).
+- `nats`: outbound JetStream publish to `subject_out` (optionally `…{conversation_id}`) with `Nats-Msg-Id` = activity
+  id; inbound from a durable pull consumer (`stream`, `subject_in`, `durable_name`), `+ACK` after accepted or
+  dead-lettered, idempotency key `nats:<stream>/<sequence>`, dead letters to `<subject_in>.dlq`. Authentication by
+  user/password, token, NKey seed or `.creds`; TLS; optional stream creation (`declare`).
+- `redis_streams`: outbound `XADD` to `stream_out` (optional `MAXLEN ~`); inbound with a consumer group (consumer
+  named after the node), `XACK` after accepted or dead-lettered, pending entries of earlier or dead consumers
+  recovered with `XAUTOCLAIM` on every start, idempotency key `redis_streams:<stream>/<entry id>`, dead letters to
+  `<stream_in>.dlq`. Password or ACL user; TLS with `rediss://`.
+- New dependencies: `gnat` and `redix` (pure Elixir). Config keys `nkey_seed` and `creds` are redacted in audit logs.
+- Tests: unit suites and end-to-end suites tagged `:nats` and `:redis_streams` (`NATS_URL`, `REDIS_URL`), run in the
+  optional "Broker channel suites" CI job.
+- Docs: [NATS JetStream](docs/channels/nats.md), [Redis Streams](docs/channels/redis-streams.md), broker channels
+  overview; ADR-0054.
+
 ### Platform event webhooks (#49)
 
 - Tenant-level webhook subscriptions (`webhook_subscriptions`: url, events, signing secret and headers encrypted at
@@ -111,7 +130,7 @@
   `rabbit_common`). The Docker build stage installs `cmake` (for the Kafka client's CRC32C NIF). Kafka channels do
   not work on Windows hosts (the NIF is not built there).
 - Docs: [Broker channels](docs/channels/brokers.md) (pipeline transport versus broker channel), Kafka and RabbitMQ
-  pages; ADR-0047. NATS JetStream and Redis Streams channels are planned (#42).
+  pages; ADR-0047. NATS JetStream and Redis Streams channels followed (see above).
 
 ### Load testing harness and published benchmarks (#34)
 

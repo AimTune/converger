@@ -53,7 +53,7 @@ defmodule ConvergerWeb.GRPC.Connection do
   def status(code), do: Map.get(@statuses, code, :aborted)
 
   @doc "Serves the stream until it ends. Runs in the RPC process."
-  @spec run(GRPC.Server.Stream.t(), String.t() | nil) :: :ok
+  @spec run(map(), String.t() | nil) :: :ok
   def run(stream, token) do
     # The stream (cowboy) process is linked: its exit (client cancel,
     # connection lost) arrives as a message, so the session is cleaned up.
