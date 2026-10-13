@@ -1,6 +1,6 @@
 defmodule Converger.Channels.Broker.Envelope do
   @moduledoc """
-  The JSON envelope of broker channel messages (`kafka`, `rabbitmq`).
+  The JSON envelope of broker channel messages (`kafka`, `rabbitmq`, `mqtt`).
 
   ## Outbound (`topic_out`, exchange)
 

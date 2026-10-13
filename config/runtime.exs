@@ -298,7 +298,8 @@ if System.get_env("WEBHOOK_ALLOW_PRIVATE_TARGETS") in ~w(true 1) do
   config :converger, :webhook, allow_private_targets: true
 end
 
-# Broker channels (kafka, rabbitmq; see Converger.Channels.Consumers).
+# Broker channels (kafka, rabbitmq, mqtt) and Discord Gateway connections
+# (see Converger.Channels.Consumers).
 # BROKER_CONSUMERS=false keeps broker consumers off this node (e.g. web-only
 # nodes); the other nodes run them. BROKER_RECONCILE_INTERVAL_MS sets how
 # often consumers are reconciled with the channels (default 30000).

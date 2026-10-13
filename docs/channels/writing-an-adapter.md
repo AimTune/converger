@@ -263,7 +263,7 @@ Callback checklist:
 | `:typing` | Forwards typing indicators (`send_typing/2`). |
 | `:lifecycle_events` | Receives conversation close and reopen events, which carry no message content. Leave it out for messaging providers, which would send an empty message. |
 | `:provider_ack` | The provider retries every non-`2xx` inbound response (for days, in Meta's case), so a handled request is always answered `200`, even when its messages were rejected permanently. |
-| `:consumer` | Inbound messages are pulled from a message broker by a consumer Converger runs, one per channel in the cluster, instead of arriving on the inbound webhook. The adapter also implements `Converger.Channels.Broker`; see [broker adapters](#broker-adapters-optional). |
+| `:consumer` | Inbound messages are pulled by a consumer Converger runs, one per channel in the cluster (a broker subscription, a provider stream such as the Discord Gateway), instead of (or besides) the inbound webhook. The adapter also implements `Converger.Channels.Broker`; see [broker adapters](#broker-adapters-optional). |
 | `:media`, `:templates`, `:reactions`, `:edits` | Outbound content the adapter renders natively (descriptive: nothing in Converger branches on them yet; the WhatsApp adapters declare `:media` and `:templates`, see [#68](https://github.com/AimTune/converger/issues/68) for typed messages). |
 | `activity_types: [...]` | The activity types `deliver_activity/2` renders natively; see [capabilities and downgrade](#capabilities-and-downgrade). |
 
@@ -293,22 +293,25 @@ If the provider registers its webhook through an API call (Telegram `setWebhook`
 
 ### Broker adapters (optional)
 
-An adapter whose inbound side is a broker topic or queue (the built-in [`kafka`](kafka.md) and
-[`rabbitmq`](rabbitmq.md)) declares the `:consumer` capability and implements the `Converger.Channels.Broker`
-behaviour next to the adapter one:
+An adapter whose inbound side is a broker topic or queue (the built-in [`kafka`](kafka.md), [`rabbitmq`](rabbitmq.md)
+and [`mqtt`](mqtt.md)) or another connection Converger keeps open (the [Discord Gateway](discord.md#gateway-mode))
+declares the `:consumer` capability and implements the `Converger.Channels.Broker` behaviour next to the adapter one.
+Every callback is optional; a Broadway consumer implements the first three:
 
 | Callback | Returns | Purpose |
 | --- | --- | --- |
 | `consumer_options(channel)` | `{:ok, keyword}` or `{:error, message}` | Broadway options of the channel's consumer: `producer: [module: {ProducerModule, opts}, concurrency: 1]` and `processors: [default: [concurrency: n]]`. |
 | `message_info(channel, %Broadway.Message{})` | `%{payload:, message_id:, source:, key:, headers:}` | The body and the broker message id (stable across redeliveries: it becomes the idempotency key), plus what dead-lettering keeps. |
-| `dead_letter(channel, info, reason)` | `:ok` or `{:error, term}` | Write a poison message to the channel's dead-letter destination. Retried until it returns `:ok`. |
+| `dead_letter(channel, info, reason)` | `:ok` or `{:error, term}` | Write a poison message to the channel's dead-letter destination. Retried until it returns `:ok`. Without it, such messages are logged and dropped. |
+| `consumer_child_spec(channel)` | a child spec | The consumer process when it is not a Broadway pipeline (the MQTT subscriber, the Discord Gateway connection). Its `start_link` returns `{:error, reason}` for a channel it cannot consume. It hands each message to `Broker.handle/4` (an envelope payload) or `Broker.handle_message/5` (a message it parsed itself). |
+| `consume?(channel)` | boolean | Whether this channel needs a consumer, when it depends on the config (Discord: `gateway: true`). Default: every active `inbound` or `duplex` channel of the type. |
 
 Everything else is shared: `Converger.Channels.Consumers` starts one consumer per active inbound channel in the
 cluster and follows channel changes, and `Converger.Channels.Broker.handle/4` decodes the
 [envelope](brokers.md#envelope), applies idempotency, retries transient failures and dead-letters poison messages.
 `deliver_activity/2` should skip activities consumed from the same channel (`Broker.echo?/2`). Use `required: :inbound`
 and `required: :outbound` for the topics in `config_schema/0`. See [Broker channels](brokers.md) and
-[ADR-0047](../adr/0047-broker-channels-kafka-and-rabbitmq.md).
+[ADR-0047](../adr/0047-broker-channels-kafka-and-rabbitmq.md) and [ADR-0055](../adr/0055-mqtt-channel-and-discord-gateway.md).
 
 ## 2. Register the type
 
@@ -318,7 +321,7 @@ Add the module to the registry with one config line, in `config/config.exs` of y
 config :converger, :adapters, [Converger.Channels.Adapters.AcmeSms]
 ```
 
-The registry (`Converger.Channels.Adapter.adapters/0`) is the built-in adapters (`echo`, `webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram`, `email`, `sms_twilio`, `sms_vonage`, `kafka`, `rabbitmq`) followed by this list, in order. An adapter whose `type/0` equals a built-in type replaces the built-in, so a fork can swap an implementation without patching core. A built-in adapter that ships with Converger itself is added to `@builtin_adapters` in `adapter.ex` instead.
+The registry (`Converger.Channels.Adapter.adapters/0`) is the built-in adapters (`echo`, `webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram`, `email`, `sms_twilio`, `sms_vonage`, `messenger`, `instagram`, `viber`, `discord`, `teams`, `http_pull`, `kafka`, `rabbitmq`, `mqtt`) followed by this list, in order. An adapter whose `type/0` equals a built-in type replaces the built-in, so a fork can swap an implementation without patching core. A built-in adapter that ships with Converger itself is added to `@builtin_adapters` in `adapter.ex` instead.
 
 That is all. From the registry and the adapter's declarations:
 

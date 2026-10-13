@@ -314,9 +314,10 @@ defmodule Converger.Channels do
   end
 
   @doc """
-  Every channel that needs a broker consumer, across tenants: active,
-  `inbound` or `duplex`, of a type with the `:consumer` capability (see
-  `Converger.Channels.Consumers`).
+  Every channel that needs a consumer, across tenants: active, `inbound`
+  or `duplex`, of a type with the `:consumer` capability, and accepted by
+  `Converger.Channels.Broker.consumes?/1` (a Discord channel only in
+  Gateway mode). See `Converger.Channels.Consumers`.
   """
   def list_consumer_channels do
     case Adapter.types_with(:consumer) do
@@ -331,6 +332,7 @@ defmodule Converger.Channels do
         # Complete on purpose (no bounded_all cap): a channel missing from
         # the list would have its consumer stopped.
         |> Repo.all()
+        |> Enum.filter(&Converger.Channels.Broker.consumes?/1)
     end
   end
 

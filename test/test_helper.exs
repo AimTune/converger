@@ -3,8 +3,8 @@
 # - live storage emulator tests (MinIO, Azurite): `--only` / `--include`
 # - :cluster, the two-node suite in test/cluster (boots extra VMs with
 #   :peer): `mix test --only cluster`
-# - :kafka and :rabbitmq, the broker channel suites against real brokers
-#   (KAFKA_BROKERS, RABBITMQ_URL): `mix test --only kafka --only rabbitmq`,
+# - :kafka, :rabbitmq and :mqtt, the broker channel suites against real brokers
+#   (KAFKA_BROKERS, RABBITMQ_URL, MQTT_HOST): `mix test --only mqtt` etc.,
 #   see docs/channels/brokers.md
 #
 # assert_receive / assert_reply / assert_push wait up to 1 s (ExUnit's
@@ -13,7 +13,7 @@
 # tests flaked. Passing tests are not slowed down: the assertion returns as
 # soon as the message arrives. refute_receive keeps its own 100 ms default.
 ExUnit.start(
-  exclude: [:benchmark, :minio, :azurite, :cluster, :kafka, :rabbitmq],
+  exclude: [:benchmark, :minio, :azurite, :cluster, :kafka, :rabbitmq, :mqtt],
   assert_receive_timeout: 1_000
 )
 

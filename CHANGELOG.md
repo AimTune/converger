@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+### MQTT channel and Discord Gateway inbound (#44)
+
+- New channel type `mqtt` (MQTT 3.1.1 over TCP or TLS, QoS 0 and 1): a subscriber per channel in the cluster on the
+  topic filter `topic_in` in a persistent session, so QoS 1 messages published while it is down or moving are
+  queued; each message is acknowledged (`PUBACK`) only after its activity is committed or it was dead-lettered.
+  Idempotency key: the envelope's `idempotency_key`, else `mqtt:<SHA-256 of topic and payload>`
+  (`derive_idempotency_key`). Outbound: the canonical envelope published with QoS 1 to `topic_out`, a template with
+  `{conversation_id}`, `{channel_id}` and `{tenant_id}`, waiting for the `PUBACK`. Poison messages go to `topic_dlq`
+  as JSON. SSRF guard on the host, health probe, admin form from `config_schema/0`.
+- The MQTT client is part of Converger (`Converger.Channels.Mqtt.Packet` / `Connection`): `emqtt` requires the
+  `quicer` NIF (no Windows build) and `tortoise311` acknowledges QoS 1 messages before the handler runs.
+- `discord` channels get an optional Gateway mode (`gateway: true`, `gateway_intents`): plain channel and direct
+  messages (`MESSAGE_CREATE`) over the Discord Gateway WebSocket, one connection per channel in the cluster, with
+  identify, jittered heartbeats, zombie detection, resume, op 7 / op 9 handling and close-code backoff; idempotency key
+  `message:<id>`, the bot's own and other bots' messages ignored, attachments downloaded into Converger storage. The
+  `public_key` is optional in Gateway mode. `mint_web_socket` is now a runtime dependency.
+- `Converger.Channels.Broker` consumers are generic: optional `consumer_child_spec/1` (a consumer that is not a
+  Broadway pipeline) and `consume?/1` (per-channel opt-in) callbacks, `Broker.handle_message/5` for consumers that
+  parse messages themselves.
+- The optional "Broker channel suites" CI job also runs the MQTT end-to-end suite (`--only mqtt`) against Mosquitto.
+- Docs: [MQTT](docs/channels/mqtt.md), [Discord Gateway mode](docs/channels/discord.md#gateway-mode), broker channels,
+  channels overview, configuration; ADR-0055.
+
 ### Platform event webhooks (#49)
 
 - Tenant-level webhook subscriptions (`webhook_subscriptions`: url, events, signing secret and headers encrypted at

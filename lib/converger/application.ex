@@ -47,7 +47,7 @@ defmodule Converger.Application do
           # Per-node cache of provider tokens and signing keys (Bot Framework).
           Converger.Channels.TokenCache,
           Converger.RateLimit.Supervisor,
-          # Broker channels (kafka, rabbitmq): per-channel publishers, started
+          # Broker channels (kafka, rabbitmq, mqtt): per-channel publishers, started
           # on first delivery, so before Oban runs delivery jobs.
           {Registry, keys: :unique, name: Converger.Channels.Broker.Registry},
           Converger.Channels.Broker.Publishers,

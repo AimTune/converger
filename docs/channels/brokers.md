@@ -1,6 +1,6 @@
 ---
 title: Broker channels
-description: Kafka and RabbitMQ as first-class channels - when to use a broker channel instead of the Broadway pipeline transport, the message envelope, consumers, idempotency, dead letters, cluster behaviour and how to run the broker tests.
+description: Kafka, RabbitMQ and MQTT as first-class channels - when to use a broker channel instead of the Broadway pipeline transport, the message envelope, consumers, idempotency, dead letters, cluster behaviour and how to run the broker tests.
 sidebar_position: 3.5
 ---
 
@@ -13,10 +13,13 @@ broker channel types are:
 | --- | --- | --- |
 | `kafka` | Apache Kafka (and Kafka-compatible brokers such as Redpanda) | [Kafka](kafka.md) |
 | `rabbitmq` | RabbitMQ (AMQP 0-9-1) | [RabbitMQ](rabbitmq.md) |
+| `mqtt` | MQTT 3.1.1 brokers (Mosquitto, EMQX, HiveMQ, AWS IoT Core, ...) | [MQTT](mqtt.md) |
 | `nats` | NATS JetStream | planned ([#42](https://github.com/AimTune/converger/issues/42)) |
 | `redis_streams` | Redis Streams with consumer groups | planned ([#42](https://github.com/AimTune/converger/issues/42)) |
 
-The design is recorded in [ADR-0047](../adr/0047-broker-channels-kafka-and-rabbitmq.md).
+The design is recorded in [ADR-0047](../adr/0047-broker-channels-kafka-and-rabbitmq.md); MQTT, and the generalisation of
+the consumers that also runs [Discord Gateway](discord.md#gateway-mode) connections, in
+[ADR-0055](../adr/0055-mqtt-channel-and-discord-gateway.md).
 
 ## Pipeline transport or broker channel?
 
@@ -65,14 +68,14 @@ flowchart LR
   TO --> EXT
 ```
 
-- **Inbound** (modes `inbound` and `duplex`): a consumer reads `topic_in` (Kafka) or `queue` (RabbitMQ) and passes every
+- **Inbound** (modes `inbound` and `duplex`): a consumer reads `topic_in` (Kafka, MQTT) or `queue` (RabbitMQ) and passes every
   message to `Converger.Inbound.receive_message/3`, the path of every inbound message (webhooks, WebSocket clients). The
   activity is created in a conversation of the channel, or in the conversation named by the message's `conversation_id`,
   and routing rules, middleware and deliveries apply to it as to any other inbound message.
 - **Outbound** (modes `outbound` and `duplex`): the pipeline delivers activities to the channel like to any channel
   (Oban jobs, retry policy, circuit breaker, rate limit, dead letters), and the adapter produces the envelope to
   `topic_out` (Kafka, keyed by `conversation_id`) or publishes it to `exchange` with `routing_key` (RabbitMQ, with
-  publisher confirms). A delivery is `sent` once the broker has acknowledged the message.
+  publisher confirms), or publishes it with QoS 1 to the conversation's `topic_out` (MQTT, waiting for the `PUBACK`). A delivery is `sent` once the broker has acknowledged the message.
 - **No echo:** a message consumed from a channel is not produced back to the same channel, although the channel is the
   primary channel of the conversation it created. Replies in the conversation (an agent's, a bot's) are.
 
@@ -142,7 +145,7 @@ echo 'cust-1:{"text":"Where is my order?","participant":{"external_id":"cust-1"}
 
 Inbound processing is **at-least-once with idempotent activity creation**:
 
-1. A message is acknowledged (Kafka: its offset committed; RabbitMQ: `basic.ack`) only after it was accepted or written
+1. A message is acknowledged (Kafka: its offset committed; RabbitMQ: `basic.ack`; MQTT: `PUBACK`) only after it was accepted or written
    to the dead-letter destination. A crash or a restart before that redelivers it.
 2. Every message gets an idempotency key: the envelope's `idempotency_key`, else `<type>:<broker message id>`:
 
@@ -150,6 +153,7 @@ Inbound processing is **at-least-once with idempotent activity creation**:
    | --- | --- | --- |
    | `kafka` | `topic/partition/offset` | `kafka:crm.in/2/41` |
    | `rabbitmq` | the AMQP `message_id` property | `rabbitmq:9b1c...` |
+   | `mqtt` | none (packet ids are reused): the SHA-256 of topic and payload, see [MQTT idempotency](mqtt.md#idempotency) | `mqtt:5e2a...` |
 
 3. A redelivered message carries the same key and is recognised as a duplicate: no second activity, no second delivery
    (`converger.inbound.received.count` with `outcome: duplicate`).
@@ -173,6 +177,7 @@ The dead-letter destination is per channel:
 | --- | --- | --- |
 | `kafka` | topic `dlq_topic` (`<topic_in>.dlq`) | the original key, value and headers, plus `x-converger-error`, `x-converger-source` (`topic/partition/offset`) and `x-converger-channel-id` |
 | `rabbitmq` | queue `dlq_queue` (`<queue>.dlq`), through the default exchange | the original body, `message_id` and headers, plus the same `x-converger-*` headers; published persistent, with confirms and `mandatory` |
+| `mqtt` | topic `topic_dlq` (`converger/dlq/{channel_id}`) | a JSON object with `error`, `source` (the topic), `channel_id`, `message_id` and the original `payload` (MQTT 3.1.1 has no headers), QoS 1 |
 
 Writing to the dead-letter destination is retried (same backoff, at most 30 s between attempts) until it succeeds, and
 only then is the message acknowledged, so a message is never dropped. While the dead-letter destination is unavailable
@@ -190,7 +195,9 @@ partition (keyed by `conversation_id`) in the order the pipeline delivers them. 
 ## Consumers in a cluster
 
 `Converger.Channels.Consumers` (a `DynamicSupervisor`) runs **one consumer per channel in the cluster**, for every
-active channel of a broker type in mode `inbound` or `duplex`:
+active channel of a broker type in mode `inbound` or `duplex` (and every `discord` channel with `gateway: true`, whose
+Gateway connection is run the same way). A consumer is a Broadway pipeline (Kafka, RabbitMQ) or the process the adapter
+names (`consumer_child_spec/1`: the MQTT subscriber, the Discord Gateway connection):
 
 - **Exactly one.** Each consumer (`Converger.Channels.Broker.Consumer`) is registered with `:global` under
   `{Converger.Channels.Broker.Consumer, channel_id}`; a second start on any node is refused. If a network partition
@@ -248,7 +255,7 @@ Configuration: [configuration](../operations/configuration.md#broker-channels).
   run on a private network: allow them with `WEBHOOK_ALLOWED_TARGETS` (host names or CIDR ranges, for example
   `kafka-*.internal,10.20.0.0/16`). The guard checks the configured bootstrap hosts; Kafka clients then connect to the
   addresses the cluster advertises.
-- Use TLS (`tls: true` for Kafka, an `amqps://` URL for RabbitMQ) and SASL or broker credentials with access limited to
+- Use TLS (`tls: true` for Kafka and MQTT, an `amqps://` URL for RabbitMQ) and SASL or broker credentials with access limited to
   the channel's topics or queues.
 - A message on `topic_in` is trusted like a signed inbound webhook: anyone who can produce to it can write into the
   tenant's conversations (`conversation_id` is checked against the channel's tenant only). Restrict producer ACLs.
@@ -263,7 +270,7 @@ everywhere.
 ## Running the broker tests
 
 Unit tests (config, envelope, idempotency, dead-lettering, consumer lifecycle) run with `mix test` and need no broker.
-The end-to-end suites run against real brokers and are excluded by default (tags `:kafka` and `:rabbitmq`). They check
+The end-to-end suites run against real brokers and are excluded by default (tags `:kafka`, `:rabbitmq` and `:mqtt`). They check
 that a message produced to `topic_in` reaches a WebSocket client through a routing rule, that the WebSocket reply is
 produced to `topic_out`, that a restarted consumer resumes from its committed offsets without duplicates, and that
 poison messages reach the dead-letter destination.
@@ -276,12 +283,19 @@ KAFKA_BROKERS=localhost:9092 mix test --only kafka
 RABBITMQ_URL=amqp://localhost:5672 mix test --only rabbitmq   # RABBITMQ_USERNAME / RABBITMQ_PASSWORD, default guest
 ```
 
+The MQTT suite: see [running the MQTT tests](mqtt.md#running-the-mqtt-tests).
+
+```bash
+docker run -d --name mosquitto -p 1883:1883 eclipse-mosquitto:2 mosquitto -c /mosquitto-no-auth.conf
+MQTT_HOST=localhost MQTT_PORT=1883 mix test --only mqtt
+```
+
 The suites create uniquely named topics and queues and allow private broker addresses for their duration. CI runs them
 in the optional "Broker channel suites" job (`.github/workflows/ci.yml`).
 
 ## Related
 
-- [Kafka](kafka.md), [RabbitMQ](rabbitmq.md)
+- [Kafka](kafka.md), [RabbitMQ](rabbitmq.md), [MQTT](mqtt.md)
 - [Channels and adapters](overview.md), [Routing rules](../concepts/routing-rules.md)
 - [Delivery pipeline](../architecture/delivery-pipeline.md) (the pipeline transport)
 - [ADR-0047](../adr/0047-broker-channels-kafka-and-rabbitmq.md)

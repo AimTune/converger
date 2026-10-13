@@ -263,10 +263,10 @@ jobs:
         run: mix test test/converger/uploads/storage_integration_test.exs --only minio --only azurite
 
   brokers:
-    name: Broker channel suites (Kafka, RabbitMQ)
+    name: Broker channel suites (Kafka, RabbitMQ, MQTT)
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    # Optional: depends on two broker containers starting on the runner.
+    # Optional: depends on three broker containers starting on the runner.
     continue-on-error: true
 
     services:
@@ -310,17 +310,24 @@ jobs:
           key: mix-${{ runner.os }}-${{ env.ELIXIR_VERSION }}-${{ env.OTP_VERSION }}-${{ hashFiles('mix.lock') }}
           restore-keys: mix-${{ runner.os }}-${{ env.ELIXIR_VERSION }}-${{ env.OTP_VERSION }}-
 
+      # Mosquitto needs a command (its default config only listens on
+      # localhost inside the container), which service containers cannot set.
+      - name: Start Mosquitto
+        run: docker run -d --name mosquitto -p 1883:1883 eclipse-mosquitto:2 mosquitto -c /mosquitto-no-auth.conf
+
       - run: mix deps.get
       - run: mix compile --warnings-as-errors
 
-      # test/converger/channels/{kafka,rabbitmq}_integration_test.exs: an
+      # test/converger/channels/{kafka,rabbitmq,mqtt}_integration_test.exs: an
       # external produce reaches a WebSocket client, the reply is produced,
       # restarts resume without duplicates, poison messages are dead-lettered.
       - name: Run the broker channel suites
         env:
           KAFKA_BROKERS: localhost:9092
           RABBITMQ_URL: amqp://localhost:5672
-        run: mix test --only kafka --only rabbitmq --warnings-as-errors
+          MQTT_HOST: localhost
+          MQTT_PORT: "1883"
+        run: mix test --only kafka --only rabbitmq --only mqtt --warnings-as-errors
 
   cluster:
     name: Two-node cluster suite

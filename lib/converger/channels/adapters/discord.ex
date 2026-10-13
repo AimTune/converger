@@ -15,13 +15,22 @@ defmodule Converger.Channels.Adapters.Discord do
       thread the user last interacted in, or to `metadata.target_channel_id`;
       `metadata.thread_name` starts a thread.
 
-  Plain channel messages reach bots only over the Gateway WebSocket, which is
-  planned (#44). See `docs/channels/discord.md`.
+    * Gateway (optional, `gateway: true`): plain channel and direct messages
+      (`MESSAGE_CREATE`) over the Discord Gateway WebSocket, one connection
+      per channel in the cluster (`Converger.Channels.Discord.Gateway`, run
+      by `Converger.Channels.Consumers` like a broker consumer).
+
+  See `docs/channels/discord.md`.
   """
 
   use Converger.Channels.Adapter, type: "discord"
 
-  alias Converger.Channels.{ChatContent, DeliveryError, InboundSignature}
+  @behaviour Converger.Channels.Broker
+
+  import Bitwise
+
+  alias Converger.Channels.{Broker, ChatContent, DeliveryError, InboundSignature, MediaDownload}
+  alias Converger.Channels.Discord.Gateway
   alias Converger.Channels.WhatsApp.Outbound
   alias Converger.{Participants, Uploads}
   alias Converger.Pipeline.RetryPolicy
@@ -54,6 +63,14 @@ defmodule Converger.Channels.Adapters.Discord do
 
   @default_ack "Got it, a reply is on its way."
 
+  # Gateway intents: GUILD_MESSAGES (1 << 9), DIRECT_MESSAGES (1 << 12) and
+  # the privileged MESSAGE_CONTENT (1 << 15).
+  @default_intents 37_376
+  @max_intents 1 <<< 26
+
+  # Message types turned into activities: DEFAULT (0) and REPLY (19).
+  @message_types [0, 19]
+
   @impl true
   def capabilities do
     [
@@ -62,6 +79,7 @@ defmodule Converger.Channels.Adapters.Discord do
       :external_delivery,
       :provider_ack,
       :media,
+      :consumer,
       activity_types: ~w(message)
     ]
   end
@@ -80,9 +98,9 @@ defmodule Converger.Channels.Adapters.Discord do
       %{
         name: "public_key",
         type: :string,
-        required: true,
         label: "Public Key",
-        placeholder: "64 hex characters, verifies X-Signature-Ed25519"
+        placeholder: "64 hex characters, verifies X-Signature-Ed25519",
+        help: "Required for the Interactions Endpoint; optional in Gateway mode"
       },
       %{
         name: "bot_token",
@@ -99,21 +117,55 @@ defmodule Converger.Channels.Adapters.Discord do
         placeholder: @default_ack,
         help:
           "Ephemeral reply to slash commands and modal submits, shown while the real reply is prepared"
+      },
+      %{
+        name: "gateway",
+        type: :boolean,
+        label: "Gateway (plain messages)",
+        help:
+          "Receive channel and direct messages over the Discord Gateway (inbound and duplex mode; default false)"
+      },
+      %{
+        name: "gateway_intents",
+        type: :integer,
+        label: "Gateway intents",
+        placeholder: "#{@default_intents}",
+        help:
+          "Intents bitfield; default GUILD_MESSAGES, DIRECT_MESSAGES and MESSAGE_CONTENT (privileged: enable it in the developer portal)"
       }
     ]
   end
 
   @impl true
   def validate_config(config) do
+    gateway? = Broker.boolean(config["gateway"])
+
     cond do
-      not Regex.match?(~r/\A[0-9a-fA-F]{64}\z/, to_string(config["public_key"])) ->
+      config["public_key"] in [nil, ""] and not gateway? ->
+        {:error, "discord config missing: public_key (required unless gateway is true)"}
+
+      config["public_key"] not in [nil, ""] and
+          not Regex.match?(~r/\A[0-9a-fA-F]{64}\z/, to_string(config["public_key"])) ->
         {:error, "discord config 'public_key' must be 64 hex characters"}
+
+      not valid_intents?(config["gateway_intents"]) ->
+        {:error,
+         "discord config 'gateway_intents' must be an integer from 0 to #{@max_intents - 1}"}
 
       not Regex.match?(~r/\A\d+\z/, to_string(config["application_id"])) ->
         {:error, "discord config 'application_id' must be a numeric id"}
 
       true ->
         :ok
+    end
+  end
+
+  defp valid_intents?(blank) when blank in [nil, ""], do: true
+
+  defp valid_intents?(value) do
+    case Broker.positive_integer(value, nil) do
+      int when is_integer(int) -> int < @max_intents
+      nil -> value in [0, "0"]
     end
   end
 
@@ -142,10 +194,11 @@ defmodule Converger.Channels.Adapters.Discord do
     end
   end
 
+  # A channel without a public key (Gateway only) rejects every interaction.
   defp public_key(channel) do
     case Base.decode16(to_string((channel.config || %{})["public_key"]), case: :mixed) do
       {:ok, <<_::binary-size(32)>> = key} -> {:ok, key}
-      _ -> :missing
+      _ -> {:error, :public_key_not_configured}
     end
   end
 
@@ -602,6 +655,147 @@ defmodule Converger.Channels.Adapters.Discord do
       {:error, error} -> {:error, DeliveryError.message(error)}
     end
   end
+
+  ## Gateway (Converger.Channels.Broker)
+
+  @doc "A channel consumes the Gateway only with `gateway: true`."
+  @impl Converger.Channels.Broker
+  def consume?(channel), do: Broker.boolean((channel.config || %{})["gateway"])
+
+  @impl Converger.Channels.Broker
+  def consumer_child_spec(channel), do: {Gateway, channel}
+
+  @doc "The Gateway intents of the channel: `gateway_intents`, else #{@default_intents}."
+  def gateway_intents(channel) do
+    case (channel.config || %{})["gateway_intents"] do
+      value when value in [0, "0"] -> 0
+      value -> Broker.positive_integer(value, @default_intents)
+    end
+  end
+
+  @doc """
+  The Gateway URL to connect to: `config :converger, #{inspect(__MODULE__)},
+  gateway_url: "..."` (an operator setting, used by the tests), else the
+  `url` of `GET /gateway/bot`. `?v=10&encoding=json` is appended.
+  """
+  @spec gateway_url(map()) :: {:ok, String.t()} | {:error, term()}
+  def gateway_url(channel) do
+    configured = Keyword.get(Application.get_env(:converger, __MODULE__, []), :gateway_url)
+
+    result =
+      if is_binary(configured) and configured != "" do
+        {:ok, configured}
+      else
+        case request(channel, :get, "/gateway/bot", receive_timeout: 10_000, retry: false) do
+          {:ok, %{"url" => url}} when is_binary(url) -> {:ok, url}
+          {:ok, _} -> {:error, :no_gateway_url}
+          {:error, _} = error -> error
+        end
+      end
+
+    with {:ok, url} <- result, do: {:ok, gateway_query(url)}
+  end
+
+  @doc false
+  def gateway_query(url) do
+    uri = URI.parse(url)
+    query = URI.encode_query(%{"v" => "10", "encoding" => "json"})
+    URI.to_string(%{uri | path: uri.path || "/", query: query})
+  end
+
+  @doc """
+  The inbound message of a Gateway `MESSAGE_CREATE` event, or `:ignore`:
+  messages of the bot itself (`bot_user_id`) and of other bots, webhook
+  and system messages, and messages without text or attachments (in a
+  guild, without the MESSAGE_CONTENT intent).
+
+  The participant and sender are the author; the Discord channel is stored
+  in the participant's metadata (`discord_channel_id`), so replies go back
+  there. Idempotency key: `message:<message id>`. Attachments are stubs the
+  inbound media step downloads and stores (`fetch_media/2`); Discord CDN
+  URLs expire.
+  """
+  @spec parse_gateway_message(map(), String.t() | nil) :: {:ok, map()} | :ignore
+  def parse_gateway_message(%{"id" => id, "channel_id" => channel_id} = data, bot_user_id)
+      when is_binary(id) and is_binary(channel_id) do
+    author = data["author"] || %{}
+    text = data["content"] || ""
+    attachments = for a <- list(data["attachments"]), is_map(a), do: gateway_attachment(a)
+
+    if ignored_author?(author, bot_user_id) or ignored_message?(data, text, attachments),
+      do: :ignore,
+      else: {:ok, gateway_message(data, author, text, attachments)}
+  end
+
+  def parse_gateway_message(_data, _bot_user_id), do: :ignore
+
+  defp ignored_author?(author, bot_user_id),
+    do: not is_binary(author["id"]) or author["id"] == bot_user_id or author["bot"] == true
+
+  defp ignored_message?(data, text, attachments) do
+    not is_nil(data["webhook_id"]) or data["type"] not in @message_types or
+      (String.trim(text) == "" and attachments == [])
+  end
+
+  defp gateway_message(data, author, text, attachments) do
+    channel_id = data["channel_id"]
+
+    %{
+      "sender" => author["id"],
+      "type" => "message",
+      "text" => if(text == "", do: nil, else: text),
+      "attachments" => attachments,
+      "metadata" =>
+        reject_nil_values(%{
+          "discord_message_id" => data["id"],
+          "discord_channel_id" => channel_id,
+          "discord_guild_id" => data["guild_id"],
+          "discord_user_id" => author["id"],
+          "username" => author["username"],
+          "discord_source" => "gateway"
+        }),
+      "idempotency_key" => "message:#{data["id"]}",
+      "reply_to_provider_id" => get_in(data, ["message_reference", "message_id"]),
+      "participant" =>
+        reject_nil_values(%{
+          "external_id" => author["id"],
+          "display_name" =>
+            get_in(data, ["member", "nick"]) || author["global_name"] || author["username"],
+          "metadata" => %{"discord_channel_id" => channel_id}
+        })
+    }
+  end
+
+  defp gateway_attachment(attachment) do
+    name = attachment["filename"]
+
+    reject_nil_values(%{
+      "contentType" =>
+        attachment["content_type"] ||
+          if(is_binary(name), do: MIME.from_path(name), else: "application/octet-stream"),
+      "name" => name,
+      "channelData" =>
+        reject_nil_values(%{
+          "provider" => "discord",
+          "kind" => "attachment",
+          "providerMediaUrl" => attachment["url"],
+          "size" => attachment["size"]
+        })
+    })
+  end
+
+  @doc """
+  Downloads a Gateway message attachment from the Discord CDN (no
+  credentials, through the SSRF guard, bounded by the upload size limit).
+  """
+  @impl true
+  def fetch_media(_channel, %{
+        "channelData" => %{"provider" => "discord", "providerMediaUrl" => url}
+      })
+      when is_binary(url),
+      do: MediaDownload.get_public(url, :discord_req_options)
+
+  def fetch_media(_channel, _attachment), do: :skip
 
   defp list(value) when is_list(value), do: value
   defp list(_), do: []

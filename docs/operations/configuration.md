@@ -107,8 +107,8 @@ All prod only. Boolean values accept `true`, `1`, `yes`, `on` (case-insensitive)
 
 See [Outbound webhooks](../webhooks.md#ssrf-protection). The same guard, and these two variables, apply to
 [platform event webhook](../platform-webhooks.md) subscriptions and to the broker
-hosts of [broker channels](../channels/brokers.md#security) (`kafka` brokers, the `rabbitmq` URL host): allow a
-private Kafka or RabbitMQ cluster with `WEBHOOK_ALLOWED_TARGETS`.
+hosts of [broker channels](../channels/brokers.md#security) (`kafka` brokers, the `rabbitmq` URL host, the `mqtt` host): allow a
+private Kafka, RabbitMQ or MQTT broker with `WEBHOOK_ALLOWED_TARGETS`.
 
 ## Platform event webhooks
 
@@ -125,7 +125,8 @@ Retries use the shared `:retry_policy`; the event log is pruned after `WEBHOOK_E
 
 ## Broker channels
 
-Consumers of the `kafka` and `rabbitmq` channel types ([Broker channels](../channels/brokers.md#consumers-in-a-cluster)).
+Consumers of the `kafka`, `rabbitmq` and `mqtt` channel types, and the Gateway connections of `discord` channels with
+`gateway: true` ([Broker channels](../channels/brokers.md#consumers-in-a-cluster), [Discord Gateway mode](../channels/discord.md#gateway-mode)).
 
 | Variable | Default | Environment | Meaning |
 | --- | --- | --- | --- |
@@ -324,6 +325,7 @@ Compose also sets `PORT=4000`, `OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collecto
 | `CHECK_ORIGIN` | `test/converger_web/check_origin_config_test.exs` | Exercises the runtime parsing. |
 | `KAFKA_BROKERS` | `test/converger/channels/kafka_integration_test.exs` (`--only kafka`) | Kafka bootstrap brokers, default `localhost:9092`. See [running the broker tests](../channels/brokers.md#running-the-broker-tests). |
 | `RABBITMQ_URL`, `RABBITMQ_USERNAME`, `RABBITMQ_PASSWORD` | `test/converger/channels/rabbitmq_integration_test.exs` (`--only rabbitmq`) | RabbitMQ broker, default `amqp://localhost:5672` with `guest` / `guest`. |
+| `MQTT_HOST`, `MQTT_PORT` | `test/converger/channels/mqtt_integration_test.exs` (`--only mqtt`) | MQTT broker without authentication, default `localhost` / `1883`. See [running the MQTT tests](../channels/mqtt.md#running-the-mqtt-tests). |
 
 ## Application configuration (config/*.exs)
 
@@ -476,7 +478,7 @@ PgBouncer transaction pooling). See [Migrations and maintenance windows](migrati
 | `:pagination` | see [Pagination](#pagination) | Page size defaults and caps. |
 | `:dead_letters` | `bulk_retry_limit: 10_000`, `export_limit: 10_000` | Max deliveries replayed by one bulk retry call, and max rows in one Deliveries CSV export. See [Replaying dead letters](../delivery.md#replaying-dead-letters). |
 | `:circuit_breaker` | `failure_threshold: 5`, `cooldown_ms: 30_000`, `park_seconds: 600`, `replay_dead_letters_on_close: false`, `replay_window_ms: 3_600_000` | Per-channel delivery circuit breaker and opt-in dead-letter replay on close. See [Circuit breaker](../delivery.md#circuit-breaker). |
-| `:adapters` | `[]` | Channel adapter modules registered after the built-in ones (`echo`, `webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram`, `email`, `sms_twilio`, `sms_vonage`, `messenger`, `instagram`, `viber`, `discord`, `teams`, `http_pull`). One with a built-in type replaces it. Checked at boot. See [Writing an adapter](../channels/writing-an-adapter.md#2-register-the-type). |
+| `:adapters` | `[]` | Channel adapter modules registered after the built-in ones (`echo`, `webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram`, `email`, `sms_twilio`, `sms_vonage`, `messenger`, `instagram`, `viber`, `discord`, `teams`, `http_pull`, `kafka`, `rabbitmq`, `mqtt`). One with a built-in type replaces it. Checked at boot. See [Writing an adapter](../channels/writing-an-adapter.md#2-register-the-type). |
 | `:channel_health` | `probe_idle_channels: true`; `false` in test | Call the adapter's `health_probe/1` for channels without deliveries in the health window. See [Health probes](../channels/overview.md#health-probes). |
 | `Converger.Channels.MediaDownload` | `timeout_ms: 10_000` | Receive timeout of each inbound media download (WhatsApp images, voice notes, documents). See [inbound media download](../channels/whatsapp.md#inbound-media-download). |
 | `Converger.Channels.Templates` | `ttl_ms: 300_000` | How long a channel's provider templates are cached per node. See [channel message templates](../api/tenant-api.md#channel-message-templates). |
@@ -496,6 +498,7 @@ PgBouncer transaction pooling). See [Migrations and maintenance windows](migrati
 | `Converger.Channels.Adapters.Messenger` / `.Instagram`, `graph_api_version:` | `"v26.0"` | Default Graph API version of `messenger` / `instagram` channels without one in their config. |
 | `Converger.Channels.Adapters.Viber`, `api_base_url:` | `"https://chatapi.viber.com/pa"` | Viber Bot API base URL for every `viber` channel. Not a channel setting: the URL receives the token. |
 | `Converger.Channels.Adapters.Discord`, `api_base_url:` | `"https://discord.com/api/v10"` | Discord API base URL for every `discord` channel. Not a channel setting: the URL receives the bot token. |
+| `Converger.Channels.Adapters.Discord`, `gateway_url:`, `fatal_retry_ms:` | unset (the `url` of `GET /gateway/bot`), `300000` | Gateway URL of every `discord` channel in [Gateway mode](../channels/discord.md#gateway-mode) (tests point it at a fake Gateway; the URL receives the bot token), and the wait before reconnecting after a close code no retry fixes (4004, 4010 to 4014). |
 | `Converger.Channels.Adapters.Teams`, `openid_metadata_url:`, `issuers:`, `login_base_url:`, `service_url_hosts:`, `key_refresh_cooldown_ms:` | Bot Framework public cloud | Bot Framework token validation, the OAuth token endpoint and the hosts replies may be posted to; see [Microsoft Teams](../channels/teams.md#configuration). |
 | `:activity_limits` | `max_text_bytes: 65_536`, `max_attachments: 10`, `max_attachment_bytes: 4_096`, `max_metadata_bytes: 16_384` | Activity size limits (attachment and metadata sizes measured as JSON). |
 | `:conversation_inactivity_hours` | `24` | Open conversations idle longer than this are closed by the hourly expiration job. |

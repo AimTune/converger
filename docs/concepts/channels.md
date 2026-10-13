@@ -17,7 +17,7 @@ Table `channels`:
 | `id` | uuid | | Primary key. |
 | `tenant_id` | uuid | | Owner. `(tenant_id, name)` is unique. |
 | `name` | text | | Required. |
-| `type` | string | `"webhook"` | Adapter: `echo`, `webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram`, `email`, `sms_twilio`, `sms_vonage`, `kafka`, `rabbitmq`. |
+| `type` | string | `"webhook"` | Adapter: `echo`, `webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram`, `email`, `sms_twilio`, `sms_vonage`, `messenger`, `instagram`, `viber`, `discord`, `teams`, `http_pull`, `kafka`, `rabbitmq`, `mqtt`. |
 | `mode` | text | `"duplex"` | `inbound`, `outbound` or `duplex`. Must be supported by the type. |
 | `secret` | encrypted binary | generated | Encrypted at rest. Generated (32 random bytes, Base64) when not given. |
 | `secret_hash` | binary | | SHA-256 of `secret`, unique, used for lookups. |
@@ -50,6 +50,7 @@ Each type maps to a module implementing the `Converger.Channels.Adapter` behavio
 | `sms_vonage` | `inbound`, `outbound`, `duplex` | `from`, and `api_key` + `api_secret` or `application_id` + `private_key`, plus `signature_secret` when `require_signature` is true. Optional: `default_country_code`, `max_segments` | Vonage Messages API (SMS), status webhooks | [SMS](../channels/sms.md) |
 | `kafka` | `inbound`, `outbound`, `duplex` | `brokers`, plus `topic_in` (inbound, duplex) and `topic_out` (outbound, duplex). Optional: `group_id`, `start_offset`, `dlq_topic`, `concurrency`, SASL (`sasl_mechanism`, `sasl_username`, `sasl_password`), TLS (`tls`, `tls_verify`, `tls_ca_cert`) | Produces the activity envelope to `topic_out` keyed by conversation; consumes `topic_in` ([broker channel](../channels/brokers.md)) | [Kafka](../channels/kafka.md) |
 | `rabbitmq` | `inbound`, `outbound`, `duplex` | `url`, plus `queue` (inbound, duplex) and `routing_key` (outbound, duplex). Optional: `username`, `password`, `exchange`, `dlq_queue`, `declare`, `prefetch_count`, `concurrency`, `tls_verify`, `tls_ca_cert` | Publishes the activity envelope with publisher confirms; consumes `queue` ([broker channel](../channels/brokers.md)) | [RabbitMQ](../channels/rabbitmq.md) |
+| `mqtt` | `inbound`, `outbound`, `duplex` | `host`, plus `topic_in` (inbound, duplex) and `topic_out` (outbound, duplex). Optional: `port`, `tls`, `tls_verify`, `tls_ca_cert`, `username`, `password`, `client_id`, `topic_dlq`, `qos`, `keepalive`, `derive_idempotency_key` | Publishes the activity envelope with QoS 1 to the conversation's topic; subscribes to `topic_in` in a persistent session ([broker channel](../channels/brokers.md)) | [MQTT](../channels/mqtt.md) |
 | `echo` | `outbound` | none | Writes a reply activity from `"bot"` into the same conversation (testing) | [Echo](../channels/echo.md) |
 
 See the [channels overview](../channels/overview.md) for provider setup, and [writing an adapter](../channels/writing-an-adapter.md) to add a type. Each type is one adapter module: the type list, the config validation above and the admin form all come from the adapters' `capabilities/0` and `config_schema/0` ([ADR-0038](../adr/0038-adapter-behaviour-v2-and-config-driven-registry.md)).
@@ -145,7 +146,7 @@ Deleting a channel also disconnects its sockets, and cascades to its conversatio
 
 ## Health checks
 
-`Converger.Workers.ChannelHealthWorker` runs every 5 minutes (Oban cron). For each **active** channel of type `webhook`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram`, `email`, `sms_twilio`, `sms_vonage`, `kafka` or `rabbitmq`, it computes the delivery failure rate over the last 60 minutes and stores a row in `channel_health_checks`:
+`Converger.Workers.ChannelHealthWorker` runs every 5 minutes (Oban cron). For each **active** channel of type `webhook`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram`, `email`, `sms_twilio`, `sms_vonage`, `kafka`, `rabbitmq` or `mqtt` (every type with the `:external_delivery` capability), it computes the delivery failure rate over the last 60 minutes and stores a row in `channel_health_checks`:
 
 | Status | Failure rate (failed / total deliveries in window) |
 | --- | --- |

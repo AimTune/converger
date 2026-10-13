@@ -1,20 +1,15 @@
 ---
 title: Discord
-description: Configuration, Interactions Endpoint setup, Ed25519 signature verification, interaction mapping and responses, outbound messages, buttons, files and threads of the discord channel adapter.
+description: Configuration, Interactions Endpoint setup, Ed25519 signature verification, interaction mapping and responses, Gateway mode for plain messages, outbound messages, buttons, files and threads of the discord channel adapter.
 sidebar_position: 2.55
 ---
 
 The `discord` adapter connects a Discord application (bot) to Converger
 ([`lib/converger/channels/adapters/discord.ex`](https://github.com/AimTune/converger/blob/main/lib/converger/channels/adapters/discord.ex)).
 It supports the modes `inbound`, `outbound` and `duplex`. Inbound traffic is the application's
-**Interactions Endpoint** (slash commands, buttons, select menus, modals); outbound messages are posted with the bot
-token to `POST /channels/{channel.id}/messages`.
-
-:::note
-**Planned.** Plain channel messages (users typing in a channel without a slash command) reach bots only over the Discord Gateway
-WebSocket. Gateway inbound is planned ([#44](https://github.com/AimTune/converger/issues/44)); until then, users
-start conversations with a slash command or a button.
-:::
+**Interactions Endpoint** (slash commands, buttons, select menus, modals) and, in [Gateway mode](#gateway-mode), plain
+channel and direct messages over the Discord Gateway WebSocket; outbound messages are posted with the bot token to
+`POST /channels/{channel.id}/messages`.
 
 ## Setup
 
@@ -49,9 +44,11 @@ start conversations with a slash command or a button.
 | Key | Required | Description |
 | --- | --- | --- |
 | `application_id` | yes | Numeric application id. |
-| `public_key` | yes | The application's Ed25519 public key, 64 hex characters. Verifies every interaction. |
+| `public_key` | yes, unless `gateway` is true | The application's Ed25519 public key, 64 hex characters. Verifies every interaction. A channel without one rejects every interaction. |
 | `bot_token` | yes (secret) | Sent as `Authorization: Bot <token>`. |
 | `command_ack_text` | no | Ephemeral reply to slash commands and modal submits. Default `Got it, a reply is on its way.` |
+| `gateway` | no | `true` receives plain messages over the Gateway ([Gateway mode](#gateway-mode)), in modes `inbound` and `duplex`. Default `false`. |
+| `gateway_intents` | no | Gateway intents bitfield. Default `37376`: `GUILD_MESSAGES` (512), `DIRECT_MESSAGES` (4096) and `MESSAGE_CONTENT` (32768). |
 | `conversation_idle_timeout_seconds`, `unsupported_activities` | no | As for every channel. |
 
 The operator can point all Discord channels at another API base (`config :converger,
@@ -90,6 +87,61 @@ same request:
   Converger.
 
 The interaction token (valid for 15 minutes) is not stored: replies are bot messages, not interaction follow-ups.
+
+## Gateway mode
+
+With `gateway: true`, the channel also receives **plain messages**: what users type in the channels the bot can read
+and in direct messages to the bot, without a slash command. Discord delivers them only over the
+[Gateway](https://discord.com/developers/docs/events/gateway), a WebSocket the bot keeps open.
+
+Setup: in the developer portal, enable the **Message Content Intent** (Bot page; a privileged intent, which Discord
+reviews for bots in 100 servers or more), give the bot the **View Channels** and **Read Message History** permissions
+where it should listen, and set `gateway: true` on the channel. The Interactions Endpoint keeps working alongside;
+`public_key` may be left out if you use only the Gateway.
+
+**One connection per channel in the cluster.** The Gateway connection (`Converger.Channels.Discord.Gateway`) is run by
+the same machinery as broker consumers ([consumers in a cluster](brokers.md#consumers-in-a-cluster)): one per channel,
+on the node that owns it, restarted when the channel's config changes, stopped when it is disabled, deleted or
+`gateway` is turned off. `BROKER_CONSUMERS=false` keeps Gateway connections off a node too. Do not enable the Gateway
+on two channels with the same bot token, or run the same bot elsewhere: each session receives every message.
+
+**Connection handling:**
+
+| Situation | What Converger does |
+| --- | --- |
+| `HELLO` | Sends the first heartbeat after `heartbeat_interval` times a random jitter (0 to 1), then every `heartbeat_interval`; sends `IDENTIFY` (token, intents) or, for a known session, `RESUME` (`session_id`, last sequence number) |
+| `READY` | Keeps `session_id`, `resume_gateway_url` and the bot's user id |
+| Heartbeat requested (op 1) | Heartbeats at once |
+| No `HEARTBEAT_ACK` since the last heartbeat | Zombie connection: closes it and resumes |
+| Reconnect (op 7), socket closed, close codes other than below | Reconnects to `resume_gateway_url` and resumes: Discord replays the events missed in between |
+| Invalid session (op 9) | Resumes when `d` is true; otherwise identifies again after 1 to 5 seconds |
+| Close 4007, 4009 | Identifies again (session invalid or timed out) |
+| Close 4004 (authentication failed), 4010 to 4014 (shard, API version, invalid or disallowed intents) | Logs an error and tries again only after 5 minutes: fix the token or enable the intent |
+
+Failed connection attempts back off exponentially (1 s doubling, at most 60 s). The Gateway URL comes from
+`GET /gateway/bot`; the operator can override it (`config :converger, Converger.Channels.Adapters.Discord,
+gateway_url: "..."`, used by the tests).
+
+**Messages.** Each `MESSAGE_CREATE` event becomes a `message` activity, unless it comes from the bot itself or another
+bot, from a webhook, is a system message (only types `DEFAULT` and `REPLY` are taken), or has neither text nor
+attachments (a guild message without the Message Content Intent):
+
+- **Participant and sender**: the author's user id; display name the server nickname, else the global name, else the
+  user name. The Discord channel is stored in the participant's metadata (`discord_channel_id`), so replies go back to
+  where the user wrote, as for interactions.
+- **Idempotency**: `message:<message id>`: an event replayed by a resume is a duplicate.
+- **Metadata**: `discord_message_id`, `discord_channel_id`, `discord_guild_id` (none for direct messages),
+  `discord_user_id`, `username`, `discord_source: "gateway"`.
+- **Replies**: a reply to a message Converger sent resolves `reply_to_id` from `message_reference`.
+- **Attachments**: downloaded from the Discord CDN (its URLs expire) and stored in Converger like other inbound media
+  (the SSRF guard and the upload size limit apply); `download_media: false` keeps the stubs.
+
+Events are stored one at a time, in order, beside the connection (so a slow database never delays heartbeats). A
+transient failure is retried in place (`inbound_max_attempts`, see [broker channels](brokers.md#poison-messages-and-retries));
+the Gateway has no acknowledgements and no dead-letter destination, so a message that still cannot be stored is
+dropped and logged (`Inbound message dropped`, `converger.broker.dead_lettered.count`). Messages sent while no
+connection is open are recovered only by a resume within Discord's window. One shard is used: bots in 2500 servers or
+more need sharding, which is not supported. See [ADR-0055](../adr/0055-mqtt-channel-and-discord-gateway.md).
 
 ## Outbound
 
@@ -132,3 +184,6 @@ The default outbound rate limit is `50/s` (Discord's global limit per bot).
 
 [`discord_test.exs`](https://github.com/AimTune/converger/blob/main/test/converger/channels/adapters/discord_test.exs)
 signs interactions with a generated Ed25519 key and stubs the API through `config :converger, :discord_req_options`.
+[`gateway_test.exs`](https://github.com/AimTune/converger/blob/main/test/converger/channels/discord/gateway_test.exs)
+runs the Gateway connection against a fake Gateway (a local WebSocket server): identify, heartbeats, resume after a
+reconnect request, zombie detection, invalid sessions, close codes and `MESSAGE_CREATE` handling.
