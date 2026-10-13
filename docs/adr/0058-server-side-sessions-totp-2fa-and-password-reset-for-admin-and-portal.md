@@ -9,7 +9,7 @@ description: Admin and portal logins become hashed server-side session rows with
 | **Status** | Accepted |
 | **Date** | 2026-10-13 |
 | **Issue** | [#52](https://github.com/AimTune/converger/issues/52) (part 2: admin panel and tenant portal) |
-| **Pull request** | PR_PLACEHOLDER |
+| **Pull request** | [#160](https://github.com/AimTune/converger/pull/160) |
 | **Related** | [ADR-0012](0012-secrets-at-rest-and-audit-redaction.md), [ADR-0013](0013-cluster-wide-rate-limiting-with-hammer-and-pubsub.md), [ADR-0022](0022-deployment-hardening.md), [ADR-0057](https://github.com/AimTune/converger/issues/52) (part 1: client tokens) |
 
 ## Context and problem statement
