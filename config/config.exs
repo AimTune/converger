@@ -18,6 +18,13 @@ config :converger,
   # Allowed clock skew for timestamped `x-converger-signature` inbound signatures
   inbound_signature_tolerance_seconds: 300
 
+# Hasher for new admin/tenant user passwords (Converger.Accounts.PasswordHasher,
+# ADR-0057). CONVERGER_PASSWORD_HASHER=pbkdf2 is for machines without a C
+# toolchain: mix.exs then leaves out the bcrypt_elixir NIF. Default: bcrypt.
+config :converger,
+       :password_hasher,
+       if(System.get_env("CONVERGER_PASSWORD_HASHER") == "pbkdf2", do: Pbkdf2, else: Bcrypt)
+
 # Page sizes for every list query (see Converger.Pagination). Request-supplied
 # `limit` params are clamped to the max; omitted/invalid ones use the default.
 config :converger, :pagination,
@@ -179,6 +186,17 @@ config :converger, :websocket,
   drain_batch_size: 500,
   drain_batch_interval_ms: 1_000,
   drain_shutdown_ms: 30_000
+
+# Converger client tokens (ADR-0059, docs/security/client-tokens.md); TOKEN_*
+# env vars in config/runtime.exs. Signing keys (`:token_signing_keys`, a list
+# of {kid, secret}, signing key first) default to secret_key_base under the kid
+# "default". A refreshed token stays usable for the rotation grace period.
+config :converger, :token_rotation_grace_seconds, 30
+# Accept tokens without a kid header (issued before #52, signed with
+# secret_key_base). Turn off once they have expired.
+config :converger, :token_accept_unkeyed, true
+# Each node re-reads recent revocations this often, in case a broadcast was missed.
+config :converger, Converger.Auth.RevocationCache, sync_interval_ms: 60_000
 
 # The hard frame cap is applied by Bandit when the socket is mounted, so it is
 # read at compile time; frames above it close the socket with 1009.

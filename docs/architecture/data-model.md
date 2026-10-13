@@ -367,7 +367,7 @@ Oban's own table, created by `Oban.Migration.up(version: 12)` and upgraded to sc
 | `channels.secret_hash` | SHA-256 digest | lookup by presented secret |
 | `webhook_subscriptions.secret`, `webhook_subscriptions.headers` | encrypted | same (`Converger.Encrypted.Binary`, `Converger.Encrypted.Map`); re-encrypted by `reencrypt_secrets/0` too |
 | `tenants.api_key_hash`, `tenants.previous_api_key_hash` | SHA-256 digest | authentication hashes the presented `x-api-key` |
-| `admin_users.password_hash`, `tenant_users.password_hash` | bcrypt | `bcrypt_elixir` |
+| `admin_users.password_hash`, `tenant_users.password_hash` | bcrypt | `bcrypt_elixir` via `Converger.Accounts.PasswordHasher` (`pbkdf2_elixir` with `CONVERGER_PASSWORD_HASHER=pbkdf2`) |
 
 Each ciphertext is tagged with a fingerprint of the key that produced it, so keys can be rotated: put the old key in `CLOAK_RETIRED_KEYS`, deploy with the new `CLOAK_KEY`, then run `Converger.Release.reencrypt_secrets/0`. The migration that introduced encryption encrypts existing rows in place without needing the vault process. See [security](../security.md) and [ADR-0012](../adr/0012-secrets-at-rest-and-audit-redaction.md).
 

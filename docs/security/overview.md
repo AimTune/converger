@@ -17,8 +17,8 @@ in depth in [Security: client IPs, proxies and admin access](../security.md); th
 | Tenant staff (portal `/portal`) | Tenant name + email + password, plus a TOTP code when 2FA is on; server-side session | `ConvergerWeb.Plugs.Auth`, LiveView `on_mount` hooks | `tenant_users.password_hash` (bcrypt), `tenant_users.totp_secret` (AES-GCM encrypted), `user_sessions.token_hash` (SHA-256) |
 | Tenant backend (server to server) | `x-api-key: cvg_live_...` | `ConvergerWeb.Plugs.TenantAuth` | `tenants.api_key_hash` (SHA-256) |
 | Channel integration | Channel secret as `Authorization: Bearer ...` on `POST /api/v1/converger/tokens/generate` | `ConvergerWeb.Plugs.ConvergerAuth` (`mode: :secret`) | `channels.secret` (AES-GCM encrypted) + `channels.secret_hash` (SHA-256, for lookup) |
-| End-user client (widget, SDK) | Converger token (JWT) as Bearer or socket `token` param | `ConvergerWeb.Plugs.ConvergerAuth` (`mode: :token`), `ConvergerWeb.ConvergerSocket` | Not stored (stateless JWT) |
-| Backend client on the gRPC transport | Converger token (JWT) as `authorization: Bearer` metadata or `Hello.token` | `ConvergerWeb.Protocol.Session` on `hello` ([Protocol v1 over gRPC](../protocol/grpc.md)) | Not stored (stateless JWT) |
+| End-user client (widget, SDK) | Converger token (JWT) as Bearer or socket `token` param | `ConvergerWeb.Plugs.ConvergerAuth` (`mode: :token`), `ConvergerWeb.ConvergerSocket` | Not stored (JWT); revocations and rotations in `revoked_tokens` ([client tokens](client-tokens.md)) |
+| Backend client on the gRPC transport | Converger token (JWT) as `authorization: Bearer` metadata or `Hello.token` | `ConvergerWeb.Protocol.Session` on `hello` ([Protocol v1 over gRPC](../protocol/grpc.md)) | Not stored (JWT); revocations in `revoked_tokens` |
 | Legacy client (deprecated, see [migrating](../api/migrating-from-legacy.md)) | Channel token in `x-channel-token`, conversation token on `/socket` | `ConvergerWeb.Plugs.TenantAuth`, `ConvergerWeb.UserSocket` | Not stored (stateless JWT) |
 | External provider (WhatsApp, webhook sender) | Request signature over the raw body | `ConvergerWeb.InboundController` + `Converger.Channels.InboundSignature` or the adapter's own scheme | Uses the channel secret / adapter config |
 
@@ -28,9 +28,10 @@ in depth in [Security: client IPs, proxies and admin access](../security.md); th
 
 Admin accounts live in `admin_users` with the roles `super_admin`, `admin` and `viewer`
 ([`Converger.Accounts.AdminUser`](https://github.com/AimTune/converger/blob/main/lib/converger/accounts/admin_user.ex)).
-Passwords are hashed with bcrypt (`bcrypt_elixir`, default cost) and follow the
-[password policy](#password-policy).
-`Converger.Accounts.authenticate_admin/2` runs `Bcrypt.no_user_verify/0` when the email is unknown, so response
+Passwords are hashed with bcrypt (`bcrypt_elixir`, default cost) through `Converger.Accounts.PasswordHasher` and
+follow the [password policy](#password-policy). Development builds without a C compiler can use PBKDF2-SHA512
+instead (`CONVERGER_PASSWORD_HASHER=pbkdf2`, [ADR-0057](../adr/0057-pluggable-password-hasher-and-dev-container.md)).
+`Converger.Accounts.authenticate_admin/2` runs `PasswordHasher.no_user_verify/0` when the email is unknown, so response
 time does not reveal whether an account exists.
 
 Every `/admin` route goes through two layers:
@@ -150,17 +151,19 @@ constant-time comparison with the decrypted value (`Converger.Channels.get_chann
 
 ### Tokens (JWT)
 
-All tokens are HS256 JWTs created with Joken. They share one signer,
-[`Converger.Auth.Signer`](https://github.com/AimTune/converger/blob/main/lib/converger/auth/signer.ex), whose key
-is the endpoint's `SECRET_KEY_BASE`.
+All tokens are HS256 JWTs created with Joken
+([`Converger.Auth.Signer`](https://github.com/AimTune/converger/blob/main/lib/converger/auth/signer.ex)). Converger
+tokens are signed with the dedicated keys of `TOKEN_SIGNING_KEYS` and carry the key's `kid` in the header, so the
+keys rotate without downtime and independently of `SECRET_KEY_BASE`
+([client tokens](client-tokens.md#signing-keys-and-rotation)). The legacy tokens are signed with `SECRET_KEY_BASE`.
 
 | Token | Module | Claims | Lifetime | Issued by |
 | --- | --- | --- | --- | --- |
-| Converger token | `Converger.Auth.ConvergerToken` | `type: "converger"`, `channel_id`, `tenant_id`, `sub`, optional `conversation_id`, `user_id` and `scope` (only `"channel"`, never combined with `conversation_id`) | 1800 s | `POST /api/v1/converger/tokens/generate` (channel secret), `POST /api/v1/converger/tokens/refresh` (valid token) |
+| Converger token | `Converger.Auth.ConvergerToken` | `type: "converger"`, `channel_id`, `tenant_id`, `sub`, `jti`, `fam` (family), optional `conversation_id`, `user_id`, `scope` (only `"channel"`, never combined with `conversation_id`) and `perms` (`read`, `write`, `typing`) | 1800 s | `POST /api/v1/converger/tokens/generate` (channel secret), `POST /api/v1/converger/tokens/refresh` (valid token, rotated) |
 | Conversation token (legacy, deprecated) | `Converger.Auth.Token` | `conversation_id`, `tenant_id`, `sub` | 3600 s | `POST /api/v1/tokens` |
 | Channel token (legacy, deprecated) | `Converger.Auth.Token.generate_channel_token/1` | `channel_id`, `tenant_id`, `sub: "channel_<id>"` | 3600 s | Shown on the admin channel page (`/admin/channels`) |
 
-Because the signer is shared, every verifier also checks the token's shape
+Because the legacy tokens and keyless Converger tokens share the `SECRET_KEY_BASE` signer, every verifier also checks the token's shape
 ([ADR-0026](../adr/0026-one-client-socket-stack-and-shape-checked-legacy-tokens.md)):
 
 - `x-channel-token` (`TenantAuth`, `POST /api/v1/tokens`, `POST /api/v1/conversations`) accepts only channel tokens
@@ -175,16 +178,19 @@ The legacy tokens and the legacy socket are deprecated; see
 [migrating from the legacy surfaces](../api/migrating-from-legacy.md).
 
 Converger tokens are rejected unless `type` is `"converger"`, and every authenticated request re-checks that the
-token's channel is still `active` (`403` otherwise). Consequences of the stateless design:
+token's channel is still `active` (`403` otherwise) and that the token was not revoked (`401 token_revoked`), with
+one ETS lookup per node ([ADR-0059](../adr/0059-client-token-keys-revocation-rotation-and-permissions.md)):
 
-- A token cannot be revoked before it expires. Deactivating a channel blocks its tokens on the next request and
-  disconnects its sockets.
-- `refresh` mints a new token from any valid one, without rotation or reuse detection.
-- Rotating `SECRET_KEY_BASE` invalidates every token and every session at once (see
-  [Rotating leaked secrets](../security.md#rotating-leaked-secrets)).
+- **Revocation:** `POST /api/v1/converger/tokens/revoke` revokes a token's family (logout) or, with the channel
+  secret, every token of an end user (a ban). Every node refuses the token within a second and the subject's sockets
+  are disconnected. Deactivating a channel still blocks all of its tokens.
+- **Refresh rotation:** a refreshed token stays valid for a 30 s grace period, then is refused; refreshing it again
+  after that revokes the whole family (reuse detection). Derived conversation tokens never outlive the token they
+  came from.
+- **Permissions:** the `perms` claim (`read`, `write`, `typing`) restricts a token, for example to a read-only
+  viewer; checked by the REST controllers, the Phoenix channel and the Protocol v1 session.
 
-Revocation, refresh rotation, scopes beyond `channel` and a dedicated signing key with `kid` are Planned
-([#52](https://github.com/AimTune/converger/issues/52)).
+See [Client tokens](client-tokens.md).
 
 ### WebSocket authentication
 
@@ -246,7 +252,7 @@ configured key can decrypt them.
 | `webhook_subscriptions.secret`, `webhook_subscriptions.headers` | Encrypted (`Converger.Encrypted.Binary`, `Converger.Encrypted.Map`); the API returns header names only and the secret only on create or rotation |
 | `channels.config` (provider access tokens, `app_secret`, `verify_token`, Infobip `api_key`, webhook headers, ...) | Encrypted as a whole map (`Converger.Encrypted.Map`) |
 | `tenants.api_key_hash`, `previous_api_key_hash` | SHA-256 digest only; plaintext never stored |
-| `admin_users.password_hash`, `tenant_users.password_hash` | bcrypt |
+| `admin_users.password_hash`, `tenant_users.password_hash` | bcrypt (PBKDF2-SHA512 in a `CONVERGER_PASSWORD_HASHER=pbkdf2` build) |
 | `admin_users.totp_secret`, `tenant_users.totp_secret` | Encrypted (`Converger.Encrypted.Binary`) |
 | `user_sessions.token_hash`, `account_tokens.token_hash` | SHA-256 digest only; the session token lives in the signed cookie, the reset token in the mailed link |
 | Activities, attachments, `tenants.alert_webhook_url`, webhook subscription URLs, `webhook_events` payloads, audit logs | Not encrypted by the application; rely on database and storage encryption |
@@ -418,15 +424,12 @@ The Docker workflow builds the image on every pull request and scans it with Tri
 uploaded to code scanning). Dependabot opens dependency updates. See
 [ADR-0021](../adr/0021-ci-quality-gates-and-lf-line-endings.md).
 
-## Planned hardening
+## Known limitations
 
-Tracked in [#52](https://github.com/AimTune/converger/issues/52) (Planned):
-
-- token revocation (`jti` denylist), refresh-token rotation with reuse detection, scoped tokens;
-- a dedicated JWT signing key with `kid` and rollover, independent of `SECRET_KEY_BASE`;
-
-Other known limitations: the login form reports "Your account has been deactivated" for an inactive account
-before the password is checked.
+- 2FA has no recovery codes and no WebAuthn; a locked-out admin is reset by a `super_admin` or with
+  `Converger.Release.reset_admin_2fa/1` ([ADR-0058](../adr/0058-server-side-sessions-totp-2fa-and-password-reset-for-admin-and-portal.md)).
+- The login form reports "Your account has been deactivated" for an inactive account
+  before the password is checked.
 
 ## Reporting a vulnerability
 

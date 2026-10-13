@@ -145,7 +145,7 @@ Make Converger adoptable by someone who has never read its source: a license, a 
 | [#52](https://github.com/AimTune/converger/issues/52) | Auth hardening: token revocation, refresh rotation, scoped tokens, admin 2FA, password reset, session expiry | Open |
 | [#49](https://github.com/AimTune/converger/issues/49) | Platform event webhooks: tenant-level subscriptions for activity, delivery, conversation and channel events (signed, retried) | Done ([Platform event webhooks](platform-webhooks.md), [ADR-0053](adr/0053-platform-event-webhooks.md)) |
 | [#50](https://github.com/AimTune/converger/issues/50) | Admin panel and tenant portal modernization: Tailwind/daisyUI, pagination and search, channel test-send, key rotation, deliveries view, live tail | Open |
-| [#53](https://github.com/AimTune/converger/issues/53) | Windows developer setup: `bcrypt_elixir` requires MSVC `nmake`; document or offer a pure-Elixir hashing option | Open (workaround in [Getting started](getting-started.md#per-os-notes)) |
+| [#53](https://github.com/AimTune/converger/issues/53) | Windows developer setup: `bcrypt_elixir` requires MSVC `nmake`; document or offer a pure-Elixir hashing option | Done ([Getting started](getting-started.md#per-os-notes), [dev container](contributing.md#dev-container), [ADR-0057](adr/0057-pluggable-password-hasher-and-dev-container.md)) |
 
 Exit criteria: a new integrator provisions a tenant and a channel through the API, embeds the TypeScript SDK and exchanges messages using only the docs; the docs site is published from CI; the GitHub community profile is complete.
 

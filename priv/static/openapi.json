@@ -645,6 +645,20 @@
             "description": "Seconds",
             "type": "integer"
           },
+          "permissions": {
+            "items": {
+              "enum": [
+                "read",
+                "write",
+                "typing"
+              ],
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "token": {
             "type": "string"
           }
@@ -660,6 +674,19 @@
       "ClientTokenRequest": {
         "description": "Token generation options.",
         "properties": {
+          "permissions": {
+            "description": "Restricts the token (and every token derived or refreshed from it). Omitted: all permissions.",
+            "items": {
+              "enum": [
+                "read",
+                "write",
+                "typing"
+              ],
+              "type": "string"
+            },
+            "minItems": 1,
+            "type": "array"
+          },
           "scope": {
             "enum": [
               "channel"
@@ -677,6 +704,42 @@
           }
         },
         "title": "ClientTokenRequest",
+        "type": "object"
+      },
+      "ClientTokenRevokeRequest": {
+        "description": "What to revoke. With the channel secret: `token` (a token of the channel, with its family) or `user.id` (every token of that end user issued so far). With a token: nothing, the token revokes itself and its family.",
+        "properties": {
+          "token": {
+            "type": "string"
+          },
+          "user": {
+            "description": "The end user",
+            "properties": {
+              "id": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "title": "ClientTokenRevokeRequest",
+        "type": "object"
+      },
+      "ClientTokenRevoked": {
+        "description": "The revocation, effective on every node within a second.",
+        "properties": {
+          "revoked": {
+            "enum": [
+              "token",
+              "user"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "revoked"
+        ],
+        "title": "ClientTokenRevoked",
         "type": "object"
       },
       "Conversation": {
@@ -1492,6 +1555,7 @@
           "conversation_closed",
           "forbidden",
           "inbound_not_supported",
+          "insufficient_permission",
           "internal",
           "invalid_channel_config",
           "invalid_message",
@@ -1503,6 +1567,7 @@
           "payload_too_large",
           "rate_limited",
           "token_expired",
+          "token_revoked",
           "unauthorized",
           "unavailable",
           "unsupported_channel_type",
@@ -3848,7 +3913,7 @@
     "/api/v1/converger/tokens/generate": {
       "post": {
         "callbacks": {},
-        "description": "Exchanges the channel secret (server side) for a short-lived, unscoped Converger token for an end user.",
+        "description": "Exchanges the channel secret (server side) for a short-lived, unscoped Converger token for an end user. `permissions` restricts it (read-only viewers).",
         "operationId": "generateToken",
         "parameters": [],
         "requestBody": {
@@ -3903,7 +3968,7 @@
     "/api/v1/converger/tokens/refresh": {
       "post": {
         "callbacks": {},
-        "description": "A new token with the same claims and a new expiry.",
+        "description": "A new token with the same claims and a new expiry. The presented token is rotated: it stays valid for the rotation grace period (default 30 s), then is rejected; refreshing it again after that revokes its whole family (`token_revoked`).",
         "operationId": "refreshToken",
         "parameters": [],
         "responses": {
@@ -3936,6 +4001,64 @@
           }
         ],
         "summary": "Refresh a Converger token",
+        "tags": [
+          "Client: Tokens"
+        ]
+      }
+    },
+    "/api/v1/converger/tokens/revoke": {
+      "post": {
+        "callbacks": {},
+        "description": "With a token: revokes it and its family (every token derived or refreshed from the same generated token), e.g. on logout. With the channel secret: revokes the `token` given in the body (with its family), or every token of the end user `user.id` issued so far (a banned user). Affected sockets are disconnected; revoked tokens are rejected by every node within a second.",
+        "operationId": "revokeToken",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClientTokenRevokeRequest"
+              }
+            }
+          },
+          "description": "What to revoke",
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientTokenRevoked"
+                }
+              }
+            },
+            "description": "Revoked"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "channelSecret": []
+          },
+          {
+            "convergerToken": []
+          }
+        ],
+        "summary": "Revoke Converger tokens",
         "tags": [
           "Client: Tokens"
         ]

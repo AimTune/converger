@@ -2,7 +2,7 @@ defmodule Converger.Accounts.AdminUser do
   use Ecto.Schema
   import Ecto.Changeset
 
-  alias Converger.Accounts.PasswordPolicy
+  alias Converger.Accounts.{PasswordHasher, PasswordPolicy}
 
   @type t :: %__MODULE__{}
 
@@ -66,15 +66,15 @@ defmodule Converger.Accounts.AdminUser do
 
   def valid_password?(%__MODULE__{password_hash: hash}, password)
       when is_binary(hash) and is_binary(password) do
-    Bcrypt.verify_pass(password, hash)
+    PasswordHasher.verify_pass(password, hash)
   end
 
-  def valid_password?(_, _), do: Bcrypt.no_user_verify()
+  def valid_password?(_, _), do: PasswordHasher.no_user_verify()
 
   defp hash_password(changeset) do
     case get_change(changeset, :password) do
       nil -> changeset
-      password -> put_change(changeset, :password_hash, Bcrypt.hash_pwd_salt(password))
+      password -> put_change(changeset, :password_hash, PasswordHasher.hash_pwd_salt(password))
     end
   end
 end

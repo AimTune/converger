@@ -9,6 +9,10 @@ defmodule ConvergerWeb.ConvergerAPI.ConversationController do
   import ConvergerWeb.Helpers.Authorization,
     only: [authorize_channel: 2, authorize_conversation: 2]
 
+  # Token permissions (ADR-0059).
+  plug ConvergerWeb.Plugs.RequirePermission, "write" when action in [:create, :close, :reopen]
+  plug ConvergerWeb.Plugs.RequirePermission, "read" when action in [:show]
+
   action_fallback ConvergerWeb.FallbackController
 
   tags(["Client: Conversations"])
@@ -68,9 +72,11 @@ defmodule ConvergerWeb.ConvergerAPI.ConversationController do
              "channel_id" => channel.id,
              "metadata" => %{"source" => "converger"}
            }),
-         {:ok, token, _claims} <-
-           ConvergerToken.generate_conversation_token(channel, conversation.id,
-             user_id: claims["user_id"]
+         {:ok, token, token_claims} <-
+           ConvergerToken.generate_conversation_token(
+             channel,
+             conversation.id,
+             ConvergerToken.derived_opts(claims)
            ) do
       stream_url = build_stream_url(conn, conversation.id, token)
 
@@ -79,7 +85,7 @@ defmodule ConvergerWeb.ConvergerAPI.ConversationController do
       |> json(%{
         conversationId: conversation.id,
         token: token,
-        expires_in: ConvergerToken.default_expiry(),
+        expires_in: max(token_claims["exp"] - Joken.current_time(), 0),
         streamUrl: stream_url
       })
     end
@@ -94,9 +100,13 @@ defmodule ConvergerWeb.ConvergerAPI.ConversationController do
          :ok <- authorize_channel(claims, conversation) do
       channel = Channels.get_channel!(claims["channel_id"])
 
-      {:ok, token, _claims} =
-        ConvergerToken.generate_conversation_token(channel, conversation_id,
-          user_id: claims["user_id"]
+      # Derived from the presented token: same family and permissions, and
+      # never outliving it (only a refresh, which rotates, extends a session).
+      {:ok, token, token_claims} =
+        ConvergerToken.generate_conversation_token(
+          channel,
+          conversation_id,
+          ConvergerToken.derived_opts(claims)
         )
 
       watermark = params["watermark"]
@@ -107,7 +117,7 @@ defmodule ConvergerWeb.ConvergerAPI.ConversationController do
       |> json(%{
         conversationId: conversation_id,
         token: token,
-        expires_in: ConvergerToken.default_expiry(),
+        expires_in: max(token_claims["exp"] - Joken.current_time(), 0),
         streamUrl: stream_url
       })
     else

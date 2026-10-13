@@ -17,6 +17,7 @@ config :converger, Converger.Repo,
 # Full-cost hashing makes login tests slow enough to straddle the 60 s
 # login-lockout window (see test/converger_web/controllers/rate_limiting_test.exs).
 config :bcrypt_elixir, :log_rounds, 1
+config :pbkdf2_elixir, :rounds, 1
 
 # We don't run a server during test. If one is required,
 # you can enable the server option below.
@@ -24,6 +25,9 @@ config :converger, ConvergerWeb.Endpoint,
   http: [ip: {127, 0, 0, 1}, port: 4002],
   secret_key_base: "9Ov2AhAq9kITaSWzIOHQlF0OjtggqukSSK19U94ghQsnmuWqnKNRkQ/2PjUT9xNm",
   server: false
+
+# Tests sync the token revocation cache explicitly (RevocationCache.sync/0).
+config :converger, Converger.Auth.RevocationCache, sync_interval_ms: nil
 
 # No readiness grace period when the test app stops.
 config :converger, :websocket, drain_delay_ms: 0

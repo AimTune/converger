@@ -19,6 +19,8 @@ export interface components {
       token: string;
       /** Lifetime in seconds. */
       expires_in: number;
+      /** `read`, `write`, `typing` when the token is restricted (#52), else null. */
+      permissions?: ("read" | "write" | "typing")[] | null;
     };
     /** `POST /conversations` and `GET /conversations/:id`. */
     ConversationResponse: {

@@ -7,6 +7,8 @@ defmodule Converger.MultiNodeTest do
     * an activity created on node A reaches a WebSocket client on node B
       (Phoenix.PubSub across nodes);
     * rate limits are shared (the `:cluster` backend, ADR-0013);
+    * a client token revoked on one node is rejected by the other within a
+      second (ADR-0059);
     * every delivery job is executed exactly once although both nodes run
       the Oban queues.
 
@@ -125,6 +127,47 @@ defmodule Converger.MultiNodeTest do
 
     # ... and rejects the client although it never saw it before.
     assert %{status: 429} = http(:post, b.port, "/api/v1/tokens", json: token_params())
+  end
+
+  test "a token revoked on node A is rejected by node B within a second", %{a: a, b: b} do
+    tenant = Peer.call(a.pid, TenantsFixtures, :tenant_fixture, [%{}])
+    channel = Peer.call(a.pid, ChannelsFixtures, :channel_fixture, [tenant])
+    secret = [{"authorization", "Bearer #{channel.secret}"}]
+
+    %{status: 200, body: %{"token" => token}} =
+      http(:post, a.port, "/api/v1/converger/tokens/generate",
+        json: %{user: %{id: "revoked-user"}},
+        headers: secret
+      )
+
+    bearer = [{"authorization", "Bearer #{token}"}]
+
+    # Node B knows the token (and its cache is warm).
+    assert %{status: 201} =
+             http(:post, b.port, "/api/v1/converger/conversations", headers: bearer)
+
+    {:ok, client} =
+      WsClient.connect(b.port, "/socket/converger/websocket?token=#{token}&vsn=2.0.0")
+
+    assert %{status: 200, body: %{"revoked" => "token"}} =
+             http(:post, a.port, "/api/v1/converger/tokens/revoke", headers: bearer)
+
+    revoked_at = System.monotonic_time(:millisecond)
+
+    Peer.eventually(fn ->
+      match?(
+        %{status: 401, body: %{"error" => %{"code" => "token_revoked"}}},
+        http(:post, b.port, "/api/v1/converger/conversations", headers: bearer)
+      )
+    end)
+
+    assert System.monotonic_time(:millisecond) - revoked_at < 1_000
+
+    # The socket on node B was disconnected and cannot reconnect.
+    assert {:error, :closed} = WsClient.await(client, fn _ -> false end, 2_000)
+
+    assert {:error, _} =
+             WsClient.connect(b.port, "/socket/converger/websocket?token=#{token}&vsn=2.0.0")
   end
 
   test "each delivery job is executed exactly once with both nodes running Oban", %{a: a, b: b} do

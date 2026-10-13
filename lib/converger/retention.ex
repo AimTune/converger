@@ -30,8 +30,9 @@ defmodule Converger.Retention do
 
   `prune/1` (daily, `Converger.Workers.PruneWorker`) deletes, in batches,
   `channel_health_checks` older than `:health_check_days` (default 7),
-  `webhook_events` older than `:webhook_event_days` (default 7) and
-  `audit_logs` older than `:audit_log_days` (default 365). `nil` or `0`
+  `webhook_events` older than `:webhook_event_days` (default 7),
+  `audit_logs` older than `:audit_log_days` (default 365), and
+  `revoked_tokens` whose tokens have all expired. `nil` or `0`
   disables a window.
 
       config :converger, Converger.Retention,
@@ -413,7 +414,9 @@ defmodule Converger.Retention do
           "inserted_at",
           Keyword.get(opts, :webhook_event_days, webhook_event_days()),
           now
-        )
+        ),
+      # Revocations outlive their tokens by a minute (ADR-0059).
+      revoked_tokens: Converger.Auth.Revocations.prune(now)
     }
   end
 

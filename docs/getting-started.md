@@ -137,7 +137,9 @@ With [asdf](https://asdf-vm.com) or [mise](https://mise.jdx.dev), run `asdf inst
 You also need:
 
 - **PostgreSQL** (17 is what compose and CI use; at least 11 is needed for the built-in `sha256()` used by a migration). The first migration creates the `uuid-ossp` and `pgcrypto` extensions, so the role needs the rights to do that (the default `postgres` superuser has them).
-- **A C compiler and `make`**, because `bcrypt_elixir` (admin and portal password hashing) is a NIF compiled from C. See the per-OS notes below.
+- **A C compiler and `make`**, because `bcrypt_elixir` (admin and portal password hashing) is a NIF compiled from C. On Windows you can skip it with `CONVERGER_PASSWORD_HASHER=pbkdf2`. See the per-OS notes below.
+
+The [dev container](contributing.md#dev-container) bundles all of this (toolchain, C tools, Postgres) for any OS.
 - **Node.js is not needed.** There is no asset pipeline. The admin and portal layouts load Phoenix and LiveView from jsDelivr.
 
 ### Per-OS notes
@@ -154,13 +156,27 @@ sudo apt-get install -y build-essential git
 xcode-select --install
 ```
 
-**Windows**: `bcrypt_elixir` builds its NIF with MSVC and `nmake`. Without them, `mix compile` stops with `** (Mix) "nmake" not found in the path.` (issue [#53](https://github.com/AimTune/converger/issues/53)).
+**Windows**: `bcrypt_elixir` builds its NIF with MSVC and `nmake`. Without them, `mix compile` stops with `** (Mix) "nmake" not found in the path.` (issue [#53](https://github.com/AimTune/converger/issues/53)). Pick one of three ways:
+
+*No C compiler (pure-Elixir hashing).* Set `CONVERGER_PASSWORD_HASHER=pbkdf2` in every shell you run `mix` from (or once, as a user environment variable):
+
+```powershell
+$env:CONVERGER_PASSWORD_HASHER = "pbkdf2"
+mix setup
+mix test
+```
+
+`mix.exs` then leaves `bcrypt_elixir` out, and admin and tenant passwords are hashed with PBKDF2-SHA512 (`pbkdf2_elixir`). Everything else is the same; the whole test suite passes in this mode. A database seeded from a bcrypt build has bcrypt hashes that this build cannot verify, so log-ins fail with a warning in the log: run `mix ecto.reset` or reset the password. Production builds (the `Dockerfile`) keep bcrypt ([ADR-0057](adr/0057-pluggable-password-hasher-and-dev-container.md)). Kafka channels do not run natively on Windows in either mode (their `crc32cer` NIF is not built, see [broker channels](channels/brokers.md)).
+
+*Dev container.* Open the repository in the [dev container](contributing.md#dev-container) (Docker Desktop with the WSL 2 backend). It has the Linux toolchain and Postgres, and nothing has to be installed on Windows besides Docker and VS Code.
+
+*MSVC.* To build bcrypt natively:
 
 1. Install [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) and select the **"Desktop development with C++"** workload (MSVC compiler and Windows SDK).
 2. Run every `mix` command from the **"x64 Native Tools Command Prompt for VS"** (or a Developer PowerShell set to x64), so that `cl.exe` and `nmake` are on `PATH`. A plain PowerShell or Git Bash window does not have them.
 3. If `bcrypt_elixir` was already compiled in the wrong shell, rebuild it there with `mix deps.compile bcrypt_elixir --force`.
 
-As an alternative, use WSL2 and follow the Linux instructions. Converger has no pure-Elixir password hashing fallback today: `bcrypt_elixir` is the only hashing dependency in `mix.exs`. A pluggable hasher and a dev container are proposed in [#53](https://github.com/AimTune/converger/issues/53).
+WSL2 with the Linux instructions also works.
 
 ### Postgres for development
 

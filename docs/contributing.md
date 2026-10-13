@@ -22,6 +22,25 @@ The full walkthrough is in [Getting started](./getting-started.md). In short:
   [Configuration reference](operations/configuration.md#database).
 - Optional: `cp .env.example .env`, fill it in, and `docker compose up -d` for Prometheus, Grafana, Jaeger and the
   OpenTelemetry collector ([Observability](operations/observability.md#local-observability-stack)).
+- No C compiler (Windows without the MSVC build tools): set `CONVERGER_PASSWORD_HASHER=pbkdf2`, see
+  [Line endings and Windows](#line-endings-and-windows).
+
+### Dev container
+
+`.devcontainer/` describes a ready-made environment for VS Code Dev Containers, GitHub Codespaces or the
+[`devcontainer` CLI](https://github.com/devcontainers/cli): the pinned Elixir/OTP image of the `Dockerfile` with
+build-essential, cmake (Kafka's `crc32cer` NIF) and inotify-tools, plus a Postgres 17 service. It works the same on
+Windows, macOS and Linux and needs only Docker.
+
+- VS Code: install the Dev Containers extension and run **Dev Containers: Reopen in Container**. The first start
+  builds the image and runs `mix deps.get && mix compile` (several minutes).
+- CLI: `devcontainer up --workspace-folder .`, then `devcontainer exec --workspace-folder . mix test`.
+
+Inside the container `DB_HOSTNAME` is `db` (user and password `postgres`), so `mix setup`, `mix phx.server` and
+`mix test` work without further settings. Port 4000 is forwarded to the host. `deps/` and `_build` are kept in Docker
+volumes (`MIX_DEPS_PATH`, `MIX_BUILD_ROOT`), not in the checkout, so they never clash with a native build on the
+host; `docker compose -p converger-devcontainer down -v` removes them together with the database. The dev container
+is independent of the root `docker-compose.yml`, which runs the release image.
 
 ## Branches, commits and pull requests
 
@@ -119,7 +138,13 @@ Linux containers. If your clone predates the rule, run `git add --renormalize .`
 
 Notes for developing on Windows:
 
-- `bcrypt_elixir` compiles a C NIF and needs the Microsoft C++ Build Tools. Run `mix` from an
+- `bcrypt_elixir` compiles a C NIF and needs the Microsoft C++ Build Tools. Without them, set
+  `$env:CONVERGER_PASSWORD_HASHER = "pbkdf2"`: `mix.exs` leaves `bcrypt_elixir` out and passwords are hashed with
+  pure-Elixir PBKDF2 ([ADR-0057](adr/0057-pluggable-password-hasher-and-dev-container.md)). The variable is read at
+  compile time, so switching modes recompiles; give the pbkdf2 mode its own build root to avoid that
+  (`$env:MIX_BUILD_ROOT = "_build_pbkdf2"`, ignored by git).
+  Changes that touch password hashing must pass in both modes; CI runs the default (bcrypt). Or use the
+  [dev container](#dev-container). With the build tools, run `mix` from an
   "x64 Native Tools Command Prompt", or call `vcvars64.bat` first, for example in a small wrapper script:
 
   ```powershell

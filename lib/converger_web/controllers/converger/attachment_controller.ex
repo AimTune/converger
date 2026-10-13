@@ -10,6 +10,9 @@ defmodule ConvergerWeb.ConvergerAPI.AttachmentController do
   use ConvergerWeb, :controller
   use OpenApiSpex.ControllerSpecs
 
+  # Token permissions (ADR-0059).
+  plug ConvergerWeb.Plugs.RequirePermission, "read"
+
   import ConvergerWeb.ApiSchemas
 
   alias Converger.{Conversations, Uploads}

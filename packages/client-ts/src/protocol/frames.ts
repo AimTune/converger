@@ -152,6 +152,8 @@ export type ErrorCode =
   | "token_expired"
   | "forbidden"
   | "channel_inactive"
+  | "insufficient_permission"
+  | "token_revoked"
   | "rate_limited"
   | "payload_too_large"
   | "too_many_in_flight"
