@@ -387,11 +387,10 @@ The first check of a channel never alerts (there is no previous status). Health 
 
 ## Planned adapters
 
-Tracked in [#44](https://github.com/AimTune/converger/issues/44), not implemented yet (MQTT and Discord Gateway inbound are done: [MQTT](mqtt.md), [Discord Gateway mode](discord.md#gateway-mode)):
-
-| Adapter | Scope |
-| --- | --- |
-| gRPC streaming | Bidirectional stream alternative to the WebSocket for backend clients, sharing the [Protocol v1](../protocol/v1.md) frame definitions through protobuf. Needs the `grpc` and `protobuf` dependencies. |
+All adapters tracked in [#44](https://github.com/AimTune/converger/issues/44) are implemented: Discord (Interactions
+Endpoint and [Gateway mode](discord.md#gateway-mode)), Microsoft Teams, Messenger, Instagram, Viber, HTTP pull and
+[MQTT](mqtt.md). gRPC streaming is not a channel type but a transport of Protocol v1 for backend clients:
+[Protocol v1 over gRPC](../protocol/grpc.md). New adapter requests get their own issue.
 
 ## Related
 

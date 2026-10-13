@@ -45,6 +45,15 @@ config :converger, ConvergerWeb.Protocol,
   # frames replayed per handshake or `sync`; beyond it `replayTruncated`
   replay_max: 10_000
 
+# Converger Protocol v1 over gRPC (ConvergerWeb.GRPC, ADR-0056): a bidirectional
+# stream per connection on its own port, off unless GRPC_ENABLED=true
+# (config/runtime.exs). TLS when both certfile and keyfile are set.
+config :converger, ConvergerWeb.GRPC,
+  enabled: false,
+  port: 50_051,
+  certfile: nil,
+  keyfile: nil
+
 # API documentation routes (/api/docs, /api/openapi.json, ADR-0050): off
 # unless enabled per environment (dev.exs, test.exs) or with API_DOCS_ENABLED.
 config :converger, :api_docs, enabled: false

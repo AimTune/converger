@@ -48,8 +48,9 @@ From a checkout: `helm install converger deploy/helm/converger ...`.
 | `serviceAccount.*` | created, no API token | Annotate it for cloud IAM (IRSA, Workload Identity) |
 | `service.*` | `ClusterIP`, port 80 | Service in front of `:4000` |
 | `ingress.*` | off | Raise your controller's proxy timeouts for WebSockets |
+| `grpc.enabled`, `grpc.port`, `grpc.servicePort` | off, `50051`, `50051` | Protocol v1 over gRPC ([docs/protocol/grpc.md](../../../docs/protocol/grpc.md)): sets `GRPC_ENABLED`/`GRPC_PORT`, adds the `grpc` container and Service port (`appProtocol: kubernetes.io/h2c`) |
 | `metrics.podMonitor.*` | off | Scrapes every pod's `/metrics` with `METRICS_TOKEN` |
-| `networkPolicy.*` | off | HTTP from `httpFrom` (all when empty); EPMD and distribution between Converger pods |
+| `networkPolicy.*` | off | HTTP from `httpFrom` (all when empty), gRPC from `grpcFrom` when `grpc.enabled`; EPMD and distribution between Converger pods |
 | `podSecurityContext`, `securityContext` | non-root 65534, `RuntimeDefault`, no capabilities | |
 | `resources` | 250m / 512Mi requests, 1Gi limit | |
 | `terminationGracePeriodSeconds`, `preStopSleepSeconds` | `95`, `5` | Covers the WebSocket drain budget |

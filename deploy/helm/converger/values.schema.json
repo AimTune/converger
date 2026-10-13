@@ -115,6 +115,14 @@
         "tls": { "type": "array" }
       }
     },
+    "grpc": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "servicePort": { "type": "integer", "minimum": 1, "maximum": 65535 }
+      }
+    },
     "metrics": {
       "type": "object",
       "properties": {
@@ -133,7 +141,8 @@
       "type": "object",
       "properties": {
         "enabled": { "type": "boolean" },
-        "httpFrom": { "type": "array" }
+        "httpFrom": { "type": "array" },
+        "grpcFrom": { "type": "array" }
       }
     },
     "podAnnotations": { "type": "object" },

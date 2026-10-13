@@ -62,6 +62,14 @@ See [TLS, HSTS and WebSocket origins](#tls-hsts-and-websocket-origins).
 | `PHX_HOST` | `example.com` | Public host name used when generating URLs (prod only). URLs are generated as `https://PHX_HOST:443`. |
 | `PORT` | `4000` | Port the HTTP endpoint listens on (prod; also honoured in dev). |
 
+### gRPC transport
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `GRPC_ENABLED` | `false` | Starts the [Protocol v1 gRPC server](protocol/grpc.md) for backend clients. |
+| `GRPC_PORT` | `50051` | Its port. Expose it next to `PORT` (docker compose maps `50051:50051`; the Helm chart adds a `grpc` Service port with `grpc.enabled`). |
+| `GRPC_TLS_CERTFILE`, `GRPC_TLS_KEYFILE` | unset | PEM paths; both set enable TLS. Otherwise plaintext h2c: keep the port on a private network or behind a TLS-terminating, gRPC-aware proxy. |
+
 WebSocket limits and draining are tuned with `WS_*` variables (frame size, message rate, joins, slow consumers,
 drain delay and batches); see [WebSocket limits and draining](operations/websocket-limits.md#configuration).
 Load balancers and Kubernetes probe `GET /health/live` and `GET /health/ready`.

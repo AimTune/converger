@@ -136,7 +136,8 @@ thousands. The telemetry events always carry `tenant_id` in their metadata, so a
 
 Client connections are counted by [`ConvergerWeb.ClientConnections`](https://github.com/AimTune/converger/blob/main/lib/converger_web/client_connections.ex),
 a node-local registry. Labels: `socket` is `user` (legacy `/socket`), `converger` (`/socket/converger`) or
-`protocol` (native Protocol v1), and `transport` is `websocket`, `longpoll` or `sse`.
+`protocol` (native Protocol v1), and `transport` is `websocket`, `longpoll`, `sse` or `grpc`
+([Protocol v1 over gRPC](../protocol/grpc.md); for gRPC a frame is a stream message).
 
 | Metric | Type | Tags | Meaning |
 | --- | --- | --- | --- |
@@ -203,6 +204,7 @@ The events behind the metrics above, for custom handlers (`:telemetry.attach/4`)
 | `[:converger, :ws, :connected]`, `[:converger, :ws, :disconnected]` | `count` | `socket`, `transport` |
 | `[:converger, :ws, :frame]` | `count` | `socket`, `transport`, `direction` |
 | `[:converger, :ws, :connections]` | `count` (polled) | `socket`, `transport` |
+| `[:grpc, :server, :rpc, :start]`, `:stop`, `:exception` | `duration` (stop, exception) | `server`, `function_name` (one span per gRPC stream; emitted by the `grpc` library, not exported as metrics) |
 | `[:converger, :circuit, :state_change]` | `count` | `channel_id`, `channel_type`, `tenant_id`, `to`, `reason` |
 | `[:converger, :oban, :queue]` | `depth` (polled) | `queue`, `state` |
 | `[:converger, :deliveries, :dead_letters]` | `size` (polled) | `channel_type` |

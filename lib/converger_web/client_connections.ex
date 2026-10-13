@@ -10,7 +10,7 @@ defmodule ConvergerWeb.ClientConnections do
   | --- | --- | --- |
   | `user` | `websocket` | `ConvergerWeb.UserSocket` (`/socket`, legacy) |
   | `converger` | `websocket`, `longpoll` | `ConvergerWeb.ConvergerSocket` (`/socket/converger`) |
-  | `protocol` | `websocket`, `sse` | `ConvergerWeb.ProtocolSocket` and the Protocol v1 event stream |
+  | `protocol` | `websocket`, `sse`, `grpc` | `ConvergerWeb.ProtocolSocket`, the Protocol v1 event stream and the gRPC stream (`ConvergerWeb.GRPC`) |
 
   The registry drops a process when it exits, however it exits, so the gauge
   cannot drift. `[:converger, :ws, :connected]` and `[:converger, :ws,
@@ -26,7 +26,8 @@ defmodule ConvergerWeb.ClientConnections do
     {"converger", "websocket"},
     {"converger", "longpoll"},
     {"protocol", "websocket"},
-    {"protocol", "sse"}
+    {"protocol", "sse"},
+    {"protocol", "grpc"}
   ]
 
   def child_spec(_opts), do: Registry.child_spec(keys: :duplicate, name: @registry)

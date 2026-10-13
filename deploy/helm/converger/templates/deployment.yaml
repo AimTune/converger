@@ -55,6 +55,11 @@ spec:
             - name: http
               containerPort: 4000
               protocol: TCP
+            {{- if .Values.grpc.enabled }}
+            - name: grpc
+              containerPort: {{ .Values.grpc.port }}
+              protocol: TCP
+            {{- end }}
             {{- if ne .Values.cluster.strategy "none" }}
             - name: epmd
               containerPort: 4369

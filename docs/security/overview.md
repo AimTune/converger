@@ -18,6 +18,7 @@ in depth in [Security: client IPs, proxies and admin access](../security.md); th
 | Tenant backend (server to server) | `x-api-key: cvg_live_...` | `ConvergerWeb.Plugs.TenantAuth` | `tenants.api_key_hash` (SHA-256) |
 | Channel integration | Channel secret as `Authorization: Bearer ...` on `POST /api/v1/converger/tokens/generate` | `ConvergerWeb.Plugs.ConvergerAuth` (`mode: :secret`) | `channels.secret` (AES-GCM encrypted) + `channels.secret_hash` (SHA-256, for lookup) |
 | End-user client (widget, SDK) | Converger token (JWT) as Bearer or socket `token` param | `ConvergerWeb.Plugs.ConvergerAuth` (`mode: :token`), `ConvergerWeb.ConvergerSocket` | Not stored (stateless JWT) |
+| Backend client on the gRPC transport | Converger token (JWT) as `authorization: Bearer` metadata or `Hello.token` | `ConvergerWeb.Protocol.Session` on `hello` ([Protocol v1 over gRPC](../protocol/grpc.md)) | Not stored (stateless JWT) |
 | Legacy client (deprecated, see [migrating](../api/migrating-from-legacy.md)) | Channel token in `x-channel-token`, conversation token on `/socket` | `ConvergerWeb.Plugs.TenantAuth`, `ConvergerWeb.UserSocket` | Not stored (stateless JWT) |
 | External provider (WhatsApp, webhook sender) | Request signature over the raw body | `ConvergerWeb.InboundController` + `Converger.Channels.InboundSignature` or the adapter's own scheme | Uses the channel secret / adapter config |
 
@@ -125,6 +126,12 @@ Revocation, refresh rotation, scopes beyond `channel` and a dedicated signing ke
 | --- | --- | --- |
 | `/socket/converger` (`ConvergerWeb.ConvergerSocket`) | `token`: a Converger token; the channel must be active for the token's tenant | `converger:conversation:<id>`: allowed when the token's `conversation_id` equals `<id>`, or, for a `scope: "channel"` token, when the conversation belongs to the token's tenant and either to the token's channel (owned) or, for a `websocket` channel, to a channel that an enabled routing rule routes to it (routed). An unscoped channel-level token cannot join. `converger:channel:<id>`: only a `scope: "channel"` token of that `websocket` channel |
 | `/socket` (`ConvergerWeb.UserSocket`, legacy, deprecated) | `token`: a conversation token (Converger tokens and channel tokens are refused at connect) | `conversation:<id>`: only the conversation named in the token, and only while its channel is active |
+
+The gRPC transport (off unless `GRPC_ENABLED`, [Protocol v1 over gRPC](../protocol/grpc.md)) checks the same Converger
+token on `hello` as the native WebSocket, with the same identity and conversation rules; a bad credential ends the
+stream with `UNAUTHENTICATED`. Its port speaks plaintext HTTP/2 unless `GRPC_TLS_CERTFILE` and `GRPC_TLS_KEYFILE` are
+set: never expose a plaintext gRPC port to the internet, since the bearer token travels in the metadata. Restrict it
+with the Helm chart's `networkPolicy.grpcFrom`. Messages above 1 MiB end the stream before they are buffered.
 
 Sockets get a per-subject id (`converger_socket:<tenant_id>:user:<user_id>`, `...:conversation:<id>`, or
 `...:channel:<channel_id>` for a `scope: "channel"` token without `user_id`), so a forced disconnect affects one end

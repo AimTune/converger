@@ -21,6 +21,8 @@ defmodule Converger.Application do
 
     # Node discovery (libcluster). Nothing is started without a
     # CLUSTER_STRATEGY; see Converger.Cluster.
+    # Protocol v1 over gRPC (ADR-0056), when GRPC_ENABLED: on its own port,
+    # stopped after ConvergerWeb.Drain drained its streams.
     children =
       [
         ConvergerWeb.Telemetry,
@@ -57,6 +59,7 @@ defmodule Converger.Application do
         Converger.Pipeline.child_specs() ++
         [ConvergerWeb.Endpoint] ++
         broker_consumers() ++
+        ConvergerWeb.GRPC.child_specs() ++
         [
           # Last: stopped first on shutdown, it flips readiness to 503 and
           # waits before the endpoint drains its sockets.

@@ -284,7 +284,7 @@ defmodule ConvergerWeb.SocketGuard do
   @doc """
   The WebSocket close detail `{code, reason}` for a limit: the reason is JSON,
   `{"reason": reason}`, plus a jittered `retryAfterMs` for 1012 (draining)
-  and 4503 (slow consumer). Shared with `ConvergerWeb.ProtocolSocket`.
+  and 4503 (slow consumer).
   """
   @spec close_detail(integer(), String.t()) :: {integer(), String.t()}
   def close_detail(code, reason) do

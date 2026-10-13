@@ -84,10 +84,12 @@ the last child, so it stops first, while the endpoint still serves every socket:
 1. **Readiness flips.** `GET /health/ready` answers 503 and new WebSocket connections are refused with HTTP 503 and
    a `Retry-After` header, for `drain_delay_ms` (5 s). The load balancer takes the node out of rotation, and
    reconnecting clients land on other nodes. Existing sockets keep working.
-2. **Sockets are drained in batches.** The native Protocol v1 connections (WebSocket and SSE, registered in
+2. **Sockets are drained in batches.** The native Protocol v1 connections (WebSocket, SSE and gRPC streams, registered in
    `ConvergerWeb.ProtocolConnections`), which Phoenix's drainer does not know, are drained first, with the same
    batch size and pacing: a native socket is closed with **1012** and the reason below, an SSE stream ends with an
-   `error` frame `unavailable` carrying `retryAfterMs`. Then the endpoint stops, and Phoenix's socket drainer closes the sockets that
+   `error` frame `unavailable` carrying `retryAfterMs`, a gRPC stream gets `Close {code: 1012, retry_after_ms}` and ends
+   with `UNAVAILABLE` ([Protocol v1 over gRPC](../protocol/grpc.md); new streams get `UNAVAILABLE` while draining, and
+   the gRPC server stops after the drain). Then the endpoint stops, and Phoenix's socket drainer closes the sockets that
    have joined a channel, `drain_batch_size` (500) every `drain_batch_interval_ms` (1 s), for at most
    `drain_shutdown_ms` (30 s). Each socket is closed with **1012** and the reason
    `{"reason": "unavailable", "retryAfterMs": N}`, where `N` is `reconnect_base_ms` plus a random jitter of up to

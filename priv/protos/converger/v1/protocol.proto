@@ -1,0 +1,318 @@
+// Converger Protocol v1 (`converger/1`) over gRPC.
+//
+// The same frames as the native WebSocket endpoint (docs/protocol/v1.md),
+// as protobuf messages: one ClientFrame per client WebSocket message, one
+// ServerFrame per server WebSocket message. Field names are the JSON keys in
+// snake_case; the JSON <-> protobuf mapping is docs/protocol/grpc.md.
+//
+// Open-ended JSON (message `data`, `metadata`, `meta`, error `details`) is a
+// google.protobuf.Struct. A frame type without a typed message here is
+// carried verbatim as `raw` (the JSON frame as a Struct), in both directions,
+// so additive protocol changes reach gRPC clients before this file names them.
+//
+// Regenerate the Elixir modules with scripts/gen-protos.sh.
+
+syntax = "proto3";
+
+package converger.v1;
+
+import "google/protobuf/struct.proto";
+
+option go_package = "github.com/AimTune/converger/gen/go/converger/v1;convergerv1";
+option java_multiple_files = true;
+option java_package = "dev.aimtune.converger.v1";
+
+// One bidirectional stream is one Protocol v1 connection to one conversation.
+// Credentials: `authorization: Bearer <converger token>` metadata, or
+// `Hello.token`. The first client frame must be `hello`.
+service ChannelStream {
+  rpc Connect(stream ClientFrame) returns (stream ServerFrame);
+}
+
+// ---------------------------------------------------------------------------
+// Client to server (docs/protocol/v1.md, section 5.3)
+// ---------------------------------------------------------------------------
+
+message ClientFrame {
+  oneof frame {
+    Hello hello = 1;
+    // `text` and every message type: a user turn (section 7).
+    MessageSend message = 2;
+    TypingSignal typing = 3;
+    Read read = 4;
+    Sync sync = 5;
+    Ping ping = 6;
+    Auth auth = 7;
+    // Any other v1 client frame as its JSON object (with `type`), e.g. the
+    // bot-channel frames `resume`, `abort`, ... (section 9).
+    google.protobuf.Struct raw = 15;
+  }
+}
+
+// `hello` (section 4).
+message Hello {
+  // "converger/1" (default) or "mekik/1".
+  optional string protocol = 1;
+  optional string conversation_id = 2;
+  optional string user_id = 3;
+  // Resume point: the highest seq seen. Absent means 0 (full replay).
+  oneof position {
+    uint64 watermark = 4;
+    // A pre-v1 opaque watermark (section 6.5), during the migration window.
+    string legacy_watermark = 5;
+  }
+  // Alternative to the `authorization` metadata.
+  optional string token = 6;
+  google.protobuf.Struct meta = 7;
+  // Channel scope (section 10, planned #64): watermark per conversation id.
+  map<string, uint64> watermarks = 8;
+  // mekik/1 hello fields, relayed to the bot channel (planned #64).
+  optional string components_hash = 9;
+  repeated google.protobuf.Struct tools = 10;
+  optional string skills_hash = 11;
+  repeated google.protobuf.Struct skills = 12;
+}
+
+// A user turn: `{"type": "text", "clientId": ..., "data": {...}}` (section 7).
+message MessageSend {
+  // "text" or a message type (docs/protocol/messages.md).
+  string type = 1;
+  // Idempotency key and ack correlation (1..128 of A-Z a-z 0-9 . _ : ~ -).
+  optional string client_id = 2;
+  oneof payload {
+    // `data` of a `text` frame.
+    TextData text = 3;
+    // `data` of any other message type.
+    google.protobuf.Struct data = 4;
+  }
+  // Stored with the activity.
+  google.protobuf.Struct metadata = 5;
+  // mekik/1 per-turn context, never stored.
+  google.protobuf.Struct meta = 6;
+  ReplyTo reply_to = 7;
+  // mekik/1 message id, used as the clientId when none is given.
+  optional string id = 8;
+  // chativa client timestamp (ms); accepted and ignored.
+  optional int64 timestamp = 9;
+}
+
+message TextData {
+  string text = 1;
+  repeated google.protobuf.Struct attachments = 2;
+}
+
+message ReplyTo {
+  string id = 1;
+  optional uint64 seq = 2;
+}
+
+// Client `typing` (section 8.2).
+message TypingSignal {
+  bool is_typing = 1;
+}
+
+// `read {watermark}` (section 8.1).
+message Read {
+  uint64 watermark = 1;
+}
+
+// `sync {watermark}` (section 6.3).
+message Sync {
+  oneof position {
+    uint64 watermark = 1;
+    string legacy_watermark = 2;
+  }
+}
+
+// `ping` (section 8.5), answered with `heartbeat`.
+message Ping {
+  optional string nonce = 1;
+}
+
+// `auth {token}`: mid-session token refresh (section 3.3).
+message Auth {
+  string token = 1;
+}
+
+// ---------------------------------------------------------------------------
+// Server to client (section 5.2)
+// ---------------------------------------------------------------------------
+
+message ServerFrame {
+  oneof frame {
+    Welcome welcome = 1;
+    // Persistent frames: `text`, `event`, `conversationUpdate` and message
+    // types. Every one carries `seq`.
+    Activity activity = 2;
+    Ack ack = 3;
+    Error error = 4;
+    DeliveryStatus delivery_status = 5;
+    // Transient typing, and the persisted typing activities of REST (with seq).
+    Typing typing = 6;
+    Presence presence = 7;
+    Heartbeat heartbeat = 8;
+    TokenRefreshed token_refreshed = 9;
+    ReplayTruncated replay_truncated = 10;
+    // gRPC only: the WebSocket close code this stream ends with (section 12.3).
+    Close close = 11;
+    // Any other v1 server frame as its JSON object (with `type`).
+    google.protobuf.Struct raw = 15;
+  }
+}
+
+message Sender {
+  string id = 1;
+  // user, bot, agent or system.
+  optional string role = 2;
+  optional string name = 3;
+}
+
+message Capabilities {
+  optional bool acks = 1;
+  optional bool receipts = 2;
+  optional bool presence = 3;
+  optional bool typing = 4;
+  optional bool regenerate = 5;
+  optional bool edit = 6;
+  repeated string message_types = 7;
+}
+
+message Limits {
+  optional uint64 max_frame_bytes = 1;
+  optional uint64 max_text_bytes = 2;
+  optional uint64 max_metadata_bytes = 3;
+  optional uint64 max_in_flight = 4;
+  optional uint64 heartbeat_interval_ms = 5;
+  optional uint64 idle_timeout_ms = 6;
+  optional uint64 replay_batch = 7;
+  optional uint64 replay_max = 8;
+  optional uint64 max_conversations = 9;
+}
+
+// `welcome` (section 4).
+message Welcome {
+  string protocol = 1;
+  repeated string compat = 2;
+  // "conversation" (channel scope is planned, #64).
+  optional string scope = 3;
+  optional string conversation_id = 4;
+  optional string user_id = 5;
+  string connection_id = 6;
+  // The conversation's head seq at handshake time.
+  optional uint64 watermark = 7;
+  repeated google.protobuf.Struct pending = 8;
+  optional int64 expires_at = 9;
+  Capabilities capabilities = 10;
+  Limits limits = 11;
+  optional string channel_id = 12;
+}
+
+// A persistent frame (section 5.1): the mekik/1 `text` envelope.
+message Activity {
+  // "text", "event", "conversationUpdate" or a message type.
+  string type = 1;
+  string id = 2;
+  uint64 seq = 3;
+  // "user" or "bot", relative to the end user.
+  string from = 4;
+  Sender sender = 5;
+  oneof payload {
+    TextData text = 6;
+    google.protobuf.Struct data = 7;
+  }
+  int64 timestamp = 8;
+  google.protobuf.Struct metadata = 9;
+  // The sender's clientId, for its other connections to de-duplicate.
+  optional string client_id = 10;
+  ReplyTo reply_to = 11;
+  repeated google.protobuf.Struct actions = 12;
+}
+
+// `ack` (section 7).
+message Ack {
+  string client_id = 1;
+  string id = 2;
+  uint64 seq = 3;
+  int64 timestamp = 4;
+  bool duplicate = 5;
+}
+
+// `error` (section 12).
+message Error {
+  string code = 1;
+  string message = 2;
+  // Always set by Converger; absent on errors relayed from a bot channel.
+  optional uint32 number = 3;
+  optional bool retryable = 4;
+  optional uint64 retry_after_ms = 5;
+  optional string client_id = 6;
+  optional string frame_type = 7;
+  google.protobuf.Struct details = 8;
+}
+
+message DeliveryError {
+  string code = 1;
+  optional string message = 2;
+  optional bool retryable = 3;
+}
+
+// `deliveryStatus` (section 8.1).
+message DeliveryStatus {
+  optional string activity_id = 1;
+  optional uint64 seq = 2;
+  optional uint64 up_to_seq = 3;
+  optional string channel_id = 4;
+  // queued, sent, delivered, read or failed.
+  string status = 5;
+  Sender by = 6;
+  optional uint32 attempt = 7;
+  DeliveryError error = 8;
+  int64 timestamp = 9;
+}
+
+// Server `typing` (section 8.2). `seq`, `id` and `timestamp` only on the
+// typing activities persisted through REST.
+message Typing {
+  bool is_typing = 1;
+  optional string from = 2;
+  Sender sender = 3;
+  optional uint64 seq = 4;
+  optional string id = 5;
+  optional int64 timestamp = 6;
+}
+
+// `presence` (section 8.3).
+message Presence {
+  Sender participant = 1;
+  // online, away or offline.
+  string status = 2;
+  optional uint32 connections = 3;
+  optional int64 last_seen_at = 4;
+}
+
+// `heartbeat` (section 8.5).
+message Heartbeat {
+  int64 timestamp = 1;
+  optional string nonce = 2;
+  optional uint64 head_seq = 3;
+}
+
+// `tokenRefreshed` (section 3.3).
+message TokenRefreshed {
+  int64 expires_at = 1;
+}
+
+// `replayTruncated` (section 6.2).
+message ReplayTruncated {
+  uint64 watermark = 1;
+  uint64 head_seq = 2;
+}
+
+// The last frame of a stream the server ends, with the WebSocket close code
+// and reason the native endpoint would use (4401, 4403, 4408, 4503, 1012,
+// ...). The RPC then ends with the matching gRPC status.
+message Close {
+  uint32 code = 1;
+  string reason = 2;
+  optional uint64 retry_after_ms = 3;
+}

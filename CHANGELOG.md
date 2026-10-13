@@ -25,6 +25,24 @@
 - Docs: [MQTT](docs/channels/mqtt.md), [Discord Gateway mode](docs/channels/discord.md#gateway-mode), broker channels,
   channels overview, configuration; ADR-0055.
 
+### Protocol v1 over gRPC (#44)
+
+- New transport for backend clients: the gRPC service `converger.v1.ChannelStream`,
+  `rpc Connect(stream ClientFrame) returns (stream ServerFrame)`, one stream per Protocol v1 connection to one
+  conversation, on its own port. Off by default: `GRPC_ENABLED=true`, `GRPC_PORT` (default 50051), TLS with
+  `GRPC_TLS_CERTFILE` / `GRPC_TLS_KEYFILE`. Credentials: `authorization: Bearer <converger token>` metadata or
+  `Hello.token`.
+- `priv/protos/converger/v1/protocol.proto` defines the v1 frames as protobuf messages (typed `oneof` cases plus a
+  lossless `raw` Struct fallback); the generated modules are committed (`priv/protos/generate.sh`).
+- Same semantics as the native WebSocket: the session logic moved into `ConvergerWeb.Protocol.Session`, which both
+  transports run (handshake, replay from a watermark, acks and `clientId` idempotency, receipts, typing, presence,
+  token refresh, limits, slow consumers, draining). A stream ends with a `Close` frame carrying the WebSocket close
+  code and a matching gRPC status (`UNAVAILABLE` on drain, `UNAUTHENTICATED` for 4401, ...).
+- Connection metrics with `transport="grpc"`; Helm `grpc.*` values (container and Service port, NetworkPolicy
+  `grpcFrom`), docker compose maps 50051.
+- New dependencies: `grpc_server` and `grpc` 1.0.5, `protobuf` 0.17.1 (patch-level pins).
+- Docs: [Protocol v1 over gRPC](docs/protocol/grpc.md); ADR-0056.
+
 ### Broker channels: NATS JetStream and Redis Streams (#42)
 
 - New channel types `nats` and `redis_streams` on the broker channel machinery of the Kafka and RabbitMQ channels

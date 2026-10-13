@@ -235,6 +235,28 @@ if websocket_overrides != [] do
   config :converger, :websocket, websocket_overrides
 end
 
+# Protocol v1 over gRPC (ADR-0056, docs/protocol/grpc.md): GRPC_ENABLED=true starts
+# the server on GRPC_PORT (default 50051). GRPC_TLS_CERTFILE and GRPC_TLS_KEYFILE
+# (PEM paths) switch it to TLS; without them it serves plaintext h2c, for a
+# private network or a TLS-terminating proxy.
+grpc_overrides =
+  [
+    enabled: System.get_env("GRPC_ENABLED"),
+    port: System.get_env("GRPC_PORT"),
+    certfile: System.get_env("GRPC_TLS_CERTFILE"),
+    keyfile: System.get_env("GRPC_TLS_KEYFILE")
+  ]
+  |> Enum.reject(fn {_key, value} -> value in [nil, ""] end)
+  |> Enum.map(fn
+    {:enabled, value} -> {:enabled, String.downcase(value) in ~w(true 1)}
+    {:port, port} -> {:port, String.to_integer(port)}
+    pair -> pair
+  end)
+
+if grpc_overrides != [] do
+  config :converger, ConvergerWeb.GRPC, grpc_overrides
+end
+
 # Behaviour under database pressure (defaults in config/config.exs). See
 # docs/operations/database.md.
 pressure_overrides =

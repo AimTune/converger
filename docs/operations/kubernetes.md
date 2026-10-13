@@ -166,7 +166,8 @@ is the same one as in [Install](#install).
 | `service.*` | `ClusterIP`, port 80 | Service to the `http` port (4000) |
 | `ingress.*` | off | Ingress to the Service; raise the controller's proxy timeouts for WebSockets |
 | `metrics.podMonitor.*` | off, 30 s | Scrapes every pod's `/metrics` with `METRICS_TOKEN` from the Secret (needs the Prometheus Operator CRDs) |
-| `networkPolicy.enabled`, `networkPolicy.httpFrom` | off, `[]` | Allows HTTP from `httpFrom` (everyone when empty) and EPMD plus the distribution port between Converger pods |
+| `grpc.enabled`, `grpc.port`, `grpc.servicePort` | off, `50051`, `50051` | [Protocol v1 over gRPC](../protocol/grpc.md): sets `GRPC_ENABLED` and `GRPC_PORT`, adds a `grpc` container port and a Service port with `appProtocol: kubernetes.io/h2c` |
+| `networkPolicy.enabled`, `networkPolicy.httpFrom`, `networkPolicy.grpcFrom` | off, `[]`, `[]` | Allows HTTP from `httpFrom` (everyone when empty), gRPC from `grpcFrom` when `grpc.enabled`, and EPMD plus the distribution port between Converger pods |
 | `defaultTopologySpread`, `topologySpreadConstraints` | `true`, `[]` | Soft spread over nodes and zones unless constraints are given |
 | `terminationGracePeriodSeconds`, `preStopSleepSeconds` | `95`, `5` | See [Probes and shutdown](#probes-and-shutdown) |
 | `podSecurityContext`, `securityContext`, `resources`, `podAnnotations`, `podLabels`, `priorityClassName`, `nodeSelector`, `tolerations`, `affinity` | non-root, 250m/512Mi | The usual pod settings |

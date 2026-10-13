@@ -45,6 +45,9 @@ services:
       METRICS_TOKEN: ${METRICS_TOKEN:-}
       METRICS_ALLOWED_IPS: ${METRICS_ALLOWED_IPS:-}
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      # Protocol v1 over gRPC (docs/protocol/grpc.md): GRPC_ENABLED=true serves it
+      # on port 50051 (plaintext h2c here).
+      GRPC_ENABLED: ${GRPC_ENABLED:-false}
 
   app:
     build: .
@@ -56,6 +59,8 @@ services:
         condition: service_completed_successfully
     ports:
       - "4000:4000"
+      # gRPC (only listening when GRPC_ENABLED=true)
+      - "50051:50051"
     environment:
       <<: *app_env
       CREATE_DB: "false"
