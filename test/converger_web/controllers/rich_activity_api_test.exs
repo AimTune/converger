@@ -160,6 +160,61 @@ defmodule ConvergerWeb.RichActivityApiTest do
       assert %{"details" => %{"type" => ["is invalid"]}} =
                assert_api_error(conn, 422, "invalid_message")
     end
+
+    test "a typed message is stored and listed with messageType and payload (#68)", %{
+      channel: channel,
+      conversation: conversation
+    } do
+      payload = %{
+        "data" => %{
+          "text" => "How can I help?",
+          "buttons" => [%{"label" => "Track", "value" => "/track"}]
+        }
+      }
+
+      conn =
+        post_activity(channel, conversation, %{
+          "from" => %{"id" => "bot-1"},
+          "messageType" => "buttons",
+          "payload" => payload
+        })
+
+      assert %{"id" => id} = json_response(conn, 200)
+
+      [activity] =
+        channel
+        |> api_conn(conversation)
+        |> get(~p"/api/v1/converger/conversations/#{conversation.id}/activities")
+        |> json_response(200)
+        |> Map.fetch!("activities")
+
+      assert %{
+               "id" => ^id,
+               "type" => "message",
+               "text" => "How can I help?",
+               "messageType" => "buttons",
+               "payload" => ^payload
+             } = activity
+
+      root = Converger.ProtocolSchemas.build!("activity.schema.json")
+      assert :ok == Converger.ProtocolSchemas.validate(activity, root)
+    end
+
+    test "an invalid typed payload is rejected with 422 and per-field details", %{
+      channel: channel,
+      conversation: conversation
+    } do
+      conn =
+        post_activity(channel, conversation, %{
+          "messageType" => "card",
+          "payload" => %{"data" => %{"subtitle" => "no title"}}
+        })
+
+      assert %{"details" => %{"payload" => [message]}} =
+               assert_api_error(conn, 422, "invalid_message")
+
+      assert message =~ "title"
+    end
   end
 
   describe "WhatsApp reactions" do

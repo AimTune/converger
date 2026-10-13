@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+### Typed message payloads: buttons, cards, media, tool traces, GenUI and interrupts are stored (#68, #63)
+
+- A `message` activity can carry a typed message of Converger Protocol v1: new columns `message_type` and
+  `payload` (migration `20261014100000`, nullable, metadata-only on the partitioned table). Rich message frames
+  (`buttons`, `card`, `carousel`, `image`, `location`, ..., open renderer names) and mekik-native frames
+  (`tool_call`, `genui`, `interrupt`, `interrupt_resolved`, `skill`) are stored losslessly and rendered back as
+  the same frame ([ADR-0062](docs/adr/0062-typed-message-payloads-on-message-activities.md)).
+- Clients send rich types over the native WebSocket endpoint and the Phoenix binding (`frame`); they were
+  answered with `invalid_message` "not supported yet" before. REST takes `messageType` / `payload` (Converger
+  API) and `message_type` / `payload` (tenant API), and every activity response carries them (null for plain
+  messages). `priv/protocol/v1/activity.schema.json` and `priv/static/openapi.json` are updated.
+- Payloads are validated against `priv/protocol/v1` on write (`422` / `invalid_message` with per-field details);
+  `jsv` is now a runtime dependency and `Converger.ProtocolSchemas` moved from `test/support` to `lib/`. At most
+  128 KiB per payload (`activity_limits.max_payload_bytes`). `text` is filled from the payload when absent.
+- Open renderer-named types are counted in `converger.activities.unknown_type.count`.
+- Channels: adapters declare natively rendered types with `message_types:`. Messaging adapters (WhatsApp,
+  Telegram, Slack, email, SMS, ...) get the text fallback for now, or nothing when there is none. New channel
+  config key `show_tool_traces` (boolean) delivers `tool_call` traces as `name: status` lines.
+- mekik/1 compatibility (#63): every persistent frame of the vendored mekik golden fixtures round-trips through
+  storage identical in canonical JSON (`test/protocol/mekik_storage_round_trip_test.exs`).
+- Docs: [rich message vocabulary](docs/protocol/messages.md) sections 4, 5 and 7, [Protocol v1](docs/protocol/v1.md)
+  sections 5, 11, 14 and 15, [activities](docs/concepts/activities.md#typed-messages), client and tenant API,
+  channels, writing an adapter, observability.
+
 ### Admin panel and tenant portal: search, test-send, secret rotation, live tail (#50, part 2)
 
 - Every list page (tenants, channels, conversations, routing rules, deliveries, audit logs, admin/tenant/portal

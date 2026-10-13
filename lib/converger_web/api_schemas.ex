@@ -362,7 +362,18 @@ defmodule ConvergerWeb.ApiSchemas do
             },
             metadata: @object,
             reply_to_id: @uuid,
-            sender: %Schema{type: :string, description: "Defaults to `user`"}
+            sender: %Schema{type: :string, description: "Defaults to `user`"},
+            message_type: %Schema{
+              type: :string,
+              description:
+                "A Protocol v1 message type (`card`, `buttons`, `tool_call`, ...); needs `payload` and `type: message`"
+            },
+            payload: %Schema{
+              type: :object,
+              additionalProperties: true,
+              description:
+                "The typed message: the frame body without `type` and `seq`, validated against the Protocol v1 schemas"
+            }
           },
           []
         ),
@@ -740,6 +751,18 @@ defmodule ConvergerWeb.ApiSchemas do
       idempotency_key: nullable(%Schema{type: :string}),
       seq: nullable(%Schema{type: :integer, description: "Per-conversation sequence number"}),
       reply_to_id: nullable(@uuid),
+      message_type:
+        nullable(%Schema{
+          type: :string,
+          description:
+            "Protocol v1 message type of a typed message (docs/protocol/messages.md), else null"
+        }),
+      payload:
+        nullable(%Schema{
+          type: :object,
+          additionalProperties: true,
+          description: "The typed message: the frame body without the server envelope, else null"
+        }),
       edited_at: nullable(@datetime),
       deleted_at: nullable(@datetime),
       conversation_id: @uuid,
@@ -1291,6 +1314,19 @@ defmodule ConvergerWeb.ApiSchemas do
             conversationId: @uuid,
             channelData: @object,
             replyToId: nullable(@uuid),
+            messageType:
+              nullable(%Schema{
+                type: :string,
+                description:
+                  "Protocol v1 message type of a typed message (docs/protocol/messages.md), else null"
+              }),
+            payload:
+              nullable(%Schema{
+                type: :object,
+                additionalProperties: true,
+                description:
+                  "The typed message: the frame body without the server envelope, else null"
+              }),
             editedAt: nullable(@datetime),
             deletedAt: nullable(@datetime)
           },
@@ -1304,6 +1340,8 @@ defmodule ConvergerWeb.ApiSchemas do
             :conversationId,
             :channelData,
             :replyToId,
+            :messageType,
+            :payload,
             :editedAt,
             :deletedAt
           ]
@@ -1323,6 +1361,17 @@ defmodule ConvergerWeb.ApiSchemas do
               description: "Alias of `channelData`"
             },
             replyToId: @uuid,
+            messageType: %Schema{
+              type: :string,
+              description:
+                "A Protocol v1 message type (`card`, `buttons`, `tool_call`, ...); needs `payload`"
+            },
+            payload: %Schema{
+              type: :object,
+              additionalProperties: true,
+              description:
+                "The typed message: the frame body without `type` and `seq`, validated against the Protocol v1 schemas"
+            },
             from: object(nil, "The sender; defaults to `user`", %{id: %Schema{type: :string}}, [])
           },
           []

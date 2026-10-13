@@ -25,6 +25,14 @@
       "type": ["string", "null"],
       "description": "The activity this one refers to, in the same conversation: a threaded reply for `message`; the target (required, a `message`) for `messageReaction`, `messageUpdate` and `messageDelete`."
     },
+    "messageType": {
+      "type": ["string", "null"],
+      "description": "A typed message (#68): the Protocol v1 message type (`card`, `buttons`, `tool_call`, an open renderer name, ...), only on `message` activities and always with `payload`. Null for a plain message. See docs/protocol/messages.md section 4."
+    },
+    "payload": {
+      "type": ["object", "null"],
+      "description": "The typed message: the frame body without `type`, `seq` and the server envelope, as received (for example `{\"data\": {...}, \"actions\": [...]}`). Validated against the frame schemas on write. Null for a plain message."
+    },
     "editedAt": {
       "type": ["string", "null"],
       "description": "Set on the original when a `messageUpdate` for it was accepted. The original's content is unchanged; clients apply the update."
@@ -90,6 +98,21 @@
     }
   },
   "examples": [
+    {
+      "id": "3c2b1a09-8f7e-4d6c-b5a4-938271605f4e",
+      "type": "message",
+      "from": { "id": "bot-1" },
+      "text": "How can I help?",
+      "timestamp": "2026-10-14T09:00:00.000000Z",
+      "attachments": [],
+      "conversationId": "5b0c8f2e-3c1d-4a8e-9f3a-1d2e3f4a5b6c",
+      "channelData": {},
+      "replyToId": null,
+      "messageType": "buttons",
+      "payload": { "data": { "text": "How can I help?", "buttons": [{ "label": "Track an order", "value": "/track" }] } },
+      "editedAt": null,
+      "deletedAt": null
+    },
     {
       "id": "0e7d4c1a-8b2f-4f6e-a1c3-7d9e2b4f6a80",
       "type": "message",

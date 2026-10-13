@@ -197,9 +197,24 @@
               "null"
             ]
           },
+          "message_type": {
+            "description": "Protocol v1 message type of a typed message (docs/protocol/messages.md), else null",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "metadata": {
             "additionalProperties": true,
             "type": "object"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "description": "The typed message: the frame body without the server envelope, else null",
+            "type": [
+              "object",
+              "null"
+            ]
           },
           "reply_to_id": {
             "format": "uuid",
@@ -240,7 +255,9 @@
           "id",
           "idempotency_key",
           "inserted_at",
+          "message_type",
           "metadata",
+          "payload",
           "reply_to_id",
           "sender",
           "seq",
@@ -1042,6 +1059,21 @@
             "format": "uuid",
             "type": "string"
           },
+          "messageType": {
+            "description": "Protocol v1 message type of a typed message (docs/protocol/messages.md), else null",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "payload": {
+            "additionalProperties": true,
+            "description": "The typed message: the frame body without the server envelope, else null",
+            "type": [
+              "object",
+              "null"
+            ]
+          },
           "replyToId": {
             "format": "uuid",
             "type": [
@@ -1076,6 +1108,8 @@
           "conversationId",
           "channelData",
           "replyToId",
+          "messageType",
+          "payload",
           "editedAt",
           "deletedAt"
         ],
@@ -1105,9 +1139,18 @@
             },
             "type": "object"
           },
+          "messageType": {
+            "description": "A Protocol v1 message type (`card`, `buttons`, `tool_call`, ...); needs `payload`",
+            "type": "string"
+          },
           "metadata": {
             "additionalProperties": true,
             "description": "Alias of `channelData`",
+            "type": "object"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "description": "The typed message: the frame body without `type` and `seq`, validated against the Protocol v1 schemas",
             "type": "object"
           },
           "replyToId": {
@@ -1444,8 +1487,17 @@
             "maxItems": 10,
             "type": "array"
           },
+          "message_type": {
+            "description": "A Protocol v1 message type (`card`, `buttons`, `tool_call`, ...); needs `payload` and `type: message`",
+            "type": "string"
+          },
           "metadata": {
             "additionalProperties": true,
+            "type": "object"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "description": "The typed message: the frame body without `type` and `seq`, validated against the Protocol v1 schemas",
             "type": "object"
           },
           "reply_to_id": {
@@ -1795,9 +1847,24 @@
               "null"
             ]
           },
+          "message_type": {
+            "description": "Protocol v1 message type of a typed message (docs/protocol/messages.md), else null",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "metadata": {
             "additionalProperties": true,
             "type": "object"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "description": "The typed message: the frame body without the server envelope, else null",
+            "type": [
+              "object",
+              "null"
+            ]
           },
           "reply_to_id": {
             "format": "uuid",
@@ -1838,7 +1905,9 @@
           "id",
           "idempotency_key",
           "inserted_at",
+          "message_type",
           "metadata",
+          "payload",
           "reply_to_id",
           "sender",
           "seq",

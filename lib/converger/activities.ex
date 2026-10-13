@@ -258,6 +258,8 @@ defmodule Converger.Activities do
               tenant_id: activity.tenant_id
             })
 
+            count_unknown_message_type(activity)
+
             # 3. Non-durable work (PubSub broadcast etc.) AFTER successful commit
             Converger.Pipeline.after_commit(activity)
             {:ok, activity}
@@ -275,6 +277,22 @@ defmodule Converger.Activities do
         end
     end
   end
+
+  # Open renderer-named message types are stored without validating `data`
+  # (docs/protocol/messages.md, rule 5); count them so drift shows up.
+  defp count_unknown_message_type(%Activity{message_type: type} = activity)
+       when is_binary(type) do
+    unless Converger.Activities.MessagePayload.known?(type) do
+      :telemetry.execute([:converger, :activities, :unknown_type], %{count: 1}, %{
+        tenant_id: activity.tenant_id,
+        message_type: type
+      })
+    end
+
+    :ok
+  end
+
+  defp count_unknown_message_type(_activity), do: :ok
 
   # The unique index rejected a concurrent duplicate: return the winner.
   defp recover_idempotency_race(changeset, attrs) do

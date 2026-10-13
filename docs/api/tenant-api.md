@@ -140,6 +140,8 @@ receive and that the legacy WebSocket channel pushes.
   "idempotency_key": "reply-7781",
   "seq": 3,
   "reply_to_id": null,
+  "message_type": null,
+  "payload": null,
   "edited_at": null,
   "deleted_at": null,
   "conversation_id": "3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10",
@@ -154,6 +156,7 @@ receive and that the legacy WebSocket channel pushes.
 | `text` | client | Up to 65,536 bytes |
 | `attachments` | client | Array of attachment objects (at most 10, each at most 4,096 bytes as JSON). Each needs a `contentType`; `contentUrl`, `name`, `size`, `thumbnailUrl`, `content` and `channelData` are optional and other keys are dropped ([attachment schema](../concepts/activities.md#attachments)). |
 | `reply_to_id` | client | Optional: the activity of this conversation this one replies to, reacts to, edits or deletes ([references](../concepts/activities.md#references-replies-reactions-edits-and-deletes)) |
+| `message_type`, `payload` | client | Optional, together, on `message` only: a typed message of the [Protocol v1 vocabulary](../protocol/messages.md) (`buttons`, `card`, `tool_call`, ...) and its frame body, validated against the schemas ([typed messages](../concepts/activities.md#typed-messages)) |
 | `edited_at`, `deleted_at` | server | Set on a message once a `messageUpdate` / `messageDelete` for it is accepted |
 | `metadata` | client | JSON object, at most 16,384 bytes |
 | `sender` | server | From the request's `sender` field on this API (default `"user"`); `"system"` for lifecycle events |
@@ -458,6 +461,8 @@ the origin channel's matching routing rules ([routing rules](../concepts/routing
 | `attachments` | array of objects | Each needs a `contentType` |
 | `metadata` | object | |
 | `reply_to_id` | string | An activity of this conversation; required for `messageReaction`, `messageUpdate`, `messageDelete` |
+| `message_type` | string | A typed message type (`buttons`, `card`, `image`, `tool_call`, ...); needs `payload` |
+| `payload` | object | The typed message, for example `{"data": {"title": "ORD-1", "buttons": [{"label": "Track"}]}}`; at most 131,072 bytes |
 | `sender` | string | Sender id stored on the activity, for example `"bot"` or an agent id. Default `"user"`. Server-to-server only: the tenant API trusts the caller to name the sender. |
 
 Any other field (`tenant_id`, `conversation_id`, `idempotency_key`, `seq`, `inserted_at`) is ignored
@@ -485,6 +490,8 @@ curl -s -X POST "$CONVERGER/api/v1/conversations/3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7
     "idempotency_key": "reply-7781",
     "seq": 3,
     "reply_to_id": null,
+    "message_type": null,
+    "payload": null,
     "edited_at": null,
     "deleted_at": null,
     "conversation_id": "3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10",
@@ -498,7 +505,7 @@ curl -s -X POST "$CONVERGER/api/v1/conversations/3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7
 | --- | --- | --- |
 | `404` | `not_found` | Unknown or foreign conversation |
 | `409` | `conversation_closed` | Conversation is closed |
-| `422` | `invalid_message` with `details` `{"type": ["is invalid"]}` | Validation failed: unknown or internal `type`, `text` over 65,536 bytes, too many or too large attachments, an attachment without `contentType`, `metadata` too large, an invalid `reply_to_id` (unknown, in another conversation, editing someone else's message) |
+| `422` | `invalid_message` with `details` `{"type": ["is invalid"]}` | Validation failed: unknown or internal `type`, `text` over 65,536 bytes, too many or too large attachments, an attachment without `contentType`, `metadata` too large, an invalid `reply_to_id` (unknown, in another conversation, editing someone else's message), a typed `payload` that fails its schema (`{"payload": ["data/buttons/0: property 'label' is required"]}`) |
 | `429` | `rate_limited` | Tenant's `activity_create` limit exceeded |
 | `503` | `unavailable` | Deliveries could not be enqueued; nothing was stored. Retry with the same idempotency key. |
 

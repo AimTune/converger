@@ -15,6 +15,14 @@ defmodule Converger.Activities.Downgrade do
       are skipped.
     * `"skip"` - the channel does not receive it.
 
+  Typed messages (`message_type`, #68) are delivered natively when the
+  adapter declares the type in a `message_types:` capability entry (`:all`
+  for adapters that forward the canonical activity, see
+  `Converger.Channels.Adapter.message_types/1`). Otherwise the channel gets a
+  plain `message` with the text fallback, or nothing when there is none;
+  `tool_call` traces only reach channels whose config sets
+  `show_tool_traces: true`, as a `name: status` line.
+
   Internal types (`deliveryReceipt`) are never delivered to channels.
   WebSocket clients always receive every type through the PubSub broadcast.
   """
@@ -37,6 +45,9 @@ defmodule Converger.Activities.Downgrade do
       type in Activity.internal_types() ->
         :skip
 
+      typed_message?(activity) and not native_message_type?(activity, channel_type) ->
+        plan_message_type(activity, channel)
+
       type in Adapter.activity_types(channel_type) ->
         :native
 
@@ -50,6 +61,40 @@ defmodule Converger.Activities.Downgrade do
         end
     end
   end
+
+  defp typed_message?(activity), do: is_binary(Map.get(activity, :message_type))
+
+  defp native_message_type?(%{message_type: message_type}, channel_type) do
+    case Adapter.message_types(channel_type) do
+      :all -> true
+      types -> message_type in types
+    end
+  end
+
+  # A typed message (#68) the channel cannot render: tool traces only when
+  # the channel enables `show_tool_traces`, everything else as its text
+  # fallback (`activities.text`), or skipped when there is none
+  # (docs/protocol/messages.md, section 5).
+  defp plan_message_type(%{message_type: "tool_call"} = activity, channel) do
+    data = (Map.get(activity, :payload) || %{})["data"] || %{}
+
+    if show_tool_traces?(channel) and is_binary(data["name"]),
+      do: {:downgrade, plain(activity, "#{data["name"]}: #{data["status"]}")},
+      else: :skip
+  end
+
+  defp plan_message_type(activity, _channel) do
+    case text(activity) do
+      nil -> :skip
+      text -> {:downgrade, plain(activity, text)}
+    end
+  end
+
+  defp plain(activity, text),
+    do: %{activity | type: "message", text: text, message_type: nil, payload: nil}
+
+  defp show_tool_traces?(channel),
+    do: (Map.get(channel, :config) || %{})["show_tool_traces"] == true
 
   @doc "The channel's policy for unsupported types: `downgrade` or `skip`."
   def policy(channel) do

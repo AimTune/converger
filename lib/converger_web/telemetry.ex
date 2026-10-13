@@ -208,6 +208,9 @@ defmodule ConvergerWeb.Telemetry do
 
       # Custom App Metrics
       counter("converger.activities.create.count"),
+      # Typed messages of a type outside the vocabulary (#68); no tag: the
+      # type names are client-chosen.
+      counter("converger.activities.unknown_type.count"),
       counter("converger.rate_limit.exceeded.count", tags: [:bucket]),
       # Delivery circuit breaker (Converger.Channels.Circuit)
       counter("converger.circuit.state_change.count", tags: [:channel_type, :to, :reason]),

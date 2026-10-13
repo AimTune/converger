@@ -63,6 +63,7 @@ defmodule Converger.Channels.Channel do
     |> validate_inclusion(:mode, @channel_modes)
     |> validate_channel_config()
     |> validate_unsupported_activities()
+    |> validate_show_tool_traces()
     |> validate_mode_compatibility()
     |> validate_transformations()
     |> validate_retry_policy()
@@ -109,6 +110,16 @@ defmodule Converger.Channels.Channel do
         "unsupported_activities must be one of: #{Enum.join(policies, ", ")}"
       )
     end
+  end
+
+  # Optional config key: deliver `tool_call` traces to this channel as a
+  # `name: status` line (Converger.Activities.Downgrade, #68).
+  defp validate_show_tool_traces(changeset) do
+    config = get_field(changeset, :config) || %{}
+
+    if Map.get(config, "show_tool_traces") in [nil, true, false],
+      do: changeset,
+      else: add_error(changeset, :config, "show_tool_traces must be a boolean")
   end
 
   defp validate_mode_compatibility(changeset) do

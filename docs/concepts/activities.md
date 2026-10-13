@@ -26,6 +26,8 @@ Table `activities`:
 | `idempotency_key` | text | server | From the `x-idempotency-key` header or the provider message id. `(conversation_id, idempotency_key)` is unique where not null. |
 | `reply_to_id` | uuid | client | Optional. The activity this one refers to, in the same conversation ([references](#references-replies-reactions-edits-and-deletes)). No foreign key (`activities` is partitioned, [ADR-0034](../adr/0034-monthly-partitioning-and-per-tenant-retention.md)); the reference can dangle once retention drops the original's month. |
 | `edited_at`, `deleted_at` | utc_datetime_usec | server | Stamped on a message when a `messageUpdate` or `messageDelete` for it is accepted. Never cast from input. |
+| `message_type` | text | client | Optional. A typed message ([#68](https://github.com/AimTune/converger/issues/68)): the Protocol v1 message type (`card`, `buttons`, `tool_call`, an open renderer name, ...). Only on `message`, always with `payload`. See [typed messages](#typed-messages). |
+| `payload` | jsonb | client | Optional. The typed message: the frame body without `type`, `seq` and the server envelope, validated against the Protocol v1 schemas, at most 131,072 bytes as JSON. |
 | `source_channel_id` | uuid | server | The channel the activity came in on (inbound webhook, WebSocket, client API token). `NULL` for the tenant API and system events. Not part of the wire format; the pipeline uses it to route replies back to the conversation's origin channel ([Routing rules](routing-rules.md#how-activities-fan-out)). |
 | `inserted_at`, `updated_at` | utc_datetime_usec | server | The server timestamp always wins. Clients cannot set it. |
 
@@ -45,7 +47,25 @@ Converger's own activity vocabulary, kept stable (`Activity.types/0`, decided in
 | `endOfConversation` | The sender signals the end of the conversation. The server attaches no behavior to this type: it does not close the conversation, so use the close endpoint for that. |
 | `deliveryReceipt` | Internal. Only the server may create it (`create_activity(attrs, internal: true)`); clients get `422`. Never delivered to channels. Reserved: nothing emits it today, since delivery and read receipts are transient `deliveryStatus` signals plus stored read watermarks ([ADR-0032](../adr/0032-transient-conversation-signals.md)). |
 
-Any other `type` is rejected with `422`. The rich message vocabulary (buttons, cards, carousels as typed payloads) is Planned ([#68](https://github.com/AimTune/converger/issues/68)); until then cards travel as `application/vnd.converger.card.*` attachments.
+Any other `type` is rejected with `422`. Buttons, cards, carousels, media, tool traces, GenUI and interrupts are not activity types: they are [typed messages](#typed-messages), `message` activities with a `message_type`.
+
+### Typed messages
+
+A `message` activity may carry a typed message of [Converger Protocol v1](../protocol/messages.md): `message_type` names it and `payload` holds it losslessly ([ADR-0062](../adr/0062-typed-message-payloads-on-message-activities.md), [#68](https://github.com/AimTune/converger/issues/68)). Clients send them as frames over the WebSocket protocol or with `messageType` and `payload` over REST.
+
+- Types of the vocabulary and the mekik-native frames are validated against the JSON Schemas in `priv/protocol/v1`. A failure is a `422` `invalid_message` with per-field details (`{"payload": ["data/buttons/0: property 'label' is required"]}`). Open renderer-named types only need an object `data`.
+- `text` is filled from the payload when not given (`data.text`, a caption, a title, the action labels), so search and channel fallbacks keep working.
+- Cards sent earlier as `application/vnd.converger.card.*` attachments stay valid.
+- Channels whose adapter does not render a type receive the text fallback (see [delivery to channels](#delivery-to-channels)).
+
+```json
+{
+  "type": "message",
+  "message_type": "buttons",
+  "payload": { "data": { "text": "How can I help?", "buttons": [{ "label": "Track an order", "value": "/track" }] } },
+  "text": "How can I help?"
+}
+```
 
 ### Size limits
 
@@ -55,6 +75,7 @@ Any other `type` is rejected with `422`. The rich message vocabulary (buttons, c
 | `max_attachments` | `10` | number of entries |
 | `max_attachment_bytes` | `4_096` | JSON size of each attachment descriptor (not of the file itself, which is uploaded separately) |
 | `max_metadata_bytes` | `16_384` | JSON size of `metadata` |
+| `max_payload_bytes` | `131_072` | JSON size of `payload` (a typed message) |
 
 Override them with `config :converger, :activity_limits, max_text_bytes: ..., ...`.
 
@@ -129,6 +150,8 @@ Adapters declare the types they deliver natively ([capabilities](../channels/wri
 | `messageDelete` | `"<sender> deleted a message"` |
 | `event`, `endOfConversation`, `conversationUpdate` | the activity `text`; skipped when it has none |
 | `typing` | skipped |
+
+Typed messages go natively to adapters that declare the type in a `message_types:` capability entry. Adapters without one get them all natively, unless they list `activity_types`: those (WhatsApp, Telegram, Slack, email, SMS, ...) receive a plain `message` with the text fallback instead, or nothing when there is none. `tool_call` traces reach those channels only when the channel config sets `show_tool_traces: true`, as a `name: status` line. The `unsupported_activities` policy does not apply to typed messages.
 
 `deliveryReceipt` is never delivered to channels. WebSocket clients receive every type through the broadcast.
 
@@ -237,6 +260,8 @@ If enqueueing the delivery jobs fails, the transaction rolls back and the caller
   "idempotency_key": "hello-1",
   "seq": 1,
   "reply_to_id": null,
+  "message_type": null,
+  "payload": null,
   "edited_at": null,
   "deleted_at": null,
   "conversation_id": "5b0c8f2e-3c1d-4a8e-9f3a-1d2e3f4a5b6c",
@@ -260,6 +285,8 @@ The client API (`/api/v1/converger` REST and the `/socket/converger` frames) use
 | `conversationId` | `conversation_id` |
 | `channelData` | `metadata` |
 | `replyToId` | `reply_to_id` |
+| `messageType` | `message_type` |
+| `payload` | `payload` |
 | `editedAt` | `edited_at` |
 | `deletedAt` | `deleted_at` |
 
@@ -274,6 +301,8 @@ The client API (`/api/v1/converger` REST and the `/socket/converger` frames) use
   "conversationId": "5b0c8f2e-3c1d-4a8e-9f3a-1d2e3f4a5b6c",
   "channelData": {},
   "replyToId": null,
+  "messageType": null,
+  "payload": null,
   "editedAt": null,
   "deletedAt": null
 }

@@ -817,6 +817,22 @@ defmodule Converger.Channels.Adapter do
     end
   end
 
+  @doc """
+  The Protocol v1 message types (#68) the adapter for `type` delivers
+  natively: the `message_types:` entry of its capabilities (a list, or `:all`).
+  Without one, an adapter that lists its `activity_types` renders for end
+  users and gets none (typed messages are downgraded to their text); any
+  other adapter forwards the canonical activity and gets `:all`.
+  """
+  def message_types(type) do
+    capabilities = capabilities(type)
+
+    case List.keyfind(capabilities, :message_types, 0) do
+      {:message_types, types} -> types
+      nil -> if List.keymember?(capabilities, :activity_types, 0), do: [], else: :all
+    end
+  end
+
   @doc "Whether the adapter for `type` has `capability`."
   def capability?(type, capability), do: capability in capabilities(type)
 

@@ -266,6 +266,7 @@ Callback checklist:
 | `:consumer` | Inbound messages are pulled by a consumer Converger runs, one per channel in the cluster (a broker subscription, a provider stream such as the Discord Gateway), instead of (or besides) the inbound webhook. The adapter also implements `Converger.Channels.Broker`; see [broker adapters](#broker-adapters-optional). |
 | `:media`, `:templates`, `:reactions`, `:edits` | Outbound content the adapter renders natively (descriptive: nothing in Converger branches on them yet; the WhatsApp adapters declare `:media` and `:templates`, see [#68](https://github.com/AimTune/converger/issues/68) for typed messages). |
 | `activity_types: [...]` | The activity types `deliver_activity/2` renders natively; see [capabilities and downgrade](#capabilities-and-downgrade). |
+| `message_types: [...]` or `message_types: :all` | The Protocol v1 message types (`card`, `buttons`, `tool_call`, ...) `deliver_activity/2` renders natively from `activity.message_type` and `activity.payload`; see [capabilities and downgrade](#capabilities-and-downgrade). |
 
 `Converger.Channels.Adapter.types_with/1` lists the registered types with a capability, and `capability?/2` checks one type.
 
@@ -402,6 +403,9 @@ def capabilities, do: [:inbound, :outbound, activity_types: ~w(message)]
 ```
 
 The pipeline (`Converger.Activities.Downgrade`) hands the adapter only those types. Any other type is turned into a `message` with a text rendering (`"user reacted with 👍"`, `"(edited) new text"`, `"user deleted a message"`), or skipped when it has no text (typing, a removed reaction, an event without text), or skipped altogether when the channel config sets `"unsupported_activities": "skip"`. Skipped activities get no delivery row. An adapter without an `activity_types` entry receives every client type, as before [#28](https://github.com/AimTune/converger/issues/28). List a type only when `deliver_activity/2` really renders it (WhatsApp would need the target's `wamid` to send a native reaction).
+
+Typed messages ([#68](https://github.com/AimTune/converger/issues/68)) are planned the same way with a `message_types:` entry. Without one, an adapter that lists `activity_types` renders none: it receives a plain `message` whose `text` is the fallback (`message_type` and `payload` nil), and nothing for types without one (tool traces unless the channel sets `show_tool_traces: true`, GenUI chunks, skills). An adapter with neither entry forwards the canonical activity and gets every message type as is. Declare `message_types: ~w(buttons card)` only once `deliver_activity/2` renders them from `activity.payload` ([vocabulary](../protocol/messages.md)).
+
 
 ## 6. Delivery errors
 

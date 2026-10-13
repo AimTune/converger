@@ -41,6 +41,8 @@ defmodule ConvergerWeb.ConvergerAPI.ActivityJSON do
       conversationId: canonical.conversation_id,
       channelData: canonical.metadata,
       replyToId: Map.get(canonical, :reply_to_id),
+      messageType: Map.get(canonical, :message_type),
+      payload: Map.get(canonical, :payload),
       editedAt: Map.get(canonical, :edited_at),
       deletedAt: Map.get(canonical, :deleted_at)
     }

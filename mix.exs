@@ -107,7 +107,8 @@ defmodule Converger.MixProject do
        compile: false,
        depth: 1},
       {:lazy_html, ">= 0.1.0", only: :test},
-      {:jsv, "~> 0.26", only: :test},
+      # Protocol v1 JSON Schemas: typed message payloads are validated on write (#68).
+      {:jsv, "~> 0.26"},
       # Discord Gateway client (ADR-0055); also the WebSocket client of the tests.
       {:mint_web_socket, "~> 1.0"},
       {:gettext, "~> 1.0"},
