@@ -107,8 +107,8 @@ All prod only. Boolean values accept `true`, `1`, `yes`, `on` (case-insensitive)
 
 See [Outbound webhooks](../webhooks.md#ssrf-protection). The same guard, and these two variables, apply to
 [platform event webhook](../platform-webhooks.md) subscriptions and to the broker
-hosts of [broker channels](../channels/brokers.md#security) (`kafka` brokers, the `rabbitmq` URL host, the `mqtt` host): allow a
-private Kafka, RabbitMQ or MQTT broker with `WEBHOOK_ALLOWED_TARGETS`.
+hosts of [broker channels](../channels/brokers.md#security) (`kafka` brokers, the `rabbitmq` and `redis_streams` URL hosts, the `nats` servers, the `mqtt` host): allow a
+private broker with `WEBHOOK_ALLOWED_TARGETS`.
 
 ## Platform event webhooks
 
@@ -125,8 +125,9 @@ Retries use the shared `:retry_policy`; the event log is pruned after `WEBHOOK_E
 
 ## Broker channels
 
-Consumers of the `kafka`, `rabbitmq` and `mqtt` channel types, and the Gateway connections of `discord` channels with
-`gateway: true` ([Broker channels](../channels/brokers.md#consumers-in-a-cluster), [Discord Gateway mode](../channels/discord.md#gateway-mode)).
+Consumers of the `kafka`, `rabbitmq`, `nats`, `redis_streams` and `mqtt` channel types, and the Gateway connections of
+`discord` channels with `gateway: true` ([Broker channels](../channels/brokers.md#consumers-in-a-cluster),
+[Discord Gateway mode](../channels/discord.md#gateway-mode)).
 
 | Variable | Default | Environment | Meaning |
 | --- | --- | --- | --- |
@@ -325,6 +326,8 @@ Compose also sets `PORT=4000`, `OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collecto
 | `CHECK_ORIGIN` | `test/converger_web/check_origin_config_test.exs` | Exercises the runtime parsing. |
 | `KAFKA_BROKERS` | `test/converger/channels/kafka_integration_test.exs` (`--only kafka`) | Kafka bootstrap brokers, default `localhost:9092`. See [running the broker tests](../channels/brokers.md#running-the-broker-tests). |
 | `RABBITMQ_URL`, `RABBITMQ_USERNAME`, `RABBITMQ_PASSWORD` | `test/converger/channels/rabbitmq_integration_test.exs` (`--only rabbitmq`) | RabbitMQ broker, default `amqp://localhost:5672` with `guest` / `guest`. |
+| `NATS_URL` | `test/converger/channels/nats_integration_test.exs` (`--only nats`) | NATS server with JetStream, default `nats://localhost:4222`. |
+| `REDIS_URL` | `test/converger/channels/redis_streams_integration_test.exs` (`--only redis_streams`) | Redis server, default `redis://localhost:6379`. |
 | `MQTT_HOST`, `MQTT_PORT` | `test/converger/channels/mqtt_integration_test.exs` (`--only mqtt`) | MQTT broker without authentication, default `localhost` / `1883`. See [running the MQTT tests](../channels/mqtt.md#running-the-mqtt-tests). |
 
 ## Application configuration (config/*.exs)

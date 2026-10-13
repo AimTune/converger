@@ -1,8 +1,9 @@
 defmodule Converger.Channels.Broker do
   @moduledoc """
-  Broker channels: message brokers (Kafka, RabbitMQ, MQTT) as first-class
-  channels, and the consumers of every channel whose inbound messages
-  Converger pulls instead of receiving webhooks (the Discord Gateway).
+  Broker channels: message brokers (Kafka, RabbitMQ, NATS JetStream, Redis
+  Streams, MQTT) as first-class channels, and the consumers of every channel
+  whose inbound messages Converger pulls instead of receiving webhooks (the
+  Discord Gateway).
 
   A broker channel produces the activities the pipeline delivers to it to a
   topic or exchange (`deliver_activity/2`), and consumes a topic or queue for
@@ -57,17 +58,19 @@ defmodule Converger.Channels.Broker do
   @typedoc """
   What a broker adapter extracts from a consumed `Broadway.Message`:
 
-    * `:payload` - the message body
+    * `:payload` - the message body (nil when the message has none, e.g. a
+      Redis stream entry without a `payload` field)
     * `:message_id` - the broker message id: a stable id of this message,
       the same on every redelivery (Kafka `topic/partition/offset`, the AMQP
-      `message_id` property), or nil when the broker has none
+      `message_id` property, the JetStream `stream/sequence`, the Redis
+      `stream/entry id`), or nil when the broker has none
     * `:source` - where it was consumed from, for logs and dead-letter
       headers (`"topic/partition/offset"`, the queue name)
     * `:key` - the broker's message key (Kafka), kept on dead-lettering
     * `:headers` - the message headers (`[{name, value}]`)
   """
   @type info :: %{
-          required(:payload) => binary(),
+          required(:payload) => binary() | nil,
           required(:message_id) => String.t() | nil,
           required(:source) => String.t(),
           optional(:key) => binary() | nil,

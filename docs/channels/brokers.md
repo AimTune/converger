@@ -1,6 +1,6 @@
 ---
 title: Broker channels
-description: Kafka, RabbitMQ and MQTT as first-class channels - when to use a broker channel instead of the Broadway pipeline transport, the message envelope, consumers, idempotency, dead letters, cluster behaviour and how to run the broker tests.
+description: Kafka, RabbitMQ, NATS JetStream, Redis Streams and MQTT as first-class channels - when to use a broker channel instead of the Broadway pipeline transport, the message envelope, consumers, idempotency, dead letters, cluster behaviour and how to run the broker tests.
 sidebar_position: 3.5
 ---
 
@@ -13,24 +13,25 @@ broker channel types are:
 | --- | --- | --- |
 | `kafka` | Apache Kafka (and Kafka-compatible brokers such as Redpanda) | [Kafka](kafka.md) |
 | `rabbitmq` | RabbitMQ (AMQP 0-9-1) | [RabbitMQ](rabbitmq.md) |
+| `nats` | NATS JetStream | [NATS JetStream](nats.md) |
+| `redis_streams` | Redis Streams with consumer groups | [Redis Streams](redis-streams.md) |
 | `mqtt` | MQTT 3.1.1 brokers (Mosquitto, EMQX, HiveMQ, AWS IoT Core, ...) | [MQTT](mqtt.md) |
-| `nats` | NATS JetStream | planned ([#42](https://github.com/AimTune/converger/issues/42)) |
-| `redis_streams` | Redis Streams with consumer groups | planned ([#42](https://github.com/AimTune/converger/issues/42)) |
 
-The design is recorded in [ADR-0047](../adr/0047-broker-channels-kafka-and-rabbitmq.md); MQTT, and the generalisation of
-the consumers that also runs [Discord Gateway](discord.md#gateway-mode) connections, in
-[ADR-0055](../adr/0055-mqtt-channel-and-discord-gateway.md).
+The design is recorded in [ADR-0047](../adr/0047-broker-channels-kafka-and-rabbitmq.md) (Kafka, RabbitMQ and the shared
+machinery), [ADR-0054](../adr/0054-nats-and-redis-streams-channels.md) (NATS, Redis Streams) and
+[ADR-0055](../adr/0055-mqtt-channel-and-discord-gateway.md) (MQTT, and the generalisation of the consumers that also
+runs [Discord Gateway](discord.md#gateway-mode) connections).
 
 ## Pipeline transport or broker channel?
 
-Kafka and RabbitMQ appear in Converger in two unrelated roles. Pick by what you want to exchange:
+Kafka and RabbitMQ appear in Converger in two unrelated roles (NATS and Redis Streams only as broker channels). Pick by what you want to exchange:
 
 | | Pipeline transport | Broker channel |
 | --- | --- | --- |
-| What it is | The transport of the [Broadway pipeline backend](../architecture/delivery-pipeline.md#broadway): an internal queue between "activity committed" and "deliver to channels" | A channel type (`kafka`, `rabbitmq`) with its own config, modes, deliveries and routing rules |
+| What it is | The transport of the [Broadway pipeline backend](../architecture/delivery-pipeline.md#broadway): an internal queue between "activity committed" and "deliver to channels" | A channel type (`kafka`, `rabbitmq`, `nats`, `redis_streams`) with its own config, modes, deliveries and routing rules |
 | Who reads the messages | Converger itself, and only Converger | Your services |
 | Message content | `{"activity_id", "channel_id", "channel_type"}`: internal pointers, meaningless outside Converger | The canonical activity JSON plus `tenant_id`, `channel_id` and `conversation_id` |
-| Direction | Internal, one way | Inbound (consume `topic_in` / a queue) and outbound (produce to `topic_out` / an exchange) |
+| Direction | Internal, one way | Inbound (consume a topic, queue or stream) and outbound (produce to a topic, exchange, subject or stream) |
 | Configured by | The operator, once per deployment (`config :converger, :pipeline`), all tenants share it | Each tenant, per channel, in the admin panel, portal or API |
 | Tracking | None of its own (deliveries are tracked per target channel) | Deliveries per activity, retries, circuit breaker, dead letters, health checks |
 | Durability | Not durable: pushed after commit ([durability](../architecture/delivery-pipeline.md#durability)) | Outbound: deliveries go through the durable Oban pipeline like every channel. Inbound: at-least-once with idempotent activity creation |
@@ -68,14 +69,18 @@ flowchart LR
   TO --> EXT
 ```
 
-- **Inbound** (modes `inbound` and `duplex`): a consumer reads `topic_in` (Kafka, MQTT) or `queue` (RabbitMQ) and passes every
+- **Inbound** (modes `inbound` and `duplex`): a consumer reads `topic_in` (Kafka), `queue` (RabbitMQ), a durable pull
+  consumer on `stream` / `subject_in` (NATS JetStream), `stream_in` with a consumer group (Redis) or a subscription to
+  the topic filter `topic_in` (MQTT) and passes every
   message to `Converger.Inbound.receive_message/3`, the path of every inbound message (webhooks, WebSocket clients). The
   activity is created in a conversation of the channel, or in the conversation named by the message's `conversation_id`,
   and routing rules, middleware and deliveries apply to it as to any other inbound message.
 - **Outbound** (modes `outbound` and `duplex`): the pipeline delivers activities to the channel like to any channel
   (Oban jobs, retry policy, circuit breaker, rate limit, dead letters), and the adapter produces the envelope to
-  `topic_out` (Kafka, keyed by `conversation_id`) or publishes it to `exchange` with `routing_key` (RabbitMQ, with
-  publisher confirms), or publishes it with QoS 1 to the conversation's `topic_out` (MQTT, waiting for the `PUBACK`). A delivery is `sent` once the broker has acknowledged the message.
+  `topic_out` (Kafka, keyed by `conversation_id`), publishes it to `exchange` with `routing_key` (RabbitMQ, with
+  publisher confirms), publishes it to `subject_out` (NATS, JetStream publish acknowledged by the stream), appends it
+  to `stream_out` (Redis, `XADD`) or publishes it with QoS 1 to the conversation's `topic_out` (MQTT, waiting for the
+  `PUBACK`). A delivery is `sent` once the broker has acknowledged the message.
 - **No echo:** a message consumed from a channel is not produced back to the same channel, although the channel is the
   primary channel of the conversation it created. Replies in the conversation (an agent's, a bot's) are.
 
@@ -145,7 +150,7 @@ echo 'cust-1:{"text":"Where is my order?","participant":{"external_id":"cust-1"}
 
 Inbound processing is **at-least-once with idempotent activity creation**:
 
-1. A message is acknowledged (Kafka: its offset committed; RabbitMQ: `basic.ack`; MQTT: `PUBACK`) only after it was accepted or written
+1. A message is acknowledged (Kafka: its offset committed; RabbitMQ: `basic.ack`; NATS: `+ACK`; Redis: `XACK`; MQTT: `PUBACK`) only after it was accepted or written
    to the dead-letter destination. A crash or a restart before that redelivers it.
 2. Every message gets an idempotency key: the envelope's `idempotency_key`, else `<type>:<broker message id>`:
 
@@ -153,16 +158,19 @@ Inbound processing is **at-least-once with idempotent activity creation**:
    | --- | --- | --- |
    | `kafka` | `topic/partition/offset` | `kafka:crm.in/2/41` |
    | `rabbitmq` | the AMQP `message_id` property | `rabbitmq:9b1c...` |
+   | `nats` | `stream/stream sequence` | `nats:CRM/41` |
+   | `redis_streams` | `stream/entry id` | `redis_streams:bot.in/1760000000000-0` |
    | `mqtt` | none (packet ids are reused): the SHA-256 of topic and payload, see [MQTT idempotency](mqtt.md#idempotency) | `mqtt:5e2a...` |
 
 3. A redelivered message carries the same key and is recognised as a duplicate: no second activity, no second delivery
    (`converger.inbound.received.count` with `outcome: duplicate`).
 
-Consumers therefore resume from the committed offset after a restart, and a replay (a reset consumer group, a message
-redelivered by RabbitMQ) never duplicates activities. A RabbitMQ message without `message_id` and without
+Consumers therefore resume from the committed position after a restart, and a replay (a reset consumer group, a
+message redelivered by RabbitMQ, a recreated NATS durable consumer, a rewound Redis group) never duplicates activities. A RabbitMQ message without `message_id` and without
 `idempotency_key` has no stable id: it is accepted again when it is redelivered, so set `message_id` when publishing.
-The Kafka offset-based key does not recognise a message a producer wrote twice (a producer retry gets a new offset):
-send an `idempotency_key` to cover that.
+The Kafka offset, NATS sequence and Redis entry id keys do not recognise a message a producer wrote twice (a producer
+retry gets a new position): send an `idempotency_key` to cover that (NATS: or set `Nats-Msg-Id`, which the stream
+deduplicates within its duplicate window).
 
 ## Poison messages and retries
 
@@ -177,20 +185,22 @@ The dead-letter destination is per channel:
 | --- | --- | --- |
 | `kafka` | topic `dlq_topic` (`<topic_in>.dlq`) | the original key, value and headers, plus `x-converger-error`, `x-converger-source` (`topic/partition/offset`) and `x-converger-channel-id` |
 | `rabbitmq` | queue `dlq_queue` (`<queue>.dlq`), through the default exchange | the original body, `message_id` and headers, plus the same `x-converger-*` headers; published persistent, with confirms and `mandatory` |
+| `nats` | subject `dlq_subject` (`<subject_in>.dlq`), JetStream publish | the original body and headers, plus `X-Converger-Error`, `X-Converger-Source` (`stream/sequence`), `X-Converger-Channel-Id` |
+| `redis_streams` | stream `dlq_stream` (`<stream_in>.dlq`), `XADD` | the original fields (`payload` and the others), plus `x-converger-error`, `x-converger-source` (`stream/entry id`), `x-converger-channel-id` |
 | `mqtt` | topic `topic_dlq` (`converger/dlq/{channel_id}`) | a JSON object with `error`, `source` (the topic), `channel_id`, `message_id` and the original `payload` (MQTT 3.1.1 has no headers), QoS 1 |
 
 Writing to the dead-letter destination is retried (same backoff, at most 30 s between attempts) until it succeeds, and
 only then is the message acknowledged, so a message is never dropped. While the dead-letter destination is unavailable
 the consumer stalls on that message (Kafka: that partition) and logs `Broker dead-letter write failed, retrying`.
-Create the dead-letter topic or queue before you create the channel (RabbitMQ: or set `declare: true`), or the consumer
-stalls on the first poison message. To replay dead letters, fix the cause and produce them back to `topic_in` / the
+Create the dead-letter topic, queue or stream before you create the channel (RabbitMQ, NATS: or set `declare: true`;
+Redis creates it on the first `XADD`), or the consumer stalls on the first poison message. To replay dead letters, fix the cause and produce them back to `topic_in` / the
 queue (`kafka-console-consumer` piped to `kafka-console-producer`, the RabbitMQ shovel or management UI "move
 messages"); their idempotency key changes with the new offset unless the envelope carries an `idempotency_key`.
 
 Ordering: Kafka messages of one partition are processed in order (offsets are committed in order); a message waiting
 for retries holds back the rest of its partition. Outbound, the activities of a conversation are produced to one
-partition (keyed by `conversation_id`) in the order the pipeline delivers them. RabbitMQ consumers default to
-`concurrency: 1`, which keeps the queue order.
+partition (keyed by `conversation_id`) in the order the pipeline delivers them. RabbitMQ, NATS and Redis consumers default
+to `concurrency: 1`, which keeps the queue or stream order.
 
 ## Consumers in a cluster
 
@@ -223,7 +233,10 @@ Producing does not need a cluster-wide singleton: each node keeps one producer c
 closed after 15 minutes without deliveries.
 
 Kafka consumer groups are per channel (`group_id`, default `converger-<channel id>`): because the consumer is a
-singleton, the group has one member, which reads every partition.
+singleton, the group has one member, which reads every partition. The same holds for the NATS durable consumer
+(`durable_name`) and the Redis consumer group (`group`). A Redis consumer is named after its node: when the channel's
+consumer moves to another node, the new one takes over the entries the old one left pending
+([pending-entry recovery](redis-streams.md#inbound)).
 
 ## Operations
 
@@ -240,47 +253,52 @@ singleton, the group has one member, which reads every partition.
 
 `Converger.Channels.Consumers.node_of(channel_id)` (from a remote console) tells where a channel's consumer runs. Health
 checks work as for other external channels: the delivery failure rate, and for idle channels a broker probe (Kafka
-metadata for the topics, a RabbitMQ connection).
+metadata for the topics, a RabbitMQ connection, a NATS connection and stream info, a Redis `PING`).
 
 Configuration: [configuration](../operations/configuration.md#broker-channels).
 
 ## Security
 
-- The whole channel `config` (including `sasl_password` / `password`) is encrypted at rest and redacted in audit logs
-  ([ADR-0012](../adr/0012-secrets-at-rest-and-audit-redaction.md)); keys ending in `_password` are redacted like
-  `_secret` and `_token`.
+- The whole channel `config` (including `sasl_password`, `password`, `token`, `nkey_seed` and `creds`) is encrypted at
+  rest, and these keys are redacted in audit logs ([ADR-0012](../adr/0012-secrets-at-rest-and-audit-redaction.md)); keys
+  ending in `_password` are redacted like `_secret` and `_token`.
 - Broker hosts a tenant configures go through the same SSRF guard as webhook URLs
   ([`UrlGuard`](https://github.com/AimTune/converger/blob/main/lib/converger/channels/url_guard.ex)): private, loopback
   and link-local addresses are rejected when the channel is saved and again when a connection is opened. Brokers usually
   run on a private network: allow them with `WEBHOOK_ALLOWED_TARGETS` (host names or CIDR ranges, for example
   `kafka-*.internal,10.20.0.0/16`). The guard checks the configured bootstrap hosts; Kafka clients then connect to the
   addresses the cluster advertises.
-- Use TLS (`tls: true` for Kafka and MQTT, an `amqps://` URL for RabbitMQ) and SASL or broker credentials with access limited to
-  the channel's topics or queues.
-- A message on `topic_in` is trusted like a signed inbound webhook: anyone who can produce to it can write into the
+- Use TLS (`tls: true` for Kafka, NATS and MQTT, an `amqps://` URL for RabbitMQ, a `rediss://` URL for Redis) and SASL or
+  broker credentials (NATS: user/password, token, NKey or creds; Redis: an ACL user) with access limited to the
+  channel's topics, queues, subjects or streams.
+- A message on the inbound topic, queue, subject or stream is trusted like a signed inbound webhook: anyone who can produce to it can write into the
   tenant's conversations (`conversation_id` is checked against the channel's tenant only). Restrict producer ACLs.
 
 ## Platform notes
 
 The Kafka client computes record checksums (CRC32C) with a NIF (`crc32cer`) that is built with `cmake` and is not built
 on Windows. Kafka channels work on Linux and macOS (the Docker image installs `cmake` in its build stage); on a Windows
-development machine, run Converger, or at least the Kafka tests, in a container or WSL. RabbitMQ channels work
-everywhere.
+development machine, run Converger, or at least the Kafka tests, in a container or WSL. RabbitMQ, NATS and Redis Streams
+channels work everywhere.
 
 ## Running the broker tests
 
 Unit tests (config, envelope, idempotency, dead-lettering, consumer lifecycle) run with `mix test` and need no broker.
-The end-to-end suites run against real brokers and are excluded by default (tags `:kafka`, `:rabbitmq` and `:mqtt`). They check
+The end-to-end suites run against real brokers and are excluded by default (tags `:kafka`, `:rabbitmq`, `:nats`, `:redis_streams` and `:mqtt`). They check
 that a message produced to `topic_in` reaches a WebSocket client through a routing rule, that the WebSocket reply is
 produced to `topic_out`, that a restarted consumer resumes from its committed offsets without duplicates, and that
-poison messages reach the dead-letter destination.
+poison messages reach the dead-letter destination; the Redis suite also checks that entries a dead consumer left pending are recovered.
 
 ```bash
 docker run -d --name kafka -p 9092:9092 apache/kafka:3.9.1
 docker run -d --name rabbitmq -p 5672:5672 rabbitmq:3.13-management
+docker run -d --name nats -p 4222:4222 nats:2.10 -js
+docker run -d --name redis -p 6379:6379 redis:7
 
 KAFKA_BROKERS=localhost:9092 mix test --only kafka
 RABBITMQ_URL=amqp://localhost:5672 mix test --only rabbitmq   # RABBITMQ_USERNAME / RABBITMQ_PASSWORD, default guest
+NATS_URL=nats://localhost:4222 mix test --only nats
+REDIS_URL=redis://localhost:6379 mix test --only redis_streams
 ```
 
 The MQTT suite: see [running the MQTT tests](mqtt.md#running-the-mqtt-tests).
@@ -290,12 +308,12 @@ docker run -d --name mosquitto -p 1883:1883 eclipse-mosquitto:2 mosquitto -c /mo
 MQTT_HOST=localhost MQTT_PORT=1883 mix test --only mqtt
 ```
 
-The suites create uniquely named topics and queues and allow private broker addresses for their duration. CI runs them
+The suites create uniquely named topics, queues, streams and subjects and allow private broker addresses for their duration. CI runs them
 in the optional "Broker channel suites" job (`.github/workflows/ci.yml`).
 
 ## Related
 
-- [Kafka](kafka.md), [RabbitMQ](rabbitmq.md), [MQTT](mqtt.md)
+- [Kafka](kafka.md), [RabbitMQ](rabbitmq.md), [NATS JetStream](nats.md), [Redis Streams](redis-streams.md), [MQTT](mqtt.md)
 - [Channels and adapters](overview.md), [Routing rules](../concepts/routing-rules.md)
 - [Delivery pipeline](../architecture/delivery-pipeline.md) (the pipeline transport)
-- [ADR-0047](../adr/0047-broker-channels-kafka-and-rabbitmq.md)
+- [ADR-0047](../adr/0047-broker-channels-kafka-and-rabbitmq.md), [ADR-0054](../adr/0054-nats-and-redis-streams-channels.md)

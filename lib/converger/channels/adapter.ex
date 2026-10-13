@@ -443,6 +443,8 @@ defmodule Converger.Channels.Adapter do
     Converger.Channels.Adapters.HttpPull,
     Converger.Channels.Adapters.Kafka,
     Converger.Channels.Adapters.RabbitMQ,
+    Converger.Channels.Adapters.Nats,
+    Converger.Channels.Adapters.RedisStreams,
     Converger.Channels.Adapters.Mqtt
   ]
 

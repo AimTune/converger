@@ -263,10 +263,10 @@ jobs:
         run: mix test test/converger/uploads/storage_integration_test.exs --only minio --only azurite
 
   brokers:
-    name: Broker channel suites (Kafka, RabbitMQ, MQTT)
+    name: Broker channel suites (Kafka, RabbitMQ, NATS, Redis Streams, MQTT)
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    # Optional: depends on three broker containers starting on the runner.
+    # Optional: depends on five broker containers starting on the runner.
     continue-on-error: true
 
     services:
@@ -294,6 +294,16 @@ jobs:
           --health-cmd "rabbitmq-diagnostics -q ping"
           --health-interval 5s --health-timeout 10s --health-retries 20
 
+      # Service containers cannot take arguments, and the nats image does not
+      # enable JetStream by default: the NATS server is started in a step below.
+
+      redis:
+        image: redis:7
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+
     steps:
       - uses: actions/checkout@v7
 
@@ -318,16 +328,21 @@ jobs:
       - run: mix deps.get
       - run: mix compile --warnings-as-errors
 
-      # test/converger/channels/{kafka,rabbitmq,mqtt}_integration_test.exs: an
+      - name: Start NATS with JetStream
+        run: docker run -d --name nats -p 4222:4222 nats:2.10 -js
+
+      # test/converger/channels/{kafka,rabbitmq,nats,redis_streams,mqtt}_integration_test.exs: an
       # external produce reaches a WebSocket client, the reply is produced,
       # restarts resume without duplicates, poison messages are dead-lettered.
       - name: Run the broker channel suites
         env:
           KAFKA_BROKERS: localhost:9092
           RABBITMQ_URL: amqp://localhost:5672
+          NATS_URL: nats://localhost:4222
+          REDIS_URL: redis://localhost:6379
           MQTT_HOST: localhost
           MQTT_PORT: "1883"
-        run: mix test --only kafka --only rabbitmq --only mqtt --warnings-as-errors
+        run: mix test --only kafka --only rabbitmq --only nats --only redis_streams --only mqtt --warnings-as-errors
 
   cluster:
     name: Two-node cluster suite
