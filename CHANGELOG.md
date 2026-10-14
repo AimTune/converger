@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### Agent SDK for TypeScript: `@converger/agent`, `create-converger-agent` and a Claude tool-loop example (#67)
+
+- `packages/agent-ts` (`@converger/agent`, not yet published): `createAgent({url, token | getToken, group})` serves every
+  conversation of a channel from one channel-scoped socket with `onTurn(async (turn, reply) => ...)`. `reply.text`,
+  `message`, `stream` (genui text chunks), `toolCall`, `ui`, `ask` (interrupt / resume from any channel), `typing`,
+  `end`; `run` frames around handlers; turns serialised per conversation; agent groups; reconnect with jittered
+  backoff and per-conversation watermarks; acked, idempotent, paced sends; `turn.history()` over `sync`;
+  `channelTokenProvider` from the channel secret; `@converger/agent/testing` with a fake server
+  ([ADR-0067](docs/adr/0067-agent-sdk-api-and-wire-mapping.md)).
+- `packages/create-converger-agent`: `npx create-converger-agent my-agent` scaffolds a TypeScript agent with a sample
+  handler, `.env.example` and a test against the fake server.
+- `examples/agents/llm-tool-loop-ts`: an Anthropic tool loop (`claude-sonnet-5-5`) with streamed tokens, a tool trace
+  and an approval through `reply.ask`.
+- CI: `.github/workflows/agent-ts.yml` (typecheck, unit tests, build, template and example); a manual-dispatch
+  `agent-ts-publish` workflow.
+- Docs: [Agent SDK](docs/sdk/agent.md).
+
 ### Agent sockets and the bot relay: channel-scoped Protocol v1 connections (#64)
 
 - A `scope: "channel"` token of a `websocket` channel opens a channel-scoped connection on the native endpoint:

@@ -1,0 +1,13 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "entryPoints": ["src/index.ts", "src/testing/index.ts"],
+  "out": "docs-api",
+  "name": "@converger/agent",
+  "readme": "README.md",
+  "tsconfig": "tsconfig.test.json",
+  "excludePrivate": true,
+  "excludeInternal": true,
+  "includeVersion": true,
+  "treatWarningsAsErrors": false,
+  "validation": { "notExported": true, "invalidLink": true }
+}

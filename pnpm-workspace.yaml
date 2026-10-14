@@ -3,6 +3,7 @@
 packages:
   - "packages/*"
   - "examples/typescript/*"
+  - "examples/agents/*"
 
 # Dependencies allowed to run install scripts.
 allowBuilds:

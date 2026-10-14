@@ -82,6 +82,7 @@ supersedes the old one and both are linked. Read
 
 | ADR | Decision | Status | Issue / PR |
 | --- | --- | --- | --- |
+| [0067](0067-agent-sdk-api-and-wire-mapping.md) | Agent SDKs share one `onTurn(turn, reply)` API over the channel-scoped socket: `reply.stream` as genui text chunks, `reply.ask` as interrupt/resume, `run` frames around handlers, agent groups, watermark resume and acked sends | Accepted | [#67](https://github.com/AimTune/converger/issues/67) / (this PR) |
 | [0052](0052-server-side-sdks-in-the-monorepo-with-a-shared-conformance-suite.md) | Server-side SDKs (Python, Go, Elixir) in `packages/` of this repository, a shared conformance suite (REST, errors, protocol resume state machine, webhook signature vectors generated from the server signer), generator-shaped hand-written models until #45, per-language tag releases | Accepted | [#47](https://github.com/AimTune/converger/issues/47) / [#144](https://github.com/AimTune/converger/pull/144) |
 | [0051](0051-typescript-sdk-transport-abstraction-and-outbox.md) | TypeScript SDK `@converger/client`: one session core over native / Phoenix / SSE transports, a persistent clientId outbox resent once after the replay, hand-written types in a generator-compatible shape until #45 | Accepted | [#46](https://github.com/AimTune/converger/issues/46) / [#142](https://github.com/AimTune/converger/pull/142) |
 
