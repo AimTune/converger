@@ -1,5 +1,5 @@
 defmodule ConvergerWeb.Protocol.FeedTest do
-  use Converger.DataCase, async: true
+  use Converger.DataCase, async: false
 
   import Converger.TenantsFixtures
   import Converger.ChannelsFixtures
@@ -69,8 +69,7 @@ defmodule ConvergerWeb.Protocol.FeedTest do
   end
 
   test "replay is bounded by replayMax and reports truncation", ctx do
-    Application.put_env(:converger, ConvergerWeb.Protocol, replay_max: 2)
-    on_exit(fn -> Application.delete_env(:converger, ConvergerWeb.Protocol) end)
+    ConvergerWeb.ProtocolConfig.put(replay_max: 2)
 
     {frames, feed} = Feed.replay(Feed.new(ctx.conversation.id, "bob"), nil, 4)
 

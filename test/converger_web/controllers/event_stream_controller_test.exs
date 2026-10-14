@@ -99,8 +99,7 @@ defmodule ConvergerWeb.ConvergerAPI.EventStreamControllerTest do
   end
 
   test "sends heartbeats", ctx do
-    Application.put_env(:converger, ConvergerWeb.Protocol, heartbeat_interval_ms: 1_000)
-    on_exit(fn -> Application.delete_env(:converger, ConvergerWeb.Protocol) end)
+    ConvergerWeb.ProtocolConfig.put(heartbeat_interval_ms: 1_000)
 
     client = open(ctx, "")
     assert {%{id: nil, frame: %{"type" => "heartbeat"}}, _client} = Client.sse_recv(client, 1_500)
