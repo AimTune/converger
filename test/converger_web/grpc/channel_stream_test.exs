@@ -344,12 +344,7 @@ defmodule ConvergerWeb.GRPC.ChannelStreamTest do
     end
 
     test "idle streams are closed with 4408 after heartbeats", ctx do
-      Application.put_env(:converger, ConvergerWeb.Protocol,
-        heartbeat_interval_ms: 1_000,
-        idle_timeout_ms: 1_500
-      )
-
-      on_exit(fn -> Application.delete_env(:converger, ConvergerWeb.Protocol) end)
+      ConvergerWeb.ProtocolConfig.put(heartbeat_interval_ms: 1_000, idle_timeout_ms: 1_500)
 
       {_welcome, client} = join(ctx, token(ctx.channel, ctx.conversation))
       assert %{"type" => "heartbeat"} = Client.recv(client, 1_500)

@@ -359,12 +359,7 @@ defmodule Converger.ChativaCompatTest do
   end
 
   test "a heartbeat is a WebSocket ping, which keeps the idle connection open", ctx do
-    Application.put_env(:converger, ConvergerWeb.Protocol,
-      heartbeat_interval_ms: 1_000,
-      idle_timeout_ms: 1_500
-    )
-
-    on_exit(fn -> Application.delete_env(:converger, ConvergerWeb.Protocol) end)
+    ConvergerWeb.ProtocolConfig.put(heartbeat_interval_ms: 1_000, idle_timeout_ms: 1_500)
 
     {port, _welcome, _} = start_chativa(ctx, token(ctx, "alice"))
 

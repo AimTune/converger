@@ -519,12 +519,7 @@ defmodule ConvergerWeb.ProtocolSocketTest do
     test "the server sends heartbeats on outbound silence and closes idle sockets with 4408",
          ctx do
       # The schema's minimum for both is 1 s.
-      Application.put_env(:converger, ConvergerWeb.Protocol,
-        heartbeat_interval_ms: 1_000,
-        idle_timeout_ms: 1_500
-      )
-
-      on_exit(fn -> Application.delete_env(:converger, ConvergerWeb.Protocol) end)
+      ConvergerWeb.ProtocolConfig.put(heartbeat_interval_ms: 1_000, idle_timeout_ms: 1_500)
 
       {_welcome, client} = join(ctx.port, token(ctx.channel, ctx.conversation))
       assert {%{"type" => "heartbeat"}, client} = Client.recv(client, 1_500)
@@ -787,12 +782,7 @@ defmodule ConvergerWeb.ProtocolSocketTest do
     end
 
     test "gets heartbeats as WebSocket pings", ctx do
-      Application.put_env(:converger, ConvergerWeb.Protocol,
-        heartbeat_interval_ms: 1_000,
-        idle_timeout_ms: 5_000
-      )
-
-      on_exit(fn -> Application.delete_env(:converger, ConvergerWeb.Protocol) end)
+      ConvergerWeb.ProtocolConfig.put(heartbeat_interval_ms: 1_000, idle_timeout_ms: 5_000)
 
       {_welcome, client} = join_mekik(ctx)
       assert {:ping, _client} = Client.recv(client, 1_500)

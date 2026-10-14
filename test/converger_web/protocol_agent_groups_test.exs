@@ -88,6 +88,29 @@ defmodule ConvergerWeb.ProtocolAgentGroupsTest do
     end
   end
 
+  # Exactly `n` user turns, however slowly they arrive (a loaded CI runner),
+  # then `quiet` ms without another one.
+  defp take(client, n, quiet \\ 300, acc \\ [])
+
+  defp take(client, 0, quiet, acc) do
+    {rest, client} = drain(client, quiet)
+    {Enum.reverse(acc) ++ rest, client}
+  end
+
+  defp take(client, n, quiet, acc) do
+    case Client.recv(client, 5_000) do
+      {%{"conversationId" => id, "frame" => %{"type" => "text", "from" => "user"} = frame},
+       client} ->
+        take(client, n - 1, quiet, [{id, frame["data"]["text"]} | acc])
+
+      {%{}, client} ->
+        take(client, n, quiet, acc)
+
+      {other, _client} ->
+        flunk("expected #{n} more turns, got #{inspect(other)}")
+    end
+  end
+
   # The settle delay of members that join from now on (restored after the test).
   defp settle(ms) do
     previous = Application.get_env(:converger, ConvergerWeb.Protocol, [])
@@ -235,19 +258,22 @@ defmodule ConvergerWeb.ProtocolAgentGroupsTest do
       # B joins, with a settle delay long enough for the turns below. Turns
       # committed before it is eligible stay with A, and B never receives A's
       # earlier turns.
-      settle(2_000)
+      settle(5_000)
       b = agent(ctx, "agent-b")
+      # B joined the group before its welcome: eligible by now + settle at the latest.
+      joined_at = System.monotonic_time(:millisecond)
       for conversation <- ctx.conversations, do: turn(ctx, conversation, "during settle")
-      {during_a, a} = drain(a, 50)
-      {during_b, b} = drain(b, 50)
+      {during_a, a} = take(a, length(ctx.conversations))
+      {during_b, b} = drain(b, 100)
       assert during_b == []
       assert length(during_a) == length(ctx.conversations)
 
-      Process.sleep(2_100)
+      # Wait out the rest of B's settle delay, measured from its join.
+      Process.sleep(max(joined_at + 5_200 - System.monotonic_time(:millisecond), 0))
 
       for conversation <- ctx.conversations, do: turn(ctx, conversation, "after")
-      {after_a, a} = drain(a)
-      {after_b, _b} = drain(b)
+      {after_a, a} = drain(a, 1_000)
+      {after_b, _b} = drain(b, 1_000)
 
       moved = served_by(after_b)
       assert MapSet.size(moved) in 1..(length(ctx.conversations) - 1)
