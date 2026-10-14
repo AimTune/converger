@@ -234,7 +234,7 @@ config :converger, Converger.Backbone.Kafka,
   producer_concurrency: 2,    # consumer group members per node and subscription
   fetch_config: [max_wait_time: 10],   # BroadwayKafka fetch options (ms an empty partition is waited for)
   receive_interval: 100,      # ms before a drained producer polls again
-  group_config: []            # BroadwayKafka group options (session_timeout_seconds, ...)
+  group_config: []            # BroadwayKafka group options; default session_timeout_seconds: 10, heartbeat_rate_seconds: 2
 
 config :converger, Converger.Backbone.Nats,
   servers: "nats://localhost:4222", username: nil, password: nil, token: nil, creds: nil, nkey_seed: nil,

@@ -40,7 +40,8 @@ defmodule Converger.Backbone.Kafka do
         producer_concurrency: 2,       # consumer group members per node and subscription
         fetch_config: [max_wait_time: 10],
         receive_interval: 100,
-        group_config: []               # BroadwayKafka group options
+        group_config: []               # BroadwayKafka group options (default
+                                       # session_timeout_seconds: 10, heartbeat_rate_seconds: 2)
 
   Set from `BACKBONE_KAFKA_*` in `config/runtime.exs`. Broker hosts come from
   the operator, so the webhook SSRF guard does not apply to them.
@@ -132,7 +133,13 @@ defmodule Converger.Backbone.Kafka do
            offset_reset_policy: start_offset(subscription),
            offset_commit_on_ack: true,
            client_config: client_config,
-           group_config: Keyword.get(config(), :group_config, []),
+           # A member that died (node kill) holds its partitions until its
+           # session times out: 10 s instead of BroadwayKafka's 30 s.
+           group_config:
+             Keyword.merge(
+               [session_timeout_seconds: 10, heartbeat_rate_seconds: 2],
+               Keyword.get(config(), :group_config, [])
+             ),
            # The producer fetches its partitions one after the other: an empty
            # partition must not hold the others up for BroadwayKafka's 1 s
            # default wait, and a drained producer polls again soon.

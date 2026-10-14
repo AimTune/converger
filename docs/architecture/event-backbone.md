@@ -127,6 +127,11 @@ place (`inline_attempts`, default 3), then parks the event as a `Converger.Worke
 retries it durably, and acknowledges the message only after that. If Postgres is unavailable too, the consumer
 keeps retrying with backoff instead of acknowledging: it blocks its partition or queue rather than lose the event.
 
+After a node dies, its unacknowledged events are redelivered to the other nodes: on Kafka once the dead member's
+session times out (10 s, `group_config`) and its partitions are reassigned, on NATS after `ack_wait_seconds`, on
+RabbitMQ as soon as the connection drops, on Native when Oban's Lifeline rescues the jobs. Until then those events
+are delayed, not lost.
+
 These guarantees are checked by one conformance suite that every implementation passes
 (`test/support/backbone_conformance.ex`): unchanged delivery, fan-out to every shared subscription, filters,
 retries with the effect applied once, duplicate publishes, broadcast subscriptions, per-key order (Kafka), and a
