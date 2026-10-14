@@ -2,26 +2,21 @@
 
 ## Unreleased
 
-### Python agent SDK `converger-agent` and the LangChain / LangGraph adapter (#67)
+### Agent SDKs for Go, .NET and Elixir (#67)
 
-- New package `packages/agent-python` (`converger-agent`, import `converger_agent`; dependency: `websockets`): one
-  channel-scoped Protocol v1 socket serves every conversation routed to a `websocket` bot channel. `Agent` (a
-  token, a token source or the channel secret; agent groups), `@agent.on_turn` with `Turn` (text, typed message, attachments,
-  participant, channel, meta, action, reply_to, `history()`) and `Reply` (`text`, `message`, `stream`, `ui`,
-  `tool_call`, `ask`, `typing`, `end`). `run {status}` around each turn; turns of a conversation serialised,
-  conversations concurrent; reconnect with jittered backoff and per-conversation `hello.watermarks`; message sends
-  idempotent by turn-derived `clientId` and re-sent after a reconnect; structured `ConvergerError`s; mid-session
-  token refresh; `abort` cancels the running turn; a typed answer resolves an open `ask`.
-- `converger_agent.langchain` (extra `[langchain]`): `serve(runnable)` maps `astream_events` v2 (token deltas to GenUI
-  streams, tool runs to `tool_call` traces, LangGraph `interrupt()` to `ask` and `Command(resume=...)`, thread id =
-  conversation id); `bridge_langserve(url)` serves a LangServe `/stream_events` runnable.
-- `converger_agent.testing.FakeServer`: an in-process fake of the channel-scoped endpoint for agent tests.
-- Example `examples/agents/langchain-faq`: a LangGraph + Claude FAQ agent with a tool and a "talk to a human"
-  interrupt, served to a WhatsApp channel and a web widget channel through one bot channel.
-- CI: agent SDK (Python 3.10, 3.13) and example jobs in the `SDKs` workflow, the end-to-end job runs
-  `run.sh agent-python` against a real server; manual release workflow `agent-sdk-python-release.yml` (not
-  published yet).
-- Docs: [Python agent SDK](docs/sdk/agent-python.md), [server-side SDKs](docs/sdk/server-sdks.md).
+- `packages/agent-go` (`github.com/AimTune/converger/packages/agent-go`), `packages/agent-dotnet` (`Converger.Agent`)
+  and `packages/agent-elixir` (`converger_agent`): a bot backend serves every conversation of a `websocket` channel
+  over one channel-scoped Protocol v1 connection. `onTurn` handlers get the turn (text, typed message, participant,
+  meta, tapped action) and reply with text (with chips), rich messages, `tool_call` traces, typing and `ask`
+  (an `interrupt` answered by `resume` or a tapped button, then `interrupt_resolved`). Runs are framed by
+  `run started`/`finished`/`error`; turns of one conversation are serialised; message sends are acked and
+  re-sent with their `clientId` after a reconnect; reconnects use jittered backoff and per-conversation
+  `hello.watermarks`. Not published yet.
+- `packages/conformance/agent.json`: the shared agent wire-exchange fixture (text turn, duplicates and bot frames,
+  ask with a queued turn, rich replies, refused send, reconnect with watermarks), run by each SDK against a fake
+  server with every agent frame validated against `frames/channel/client-envelope.schema.json`.
+- CI: `.github/workflows/agent-sdks.yml`. Docs: [Go](docs/sdk/agent-go.md), [.NET](docs/sdk/agent-dotnet.md),
+  [Elixir](docs/sdk/agent-elixir.md).
 
 ### chativa is the reference WebSocket client: mekik/1 profile, history cursor, conversation list (#65)
 
