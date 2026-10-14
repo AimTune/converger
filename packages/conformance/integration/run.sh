@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 # End-to-end SDK tests against a real Converger server.
 #
-#   packages/conformance/integration/run.sh [python] [go] [elixir]   (default: all three)
+#   packages/conformance/integration/run.sh [python] [go] [elixir] [agent-python]   (default: the first three)
 #
 # Needs the dev database (docker compose up -d db; set DB_NAME to use a
 # separate database, it is created and migrated), Elixir deps (mix deps.get)
 # and, per SDK, Go, Python 3.10+ (or Docker with PYTHON_DOCKER=1) and Elixir.
 # Starts the server with packages/conformance/integration/server.exs (which
-# creates one tenant, client channel and signed webhook channel per SDK),
+# creates one tenant, client channel and signed webhook channel per SDK,
+# plus a widget channel routed to a bot channel for the agent SDKs),
 # waits for it, runs each SDK's integration test, then stops the server.
 set -euo pipefail
 
@@ -53,6 +54,18 @@ for sdk in "${sdks[@]}"; do
           python:3.12-slim sh -c "pip install -q -e '.[test]' && python -m pytest -m integration -v" || status=1
       else
         (cd packages/client-python && CONVERGER_FIXTURES="$fixtures" python -m pytest -m integration -v) || status=1
+      fi
+      ;;
+    agent-python)
+      if [ "${PYTHON_DOCKER:-0}" = "1" ]; then
+        MSYS_NO_PATHCONV=1 docker run --rm \
+          -v "$root:/w" -w /w/packages/agent-python \
+          --add-host host.docker.internal:host-gateway \
+          -e CONVERGER_FIXTURES=/w/packages/conformance/integration/fixtures.json \
+          -e CONVERGER_BASE_URL="http://host.docker.internal:$port" \
+          python:3.12-slim sh -c "pip install -q -e '.[test]' && python -m pytest -m integration -v" || status=1
+      else
+        (cd packages/agent-python && CONVERGER_FIXTURES="$fixtures" python -m pytest -m integration -v) || status=1
       fi
       ;;
     go)

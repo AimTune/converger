@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+### Python agent SDK `converger-agent` and the LangChain / LangGraph adapter (#67)
+
+- New package `packages/agent-python` (`converger-agent`, import `converger_agent`; dependency: `websockets`): one
+  channel-scoped Protocol v1 socket serves every conversation routed to a `websocket` bot channel. `Agent` (a
+  token, a token source or the channel secret; agent groups), `@agent.on_turn` with `Turn` (text, typed message, attachments,
+  participant, channel, meta, action, reply_to, `history()`) and `Reply` (`text`, `message`, `stream`, `ui`,
+  `tool_call`, `ask`, `typing`, `end`). `run {status}` around each turn; turns of a conversation serialised,
+  conversations concurrent; reconnect with jittered backoff and per-conversation `hello.watermarks`; message sends
+  idempotent by turn-derived `clientId` and re-sent after a reconnect; structured `ConvergerError`s; mid-session
+  token refresh; `abort` cancels the running turn; a typed answer resolves an open `ask`.
+- `converger_agent.langchain` (extra `[langchain]`): `serve(runnable)` maps `astream_events` v2 (token deltas to GenUI
+  streams, tool runs to `tool_call` traces, LangGraph `interrupt()` to `ask` and `Command(resume=...)`, thread id =
+  conversation id); `bridge_langserve(url)` serves a LangServe `/stream_events` runnable.
+- `converger_agent.testing.FakeServer`: an in-process fake of the channel-scoped endpoint for agent tests.
+- Example `examples/agents/langchain-faq`: a LangGraph + Claude FAQ agent with a tool and a "talk to a human"
+  interrupt, served to a WhatsApp channel and a web widget channel through one bot channel.
+- CI: agent SDK (Python 3.10, 3.13) and example jobs in the `SDKs` workflow, the end-to-end job runs
+  `run.sh agent-python` against a real server; manual release workflow `agent-sdk-python-release.yml` (not
+  published yet).
+- Docs: [Python agent SDK](docs/sdk/agent-python.md), [server-side SDKs](docs/sdk/server-sdks.md).
+
 ### Agent sockets and the bot relay: channel-scoped Protocol v1 connections (#64)
 
 - A `scope: "channel"` token of a `websocket` channel opens a channel-scoped connection on the native endpoint:

@@ -1,14 +1,18 @@
 name: SDKs
 
 # Tests of the server-side SDKs in packages/ (Python, Go, Elixir) against the
-# shared conformance suite (packages/conformance), plus an end-to-end run of
-# every SDK against a real server. See docs/sdk/server-sdks.md.
+# shared conformance suite (packages/conformance), the Python agent SDK
+# (packages/agent-python) and its example (examples/agents/langchain-faq), plus
+# an end-to-end run of every SDK against a real server. See
+# docs/sdk/server-sdks.md and docs/sdk/agent-python.md.
 
 on:
   push:
     branches: [main]
     paths:
       - "packages/client-python/**"
+      - "packages/agent-python/**"
+      - "examples/agents/**"
       - "packages/client-go/**"
       - "packages/client-elixir/**"
       - "packages/conformance/**"
@@ -18,6 +22,8 @@ on:
   pull_request:
     paths:
       - "packages/client-python/**"
+      - "packages/agent-python/**"
+      - "examples/agents/**"
       - "packages/client-go/**"
       - "packages/client-elixir/**"
       - "packages/conformance/**"
@@ -55,6 +61,41 @@ jobs:
           python-version: ${{ matrix.python }}
       - run: pip install -e '.[test]'
       - run: python -m pytest -v
+
+  agent-python:
+    name: Agent SDK Python ${{ matrix.python }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # LangGraph interrupt tests skip below 3.11 (interrupt() needs 3.11+ under asyncio).
+        python: ["3.10", "3.13"]
+    defaults:
+      run:
+        working-directory: packages/agent-python
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+      - run: pip install -e '.[test,langchain]'
+      - run: python -m pytest -v
+
+  agent-example:
+    name: Example langchain-faq
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: examples/agents/langchain-faq
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - run: pip install -r requirements-test.txt
+      - run: python -m pytest -v
+        env:
+          FAQ_AGENT_FAKE_MODEL: "1"
 
   go:
     name: Go ${{ matrix.go }}
@@ -105,7 +146,7 @@ jobs:
   integration:
     name: End-to-end against the server
     runs-on: ubuntu-latest
-    needs: [python, go, elixir]
+    needs: [python, agent-python, go, elixir]
     env:
       MIX_ENV: dev
     services:
@@ -141,14 +182,14 @@ jobs:
       - name: Server dependencies
         run: mix deps.get && mix compile
       - name: Python SDK dependencies
-        run: pip install -e 'packages/client-python[test]'
+        run: pip install -e 'packages/client-python[test]' -e 'packages/agent-python[test]'
       - name: Elixir client dependencies
         working-directory: packages/client-elixir
         env:
           MIX_ENV: test
         run: mix deps.get
       - name: Run every SDK against the server
-        run: packages/conformance/integration/run.sh python go elixir
+        run: packages/conformance/integration/run.sh python go elixir agent-python
       - name: Server log
         if: failure()
         run: cat packages/conformance/integration/server.log || true

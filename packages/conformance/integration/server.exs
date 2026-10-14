@@ -67,6 +67,51 @@ fixtures =
      }}
   end)
 
+# Agent SDKs (#67): a `websocket` widget channel (the end user) routed to a
+# `websocket` bot channel (the agent, on a channel-scoped socket).
+agent_fixture = fn name ->
+  {:ok, tenant} = Tenants.create_tenant(%{name: "sdk-#{name}-#{suffix}"})
+
+  {:ok, tenant} =
+    Tenants.update_tenant_limits(tenant, %{
+      "activity_create" => unlimited,
+      "token_generate" => unlimited
+    })
+
+  channel = fn role ->
+    {:ok, channel} =
+      Channels.create_channel(%{
+        name: "sdk-#{name}-#{role}-#{suffix}",
+        tenant_id: tenant.id,
+        type: "websocket",
+        mode: "duplex"
+      })
+
+    channel
+  end
+
+  widget = channel.("widget")
+  bot = channel.("bot")
+
+  {:ok, _rule} =
+    RoutingRules.create_routing_rule(%{
+      name: "sdk-#{name}-widget-to-bot-#{suffix}",
+      tenant_id: tenant.id,
+      source_channel_id: widget.id,
+      target_channel_ids: [bot.id]
+    })
+
+  %{
+    api_key: tenant.api_key,
+    widget_channel_id: widget.id,
+    widget_secret: widget.secret,
+    bot_channel_id: bot.id,
+    bot_secret: bot.secret
+  }
+end
+
+fixtures = Map.put(fixtures, "agent-python", agent_fixture.("agent-python"))
+
 endpoint = Application.get_env(:converger, ConvergerWeb.Endpoint)
 port = get_in(endpoint, [:http, :port]) || 4000
 
