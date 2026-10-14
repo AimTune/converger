@@ -462,6 +462,8 @@ defmodule ConvergerWeb.ConvergerChannel do
     with {:ok, client_id} <- Send.client_id(frame),
          {:ok, params} <- Send.message_params(frame, client_id),
          :ok <- rate_limit(claims["tenant_id"]) do
+      params = Send.resolve_reply_to(params, frame, conversation_id)
+
       message =
         Map.merge(params, %{
           "sender" => sender,

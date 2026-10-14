@@ -14,7 +14,8 @@ description: Typed message payloads compatible with chativa and mekik/1, and how
 > [activities](../concepts/activities.md) and [ADR-0036](../adr/0036-rich-activity-model.md).
 > Storing the typed message payloads of this page is **Implemented (#68)** (section 4,
 > [ADR-0062](../adr/0062-typed-message-payloads-on-message-activities.md)); channels without a native
-> renderer get the text fallback, and native per-channel rendering is **Planned (#68)** (section 5).
+> renderer get a numbered-list text, native per-channel rendering and answer normalisation are
+> **Implemented (#68)** (sections 5 and 6, [ADR-0064](../adr/0064-per-channel-rendering-of-typed-messages-and-normalised-answers.md)).
 
 The schemas are in
 [`priv/protocol/v1/messages/`](https://github.com/AimTune/converger/tree/main/priv/protocol/v1/messages);
@@ -218,18 +219,37 @@ Approve and Cancel.
 { "type": "location", "clientId": "c-18", "data": { "latitude": 41.0082, "longitude": 28.9784, "name": "Head office" } }
 ```
 
-## 5. Per-channel downgrade matrix: **text fallback Implemented (#68); native rendering Planned (#68, adapters)**
+## 5. Per-channel downgrade matrix: **Implemented (#68)**, with the exceptions listed below
 
 Each adapter declares what it renders natively through `capabilities/0`: activity types since #28
 (an `activity_types: [...]` entry, unsupported types downgraded to text or skipped per channel), and
 message types with a `message_types: [...]` entry (or `:all`). Without one, an adapter that lists its
-`activity_types` (end-user messaging: WhatsApp, Telegram, Slack, email, SMS, ...) renders no message type
-natively, and every other adapter (WebSocket, webhook, brokers, HTTP pull) receives typed messages as they
-are. **Implemented today:** a channel that does not render a type gets a plain `message` with the text
-fallback of section 4, or nothing when there is none; `tool_call` only with `show_tool_traces`. The
-native rendering below is **Planned**. The pipeline will hand the adapter the typed message; the
-adapter renders natively or downgrades as below, keeping enough state to map the user's answer back
-(section 6).
+`activity_types` (an end-user channel) renders no message type natively, and every other adapter
+(WebSocket, webhook, brokers, HTTP pull) receives typed messages as they are
+([ADR-0064](../adr/0064-per-channel-rendering-of-typed-messages-and-normalised-answers.md)).
+
+On an end-user channel the pipeline (`Converger.Activities.Downgrade`) decides per typed message:
+
+- `tool_call`: only with `show_tool_traces`, as a `name: status` line;
+- `genui`: nothing until the stream's `done` chunk, then one text message with the latest content of
+  each `text` chunk of the stream (a chunk id seen again replaces its element), joined by blank lines;
+  `ui` and `event` chunks are never sent;
+- `interrupt` with a `tool` or an `event`: skipped;
+- a type the adapter declares: delivered natively. Media (`image`, `file`, `video`, `audio`),
+  `location` and `contact` reach the adapter as the legacy attachment it already renders (`contentUrl`,
+  `application/vnd.converger.location`, `application/vnd.converger.contacts`); actionable types keep
+  their `message_type` and `payload`;
+- anything else: a plain `message` with the text rendering: the prompt, the answerable actions as a
+  numbered list (`1. Track an order`), links as `label: url`, a card as its title, subtitle, text and
+  image link, a carousel one such block per card (numbering continues), media as caption and link,
+  location as name and map link, contact as name and numbers; else the stored text fallback (section 4),
+  or nothing.
+
+Native buttons carry an opaque answer key `a:<activity id>:<index>` (at most 41 bytes) as the button
+id, row id, `callback_data` or button value; the action value stays in the stored payload and the
+answer is resolved from it (section 6).
+
+The target matrix:
 
 | type | web (chativa) | WhatsApp | Telegram | email | SMS |
 | --- | --- | --- | --- | --- | --- |
@@ -249,22 +269,42 @@ adapter renders natively or downgrades as below, keeping enough state to map the
 | `interrupt` | native (form or chips) | `actions` as for `text` + `actions`; `payload.title` or `data.text` as the prompt; skipped when it has `tool` or `event` | same rule | same rule | same rule |
 | unknown type | `data.text` | `data.text`, else skipped | `data.text`, else skipped | `data.text`, else skipped | `data.text`, else skipped |
 
+
+### What each channel does today
+
+| channel | `message_types` | rendering |
+| --- | --- | --- |
+| WebSocket, webhook, brokers, HTTP pull | `:all` | the typed message as it is |
+| WhatsApp Cloud (`whatsapp_meta`) and Infobip (`whatsapp_infobip`) | actionable types, media, `location`, `contact` | 1 to 3 answerable actions: reply buttons; 4 to 10: a list message (button `Options`, row titles cut to 24 characters with the full label, up to 72, as the row description); more: numbered text. Links are appended to the body as `label: url`; the body is the prompt, else the stored fallback, cut to 1024. A card is its image (no caption) then its text with its buttons; a card without actions is its image with the text as caption (or the text alone). A carousel is its `data.text`, then one card after the other (at most 10). Media, location and contacts as messages; audio is an audio message (no voice-note flag) |
+| Telegram | actionable types, media, `location`, `contact` | the prompt with an inline keyboard, one button per row, links as URL buttons; a card is `sendPhoto` with its text as caption (cut to 1024) and its keyboard, or a text message without image; a carousel is its `data.text`, then one message per card (no media groups). Media: `sendPhoto`, `sendDocument`, `sendVideo`, `sendAudio`, `sendVoice` (audio with `voice: true`), `sendLocation`, `sendContact` (one per contact with a phone number); the caption follows as a text message. No reply keyboards |
+| Slack | actionable types, media | Block Kit: a `section` with the prompt and an `actions` block (labels cut to 75 characters, at most 25 buttons per block, 50 blocks); a card is a section with the image as accessory; a carousel one section and actions block per card. Media as uploaded files. Location and contact as text |
+| Email | actionable types, media | the text rendering above as the text part, and HTML with paragraphs, an `<ol>` of the answerable actions, links and card images; answered by reply mail (a numeric reply). Media as attachments or links. Location and contact as text (no vCard) |
+| Messenger, Instagram, Viber, Discord, Teams | media | media as their file attachments; everything else as the text rendering (numbered list), not as native quick replies or buttons |
+| SMS (Twilio, Vonage) | none | the text rendering, media as links (no MMS for typed media) |
+
 `tool_call` is shown on end-user channels only when the channel config enables
 `show_tool_traces`, and then as a one-line text (`name: status`).
+
+**Admin panel and portal: Implemented (#68).** The conversation transcripts render every type of this
+page natively, server-side (not through chativa's web component), see
+[Admin panel and tenant portal](../admin-ui.md#rich-messages-implemented-68).
 
 Provider limits the downgrade enforces (current published limits; adapters keep them in one place):
 
 - **WhatsApp Cloud API**: at most 3 reply buttons with titles up to 20 characters; list messages
   with at most 10 rows, row titles up to 24 characters; interactive body up to 1024 characters.
   Longer labels are truncated with an ellipsis and the full label is kept for answer matching.
-- **Telegram Bot API**: `callback_data` up to 64 bytes, so the adapter sends an opaque key and keeps
-  the action value server-side; media groups of 2 to 10 items.
-- **SMS**: 160 GSM-7 or 70 UCS-2 characters per segment; numbered lists are kept short and URLs are
+- **Telegram Bot API**: `callback_data` up to 64 bytes, so the adapter sends the opaque answer key
+  and the action value stays server-side (in the stored payload); text up to 4096 characters, captions
+  up to 1024.
+- **Slack**: 3000 characters per section, 75 per button label, 25 buttons per actions block, 50
+  blocks per message.
+- **SMS**: 160 GSM-7 or 70 UCS-2 characters per segment; numbered lists are not shortened and URLs are
   not shortened by Converger.
-- **Email**: HTML plus a plain-text alternative; buttons become links to a Converger reply endpoint
-  only when the channel config enables it, otherwise a numbered list answered by reply mail.
+- **Email**: HTML plus a plain-text alternative with a numbered list answered by reply mail. Buttons
+  as links to a Converger reply endpoint (opt-in per channel) are **Planned (#68)**.
 
-## 6. Answers come back as one shape
+## 6. Answers come back as one shape: **Implemented (#68)**; interrupt `resume` **Planned (#68)**
 
 Whatever the channel, a user's answer to an actionable message (a tapped chip, a list choice, an
 inline keyboard press, a numeric reply "2", a reply mail) is normalised to an ordinary user turn:
@@ -275,16 +315,31 @@ inline keyboard press, a numeric reply "2", a reply mail) is normalised to an or
 
 - `data.text` is the action's `value` when it is a string, else its `label` (mekik/1 and chativa rule).
 - `metadata.action` keeps `{label, value, source}`, with `source` one of `button`, `list`,
-  `keyboard`, `numeric`, `email`, `web`; non-string values survive here.
-- `replyTo` names the message that offered the action. A numeric reply is matched against the most
-  recent actionable message of the conversation still open (at most 24 hours old); otherwise it is
-  plain text.
-- If the answered message is, or belongs to, an open `interrupt`, the hub converts the answer to
-  `resume {answers: {INTERRUPT_ID: value}}` for the bot channel (mekik-compatible) and stores the
-  user turn as usual. Otherwise it is an ordinary turn for the agent or bot.
+  `keyboard`, `numeric`, `email`, `web`; non-string values survive here. An action without `value`
+  has its `label` as value.
+- `replyTo` (`reply_to_id`) names the message that offered the action. A client may name it by `seq`
+  alone (`replyTo: {seq}`), which is how an answer to a mekik-native `interrupt` (no activity id on the
+  wire) is addressed.
+- A WhatsApp button (`button`) or list reply (`list`), a Telegram `callback_query` (`keyboard`) and a
+  Slack `block_actions` click (`button`) carry the answer key of section 5. It must name an answerable
+  action of an activity of the same conversation; otherwise the message keeps the provider's button
+  title as its text, without `metadata.action`. Telegram callbacks with an answer key are `message`
+  activities, other callbacks stay `event`s.
+- A numeric reply (`2`, `2.` or `2)`, without attachments) on a channel that does not forward the
+  canonical activity is matched against the most recent actionable message of the conversation sent
+  by someone else, at most 24 hours old: the action with that number in its numbered list (links are
+  not numbered). Out of range, older or without such a message, it is plain text. Its source is
+  `numeric`, or `email` on an email channel.
+- Web clients send the answer themselves: a `text` frame with `metadata.action` and `replyTo` is stored
+  as it is.
+- **Implemented (#64):** if the answered message is an open `interrupt`, the user turn is stored as
+  usual (`reply_to_id` on the interrupt, `metadata.action`) and reaches the bot channel as
+  `resume {answers: {INTERRUPT_ID: value}}` (mekik-compatible; `value` is `metadata.action.value`, else
+  the label, else the text), [v1.md section 9](./v1.md). Otherwise it is an ordinary turn for the agent
+  or bot.
 
 So an agent sends one `buttons` message and receives the same normalised turn from the web widget,
-WhatsApp, Telegram and email.
+WhatsApp, Telegram, Slack and email.
 
 ## 7. Today and migration
 

@@ -75,11 +75,14 @@ defmodule Converger.Conversations do
   Keyset-paginated conversations on `(inserted_at, id)`, newest first by default.
 
   Filters (string or atom keys, `""` ignored): `tenant_id`, `channel_id`,
-  `status`, `external_id` (the participant's provider id, exact), and `q`
+  `status`, `external_id` (the participant's provider id, exact),
+  `updated_since` (a `DateTime`: last activity at or after it), and `q`
   (the list search box: an exact conversation id, or a case-insensitive
   "contains" match on the participant's `external_id` or `display_name`).
   Options: `:limit`, `:cursor`, `:direction` (`:desc` | `:asc`),
-  `:preload`. See `Converger.Pagination.keyset/2`.
+  `:field` (the timestamp to order by, default `:inserted_at`; `:updated_at`
+  lists the most recently active first), `:preload`. See
+  `Converger.Pagination.keyset/2`.
 
   Returns `{:ok, %Converger.Pagination.Page{}}` or `{:error, :invalid_cursor}`.
   """
@@ -111,6 +114,9 @@ defmodule Converger.Conversations do
 
       {:status, value}, q when value != "" ->
         where(q, status: ^value)
+
+      {key, %DateTime{} = since}, q when key in ["updated_since", :updated_since] ->
+        where(q, [c], c.updated_at >= ^since)
 
       {"external_id", value}, q when is_binary(value) ->
         where_external_id(q, value)

@@ -72,6 +72,9 @@ defmodule Converger.Channels.Adapter do
       consumer Converger runs for each inbound channel
       (`Converger.Channels.Consumers`), not posted to the inbound webhook.
       The adapter also implements the `Converger.Channels.Broker` behaviour
+    * `:bot_relay` - the channel relays to a mekik/1 bot itself (the `mekik`
+      adapter): routed conversations treat it as their bot channel
+      (`ConvergerWeb.Protocol.BotRelay`)
     * `:media`, `:templates`, `:reactions`, `:edits` - outbound content the
       adapter renders natively
     * `activity_types: [String.t()]` - the activity types
@@ -79,6 +82,10 @@ defmodule Converger.Channels.Adapter do
       natively. Other types are downgraded to text or skipped per channel,
       see `Converger.Activities.Downgrade`. Without this entry every client
       type is delivered as is.
+    * `message_types: [String.t()] | :all` - the typed message types (#68)
+      the adapter renders natively (`message_types/1`); media, location and
+      contact reach it as legacy attachments, the others with their
+      `message_type` and `payload` (ADR-0064)
   """
   @type capability ::
           :inbound
@@ -93,7 +100,9 @@ defmodule Converger.Channels.Adapter do
           | :templates
           | :reactions
           | :edits
+          | :bot_relay
           | {:activity_types, [String.t()]}
+          | {:message_types, [String.t()] | :all}
 
   @typedoc """
   One config field (`c:config_schema/0`):
@@ -445,7 +454,8 @@ defmodule Converger.Channels.Adapter do
     Converger.Channels.Adapters.RabbitMQ,
     Converger.Channels.Adapters.Nats,
     Converger.Channels.Adapters.RedisStreams,
-    Converger.Channels.Adapters.Mqtt
+    Converger.Channels.Adapters.Mqtt,
+    Converger.Channels.Adapters.Mekik
   ]
 
   @required_functions [type: 0, supported_modes: 0, deliver_activity: 2, parse_inbound: 2]

@@ -87,7 +87,7 @@ answered `200` (`:provider_ack`), because Telegram re-delivers any other answer.
 | --- | --- | --- |
 | `message` | `message` | Text, or the caption of a media message. |
 | `edited_message` | `messageUpdate` of the original message | `reply_to_id` is the original's activity; each `edit_date` is a separate edit. |
-| `callback_query` (inline button press) | `event` with `text` = the button's callback data | `metadata.name` is `telegram.callback_query`; `reply_to_id` is the message that carried the button. The query is answered (`answerCallbackQuery`) in the background so the client stops its spinner. |
+| `callback_query` (inline button press) | `event` with `text` = the button's callback data | `metadata.name` is `telegram.callback_query`; `reply_to_id` is the message that carried the button. The query is answered (`answerCallbackQuery`) in the background so the client stops its spinner. A press on a button of a [typed message](#typed-messages) (callback data `a:<activity id>:<index>`) is a `message` instead: the normalised answer. |
 | `message_reaction` | `messageReaction` with `text` = the emoji | An empty `new_reaction` (reaction removed) gives an empty `text`. Custom-emoji and paid reactions keep their raw `new_reaction` in `metadata.reaction`. |
 | anything else (`my_chat_member`, `channel_post`, ...) | none | Answered `200` with no activity. |
 
@@ -148,13 +148,16 @@ deliberately not used, so a message routed from one bot to another is never sent
 
 **What is sent**, in order:
 
-1. every attachment with a `contentUrl`: `image/*` (except GIF) with `sendPhoto`, anything else with `sendDocument`,
-   with the attachment `name` as caption. An absolute URL is passed to Telegram, which fetches it. A Converger upload
+1. every attachment with a `contentUrl`: `image/*` (except GIF) with `sendPhoto`, `video/*` with `sendVideo`,
+   `audio/*` with `sendAudio` (`sendVoice` when `channelData.voice` is true or `channelData.kind` is `voice`),
+   anything else with `sendDocument`, with the attachment `name` as caption. An absolute URL is passed to Telegram, which fetches it. A Converger upload
    (`/api/v1/converger/attachments/<id>`, or that path on Converger's own host) is not reachable by Telegram, so its
    bytes are read from storage and uploaded (`multipart/form-data`);
-2. the activity `text` with `sendMessage` (and the channel's `parse_mode`). Without text, the title, subtitle and text
+2. location attachments (`application/vnd.converger.location`) with `sendLocation`, and every contact with a phone
+   number of a contacts attachment with `sendContact` (its first number);
+3. the activity `text` with `sendMessage` (and the channel's `parse_mode`). Without text, the title, subtitle and text
    of the card attachments are sent instead;
-3. the buttons of `application/vnd.converger.card.*` attachments become an
+4. the buttons of `application/vnd.converger.card.*` attachments become an
    [inline keyboard](https://core.telegram.org/bots/api#inlinekeyboardmarkup) on the last message, one button per row:
 
 | Card button | Telegram button |
@@ -170,6 +173,29 @@ whole activity again.
 
 Native activity types: `message`. Reactions, edits and deletes from other channels are downgraded to text (or skipped)
 per `unsupported_activities`.
+
+### Typed messages
+
+The adapter renders typed messages ([#68](https://github.com/AimTune/converger/issues/68),
+[messages.md section 5](../protocol/messages.md),
+[ADR-0064](../adr/0064-per-channel-rendering-of-typed-messages-and-normalised-answers.md)) and declares
+`message_types: text quick-reply buttons card carousel interrupt image file video audio location contact`:
+
+| Typed message | Sent as |
+| --- | --- |
+| `text` + `actions`, `quick-reply`, `buttons`, `interrupt` (without `tool` / `event`) | `sendMessage` with `data.text` (an interrupt's `payload.title`, else the stored fallback) and an inline keyboard, one button per row; `url` actions are URL buttons |
+| `card` | `sendPhoto` with the image, its title, subtitle and text as caption (cut to 1024 characters) and its buttons as keyboard; a `sendMessage` when it has no image |
+| `carousel` | `data.text` as a message, then one message per card as above |
+| `image`, `file`, `video`, `audio`, `location`, `contact` | as the attachments above (`sendPhoto`, `sendDocument`, `sendVideo`, `sendAudio` / `sendVoice`, `sendLocation`, `sendContact`); a caption follows as a text message |
+| `genui` | one text message when the stream is done (its text chunks) |
+| `tool_call` | nothing, unless the channel sets `show_tool_traces` |
+
+Callback data is the answer key `a:<activity id>:<index>` (at most 41 bytes, within Telegram's 64); the action value
+stays in the stored message, so long and non-string values work. A press becomes the normalised answer: a `message`
+whose `text` is the action's value (or its label), with `metadata.action = {label, value, source: "keyboard"}` and
+`reply_to_id` on the typed message ([messages.md section 6](../protocol/messages.md)). A reply such as `2` within 24
+hours of an actionable message picks its second numbered action (`source: "numeric"`). Reply keyboards
+(`extensions.telegram`) and media groups are not used.
 
 **Typing.** A typing signal from a WebSocket participant calls `sendChatAction` with `typing`. Telegram shows it for
 about five seconds or until the next message, so `isTyping: false` makes no call. Telegram bots cannot mark user

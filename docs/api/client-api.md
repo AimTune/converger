@@ -22,11 +22,12 @@ unlike the snake_case tenant API.
 | `POST` | `/api/v1/converger/tokens/refresh` | Bearer converger token | Exchange a valid token for a fresh one (the old one is rotated) |
 | `POST` | `/api/v1/converger/tokens/revoke` | Bearer converger token, or channel secret | Revoke a token and its family (logout), or every token of an end user (backend) |
 | `POST` | `/api/v1/converger/conversations` | Bearer converger token | Start a conversation; returns a conversation-bound token and `streamUrl` |
+| `GET` | `/api/v1/converger/conversations` | Bearer channel-scoped converger token | List the channel's conversations, most recently active first (agent consoles) |
 | `GET` | `/api/v1/converger/conversations/:id` | Bearer converger token | Reconnect: new token and `streamUrl` for an existing conversation |
 | `POST` | `/api/v1/converger/conversations/:id/close` | Bearer converger token | Close the conversation |
 | `POST` | `/api/v1/converger/conversations/:id/reopen` | Bearer converger token | Reopen the conversation |
 | `POST` | `/api/v1/converger/conversations/:conversation_id/activities` | Bearer converger token | Post an activity |
-| `GET` | `/api/v1/converger/conversations/:conversation_id/activities` | Bearer converger token | List activities after a watermark |
+| `GET` | `/api/v1/converger/conversations/:conversation_id/activities` | Bearer converger token | List activities after a watermark, or page backwards with a `seq` cursor; as activities or Protocol v1 frames |
 | `GET` | `/api/v1/converger/conversations/:conversation_id/events` | Bearer converger token or `?token=` | Server-Sent Events stream of Protocol v1 frames (fallback when WebSockets are blocked) |
 | `POST` | `/api/v1/converger/conversations/:conversation_id/upload` | Bearer converger token | Upload a file as a new activity (multipart) |
 | `GET` | `/api/v1/converger/attachments/:id` | Bearer converger token | Download an uploaded file |
@@ -63,7 +64,7 @@ sequenceDiagram
 | Token | Issued by | Can do |
 | --- | --- | --- |
 | Unscoped (no `conversation_id` claim) | `tokens/generate`, `tokens/refresh` of an unscoped token | Create conversations. Accepted for the conversations of its own channel (other channels' conversations get `404`). Cannot join a conversation topic on the WebSocket. |
-| Channel-scoped (`scope: "channel"`, no `conversation_id`) | `tokens/generate` with `"scope": "channel"`, `tokens/refresh` of a channel-scoped token | Everything an unscoped token can do, plus, on the WebSocket (role `agent`), joining `converger:channel:<channel_id>` of a `websocket` channel to follow every delivery to it, and joining the conversations owned by or routed to its channel (agent console). See [WebSocket](../websocket.md). |
+| Channel-scoped (`scope: "channel"`, no `conversation_id`) | `tokens/generate` with `"scope": "channel"`, `tokens/refresh` of a channel-scoped token | Everything an unscoped token can do, plus listing the channel's conversations (`GET /conversations`), plus, on the WebSocket (role `agent`), joining `converger:channel:<channel_id>` of a `websocket` channel to follow every delivery to it, and joining the conversations owned by or routed to its channel (agent console). See [WebSocket](../websocket.md). |
 | Conversation-bound | `POST /conversations`, `GET /conversations/:id`, `tokens/refresh` of a bound token | Only its own conversation: other conversation ids get `403`, attachments of other conversations `404`. |
 
 :::tip
@@ -84,7 +85,7 @@ cannot be widened. A token without the claim has every permission.
 
 | Permission | Allows |
 | --- | --- |
-| `read` | `GET /conversations/:id`, `GET .../activities`, `GET .../events` (SSE), `GET /attachments/:id`; joining a conversation on the WebSocket (and with it `ack`, `read` receipts, `sync`) |
+| `read` | `GET /conversations` (channel-scoped tokens), `GET /conversations/:id`, `GET .../activities`, `GET .../events` (SSE), `GET /attachments/:id`; joining a conversation on the WebSocket (and with it `ack`, `read` receipts, `sync`) |
 | `write` | `POST /conversations` (and starting one on the native WebSocket), `POST .../activities`, `POST .../upload`, `close`, `reopen`; `postActivity` and `text` frames on the WebSocket |
 | `typing` | Typing indicators on the WebSocket |
 
@@ -197,8 +198,9 @@ curl -s -X POST "$CONVERGER/api/v1/converger/tokens/revoke" \n  -H "authorizatio
 
 `POST /api/v1/converger/conversations`
 
-Creates a conversation on the token's channel, with `metadata: {"source": "converger"}`. The request body is
-ignored.
+Creates a conversation on the token's channel, with `metadata: {"source": "converger"}`. The optional body field
+`title` (a string of at most 200 bytes, chativa's `createConversation(title)`) is stored as `metadata.title`;
+anything else in the body is ignored, and a title that is not a string or is too long is a `400`.
 
 ```bash
 curl -s -X POST "$CONVERGER/api/v1/converger/conversations" \
@@ -220,6 +222,63 @@ curl -s -X POST "$CONVERGER/api/v1/converger/conversations" \
 client socket with the token already in the query string. It is built from the scheme (`wss` for HTTPS requests,
 `ws` otherwise), host and port of the request as Phoenix sees it, so behind a reverse proxy that rewrites them you
 may need to build the URL yourself. See [WebSocket](../websocket.md) for joining the channel and the frame format.
+
+### List the channel's conversations
+
+`GET /api/v1/converger/conversations`
+
+The conversations of the token's channel, most recently active first, for agent consoles such as chativa's
+agent-panel mode ([connecting clients](../protocol/clients.md#agent-panel-mode),
+[ADR-0065](../adr/0065-chativa-as-reference-client-and-history-cursor.md)). It needs a **channel-scoped** token
+(`tokens/generate` with `{"scope": "channel"}`, called by your backend with the channel secret) with the `read`
+permission; an end-user or conversation-bound token gets `403 forbidden`, because the list exposes every end
+user's conversations. Only the token's tenant and channel are listed.
+
+| Query param | Notes |
+| --- | --- |
+| `limit` | Default `50`, max `500` |
+| `cursor` | The `cursor` of the previous page. An invalid cursor is a `400`. |
+| `status` | `active` or `closed` |
+| `updated_since` | Only conversations with activity at or after this time: ISO 8601 (`2026-10-14T09:00:00Z`) or milliseconds since the epoch |
+
+```bash
+curl -s "$CONVERGER/api/v1/converger/conversations?status=active&limit=20" \
+  -H "authorization: Bearer $CHANNEL_TOKEN"
+```
+
+`200 OK`:
+
+```json
+{
+  "conversations": [
+    {
+      "id": "3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10",
+      "title": "Order ORD-42",
+      "contact": "Ayse Yilmaz",
+      "status": "active",
+      "lastMessage": "Where is my order?",
+      "lastMessageAt": 1791936076762,
+      "lastSeq": 17,
+      "metadata": { "source": "converger", "title": "Order ORD-42" },
+      "createdAt": "2026-10-14T09:12:03.004512Z",
+      "updatedAt": "2026-10-14T09:31:16.762118Z"
+    }
+  ],
+  "cursor": "dHM6MjAyNi0xMC0xNFQwOToxMjowMy4wMDQ1MTJafDNmNmQ...",
+  "has_more": true
+}
+```
+
+- Order and paging are keyset on `(updatedAt, id)`, descending. `updatedAt` moves with every activity, so a
+  conversation that becomes active while you page can move to the first page; keep the list current from the
+  socket rather than by re-paging.
+- Field names follow chativa's `Conversation` where one exists: `title` is `metadata.title`, else `contact`;
+  `contact` is the participant's display name, else its external id (a phone number, for example);
+  `lastMessage` is the text of the latest message (null when it was deleted or has no text) and `lastMessageAt`
+  its time in milliseconds. `status` is Converger's: map `active` to chativa's `open`. An unread count is not
+  computed; a client derives it from `lastSeq` and the seq it has read.
+- `lastSeq` is the head seq: pass it as `hello.watermark` to start a socket for that conversation at the
+  present, or page the history backwards from it.
 
 ### Reconnect to a conversation
 
@@ -289,6 +348,7 @@ REST and socket payloads are identical ([ADR-0004](../adr/0004-single-canonical-
 ```json
 {
   "id": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d",
+  "seq": 42,
   "type": "message",
   "from": { "id": "user-42" },
   "text": "Hi, I need help with my order",
@@ -306,6 +366,7 @@ REST and socket payloads are identical ([ADR-0004](../adr/0004-single-canonical-
 
 | Field | Canonical field |
 | --- | --- |
+| `seq` | `seq`: the per-conversation sequence number, the Protocol v1 watermark and the history cursor |
 | `from.id` | `sender` |
 | `timestamp` | `inserted_at` (server time) |
 | `conversationId` | `conversation_id` |
@@ -339,7 +400,7 @@ See [activities](../concepts/activities.md#references-replies-reactions-edits-an
 | `channelData` | object | `{}` | Stored as `metadata` (16,384 bytes max). `metadata` is accepted as an alias when `channelData` is absent. |
 | `messageType` | string | `null` | A typed message of [the vocabulary](../protocol/messages.md) (`buttons`, `card`, `image`, `location`, ...), a mekik-native type (`tool_call`, `genui`, `interrupt`, ...) or an open renderer name. Needs `payload` and `type: message`. |
 | `payload` | object | `null` | The typed message as its frame body without `type` and `seq`, for example `{"data": {"buttons": [...]}}`. Validated against the Protocol v1 schemas (`422` with per-field details); at most 131,072 bytes. `text` is filled from it when absent. |
-| `from.id` | string | `"user"` | Stored as the activity's `sender` |
+| `from.id` | string | the token's `user_id`, else `"user"` | Stored as the activity's `sender` |
 
 These are the only fields read from the body. The client changeset casts only `type`, `text`, `attachments`,
 `metadata`, `reply_to_id`, `message_type` and `payload`; `tenant_id`, `conversation_id` and the idempotency key come from the token and headers
@@ -381,10 +442,16 @@ The same activity can also be sent over the socket with the `postActivity` event
 
 The activities after a watermark, oldest first ([ADR-0006](../adr/0006-per-conversation-seq-and-opaque-watermarks.md)).
 Use it to catch up after a reconnect, to fetch what the socket replay did not include, or to poll without a socket.
+It also pages **backwards** for "load older messages" (see [below](#history-paging-backwards)), and returns
+Protocol v1 frames with `format=frames`.
 
 | Query param | Notes |
 | --- | --- |
 | `watermark` | The `watermark` of the previous response, or of the last socket `activitySet` frame. Omit to start at the first activity. |
+| `before` | Backward paging: the activities with a `seq` below this one (a positive integer: the `cursor` of the previous backward page). Anything else is a `400`. |
+| `direction` | `forward` (default) or `backward`. `backward` without `before` starts at the newest activity. |
+| `format` | `activities` (default) or `frames`: the page as [Protocol v1 frames](../protocol/v1.md#54-activities-as-frames) in `frames` |
+| `userId` | With `format=frames` and a token without `user_id`: the end user whose activities are `from: "user"` |
 | `limit` | Default `100`, max `1000` |
 
 ```bash
@@ -430,7 +497,45 @@ curl -s "$CONVERGER/api/v1/converger/conversations/$CONV/activities?watermark=c2
   `replayTruncated` frame) is also accepted: `?watermark=42` means "after seq 42". Responses still return the
   opaque form until the migration in section 6.5 of the spec.
 
-Errors: `403` (token bound to another conversation), `404` (unknown or foreign conversation).
+#### History paging backwards
+
+A chat widget opens at the latest messages and loads older ones on scroll (chativa's `loadHistory(cursor)`).
+Ask for the newest page with `direction=backward`, then pass each response's `cursor` back as `before`
+([ADR-0065](../adr/0065-chativa-as-reference-client-and-history-cursor.md)):
+
+```bash
+curl -s "$CONVERGER/api/v1/converger/conversations/$CONV/activities?direction=backward&limit=20&format=frames" \
+  -H "authorization: Bearer $TOKEN"
+```
+
+```json
+{
+  "frames": [
+    { "type": "text", "id": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d", "seq": 81, "from": "user", "sender": { "id": "user-42", "role": "user" }, "data": { "text": "Where is my order?" }, "timestamp": 1791936076762 },
+    { "type": "tool_call", "seq": 82, "data": { "id": "t1", "name": "get_order", "status": "completed" } }
+  ],
+  "watermark": "c2VxOjgy",
+  "has_more": true,
+  "cursor": "81"
+}
+```
+
+- The page is still **oldest first**: the activities with the highest `seq` below `before` (or the newest ones),
+  so a client prepends it as it is.
+- `cursor` is the `seq` of the oldest activity of the page, as a string; send it as `before` for the next older
+  page. It is `null` and `has_more` is `false` when the page reaches the first activity. In a backward page
+  `has_more` means "older activities exist".
+- `watermark` is the watermark of the newest activity of the page, so the first backward page tells a client
+  where the live stream starts.
+- Forward pages are unchanged and have no `cursor`.
+
+With `format=frames` each activity is the frame the native WebSocket and the SSE stream deliver (a `text` or
+typed message frame with `from` relative to the token's `user_id`, `tool_call`, `genui`, `interrupt`, ...),
+rendered as on a replay. chativa feeds them to the same routing as live frames. Without `format`, the response is
+`activities` as before.
+
+Errors: `400` (malformed `before`, `direction` or `format`), `403` (token bound to another conversation),
+`404` (unknown or foreign conversation).
 
 ### Stream events (Server-Sent Events)
 
@@ -522,18 +627,42 @@ curl -s -X POST "$CONVERGER/api/v1/converger/conversations/$CONV/upload" \
 ```json
 {
   "id": "e4d3c2b1-a0f9-4e8d-9c7b-6a5f4e3d2c1b",
+  "seq": 18,
   "attachments": [
     {
       "id": "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
       "contentType": "image/png",
       "contentUrl": "https://chat.example.com/api/v1/converger/attachments/9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
+      "name": "receipt.png",
       "size": 48213
     }
-  ]
+  ],
+  "frame": {
+    "type": "text",
+    "id": "e4d3c2b1-a0f9-4e8d-9c7b-6a5f4e3d2c1b",
+    "seq": 18,
+    "from": "user",
+    "sender": { "id": "user-42", "role": "user" },
+    "data": {
+      "text": "Here is my receipt",
+      "attachments": [
+        {
+          "contentType": "image/png",
+          "contentUrl": "https://chat.example.com/api/v1/converger/attachments/9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
+          "name": "receipt.png",
+          "size": 48213
+        }
+      ]
+    },
+    "timestamp": 1791936076762
+  }
 }
 ```
 
-`id` is the created activity. Its `attachments` contain
+`id` and `seq` are the created activity's. `frame` is the attachment message as the WebSocket delivers it, rendered
+for the uploading end user (the token's `user_id`): chativa's `sendFile` can show it at once and de-duplicate the
+socket copy by `id` ([connecting clients](../protocol/clients.md#hub-extras)). The activity's `sender` is
+`activity.from.id`, else the token's `user_id`, else `"user"`. Its `attachments` contain
 `{"contentType", "contentUrl", "name", "size"}` (`name` is the sanitized original filename), and its `text`
 defaults to `""`. `contentUrl` is built from the endpoint's configured URL (`PHX_HOST` in production), not from the
 request.

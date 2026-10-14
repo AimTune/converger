@@ -70,8 +70,26 @@ defmodule ConvergerWeb.Protocol.Frames do
       "sender" => %{"id" => sender_id(canonical.sender), "role" => role}
     }
 
-    typed(canonical.type, canonical, base, role, live?)
+    canonical.type
+    |> typed(canonical, base, role, live?)
+    |> put_agent_meta(canonical, viewer, role)
   end
+
+  # On a channel-scoped connection a user turn names where it came from
+  # (#67): `meta.channel.id` (the arrival channel) and `meta.participant.id`.
+  # ChannelSession adds the channel type.
+  defp put_agent_meta(%{"from" => "user"} = frame, canonical, {:agent, _, _}, "user") do
+    meta =
+      %{"participant" => %{"id" => sender_id(canonical.sender)}}
+      |> maybe_put("channel", channel_ref(Map.get(canonical, :source_channel_id)))
+
+    Map.update(frame, "meta", meta, &Map.merge(meta, &1))
+  end
+
+  defp put_agent_meta(frame, _canonical, _viewer, _role), do: frame
+
+  defp channel_ref(nil), do: nil
+  defp channel_ref(id), do: %{"id" => id}
 
   defp typed("typing", _canonical, base, _role, live?) do
     Map.merge(base, %{"type" => "typing", "isTyping" => live?})

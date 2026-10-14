@@ -18,6 +18,52 @@
 - CI: `.github/workflows/agent-sdks.yml`. Docs: [Go](docs/sdk/agent-go.md), [.NET](docs/sdk/agent-dotnet.md),
   [Elixir](docs/sdk/agent-elixir.md).
 
+### chativa is the reference WebSocket client: mekik/1 profile, history cursor, conversation list (#65)
+
+- **mekik/1 profile on the native endpoint.** A connection that offers no WebSocket subprotocol and sends no
+  `hello.protocol` (an unmodified mekik/1 client such as `@chativa/connector-mekik`) no longer receives `ack`,
+  `deliveryStatus`, `presence`, `tokenRefreshed` or `replayTruncated`, which mekik/1's open rule rendered as empty
+  chat bubbles; its `heartbeat` is a WebSocket ping, so idle widgets are no longer closed with 4408; `token_expired`
+  and `token_revoked` are reported as `unauthorized` so its auth provider refreshes. **Behaviour change** for
+  hand-written clients without a subprotocol and without `hello.protocol`: offer `converger.v1` or send
+  `hello.protocol: "converger/1"` to keep acks and receipts (every Converger SDK already does)
+  ([ADR-0065](docs/adr/0065-chativa-as-reference-client-and-history-cursor.md), Protocol v1 section 14.1).
+- `GET /api/v1/converger/conversations/:id/activities` pages backwards: `direction=backward` (newest page) and
+  `before=<seq>`, with a `cursor` (a seq) for the next older page; pages stay oldest first. `format=frames` returns
+  the page as Protocol v1 frames (`?userId=` for tokens without `user_id`). Every client API activity now carries
+  `seq` (REST and the Phoenix binding's `activitySet`).
+- New `GET /api/v1/converger/conversations` for **channel-scoped** tokens (agent consoles, chativa's agent-panel
+  mode): the channel's conversations, most recently active first, keyset-paginated, filters `status` and
+  `updated_since`, with `title`, `contact`, `lastMessage`, `lastMessageAt` and `lastSeq`. Other tokens get
+  `403`. Migration `20261014210000` adds the index `conversations (channel_id, updated_at, id)` (concurrently).
+- `POST /api/v1/converger/conversations` accepts an optional `title` (stored as `metadata.title`).
+- The upload response adds `seq`, the attachment `name` and `frame` (the attachment message as the socket delivers
+  it). REST activities and uploads without `from.id` are stored with the token's `user_id` as sender (was `"user"`).
+- CI: new job "chativa reference client compatibility" runs `test/protocol/chativa_compat_test.exs`: chativa's real
+  `MekikConnector` and `parseChatFrame` (vendored at a pinned commit in `test/protocol/fixtures/chativa/`) in Node 24
+  against a real server. Locally it runs when Node >= 22.18 is on the PATH and is skipped otherwise.
+- `priv/static/openapi.json` is regenerated. Docs: new [connecting chat clients](docs/protocol/clients.md),
+  [client API](docs/api/client-api.md) (conversation list, history paging backwards, upload), [Protocol v1](docs/protocol/v1.md)
+  sections 2.1, 5.4, 8.5, 14.1 and 15.
+
+### mekik channel adapter: Converger dials a mekik/1 server per conversation (#64, Mode A)
+
+- New channel type `mekik` (mode `duplex`): a routing rule from any end-user channel (WhatsApp, Telegram, the
+  web widget, ...) to it makes a stock mekik/1 server the conversation's bot. Config `url` (ws/wss), `token`
+  (secret; `hello.token` and `Authorization: Bearer`), `meta`, `bot_id`, `idle_timeout_seconds`
+  ([mekik channel](docs/channels/mekik.md), [ADR-0066](docs/adr/0066-mekik-channel-adapter-mode-a.md)).
+- One upstream WebSocket per conversation (`Converger.Channels.Mekik.Connections`, `:global` in the cluster),
+  opened on the first turn, closed after the idle timeout, reconnected with jittered backoff. End-user turns
+  go upstream as mekik/1 `text` with per-turn `meta`; a tapped button answering an open interrupt as
+  `resume`; native `resume`, `genui_event`, `abort`, ... are forwarded.
+- The bot's `text`, rich messages, `tool_call`, `genui`, `interrupt`, `interrupt_resolved` and `skill` frames
+  are stored as the channel's bot (exactly once, keyed by mekik conversation and `seq`) and routed back to
+  the end user; `run`, `genui_components`, `skills` and `error` are relayed; `run` drives the bot's typing.
+- Resume: the mekik conversation and watermark are recorded in the new `mekik_sessions` table (migration
+  `20261014220000`), so a reconnect or restart gets exactly the frames it missed. A rejected token (close
+  4401) dead-letters the waiting deliveries.
+- New adapter capability `:bot_relay`.
+
 ### Agent sockets and the bot relay: channel-scoped Protocol v1 connections (#64)
 
 - A `scope: "channel"` token of a `websocket` channel opens a channel-scoped connection on the native endpoint:
@@ -39,6 +85,49 @@
 - Docs: [Protocol v1](docs/protocol/v1.md) sections 5, 9, 10, 11; [WebSocket channel type](docs/channels/websocket.md);
   [activities](docs/concepts/activities.md).
 
+
+### Typed messages rendered per channel, answers normalised to one shape (#68)
+
+- End-user adapters declare what they render natively with `message_types:`
+  ([ADR-0064](docs/adr/0064-per-channel-rendering-of-typed-messages-and-normalised-answers.md),
+  [messages.md section 5](docs/protocol/messages.md)):
+  - **WhatsApp** (Cloud API and Infobip): actions as reply buttons (1 to 3, titles cut to 20 characters), a list
+    message (4 to 10, rows cut to 24 with the full label as description) or numbered text (more); cards as their
+    image followed by their text and buttons; carousels card by card; image, file, video, audio, location and
+    contact messages.
+  - **Telegram**: inline keyboards, cards as `sendPhoto` with caption and keyboard, carousels message by message;
+    `sendVideo`, `sendAudio` / `sendVoice`, `sendLocation` and `sendContact` (also for legacy attachments, which went
+    out as documents or not at all before).
+  - **Slack**: Block Kit sections and buttons; media as uploaded files.
+  - **Email**: a numbered list in the text part and an `<ol>` with links and card images in the HTML part.
+  - **Messenger, Instagram, Viber, Discord, Teams**: typed media as file attachments.
+  - Every other case on an end-user channel, including SMS: the prompt with its actions as a numbered list
+    (`Converger.Channels.RichContent.text/1`) instead of the plain fallback (`"Track | Pricing"`).
+- GenUI streams reach end-user channels as one text message (their text chunks) when the stream is `done`; an
+  `interrupt` with a `tool` or an `event` is not delivered to them.
+- Answers (messages.md section 6): native buttons carry the answer key `a:<activity id>:<index>`. A WhatsApp button or
+  list reply, a Telegram callback query and a Slack button click with a key, and a numeric reply (`2`) within 24
+  hours of the conversation's latest actionable message, are stored as a `message` whose `text` is the action's
+  value (or label), with `metadata.action = {label, value, source}` and `reply_to_id` on the offering message
+  (`Converger.Inbound.Answers`). Telegram callbacks with an answer key are now `message` activities (other callbacks
+  stay `event`s). WebSocket clients' `metadata.action` / `replyTo` answers are stored as sent.
+- Not yet: interrupt answers forwarded to the bot as `resume`, native quick replies on Messenger / Instagram / Viber /
+  Discord / Teams, email reply links.
+- Docs: [messages.md](docs/protocol/messages.md) sections 5 and 6, [activities](docs/concepts/activities.md),
+  channel pages (WhatsApp, Telegram, Slack, email, SMS, Messenger, Instagram, Viber, Discord, Teams, overview,
+  writing an adapter).
+
+### Admin panel and tenant portal render rich messages (#68)
+
+- The conversation transcripts (`/admin/conversations/:id`, `/portal/conversations/:id`) render typed messages
+  natively with daisyUI: actions as chips, cards, carousels, media links with metadata, locations (OpenStreetMap
+  link), contacts, collapsible `tool_call` traces, GenUI chunks, interrupts with an open/resolved badge that
+  updates live, `interrupt_resolved` notes and skill badges; unknown types show `data.text` or their JSON.
+- Server-side (`ConvergerWeb.MessageComponents`), not chativa's web component (no Node or CDN in the asset
+  build, ADR-0060). Payloads are escaped, only `http(s)` and same-origin `/api/` URLs are linked, media are not
+  loaded inline, JSON previews are truncated.
+- Docs: [admin UI](docs/admin-ui.md#rich-messages-implemented-68), [rich message vocabulary](docs/protocol/messages.md)
+  section 5.
 
 ### Typed message payloads: buttons, cards, media, tool traces, GenUI and interrupts are stored (#68, #63)
 

@@ -78,7 +78,7 @@ defmodule ConvergerWeb.ProtocolSocketTest do
     end
 
     test "accepts clients that offer no subprotocol (mekik/1)", ctx do
-      {:ok, client} = Client.connect(ctx.port)
+      {:ok, client} = Client.connect(ctx.port, subprotocols: [])
       assert Client.subprotocol(client) == nil
       Client.close(client)
     end
@@ -733,6 +733,70 @@ defmodule ConvergerWeb.ProtocolSocketTest do
         Client.push(client, %{"type" => "text", "clientId" => "mp-1", "data" => %{"text" => "hi"}})
 
       assert {%{"type" => "ack", "clientId" => "mp-1", "seq" => 1}, _client} = Client.recv(client)
+    end
+  end
+
+  describe "mekik/1 profile (ADR-0065)" do
+    # No subprotocol and no hello.protocol: an unmodified mekik/1 client such
+    # as chativa connector-mekik, which renders unknown frame types as messages.
+    defp join_mekik(ctx, hello \\ %{}) do
+      join(ctx.port, token(ctx.channel, ctx.conversation, user_id: "alice"), hello,
+        subprotocols: []
+      )
+    end
+
+    test "gets no ack or deliveryStatus for its sends", ctx do
+      {welcome, client} = join_mekik(ctx)
+      assert welcome["data"]["compat"] == ["mekik/1"]
+
+      client =
+        Client.push(client, %{"type" => "text", "id" => "171-a", "data" => %{"text" => "hi"}})
+
+      Client.refute_frame(client, 500)
+      assert %Activity{text: "hi"} = Repo.get_by!(Activity, conversation_id: ctx.conversation.id)
+    end
+
+    test "gets no presence frames", ctx do
+      {_, client} = join_mekik(ctx)
+      {_, _agent} = join(ctx.port, token(ctx.channel, ctx.conversation, user_id: "agent-7"))
+      Client.refute_frame(client, 300)
+    end
+
+    test "gets heartbeats as WebSocket pings", ctx do
+      Application.put_env(:converger, ConvergerWeb.Protocol,
+        heartbeat_interval_ms: 1_000,
+        idle_timeout_ms: 5_000
+      )
+
+      on_exit(fn -> Application.delete_env(:converger, ConvergerWeb.Protocol) end)
+
+      {_welcome, client} = join_mekik(ctx)
+      assert {:ping, _client} = Client.recv(client, 1_500)
+    end
+
+    test "gets token_expired as the mekik/1 auth code unauthorized", ctx do
+      token = token(ctx.channel, ctx.conversation, expires_in: 2)
+      {_welcome, client} = join(ctx.port, token, %{}, subprotocols: [])
+
+      assert {%{"data" => %{"code" => "unauthorized", "number" => 2001}}, client} =
+               Client.recv_type(client, "error", 3_500)
+
+      assert {{:close, 4401}, _client} = Client.recv(client)
+    end
+
+    test "hello.protocol converger/1 without a subprotocol gets the full protocol", ctx do
+      {_welcome, client} = join_mekik(ctx, %{"protocol" => "converger/1"})
+
+      client =
+        Client.push(client, %{"type" => "text", "clientId" => "c-1", "data" => %{"text" => "hi"}})
+
+      assert {%{"type" => "ack", "clientId" => "c-1"}, _client} = Client.recv(client)
+    end
+
+    test "rich and persistent frames are unchanged", ctx do
+      activity!(ctx.conversation, "hello")
+      {_welcome, client} = join_mekik(ctx)
+      assert {%{"type" => "text", "seq" => 1, "from" => "bot"}, _client} = Client.recv(client)
     end
   end
 end

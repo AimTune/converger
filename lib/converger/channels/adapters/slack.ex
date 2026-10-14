@@ -41,7 +41,10 @@ defmodule Converger.Channels.Adapters.Slack do
       :provider_ack,
       :media,
       :edits,
-      activity_types: ~w(message messageUpdate messageDelete)
+      activity_types: ~w(message messageUpdate messageDelete),
+      # Typed messages rendered natively (#68, ADR-0064): Block Kit sections
+      # and buttons; media as uploaded files.
+      message_types: ~w(text quick-reply buttons card carousel interrupt image file video audio)
     ]
   end
 
@@ -177,7 +180,13 @@ defmodule Converger.Channels.Adapters.Slack do
   end
 
   defp put_blocks(payload, activity) do
-    case Blocks.from_attachments(activity.attachments) do
+    blocks =
+      case Blocks.from_message(activity) do
+        [] -> Blocks.from_attachments(activity.attachments)
+        blocks -> blocks
+      end
+
+    case blocks do
       [] -> payload
       blocks -> Map.put(payload, :blocks, blocks)
     end

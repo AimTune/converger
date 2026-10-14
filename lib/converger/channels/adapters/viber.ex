@@ -46,7 +46,10 @@ defmodule Converger.Channels.Adapters.Viber do
       :receipts,
       :provider_ack,
       :media,
-      activity_types: ~w(message)
+      activity_types: ~w(message),
+      # Typed media messages arrive as file attachments (#68, ADR-0064);
+      # actions as a numbered list (Converger.Channels.RichContent).
+      message_types: ~w(image file video audio)
     ]
   end
 
