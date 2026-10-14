@@ -115,6 +115,7 @@ The same channel-scoped token can also join `converger:conversation:<id>` for on
 - Several agent processes can share a channel with the same `hello.group`: each conversation is served by exactly one of them.
 - The opposite direction, Converger dialing a mekik server per conversation, is the [mekik channel](mekik.md) (Mode A of #64).
 - A connection follows at most `maxConversations` conversations (default 5 000, `config :converger, ConvergerWeb.Protocol, max_conversations:`).
+- Agent SDKs that speak this for you (turns, replies, `ask`, reconnect with watermarks): [Go](../sdk/agent-go.md), [.NET](../sdk/agent-dotnet.md), [Elixir](../sdk/agent-elixir.md) (#67).
 
 ## Related
 

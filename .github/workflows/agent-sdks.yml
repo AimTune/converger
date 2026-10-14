@@ -1,0 +1,99 @@
+name: Agent SDKs
+
+# Tests of the agent SDKs in packages/ (Go, .NET, Elixir; #67) against the
+# shared agent conformance fixture (packages/conformance/agent.json) and the
+# Protocol v1 schemas. No publishing. See docs/sdk/agent-go.md.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "packages/agent-go/**"
+      - "packages/agent-dotnet/**"
+      - "packages/agent-elixir/**"
+      - "packages/conformance/agent.json"
+      - "priv/protocol/**"
+      - ".github/workflows/agent-sdks.yml"
+  pull_request:
+    paths:
+      - "packages/agent-go/**"
+      - "packages/agent-dotnet/**"
+      - "packages/agent-elixir/**"
+      - "packages/conformance/agent.json"
+      - "priv/protocol/**"
+      - ".github/workflows/agent-sdks.yml"
+
+concurrency:
+  group: agent-sdks-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  # Keep in sync with ci.yml.
+  ELIXIR_VERSION: "1.19.5"
+  OTP_VERSION: "28.5.0.5"
+
+jobs:
+  go:
+    name: Go agent ${{ matrix.go }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        go: ["1.22", "stable"]
+    defaults:
+      run:
+        working-directory: packages/agent-go
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ matrix.go }}
+          cache-dependency-path: packages/agent-go/go.sum
+      - name: gofmt
+        run: test -z "$(gofmt -l .)"
+      - run: go vet ./...
+      - run: go test -race -count=1 ./...
+
+  dotnet:
+    name: .NET agent
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/agent-dotnet
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+      - run: dotnet build -warnaserror
+      - run: dotnet test --no-build --logger "console;verbosity=normal"
+
+  elixir:
+    name: Elixir agent
+    runs-on: ubuntu-latest
+    env:
+      MIX_ENV: test
+    defaults:
+      run:
+        working-directory: packages/agent-elixir
+    steps:
+      - uses: actions/checkout@v7
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          otp-version: ${{ env.OTP_VERSION }}
+      - uses: actions/cache@v6
+        with:
+          path: |
+            packages/agent-elixir/deps
+            packages/agent-elixir/_build
+          key: agent-elixir-${{ runner.os }}-${{ env.ELIXIR_VERSION }}-${{ env.OTP_VERSION }}-${{ hashFiles('packages/agent-elixir/mix.lock') }}
+      - run: mix deps.get
+      - run: mix format --check-formatted
+      - run: mix compile --warnings-as-errors --force
+      - run: mix test --warnings-as-errors
