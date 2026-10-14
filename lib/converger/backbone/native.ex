@@ -34,8 +34,17 @@ defmodule Converger.Backbone.Native do
 
   @impl true
   def publish(topic, %Event{} = event) do
-    Phoenix.PubSub.broadcast(Converger.PubSub, pubsub_topic(topic), {:backbone_event, event})
+    broadcast(topic, event)
+    enqueue(topic, event)
+  end
 
+  @doc """
+  Insert the jobs of the shared subscriptions that accept `event`. Inside a
+  `Converger.Repo` transaction they commit or roll back with it (the
+  transactional outbox of `Converger.Backbone.publish_in_transaction/2`).
+  Raises when the insert fails, so a transaction never commits without them.
+  """
+  def enqueue(topic, %Event{} = event) do
     jobs =
       for subscription <- Registry.shared_for(topic),
           Dispatch.accept?(subscription, event),
@@ -49,6 +58,11 @@ defmodule Converger.Backbone.Native do
         _ = Oban.insert_all(jobs)
         :ok
     end
+  end
+
+  @doc "Deliver `event` to this cluster's broadcast subscriptions (best effort)."
+  def broadcast(topic, %Event{} = event) do
+    Phoenix.PubSub.broadcast(Converger.PubSub, pubsub_topic(topic), {:backbone_event, event})
   end
 
   @doc "The job of `event` for a shared `subscription`."

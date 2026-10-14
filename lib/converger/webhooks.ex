@@ -251,6 +251,27 @@ defmodule Converger.Webhooks do
   def emit(_tenant_id, _type, _data), do: :ok
 
   @doc """
+  Publish a platform event inside the caller's `Converger.Repo` transaction
+  (`Converger.Backbone.publish_in_transaction/2`, a transactional outbox):
+  the event exists exactly when the transaction commits. Unlike `emit/3`
+  nothing is rescued: a failure rolls the transaction back, so its caller
+  (the client that sent the activity) retries instead of the event being
+  lost. Returns the event for `Converger.Backbone.after_commit/1`, or `nil`
+  for an unknown type.
+  """
+  def emit_in_transaction(tenant_id, type, data) when is_binary(tenant_id) and is_map(data) do
+    if Catalog.known?(type) do
+      Converger.Backbone.publish_in_transaction(Converger.Backbone.topic_for_type(type), %{
+        type: type,
+        tenant_id: tenant_id,
+        data: data
+      })
+    end
+  end
+
+  def emit_in_transaction(_tenant_id, _type, _data), do: nil
+
+  @doc """
   Whether a backbone event is wanted by any enabled subscription of its
   tenant (and platform webhooks are enabled).
   """
