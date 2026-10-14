@@ -33,10 +33,17 @@ defmodule ConvergerWeb.Protocol.ChannelSession do
 
   `hello.group` (a Converger addition) puts the connection in a group of the
   channel. The connections of a group share the channel's conversations: each
-  conversation is served by exactly one live member (rendezvous hashing over
-  the `:pg` group, on every node), so several agent processes can run behind
-  one channel without duplicate replies. A connection without a group sees
-  every conversation (an agent console).
+  user turn is delivered to exactly one member (rendezvous hashing over the
+  members eligible for the turn, `ConvergerWeb.Protocol.GroupMembership`), so
+  several agent processes can run behind one channel without duplicate
+  replies. A connection without a group sees every conversation (an agent
+  console).
+
+  Every member sees every turn and remembers the ones it left to another
+  member. When members leave (`:pg` monitor), the member that now owns such a
+  conversation follows it and receives its unanswered user turns since the
+  first one it passed (ADR-0069): a member that died is still listed until
+  `:pg` notices, and the turns committed meanwhile reached nobody.
 
   ## The agent's frames
 
@@ -62,7 +69,7 @@ defmodule ConvergerWeb.Protocol.ChannelSession do
   alias Converger.{Conversations, Deliveries, Inbound, Pipeline, RateLimit}
   alias Converger.Conversations.Conversation
   alias ConvergerWeb.{ConversationSignals, Protocol}
-  alias ConvergerWeb.Protocol.{Access, AgentGroups, BotRelay, Feed, Frames, Send}
+  alias ConvergerWeb.Protocol.{Access, BotRelay, Feed, Frames, GroupMembership, Send}
 
   # A user turn's meta waits this long for its turn to be delivered.
   @meta_ttl_ms 60_000
@@ -89,8 +96,11 @@ defmodule ConvergerWeb.Protocol.ChannelSession do
     Phoenix.PubSub.subscribe(Converger.PubSub, WebSocket.channel_topic(channel.id))
     track(claims, channel)
 
-    group = group(hello["group"])
-    if group, do: :pg.join(AgentGroups, {channel.id, group}, self())
+    membership =
+      case group(hello["group"]) do
+        nil -> nil
+        group -> GroupMembership.join(channel.id, group)
+      end
 
     state =
       Map.merge(state, %{
@@ -98,7 +108,8 @@ defmodule ConvergerWeb.Protocol.ChannelSession do
         mode: :channel,
         claims: claims,
         channel: channel,
-        group: group,
+        membership: membership,
+        passed: %{},
         agent: agent_sender(claims, hello),
         participant: ConversationSignals.participant(claims),
         follows: %{},
@@ -401,7 +412,7 @@ defmodule ConvergerWeb.Protocol.ChannelSession do
       ) do
     %{conversation_id: id, frame: frame} = payload
 
-    if serves?(state, id) do
+    if serves?(state, id, :now) do
       case ensure_followed(id, state) do
         {:ok, frames, state} -> {frames ++ [Frames.envelope(id, frame)], touch(state, id)}
         :error -> {[], state}
@@ -464,28 +475,128 @@ defmodule ConvergerWeb.Protocol.ChannelSession do
       ConversationSignals.stop_typing(typing, id, state.participant)
     end)
 
-    if state.group, do: :pg.leave(AgentGroups, {state.channel.id, state.group}, self())
+    if state.membership, do: GroupMembership.leave(state.membership)
     :ok
   end
 
   defp conversation_of_topic(rest), do: rest |> String.split(":") |> hd()
 
   defp deliver_live(id, activity, opts, state) do
-    if serves?(state, id) do
+    at = Map.get(activity, :inserted_at) || :now
+
+    if serves?(state, id, at) do
       case ensure_followed(id, state, Map.get(activity, :seq)) do
         {:ok, frames, state} ->
           entry = Map.fetch!(state.follows, id)
           {live, feed} = Feed.live(entry.feed, activity, opts)
           {metas, state} = take_meta(state, id, activity)
           state = put_feed(touch(state, id), id, feed)
+          state = %{state | passed: Map.delete(state.passed, id)}
           {frames ++ envelope_all(id, live, metas, state), state}
 
         :error ->
           {[], state}
       end
     else
-      {[], unfollow(state, id)}
+      {[], state |> unfollow(id) |> pass(id, activity, at)}
     end
+  end
+
+  ## Agent groups
+
+  @doc """
+  A `:pg` monitor message of the connection's agent group. Returns
+  `{frames, state}`, or `:ignore` when the message is not one.
+
+  When members leave, this member takes over the conversations it passed to
+  them (`take_over/2`).
+  """
+  def handle_group(_message, %{membership: nil}), do: :ignore
+
+  def handle_group(message, state) do
+    case GroupMembership.handle(state.membership, message) do
+      {:joined, _pids, membership} ->
+        {[], %{state | membership: membership}}
+
+      {:left, pids, membership} ->
+        take_over(%{state | membership: membership}, pids)
+
+      :ignore ->
+        :ignore
+    end
+  end
+
+  # A turn this member saw and left to `owner`: remembered, so that it can
+  # take the conversation over if `owner` leaves before answering (a member
+  # that died is still in `:pg` until its monitor fires, and the turns
+  # committed meanwhile are delivered to nobody). Keeps the first such seq per
+  # owner and at most `max_conversations` conversations.
+  defp pass(%{membership: nil} = state, _id, _activity, _at), do: state
+
+  defp pass(state, id, %{seq: seq}, at) when is_integer(seq) do
+    owner = GroupMembership.owner(state.membership, id, at)
+    at = GroupMembership.to_us(at)
+
+    passed =
+      case Map.get(state.passed, id) do
+        %{owner: ^owner} = entry -> %{entry | at: at}
+        _ -> %{from: seq, owner: owner, at: at}
+      end
+
+    %{state | passed: state.passed |> Map.put(id, passed) |> bound_passed()}
+  end
+
+  defp pass(state, _id, _activity, _at), do: state
+
+  defp bound_passed(passed) do
+    if map_size(passed) > Protocol.config(:max_conversations) do
+      {oldest, _entry} = Enum.min_by(passed, fn {_id, entry} -> entry.at end)
+      Map.delete(passed, oldest)
+    else
+      passed
+    end
+  end
+
+  # Members `left` the group: every conversation this member passed to one of
+  # them and now serves (decided at the time of the last turn it passed, like
+  # every other member decides) is followed, and its unanswered user turns
+  # since the first passed one (the trailing `from: user` frames, after the
+  # last frame of any bot or agent) are delivered. A turn the old owner
+  # answered before leaving is not delivered again.
+  defp take_over(state, left) do
+    {mine, others} =
+      Enum.split_with(state.passed, fn {id, entry} ->
+        entry.owner in left and GroupMembership.serves?(state.membership, id, entry.at)
+      end)
+
+    state = %{state | passed: Map.new(others)}
+
+    Enum.reduce(mine, {[], state}, fn {id, entry}, {acc, state} ->
+      {frames, state} = take_over_conversation(id, entry, state)
+      {acc ++ frames, state}
+    end)
+  end
+
+  defp take_over_conversation(id, %{from: from}, state) do
+    case ensure_followed(id, state) do
+      {:ok, evicted, state} ->
+        head = Conversations.get_conversation(id).last_seq
+        entry = Map.fetch!(state.follows, id)
+        {frames, feed} = Feed.replay(entry.feed, {:seq, from - 1}, head)
+        state = put_feed(touch(state, id), id, feed)
+        {evicted ++ envelope_all(id, unanswered(frames), %{}, state), state}
+
+      :error ->
+        {[], state}
+    end
+  end
+
+  defp unanswered(frames) do
+    frames
+    |> Enum.filter(&is_integer(&1["seq"]))
+    |> Enum.reverse()
+    |> Enum.take_while(&(&1["from"] == "user"))
+    |> Enum.reverse()
   end
 
   ## Following
@@ -518,7 +629,7 @@ defmodule ConvergerWeb.Protocol.ChannelSession do
   defp follow_from(id, watermark, state) do
     with {:ok, position} <- Protocol.parse_watermark(watermark, deprecation: [api: :protocol]),
          {:ok, source, conversation} <- Access.conversation(id, state.channel, state.claims),
-         true <- serves?(state, conversation.id) do
+         true <- serves?(state, conversation.id, :now) do
       {evicted, state} = make_room(state)
       state = follow(conversation, source, state)
 
@@ -594,16 +705,9 @@ defmodule ConvergerWeb.Protocol.ChannelSession do
     {envelope_all(id, frames, %{}, state), state}
   end
 
-  # Rendezvous hashing over the live members of the connection's group: the
-  # member with the highest hash serves the conversation.
-  defp serves?(%{group: nil}, _id), do: true
-
-  defp serves?(state, id) do
-    case :pg.get_members(AgentGroups, {state.channel.id, state.group}) do
-      [] -> true
-      members -> Enum.max_by(members, &:erlang.phash2({id, &1})) == self()
-    end
-  end
+  # Rendezvous hashing over the members of the connection's group eligible at
+  # `at` (ConvergerWeb.Protocol.GroupMembership).
+  defp serves?(state, id, at), do: GroupMembership.serves?(state.membership, id, at)
 
   ## Helpers
 

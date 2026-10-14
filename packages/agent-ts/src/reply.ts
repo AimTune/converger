@@ -24,6 +24,7 @@ import type {
   InterruptData,
   JsonObject,
   MessageAction,
+  MessageDataMap,
   RunStatus,
   ToolCallData,
   ToolCallStatus,
@@ -105,8 +106,17 @@ export interface Reply {
   text(text: string, options?: SendOptions): Promise<AckFrame | undefined>;
   /** Start a token stream (see {@link StreamMode}). */
   stream(options?: StreamOptions): ReplyStream;
-  /** Send any message type (`buttons`, `quick-reply`, `card`, `carousel`, `image`, `file`, `location`, ...). */
-  message(type: string, data: JsonObject, options?: SendOptions): Promise<AckFrame | undefined>;
+  /**
+   * Send any message type (`buttons`, `quick-reply`, `card`, `carousel`, `image`, `file`, `location`, ...).
+   * The vocabulary's types are checked against their generated schema types ({@link MessageDataMap}).
+   */
+  message<T extends keyof MessageDataMap>(type: T, data: MessageDataMap[T], options?: SendOptions): Promise<AckFrame | undefined>;
+  /** Send a message type outside the vocabulary (an opaque renderer type, mekik/1 section 4.5). */
+  message<T extends string>(
+    type: T extends keyof MessageDataMap ? never : T,
+    data: JsonObject,
+    options?: SendOptions,
+  ): Promise<AckFrame | undefined>;
   /** Report a tool call; call again with the same id as it advances. */
   toolCall(id: string, status: ToolCallStatus, options?: ToolCallOptions): Promise<void>;
   /** Send a GenUI component chunk. Resolves with its chunk id (send again with `{id}` to update it in place). */

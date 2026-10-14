@@ -238,6 +238,15 @@ defmodule ConvergerWeb.Protocol.Session do
     close(4401, "token expired", [error("token_expired", "token expired, refresh it")], state)
   end
 
+  # A member joined or left the connection's agent group (`:pg` monitor).
+  def handle_info({ref, event, _group, _pids} = message, %{mode: :channel} = state)
+      when is_reference(ref) and event in [:join, :leave] and state.phase == :ready do
+    case ChannelSession.handle_group(message, state) do
+      :ignore -> {:ok, state}
+      {frames, state} -> reply(frames, state)
+    end
+  end
+
   def handle_info(_message, state), do: {:ok, state}
 
   @doc """
