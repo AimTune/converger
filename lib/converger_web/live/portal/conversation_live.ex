@@ -2,12 +2,14 @@ defmodule ConvergerWeb.Portal.ConversationLive do
   use ConvergerWeb, :live_view
 
   import ConvergerWeb.ConversationComponents
+  import ConvergerWeb.MessageComponents, only: [message_body: 1]
 
   alias Converger.Activities
   alias Converger.Channels
   alias Converger.Conversations
   alias Converger.Pagination.Page
   alias Converger.Repo
+  alias ConvergerWeb.MessageComponents
 
   # Conversations are keyset-paginated ("Load more") with URL-driven filters;
   # the transcript opens on the most recent activities with "Load earlier"
@@ -35,7 +37,8 @@ defmodule ConvergerWeb.Portal.ConversationLive do
        has_older: false,
        oldest_seq: nil,
        newest_seq: nil,
-       activity_count: 0
+       activity_count: 0,
+       interrupts: MessageComponents.interrupt_state()
      )
      |> stream(:conversations, [])
      |> stream(:activities, [])}
@@ -95,7 +98,9 @@ defmodule ConvergerWeb.Portal.ConversationLive do
       has_older: has_older,
       oldest_seq: seq_of(List.first(activities), nil),
       newest_seq: seq_of(List.last(activities), nil),
-      activity_count: length(activities)
+      activity_count: length(activities),
+      interrupts:
+        MessageComponents.track_interrupts(MessageComponents.interrupt_state(), activities)
     )
     |> stream(:activities, activities, reset: true)
   end
@@ -137,7 +142,8 @@ defmodule ConvergerWeb.Portal.ConversationLive do
           delivery_map: Map.merge(socket.assigns.delivery_map, delivery_map(activities)),
           has_older: has_older,
           oldest_seq: seq_of(List.first(activities), oldest_seq),
-          activity_count: socket.assigns.activity_count + length(activities)
+          activity_count: socket.assigns.activity_count + length(activities),
+          interrupts: MessageComponents.track_interrupts(socket.assigns.interrupts, activities)
         )
 
       # Prepend: inserting newest-first at index 0 keeps ascending order.
@@ -213,15 +219,25 @@ defmodule ConvergerWeb.Portal.ConversationLive do
         delivery_map: Map.merge(socket.assigns.delivery_map, delivery_map([activity])),
         newest_seq: if(new?, do: activity.seq, else: newest),
         oldest_seq: socket.assigns.oldest_seq || activity.seq,
-        activity_count: socket.assigns.activity_count + if(new?, do: 1, else: 0)
+        activity_count: socket.assigns.activity_count + if(new?, do: 1, else: 0),
+        interrupts: MessageComponents.track_interrupts(socket.assigns.interrupts, [activity])
       )
       |> stream_insert(:activities, activity)
+      |> rerender_resolved_interrupt(activity)
 
     # A close/reopen made elsewhere (API, expiry): refresh the status.
     if Conversations.lifecycle_event?(activity) do
       assign(socket, viewing: preload_conversation(socket.assigns.viewing))
     else
       socket
+    end
+  end
+
+  # An interrupt resolved live: re-insert its row so it shows as resolved.
+  defp rerender_resolved_interrupt(socket, activity) do
+    case MessageComponents.resolved_interrupt_row(socket.assigns.interrupts, activity) do
+      nil -> socket
+      interrupt -> stream_insert(socket, :activities, interrupt)
     end
   end
 
@@ -324,7 +340,9 @@ defmodule ConvergerWeb.Portal.ConversationLive do
                 </span>
               </span>
             </div>
-            <p class="mt-1 break-words">{activity.text}</p>
+            <div class="mt-1 break-words">
+              <.message_body activity={activity} resolved_interrupts={@interrupts.resolved} />
+            </div>
           </li>
         </ul>
         <.empty_state :if={@activity_count == 0}>No activities yet.</.empty_state>

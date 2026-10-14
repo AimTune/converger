@@ -254,4 +254,100 @@ defmodule ConvergerWeb.ConversationLiveTest do
                live(conn, ~p"/portal/conversations/#{c.id}")
     end
   end
+
+  describe "rich messages in the transcript (#68)" do
+    @interrupt_id "approve/0:interrupt#0"
+
+    defp typed_fixture(tenant, conversation, message_type, payload) do
+      activity_fixture(tenant, conversation, %{
+        text: nil,
+        sender: "bot",
+        message_type: message_type,
+        payload: payload
+      })
+    end
+
+    defp interrupt_payload do
+      %{
+        "id" => @interrupt_id,
+        "data" => %{
+          "payload" => %{"title" => "Refund 249.90 TRY?"},
+          "actions" => [%{"label" => "Approve", "value" => %{"approved" => true}}]
+        }
+      }
+    end
+
+    test "admin renders typed messages natively and resolves interrupts live", %{
+      conn: conn,
+      tenant: t,
+      conversation: c
+    } do
+      card =
+        typed_fixture(t, c, "card", %{
+          "data" => %{
+            "title" => "<script>alert(1)</script>",
+            "subtitle" => "249.90 USD",
+            "buttons" => [%{"label" => "Track", "value" => "/track"}]
+          }
+        })
+
+      tool =
+        typed_fixture(t, c, "tool_call", %{
+          "data" => %{"id" => "t1", "name" => "get_order", "status" => "running"}
+        })
+
+      interrupt = typed_fixture(t, c, "interrupt", interrupt_payload())
+
+      {:ok, view, html} = live(admin_conn(conn, "super_admin"), ~p"/admin/conversations/#{c.id}")
+
+      refute html =~ "<script>alert(1)"
+      refute html =~ "javascript:"
+      assert has_element?(view, "#activities-#{card.id} [data-message-type=card]", "249.90 USD")
+      assert has_element?(view, "#activities-#{tool.id} details", "get_order")
+
+      assert has_element?(
+               view,
+               "#activities-#{interrupt.id} [data-interrupt-state=open]"
+             )
+
+      resolved =
+        typed_fixture(t, c, "interrupt_resolved", %{
+          "id" => @interrupt_id,
+          "data" => %{"answer" => %{"approved" => true}}
+        })
+
+      assert has_element?(view, "#activities-#{resolved.id}", "resolved")
+
+      assert has_element?(
+               view,
+               "#activities-#{interrupt.id} [data-interrupt-state=resolved]"
+             )
+    end
+
+    test "portal renders typed messages and resolved interrupts", %{
+      conn: conn,
+      tenant: t,
+      conversation: c
+    } do
+      interrupt = typed_fixture(t, c, "interrupt", interrupt_payload())
+
+      typed_fixture(t, c, "interrupt_resolved", %{"id" => @interrupt_id, "data" => %{}})
+
+      {:ok, view, _html} = live(portal_conn(conn, t, "member"), ~p"/portal/conversations/#{c.id}")
+
+      assert has_element?(view, "#activities-#{interrupt.id} [data-interrupt-state=resolved]")
+
+      live_one =
+        typed_fixture(t, c, "location", %{
+          "data" => %{"latitude" => 41.0082, "longitude" => 28.9784, "name" => "Head office"}
+        })
+
+      assert has_element?(
+               view,
+               "#activities-#{live_one.id} a[href^='https://www.openstreetmap.org/']"
+             )
+
+      assert has_element?(view, "#activities-#{live_one.id}", "Head office")
+    end
+  end
 end
