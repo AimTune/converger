@@ -13,6 +13,7 @@ This page is the map. The pages below go into detail:
 | [Activity flow](activity-flow.md) | The write path: from a REST call, socket push or inbound webhook to a committed activity, its outbox jobs and the PubSub broadcast. |
 | [Delivery pipeline](delivery-pipeline.md) | The pluggable pipeline backends (Oban, Broadway, Inline), how to select one, middleware, adapters. |
 | [Real-time](realtime.md) | Sockets, channels, PubSub topics, socket identity, presence and forced disconnects. |
+| [Event backbone](event-backbone.md) | Where platform events are published and consumed: Native (PubSub + Oban), Kafka, NATS JetStream or RabbitMQ, subscriptions, guarantees. |
 | [Data model](data-model.md) | Tables, columns, indexes, constraints and encrypted columns. |
 | [Delivery and retries](../delivery.md) | Retry policies, permanent vs. transient errors, dead letters, Lifeline. |
 
@@ -174,7 +175,7 @@ config :converger, Oban,
        {"*/5 * * * *", Converger.Workers.ChannelHealthWorker}
      ]}
   ],
-  queues: [default: 10, deliveries_high: 10, deliveries: 20, deliveries_bulk: 5, maintenance: 1, webhooks: 10]
+  queues: [default: 10, deliveries_high: 10, deliveries: 20, deliveries_bulk: 5, maintenance: 1, webhooks: 10, backbone: 10]
 ```
 
 | Worker | Queue | Schedule | Purpose |
@@ -197,6 +198,7 @@ In the test environment Oban runs with `testing: :inline` and the pipeline backe
 | `<socket id>` (for example `converger_socket:<tenant_id>:user:<user_id>`) | `ConvergerWeb.Sockets` (`disconnect`) | Phoenix socket transports |
 | `converger:rate_limit` | `Converger.RateLimit.ClusterSync` | the same, on other nodes |
 | `converger:rate_limit_overrides` | `Converger.RateLimit.Overrides` | the same, on other nodes (cache invalidation) |
+| `backbone:<topic>` | `Converger.Backbone.Native` (every platform event) | broadcast subscriptions of the Native [event backbone](event-backbone.md) |
 
 PubSub is fire-and-forget. Nothing that must not be lost is sent only over PubSub: activities are committed first, and clients that miss a broadcast catch up from the database with `seq` watermarks ([ADR-0006](../adr/0006-per-conversation-seq-and-opaque-watermarks.md)).
 

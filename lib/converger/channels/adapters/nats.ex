@@ -473,11 +473,14 @@ defmodule Converger.Channels.Adapters.Nats do
   Open a NATS connection (a `Gnat` process, not linked to the caller) to the
   first server of `config` that accepts it, after checking its host with
   the SSRF guard. The caller links or monitors it.
+
+  `guard: false` skips the SSRF guard, for servers the operator configured
+  (the NATS backbone, `Converger.Backbone.Nats`), never for channel config.
   """
   @spec connect(map(), keyword()) :: {:ok, pid()} | {:error, term()}
   def connect(config, opts \\ []) do
     with {:ok, servers} <- servers(config),
-         {:guard, :ok} <- {:guard, check_hosts(servers)} do
+         {:guard, :ok} <- {:guard, guard(servers, opts)} do
       timeout = Keyword.get(opts, :connection_timeout, 10_000)
 
       Enum.reduce_while(servers, {:error, :no_servers}, fn server, _acc ->
@@ -492,6 +495,10 @@ defmodule Converger.Channels.Adapters.Nats do
       {:guard, {:error, message}} -> {:error, {:target_blocked, message}}
       {:error, message} -> {:error, {:invalid_config, message}}
     end
+  end
+
+  defp guard(servers, opts) do
+    if Keyword.get(opts, :guard, true), do: check_hosts(servers), else: :ok
   end
 
   # The handshake does not wait for the server to accept the credentials: a

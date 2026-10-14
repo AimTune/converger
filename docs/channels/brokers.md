@@ -42,6 +42,15 @@ tenancy, routing rules and delivery tracking. A broker channel is a tenant-scope
 it composes with everything else: a routing rule can bridge a Kafka channel to an agent console, middleware can transform
 what is produced, and replies come back through the same channel.
 
+**The event backbone is a third role.** With `BACKBONE=kafka`, `nats` or `rabbitmq` the operator points Converger's
+[event backbone](../architecture/event-backbone.md) at a broker: every platform event (activity created, delivery
+status changes, conversation, channel and participant events) of every tenant is published to `converger.activities`,
+`converger.deliveries` and `converger.events`. That is a deployment-wide feed of *events* for the operator's own
+systems. A broker channel stays the per-tenant way to exchange *messages* with a tenant's systems, with routing,
+middleware and delivery tracking. Broker channels do not read from the backbone: their outbound side is a channel
+delivery (transactional, retried, dead-lettered per channel), which the backbone cannot replace
+([ADR-0070](../adr/0070-pluggable-event-backbone.md)). The backbone reuses their client code.
+
 ## How a broker channel works
 
 ```mermaid
@@ -307,6 +316,10 @@ The MQTT suite: see [running the MQTT tests](mqtt.md#running-the-mqtt-tests).
 docker run -d --name mosquitto -p 1883:1883 eclipse-mosquitto:2 mosquitto -c /mosquitto-no-auth.conf
 MQTT_HOST=localhost MQTT_PORT=1883 mix test --only mqtt
 ```
+
+The same tags also run the event backbone conformance suites against Kafka, NATS JetStream and RabbitMQ
+(`test/converger/backbone/*_conformance_test.exs`, see [Event backbone](../architecture/event-backbone.md#delivery-guarantees)),
+including a zero-loss test that kills the consumers mid-stream. Run them with the default (Native) backbone selected.
 
 The suites create uniquely named topics, queues, streams and subjects and allow private broker addresses for their duration. CI runs them
 in the optional "Broker channel suites" job (`.github/workflows/ci.yml`).

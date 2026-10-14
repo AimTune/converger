@@ -24,7 +24,8 @@ defmodule Converger.Channels.Broker.NatsProducer do
 
   Options: `:config` (the channel config), `:stream`, `:subject`,
   `:durable_name`, `:dlq_subject`, `:declare`, `:deliver_policy`,
-  `:ack_wait_ms`, `:batch_size`.
+  `:ack_wait_ms`, `:batch_size`, `:connect_opts` (`Nats.connect/2` options;
+  the NATS backbone, `Converger.Backbone.Nats`, passes `guard: false`).
   """
 
   use GenStage
@@ -46,7 +47,7 @@ defmodule Converger.Channels.Broker.NatsProducer do
   def init(opts) do
     config = Keyword.fetch!(opts, :config)
 
-    case Nats.connect(config) do
+    case Nats.connect(config, Keyword.get(opts, :connect_opts, [])) do
       {:ok, conn} ->
         Process.link(conn)
 

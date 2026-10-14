@@ -1,0 +1,21 @@
+# The Kafka backbone for app2 and app3 of the three-node load topology,
+# layered after load/docker-compose.load-kafka.yml by load/run.sh.
+x-kafka-backbone: &kafka_backbone
+  BACKBONE: kafka
+  BACKBONE_KAFKA_BROKERS: kafka:9092
+  BACKBONE_KAFKA_PARTITIONS: ${LOAD_KAFKA_PARTITIONS:-12}
+
+services:
+  app2:
+    environment:
+      <<: *kafka_backbone
+    depends_on:
+      kafka:
+        condition: service_healthy
+
+  app3:
+    environment:
+      <<: *kafka_backbone
+    depends_on:
+      kafka:
+        condition: service_healthy

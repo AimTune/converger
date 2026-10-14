@@ -31,6 +31,7 @@ defmodule Converger.Retention do
   `prune/1` (daily, `Converger.Workers.PruneWorker`) deletes, in batches,
   `channel_health_checks` older than `:health_check_days` (default 7),
   `webhook_events` older than `:webhook_event_days` (default 7),
+  `backbone_receipts` older than `:backbone_receipt_days` (default 7),
   `audit_logs` older than `:audit_log_days` (default 365), and
   `revoked_tokens` whose tokens have all expired. `nil` or `0`
   disables a window.
@@ -40,6 +41,7 @@ defmodule Converger.Retention do
         health_check_days: 7,
         audit_log_days: 365,
         webhook_event_days: 7,
+        backbone_receipt_days: 7,
         prune_batch_size: 10_000
   """
 
@@ -57,6 +59,8 @@ defmodule Converger.Retention do
   def audit_log_days, do: config(:audit_log_days, 365)
 
   def webhook_event_days, do: config(:webhook_event_days, 7)
+
+  def backbone_receipt_days, do: config(:backbone_receipt_days, 7)
 
   ## Activities and deliveries
 
@@ -383,12 +387,13 @@ defmodule Converger.Retention do
   ## Time-based pruning
 
   @doc """
-  Prunes `channel_health_checks`, `audit_logs` and `webhook_events` by their
-  configured windows. Returns `%{channel_health_checks: n, audit_logs: n,
-  webhook_events: n}` (`nil` for a
+  Prunes `channel_health_checks`, `audit_logs`, `webhook_events` and
+  `backbone_receipts` by their configured windows. Returns
+  `%{channel_health_checks: n, audit_logs: n, webhook_events: n, backbone_receipts: n}` (`nil` for a
   disabled window).
 
-  Options: `:now`, `:health_check_days`, `:audit_log_days`, `:webhook_event_days`.
+  Options: `:now`, `:health_check_days`, `:audit_log_days`, `:webhook_event_days`,
+  `:backbone_receipt_days`.
   """
   def prune(opts \\ []) do
     now = Keyword.get_lazy(opts, :now, &DateTime.utc_now/0)
@@ -415,6 +420,13 @@ defmodule Converger.Retention do
           Keyword.get(opts, :webhook_event_days, webhook_event_days()),
           now
         ),
+      backbone_receipts:
+        prune_window(
+          "backbone_receipts",
+          "inserted_at",
+          Keyword.get(opts, :backbone_receipt_days, backbone_receipt_days()),
+          now
+        ),
       # Revocations outlive their tokens by a minute (ADR-0059).
       revoked_tokens: Converger.Auth.Revocations.prune(now)
     }
@@ -435,7 +447,7 @@ defmodule Converger.Retention do
   # values are bound parameters.
   # sobelow_skip ["SQL.Query"]
   def prune_older_than(table, column, %DateTime{} = cutoff)
-      when table in ["channel_health_checks", "audit_logs", "webhook_events"] and
+      when table in ["channel_health_checks", "audit_logs", "webhook_events", "backbone_receipts"] and
              column in ["checked_at", "inserted_at"] do
     batch = config(:prune_batch_size, 10_000)
     cutoff = DateTime.to_naive(cutoff)

@@ -14,6 +14,11 @@ The entry module is [`Converger.Pipeline`](https://github.com/AimTune/converger/
 | `after_commit(activity)` | after the transaction committed | PubSub broadcast and any non-transactional work. |
 | `child_specs()` | application start | Processes the backend needs supervised (Broadway only). |
 
+The pipeline backend is not the [event backbone](event-backbone.md). The backbone (`BACKBONE`: Native, Kafka, NATS
+JetStream, RabbitMQ) carries platform events for subscribers such as the platform webhooks; channel deliveries stay
+here on every backbone, because their jobs are inserted in the activity transaction
+([ADR-0070](../adr/0070-pluggable-event-backbone.md)).
+
 ## Backends
 
 | Backend | Delivery hand-off | Durable | Intended for |

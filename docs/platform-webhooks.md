@@ -19,6 +19,13 @@ ticket on `conversation.closed`, without creating a channel per conversation.
 
 The decision record is [ADR-0053](adr/0053-platform-event-webhooks.md).
 
+Events travel through the [event backbone](architecture/event-backbone.md) ([ADR-0070](adr/0070-pluggable-event-backbone.md)):
+the code that emits an event publishes it, and the built-in `webhooks` backbone subscription writes the event log
+rows and enqueues their deliveries, in the same transaction as the event's idempotency receipt. Whatever the
+backbone (Native, Kafka, NATS JetStream, RabbitMQ), a subscription gets each event once, and the event's `id` (also
+the `x-converger-event-id` header) is the backbone event id. With a broker backbone the same events are on the
+broker's topics for your own consumers.
+
 ## Subscriptions
 
 A subscription has:
@@ -217,7 +224,7 @@ subscription with `managed_by: "alert_webhook_url"` on `channel.health_changed`,
 
 | Setting | Default | Notes |
 | --- | --- | --- |
-| `config :converger, :platform_webhooks, enabled:` | `true` | `false` stops emitting events (subscriptions are kept). |
+| `config :converger, :platform_webhooks, enabled:` | `true` | `false` stops recording and sending webhook events (subscriptions are kept; events are still published to the [backbone](architecture/event-backbone.md)). |
 | `config :converger, :platform_webhooks, connect_timeout:` | `5000` | Connect timeout, ms. |
 | `config :converger, :platform_webhooks, receive_timeout:` | `10000` | Response timeout, ms. |
 | `config :converger, :platform_webhooks, max_response_bytes:` | `65536` | Response bytes read. |
@@ -231,4 +238,5 @@ subscription with `managed_by: "alert_webhook_url"` on `channel.health_changed`,
 - [Tenant API: platform event webhooks](api/tenant-api.md#platform-event-webhooks)
 - [Outbound webhooks (channel adapter)](webhooks.md)
 - [Delivery pipeline and retries](delivery.md)
-- [ADR-0053](adr/0053-platform-event-webhooks.md), [ADR-0014](adr/0014-webhook-ssrf-guard-and-outbound-signing.md)
+- [Event backbone](architecture/event-backbone.md)
+- [ADR-0053](adr/0053-platform-event-webhooks.md), [ADR-0014](adr/0014-webhook-ssrf-guard-and-outbound-signing.md), [ADR-0070](adr/0070-pluggable-event-backbone.md)

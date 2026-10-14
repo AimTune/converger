@@ -8,10 +8,15 @@
 #   * `targets` - outbound webhook channels the inbound burst fans out to
 #   * `mock_url` - base URL of load/mock_provider
 #
+# It also subscribes a platform event webhook to `activity.created` on the
+# mock provider (`/hook/backbone`): every activity goes through the event
+# backbone (issue #66) to that subscriber, which is the backbone zero-loss
+# check (every stored activity observed once, see load/results.js).
+#
 # Prints one JSON line. Not a test file: ExUnit only loads *_test.exs.
 
 alias Converger.Auth.ConvergerToken
-alias Converger.{Channels, Conversations, RoutingRules, Tenants}
+alias Converger.{Channels, Conversations, RoutingRules, Tenants, Webhooks}
 
 suffix = Base.encode16(:crypto.strong_rand_bytes(4), case: :lower)
 
@@ -87,9 +92,17 @@ if target_channels != [] do
     })
 end
 
+{:ok, backbone_subscription} =
+  Webhooks.create_subscription(tenant.id, %{
+    "url" => "#{mock_url}/hook/backbone",
+    "events" => ["activity.created"],
+    "description" => "load harness backbone zero-loss check"
+  })
+
 IO.puts(
   Jason.encode!(%{
     tenant_id: tenant.id,
+    backbone_subscription_id: backbone_subscription.id,
     api_key: tenant.api_key,
     fanout_channel_id: fanout.id,
     conversations: e2e,

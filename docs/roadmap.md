@@ -108,7 +108,7 @@ Run Converger as a cluster that meets the PRD targets (10M messages per day, 1k+
 | [#32](https://github.com/AimTune/converger/issues/32) | Dead-letter queue with inspection and replay (API + admin UI) | Done |
 | [#30](https://github.com/AimTune/converger/issues/30) | Table partitioning and retention for `activities` and `deliveries`; archival to object storage | Open |
 | [#35](https://github.com/AimTune/converger/issues/35) | Graceful degradation under database pressure: pool sizing, timeouts, bulkheads, readiness flip | Open |
-| [#66](https://github.com/AimTune/converger/issues/66) | Pluggable event backbone: Elixir-native (PubSub + Oban) by default, Kafka/NATS/RabbitMQ selectable, with a published benchmark matrix | Open |
+| [#66](https://github.com/AimTune/converger/issues/66) | Pluggable event backbone: Elixir-native (PubSub + Oban) by default, Kafka/NATS/RabbitMQ selectable, with a published benchmark matrix | Done (published numbers pending a quiet-machine or nightly run), see [Event backbone](architecture/event-backbone.md) and [Backbone matrix](benchmarks/backbone-matrix.md) |
 | [#34](https://github.com/AimTune/converger/issues/34) | Load testing harness (k6 WebSocket + REST scenarios) with nightly CI run and published baselines | Done (Kafka column with #66; full re-run after #35), see [Benchmarks](benchmarks/index.md) |
 
 Exit criteria: a nightly load test publishes p95 latency and connection counts with enforced thresholds; one dead channel does not degrade other tenants; partition drop and archive are verified on a 100M-row dataset.

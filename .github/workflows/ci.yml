@@ -393,6 +393,8 @@ jobs:
       # test/converger/channels/{kafka,rabbitmq,nats,redis_streams,mqtt}_integration_test.exs: an
       # external produce reaches a WebSocket client, the reply is produced,
       # restarts resume without duplicates, poison messages are dead-lettered.
+      # test/converger/backbone/{kafka,nats,rabbitmq}_conformance_test.exs: the
+      # event backbone conformance suite (#66), zero loss across a consumer kill.
       - name: Run the broker channel suites
         env:
           KAFKA_BROKERS: localhost:9092
@@ -403,6 +405,67 @@ jobs:
           MQTT_PORT: "1883"
         run: mix test --only kafka --only rabbitmq --only nats --only redis_streams --only mqtt --warnings-as-errors
 
+
+  # The backbone integration suite (test/converger/backbone/integration_test.exs,
+  # issue #66): REST activities, delivery and conversation events reach the
+  # platform webhooks through the backbone exactly once, and the WebSocket
+  # fan-out keeps working, with the Native backbone and again with Kafka as
+  # the backbone (BACKBONE=kafka; a single config change). The backbone
+  # conformance suites run in the `brokers` job above.
+  backbone:
+    name: Backbone integration (${{ matrix.backbone }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        backbone: [native, kafka]
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+
+      kafka:
+        image: apache/kafka:3.9.1
+        ports: ["9092:9092"]
+        options: >-
+          --health-cmd "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092"
+          --health-interval 5s --health-timeout 10s --health-retries 20
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          otp-version: ${{ env.OTP_VERSION }}
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            deps
+            _build
+          key: mix-${{ runner.os }}-${{ env.ELIXIR_VERSION }}-${{ env.OTP_VERSION }}-${{ hashFiles('mix.lock') }}
+          restore-keys: mix-${{ runner.os }}-${{ env.ELIXIR_VERSION }}-${{ env.OTP_VERSION }}-
+
+      - run: mix deps.get
+      - run: mix compile --warnings-as-errors
+
+      - name: Run the backbone integration suite
+        env:
+          BACKBONE: ${{ matrix.backbone }}
+          BACKBONE_KAFKA_BROKERS: localhost:9092
+          BACKBONE_KAFKA_PARTITIONS: "3"
+        run: |
+          mix ecto.create --quiet
+          mix ecto.migrate --quiet
+          mix test --only backbone_integration --warnings-as-errors
   cluster:
     name: Two-node cluster suite
     runs-on: ubuntu-latest

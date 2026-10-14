@@ -290,13 +290,16 @@ config :converger, Oban,
   # Delivery queues per tenant tier (tenants.tier), see Converger.Pipeline.Oban.
   # `maintenance`: partitions, retention, pruning and purge jobs (issue #30).
   # `webhooks`: platform event webhooks (issue #49, Converger.Webhooks).
+  # `backbone`: Native backbone subscriptions and parked broker publishes
+  # and retries (issue #66, Converger.Backbone).
   queues: [
     default: 10,
     deliveries_high: 10,
     deliveries: 20,
     deliveries_bulk: 5,
     maintenance: 1,
-    webhooks: 10
+    webhooks: 10,
+    backbone: 10
   ]
 
 # Monthly partitions of activities and deliveries (Converger.Partitions).
@@ -312,6 +315,9 @@ config :converger, Converger.Retention,
   health_check_days: 7,
   audit_log_days: 365,
   webhook_event_days: 7,
+  # Idempotency receipts of backbone subscriptions (ADR-0070): longer than
+  # any redelivery or dual-publish window.
+  backbone_receipt_days: 7,
   prune_batch_size: 10_000
 
 # Archive of expired rows (Converger.Archive). storage: nil uses the
@@ -330,6 +336,29 @@ config :converger, :platform_webhooks,
   connect_timeout: 5_000,
   receive_timeout: 10_000,
   max_response_bytes: 65_536
+
+# Event backbone (issue #66, Converger.Backbone, ADR-0070, docs/deployment.md).
+# One implementation per deployment: Converger.Backbone.Native (Phoenix.PubSub
+# + Oban on Postgres, no extra services), .Kafka, .Nats (JetStream) or
+# .RabbitMQ. config/runtime.exs sets it from BACKBONE.
+config :converger, :backbone, Converger.Backbone.Native
+
+config :converger, Converger.Backbone,
+  # Broker topics/subjects are "<topic_prefix>.activities|deliveries|events".
+  topic_prefix: "converger",
+  # Backbones that also receive every event (dual publish while migrating).
+  mirror: [],
+  # Run this node's broker consumers (BACKBONE_CONSUMERS=false: web-only nodes).
+  consumers: true,
+  # Extra subscriptions every node declares: [{name, topics, handler, opts}].
+  subscriptions: [],
+  # A failing handler on a broker consumer is retried in place, then parked
+  # as an Oban job (queue `backbone`).
+  inline_attempts: 3,
+  inline_backoff_ms: 200,
+  # After a failed publish to a broker, publishes to it are parked at once
+  # for this long (no request waits for the produce timeout again).
+  down_ms: 5_000
 
 # Rate limiting (Hammer 7, see Converger.RateLimit).
 #   backend: :local   - per-node ETS counters (single node)

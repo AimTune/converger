@@ -41,9 +41,15 @@ const METRICS = [
   ["rolling_restart", "client reconnect max (ms)", "ws_reconnect_ms.max", "lower", 500, false],
   ["node_kill", "killed node back to ready (s)", "recovery_max_s", "lower", 2, false],
   ["node_kill", "client reconnect max (ms)", "ws_reconnect_ms.max", "lower", 500, false],
+  ["backbone", "activity events observed / expected", "events_observed", null, 0, false],
+  ["backbone", "duplicate events at the subscriber", "duplicate_events", null, 0, false],
+  ["backbone", "send→backbone subscriber p50 (ms)", "publish_to_subscriber_ms.p50", "lower", 10, false],
+  ["backbone", "send→backbone subscriber p95 (ms)", "publish_to_subscriber_ms.p95", "lower", 10, false],
+  ["backbone", "send→backbone subscriber p99 (ms)", "publish_to_subscriber_ms.p99", "lower", 10, false],
+  ["backbone", "caught up after the delivery queues drained (s)", "caught_up_after_drain_s", "lower", 2, false],
 ];
 
-const LOSS = ["e2e", "webhook_burst", "reconnect_storm", "rolling_restart", "node_kill"];
+const LOSS = ["e2e", "webhook_burst", "reconnect_storm", "rolling_restart", "node_kill", "backbone"];
 
 const get = (obj, path) => path.split(".").reduce((o, k) => (o === null || o === undefined ? undefined : o[k]), obj);
 const fmt = (v) => (v === null || v === undefined ? "–" : typeof v === "number" ? String(Number(v.toFixed(1))) : String(v));
@@ -129,7 +135,7 @@ function render(runs, { baseline = [], threshold = 0.15, title } = {}) {
       for (const [node, n] of Object.entries(res.nodes)) {
         out.push(
           `| ${topology(r)} | ${scenario} | ${node} | ${fmt(n.cpu_avg_pct)} | ${fmt(n.cpu_max_pct)} | ${fmt(n.rss_max_mib)} | ` +
-            `${node === "db" ? "–" : fmt(res.db_pool_wait_max_ms)} | ${node === "db" ? "–" : fmt(res.db_background_pool_wait_max_ms)} | ${node === "db" ? "–" : fmt(res.oban_depth_max)} |`,
+            `${node === "db" || node === "kafka" ? "–" : fmt(res.db_pool_wait_max_ms)} | ${node === "db" || node === "kafka" ? "–" : fmt(res.db_background_pool_wait_max_ms)} | ${node === "db" || node === "kafka" ? "–" : fmt(res.oban_depth_max)} |`,
         );
       }
     }
