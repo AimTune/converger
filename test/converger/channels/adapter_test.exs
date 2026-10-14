@@ -10,7 +10,7 @@ defmodule Converger.Channels.AdapterTest do
   import Converger.ConversationsFixtures
   import Converger.ActivitiesFixtures
 
-  @builtin ~w(echo webhook websocket whatsapp_meta whatsapp_infobip slack telegram email sms_twilio sms_vonage messenger instagram viber discord teams http_pull kafka rabbitmq nats redis_streams mqtt)
+  @builtin ~w(echo webhook websocket whatsapp_meta whatsapp_infobip slack telegram email sms_twilio sms_vonage messenger instagram viber discord teams http_pull kafka rabbitmq nats redis_streams mqtt mekik)
 
   defp put_env(key, value) do
     previous = Application.get_env(:converger, key)
@@ -45,7 +45,7 @@ defmodule Converger.Channels.AdapterTest do
 
     test "derives the externally delivering types from capabilities" do
       assert Adapter.types_with(:external_delivery) ==
-               ~w(webhook whatsapp_meta whatsapp_infobip slack telegram email sms_twilio sms_vonage messenger instagram viber discord teams kafka rabbitmq nats redis_streams mqtt)
+               ~w(webhook whatsapp_meta whatsapp_infobip slack telegram email sms_twilio sms_vonage messenger instagram viber discord teams kafka rabbitmq nats redis_streams mqtt mekik)
 
       assert Adapter.types_with(:provider_ack) ==
                ~w(whatsapp_meta whatsapp_infobip slack telegram email sms_twilio sms_vonage messenger instagram viber discord teams)

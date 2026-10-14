@@ -20,6 +20,7 @@ This page covers the behaviour, the built-in channel types and what each one sup
 - [Broker channels](brokers.md): [Kafka](kafka.md), [RabbitMQ](rabbitmq.md), [NATS JetStream](nats.md), [Redis Streams](redis-streams.md) and [MQTT](mqtt.md)
 - [Echo](echo.md)
 - [WebSocket](websocket.md)
+- [mekik](mekik.md): Converger dials a mekik/1 bot server per conversation (Mode A of [#64](https://github.com/AimTune/converger/issues/64))
 - Generic HTTP webhook: see [Outbound webhooks](../webhooks.md)
 - [HTTP pull (outbox)](http-pull.md)
 - [Writing an adapter](writing-an-adapter.md)
@@ -30,7 +31,7 @@ The channel schema ([`lib/converger/channels/channel.ex`](https://github.com/Aim
 
 | Field | Values | Default |
 | --- | --- | --- |
-| `type` | `echo`, `webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram`, `email`, `sms_twilio`, `sms_vonage`, `messenger`, `instagram`, `viber`, `discord`, `teams`, `http_pull`, `kafka`, `rabbitmq`, `nats`, `redis_streams`, `mqtt` | `webhook` |
+| `type` | `echo`, `webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram`, `email`, `sms_twilio`, `sms_vonage`, `messenger`, `instagram`, `viber`, `discord`, `teams`, `http_pull`, `kafka`, `rabbitmq`, `nats`, `redis_streams`, `mqtt`, `mekik` | `webhook` |
 | `mode` | `inbound`, `outbound`, `duplex` | `duplex` |
 | `status` | `active` or another value such as `inactive`. Only `active` channels accept inbound requests and socket joins, are routing-rule targets and get health checks. | `active` |
 | `require_signature` | `true` / `false` | `true` |
@@ -45,7 +46,7 @@ The mode decides the direction of traffic:
 - `outbound`: the pipeline delivers activities to the channel. Inbound messages are refused (`400 Channel does not accept inbound messages`); delivery receipts are still accepted.
 - `duplex`: both.
 
-The changeset rejects a mode the adapter does not support (`<type> channels only support modes: ...`). The modes follow from the adapter's capabilities: `echo` and `http_pull` are `outbound` only; the others support all three modes.
+The changeset rejects a mode the adapter does not support (`<type> channels only support modes: ...`). The modes follow from the adapter's capabilities: `echo` and `http_pull` are `outbound` only, `mekik` is `duplex` only; the others support all three modes.
 
 Channels are created and edited in the admin panel (`/admin/channels`) and the tenant portal (`/portal/channels`). The admin config form is generated from the adapter's `config_schema/0`; the fields per type are listed on each adapter page.
 
@@ -55,7 +56,7 @@ The behaviour lives in [`lib/converger/channels/adapter.ex`](https://github.com/
 
 ### Registry
 
-The channel types are the registered adapters: the built-ins (`echo`, `webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram`, `email`, `sms_twilio`, `sms_vonage`, `messenger`, `instagram`, `viber`, `discord`, `teams`, `http_pull`, `kafka`, `rabbitmq`, `nats`, `redis_streams`, `mqtt`) followed by the modules in `config :converger, :adapters`. A configured adapter with a built-in type replaces it. `Adapter.types/0` lists the types (the channel changeset and the admin type dropdown use it), and `Adapter.types_with/1` the types with a capability. The registry is checked at boot (`Adapter.validate_registry!/0`). Nothing else in the code base lists channel types: the pipeline, health checks, the admin forms and the inbound controller ask the adapter. See [Writing an adapter](writing-an-adapter.md) and [ADR-0038](../adr/0038-adapter-behaviour-v2-and-config-driven-registry.md).
+The channel types are the registered adapters: the built-ins (`echo`, `webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram`, `email`, `sms_twilio`, `sms_vonage`, `messenger`, `instagram`, `viber`, `discord`, `teams`, `http_pull`, `kafka`, `rabbitmq`, `nats`, `redis_streams`, `mqtt`, `mekik`) followed by the modules in `config :converger, :adapters`. A configured adapter with a built-in type replaces it. `Adapter.types/0` lists the types (the channel changeset and the admin type dropdown use it), and `Adapter.types_with/1` the types with a capability. The registry is checked at boot (`Adapter.validate_registry!/0`). Nothing else in the code base lists channel types: the pipeline, health checks, the admin forms and the inbound controller ask the adapter. See [Writing an adapter](writing-an-adapter.md) and [ADR-0038](../adr/0038-adapter-behaviour-v2-and-config-driven-registry.md).
 
 ### Callbacks
 
@@ -86,8 +87,8 @@ The channel types are the registered adapters: the built-ins (`echo`, `webhook`,
 | Capability | Effect | Built-in adapters with it |
 | --- | --- | --- |
 | `:inbound` | Accepts inbound messages; with `:outbound`, allows `duplex` | every built-in except `echo` and `http_pull` |
-| `:outbound` | The pipeline delivers to its channels | all twenty-one |
-| `:external_delivery` | Its channels get health checks and dashboard health | `webhook`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram`, `email`, `sms_twilio`, `sms_vonage`, `messenger`, `instagram`, `viber`, `discord`, `teams`, `kafka`, `rabbitmq`, `nats`, `redis_streams`, `mqtt` |
+| `:outbound` | The pipeline delivers to its channels | all twenty-two |
+| `:external_delivery` | Its channels get health checks and dashboard health | `webhook`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram`, `email`, `sms_twilio`, `sms_vonage`, `messenger`, `instagram`, `viber`, `discord`, `teams`, `kafka`, `rabbitmq`, `nats`, `redis_streams`, `mqtt`, `mekik` |
 | `:receipts` | Reports delivery or read receipts | `webhook`, `whatsapp_meta`, `whatsapp_infobip`, `email`, `sms_twilio`, `sms_vonage`, `messenger`, `instagram`, `viber` |
 | `:typing` | Forwards typing indicators | `whatsapp_meta`, `telegram`, `teams` |
 | `:lifecycle_events` | Receives conversation close and reopen events | `webhook`, `websocket`, `http_pull`, `kafka`, `rabbitmq`, `nats`, `redis_streams`, `mqtt` |
@@ -97,6 +98,7 @@ The channel types are the registered adapters: the built-ins (`echo`, `webhook`,
 | `:templates` | Sends provider message templates (WhatsApp HSM) ([WhatsApp](whatsapp.md#templates-hsm)) | `whatsapp_meta`, `whatsapp_infobip` |
 | `:edits` | Edits and deletes of posted messages | `slack` |
 | `:reactions` | Native outbound reactions (descriptive) | none yet |
+| `:bot_relay` | The channel relays to a mekik/1 bot itself: a conversation routed to it treats it as its bot channel, so the end users' bot-only frames (`resume`, `genui_event`, ...) and per-turn `meta` reach it ([protocol section 9](../protocol/v1.md#9-the-bot-channel-and-mekik-relay-implemented-64)) | `mekik` |
 
 ### `deliver_activity/2`
 
@@ -172,12 +174,13 @@ Status progression is monotonic (`pending` < `sent` < `delivered` < `read`): a `
 | `nats` | inbound, outbound, duplex | The [envelope](brokers.md#envelope) published to `subject_out` with a JetStream publish acknowledged by the stream ([NATS JetStream](nats.md)) | all | No: pulls from a durable consumer on `stream` | No | Not applicable (user/password, token, NKey or creds; TLS) | Not applicable (one message per NATS message) | No |
 | `redis_streams` | inbound, outbound, duplex | The [envelope](brokers.md#envelope) in the `payload` field of an entry appended to `stream_out` (`XADD`) ([Redis Streams](redis-streams.md)) | all | No: reads `stream_in` with a consumer group | No | Not applicable (password or ACL user, TLS) | Not applicable (one message per stream entry) | No |
 | `mqtt` | inbound, outbound, duplex | The [envelope](brokers.md#envelope) published with QoS 1 to the conversation's `topic_out` ([MQTT](mqtt.md)) | all | No: subscribes to `topic_in` (persistent session) | No | Not applicable (broker credentials, TLS) | Not applicable (one message per `PUBLISH`) | No |
+| `mekik` | duplex | The end user's turns as mekik/1 `text` (or `resume` for an interrupt answer) on a per-conversation upstream WebSocket to the bot ([mekik](mekik.md)) | all | No: the bot's frames arrive on the upstream WebSocket and are stored as the channel's | No | Not applicable (`token` sent to the bot) | Not applicable | Bot typing from `run` frames |
 | `echo` | outbound | Creates a reply activity from `bot` in the same conversation | `message` | No | No | Not applicable | Not applicable | No |
 | `websocket` | inbound, outbound, duplex | Broadcast to the channel's connected sockets; `pending` until a client is connected, replays or acks ([WebSocket](websocket.md)) | all | No (clients send over the socket, through the same inbound path) | Client `ack` over the socket | Not applicable (socket token) | Not applicable | Not applicable (clients get `typing` and `deliveryStatus` frames) |
 
 Notes:
 
-- The pipeline calls the adapter of every channel whose adapter has the `:outbound` capability (`Adapter.capability?/2`, used by `resolve_delivery_channels/1` in [`lib/converger/pipeline.ex`](https://github.com/AimTune/converger/blob/main/lib/converger/pipeline.ex)): all twenty-one built-in types today.
+- The pipeline calls the adapter of every channel whose adapter has the `:outbound` capability (`Adapter.capability?/2`, used by `resolve_delivery_channels/1` in [`lib/converger/pipeline.ex`](https://github.com/AimTune/converger/blob/main/lib/converger/pipeline.ex)): all twenty-two built-in types today.
 - Conversation lifecycle events (close, reopen) are delivered only to channels whose adapter has `:lifecycle_events` (`webhook`, `websocket`, `http_pull`, `kafka`, `rabbitmq`, `nats`, `redis_streams` and `mqtt`).
 - Activity types outside an adapter's native types (the `activity_types:` entry of `capabilities/0`) are downgraded to a text `message` (for example `messageReaction` becomes `"user reacted with 👍"`) or skipped, as set by the channel config key `unsupported_activities` (`downgrade`, the default, or `skip`). `typing` and the internal `deliveryReceipt` never reach messaging adapters. See [activities](../concepts/activities.md#delivery-to-channels).
 - Typed messages (`message_type`, [#68](https://github.com/AimTune/converger/issues/68)) reach adapters natively when they declare the type in a `message_types:` capability entry (or have neither `message_types` nor `activity_types`, like webhook, WebSocket and broker channels). Otherwise the channel gets the text fallback, or nothing without one. Set `show_tool_traces: true` in a channel's config to deliver `tool_call` traces there as `name: status` lines ([activities](../concepts/activities.md#delivery-to-channels)).
