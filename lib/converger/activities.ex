@@ -145,17 +145,46 @@ defmodule Converger.Activities do
 
   @doc """
   Whether the mekik `interrupt` `interrupt_id` of a conversation is still open:
-  no `interrupt_resolved` with the same id was stored after it (#64).
+  no `interrupt_resolved` with the same id was stored after its latest
+  `interrupt` (#64). mekik names a pause by its node (`approve:interrupt#0`),
+  so a later run of the same graph reuses the id of a resolved interrupt.
   """
   def interrupt_open?(conversation_id, interrupt_id) when is_binary(interrupt_id) do
-    resolved =
+    latest =
       from(a in Activity,
         where:
-          a.conversation_id == ^conversation_id and a.message_type == "interrupt_resolved" and
-            fragment("?->>?", a.payload, "id") == ^interrupt_id
+          a.conversation_id == ^conversation_id and a.message_type == "interrupt" and
+            fragment("?->>?", a.payload, "id") == ^interrupt_id,
+        select: max(a.seq)
       )
+      |> Repo.one()
 
-    not Repo.exists?(resolved)
+    not resolved_after?(conversation_id, interrupt_id, latest || 0)
+  end
+
+  @doc """
+  Whether the stored `interrupt` activity is still open: no
+  `interrupt_resolved` with its id was stored after it. An older interrupt
+  whose id a later run reused is closed by that id's first resolution.
+  """
+  def interrupt_open?(%Activity{
+        message_type: "interrupt",
+        conversation_id: conversation_id,
+        seq: seq,
+        payload: %{"id" => interrupt_id}
+      })
+      when is_binary(interrupt_id),
+      do: not resolved_after?(conversation_id, interrupt_id, seq || 0)
+
+  def interrupt_open?(_activity), do: false
+
+  defp resolved_after?(conversation_id, interrupt_id, seq) do
+    from(a in Activity,
+      where:
+        a.conversation_id == ^conversation_id and a.message_type == "interrupt_resolved" and
+          fragment("?->>?", a.payload, "id") == ^interrupt_id and a.seq > ^seq
+    )
+    |> Repo.exists?()
   end
 
   @doc """

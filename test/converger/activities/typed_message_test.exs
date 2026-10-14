@@ -241,6 +241,72 @@ defmodule Converger.Activities.TypedMessageTest do
       assert {:error, %Ecto.Changeset{} = changeset} = result
       errors_on(changeset)
     end
+
+    test "an interrupt id reused by a later run is open again until resolved again (#64)",
+         ctx do
+      interrupt = fn ->
+        {:ok, activity} =
+          create(ctx, %{
+            "message_type" => "interrupt",
+            "payload" => %{
+              "id" => "approve:interrupt#0",
+              "data" => %{"payload" => %{"title" => "Refund?"}}
+            }
+          })
+
+        activity
+      end
+
+      resolve = fn ->
+        {:ok, _} =
+          create(ctx, %{
+            "message_type" => "interrupt_resolved",
+            "payload" => %{"id" => "approve:interrupt#0", "data" => %{}}
+          })
+      end
+
+      id = "approve:interrupt#0"
+      first = interrupt.()
+      assert Activities.interrupt_open?(ctx.conversation.id, id)
+      assert Activities.interrupt_open?(first)
+
+      resolve.()
+      refute Activities.interrupt_open?(ctx.conversation.id, id)
+      refute Activities.interrupt_open?(first)
+
+      # The graph's next run pauses on the same node: same id, open again.
+      second = interrupt.()
+      assert Activities.interrupt_open?(ctx.conversation.id, id)
+      assert Activities.interrupt_open?(second)
+      refute Activities.interrupt_open?(first)
+
+      # A reply to the open one resumes the graph; a reply to the stale one
+      # is a plain turn.
+      reply = fn to, value ->
+        ConvergerWeb.Protocol.BotRelay.turn_frame(
+          %{
+            "type" => "text",
+            "from" => "user",
+            "data" => %{"text" => "Approve"},
+            "replyTo" => %{"id" => to.id},
+            "metadata" => %{"action" => %{"label" => "Approve", "value" => value}}
+          },
+          ctx.conversation.id
+        )
+      end
+
+      assert reply.(second, %{"approved" => true}) == %{
+               "type" => "resume",
+               "answers" => %{id => %{"approved" => true}}
+             }
+
+      assert %{"type" => "text"} = reply.(first, %{"approved" => true})
+
+      resolve.()
+      refute Activities.interrupt_open?(ctx.conversation.id, id)
+      refute Activities.interrupt_open?(second)
+      assert Activities.open_interrupts(ctx.conversation.id) == []
+    end
   end
 
   describe "downgrade" do

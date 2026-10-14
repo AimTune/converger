@@ -25,7 +25,11 @@ ExUnit.start(
     :redis_streams,
     :mqtt,
     # a real mekik/1 server (MEKIK_URL), see test/converger/channels/mekik_live_test.exs
-    :mekik
+    # and test/acceptance/mekik_whatsapp_live_test.exs
+    :mekik,
+    # the real refund demo behind Converger (MEKIK_DIR), see
+    # test/protocol/mekik_converger_live_test.exs
+    :mekik_converger
   ],
   assert_receive_timeout: 1_000
 )

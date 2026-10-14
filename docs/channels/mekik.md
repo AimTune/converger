@@ -22,11 +22,11 @@ end user (WhatsApp, widget, ...) ──▶ Converger ──routing rule──▶
 | | Mode A: Converger dials mekik (this page) | Mode B: mekik dials Converger |
 | --- | --- | --- |
 | Who connects | the `mekik` channel adapter opens one upstream WebSocket per conversation | the mekik transport `@mekik/converger` connects to a `websocket` channel's channel-scoped socket ([WebSocket channel](websocket.md#agents-and-bots-on-the-native-endpoint-protocol-v1)) |
-| mekik changes | none | mekik runs with an external transcript (AimTune/mekik#47) |
+| mekik changes | none | the `@mekik/converger` transport, with mekik's external-transcript profile (AimTune/mekik#47) |
 | Transcripts | **two**: mekik records its own, Converger records again | one: Converger's |
 | `seq` spaces | **two**: mekik's per-conversation `seq` (used only as the upstream watermark) and Converger's | one: Converger's |
 | Public endpoint | the mekik server must be reachable from Converger | mekik needs none |
-| Status | Implemented | Planned (#64, AimTune/mekik#47) |
+| Status | Implemented, verified live with WhatsApp | Converger side implemented ([ADR-0063](../adr/0063-channel-scoped-agent-sockets-and-the-bot-relay.md)); `@mekik/converger` in review (AimTune/mekik#48); verified live ([testing](#live-tests-against-the-mekik-repository)) |
 
 Mode B is the recommended steady state; Mode A works today with any mekik server.
 
@@ -172,7 +172,7 @@ server (`test/support/mekik/`): a scripted refund turn (`run`, `tool_call`, an a
 the end user's tapped button reaching the server as `resume`, replay after a reconnect, resume after a
 restart, rejected tokens and idle eviction.
 
-The Mode A acceptance criterion of #64 is verified by
+The Mode A scenario of #64 runs in CI against the fake server in
 `test/acceptance/mekik_whatsapp_acceptance_test.exs`: a `whatsapp_meta` channel with a routing rule
 to a `mekik` channel served by the fake server. A signed WhatsApp text webhook reaches mekik as the
 user turn; the tool traces stay off WhatsApp; the approval `interrupt` reaches the Graph API as an
@@ -192,13 +192,63 @@ after a page reload `welcome.pending` re-renders the open interrupt
 ([connecting chat clients](../protocol/clients.md#a-mekik-bot-behind-converger-verified-live-63-65)). It runs in the
 CI job "chativa reference client compatibility".
 
-`test/converger/channels/mekik_live_test.exs` (tag `:mekik`, excluded by default) runs the same scenario against a
-real server:
+### Live tests against the mekik repository
+
+Three tests run the real mekik code instead of the fake server. They need a checkout of the
+[mekik repository](https://github.com/AimTune/mekik) with `ts/` built (`pnpm install && pnpm build`), so
+`test/test_helper.exs` excludes their tags by default and CI does not run them; run them by hand when the
+adapter, the bot relay, the channel-scoped socket or the mekik/1 profile changes.
+
+| Test | Tag | What it proves |
+| --- | --- | --- |
+| `test/converger/channels/mekik_live_test.exs` | `:mekik` | Mode A with a widget user: the stock refund demo answers, pauses on the approval and resumes on the answer. |
+| `test/acceptance/mekik_whatsapp_live_test.exs` | `:mekik` | **#64 Mode A acceptance**: a stock `node examples/refund.ts --serve`, configured as a `mekik` channel, answers a WhatsApp user through a routing rule. |
+| `test/protocol/mekik_converger_live_test.exs` | `:mekik_converger` | **#64 Mode B acceptance**: the same demo behind Converger with `@mekik/converger`; Converger is the only transcript, and a reconnecting chativa replays exactly once. |
+
+Mode A (start the demo first, it listens on port 8800):
 
 ```bash
-node examples/refund.ts --serve        # in mekik/ts
+cd mekik/ts && node examples/refund.ts --serve
 MEKIK_URL=ws://127.0.0.1:8800/ws mix test --only mekik
 ```
+
+The WhatsApp test posts signed Meta webhooks to `/api/v1/channels/:id/inbound` and answers the Graph API
+with a `Req.Test` stub. The user writes `ORD-42`; WhatsApp gets the demo's greeting and then the approval
+`interrupt` as interactive reply buttons (Approve / Reject, Converger's answer keys as button ids). The
+`get_order` tool traces and the `order-card` GenUI card are stored but never sent. A signed `button_reply`
+webhook resumes the graph (`interrupt_resolved` with the interrupt's id, the `refund_payment` traces),
+and WhatsApp gets the streamed text (`Refund processed ✅`, one message when the GenUI stream is done)
+and the reply `Refund complete: ORD-42`. A second refund in the same conversation pauses on an
+interrupt with the same id (`approve:interrupt#0`, mekik names a pause by its node): a tap on the
+first message's button is refused by mekik as a new turn while parked, and the new buttons resume
+the graph.
+
+Mode B (the test spawns the demo itself and kills it on exit; Node >= 22.18):
+
+```bash
+MEKIK_DIR=path/to/mekik mix test --only mekik_converger   # MEKIK_DIR defaults to ../mekik
+```
+
+The test serves the endpoint on a random port, creates a `websocket` widget channel routed to a
+`websocket` bot channel, and runs `node examples/refund.ts --converger` with
+`CONVERGER_URL=ws://127.0.0.1:PORT/socket/converger/v1` and `CONVERGER_SECRET` set to the bot channel's
+secret. The transport mints its channel-scoped token with `POST /api/v1/converger/tokens/generate` on the
+same origin and dials the bot channel's socket. The vendored chativa connector (see
+[connecting chat clients](../protocol/clients.md#a-mekik-bot-behind-converger-verified-live-63-65)) then:
+
+1. sends `ORD-42` and renders the greeting, the `get_order` traces, the `order-card` card and the
+   approval chips;
+2. taps Approve (its own `resume` frame) and renders the `refund_payment` traces, the streamed text and
+   the final reply;
+3. disconnects, while the same user asks again from another device, so the graph runs again;
+4. reconnects with its watermark and receives exactly the missed frames, each once. The open interrupt
+   is also re-announced in `welcome.pending` (as a mekik server does) under the same message id, which
+   chativa's message store renders once; a further reconnect replays nothing. The chips resume the
+   second run.
+
+Converger's transcript then holds every frame once, in one contiguous `seq` space (each tool call
+stored exactly twice, running and completed); mekik keeps no history of its own: the demo runs with
+the external-transcript profile, which `connectConverger` requires, and its transport reports no error.
 
 ## Related
 

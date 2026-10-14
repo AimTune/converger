@@ -342,7 +342,10 @@ inline keyboard press, a numeric reply "2", a reply mail) is normalised to an or
   usual (`reply_to_id` on the interrupt, `metadata.action`) and reaches the bot channel as
   `resume {answers: {INTERRUPT_ID: value}}` (mekik-compatible; `value` is `metadata.action.value`, else
   the label, else the text), [v1.md section 9](./v1.md). Otherwise it is an ordinary turn for the agent
-  or bot.
+  or bot. An interrupt is open until an `interrupt_resolved` with its id is stored after it: mekik names
+  a pause by its node (`approve:interrupt#0`), so the graph's next run reuses the id of a resolved
+  interrupt, and the new one is open again, while a tap on the older message's button is an ordinary
+  turn (#64).
 
 So an agent sends one `buttons` message and receives the same normalised turn from the web widget,
 WhatsApp, Telegram, Slack and email.

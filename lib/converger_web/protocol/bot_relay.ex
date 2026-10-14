@@ -153,7 +153,7 @@ defmodule ConvergerWeb.Protocol.BotRelay do
          %Activity{message_type: "interrupt", payload: %{"id" => interrupt_id}} = interrupt <-
            Activities.get_activity(reply_to_id),
          true <- interrupt.conversation_id == conversation_id,
-         true <- Activities.interrupt_open?(conversation_id, interrupt_id) do
+         true <- Activities.interrupt_open?(interrupt) do
       {interrupt_id, answer_value(frame)}
     else
       _ -> nil
