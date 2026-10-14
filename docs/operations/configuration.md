@@ -153,7 +153,7 @@ private broker with `WEBHOOK_ALLOWED_TARGETS`.
 
 ```elixir
 config :converger, :platform_webhooks,
-  enabled: true,              # false stops emitting events
+  enabled: true,              # false stops webhook deliveries (events still reach the backbone)
   connect_timeout: 5_000,     # ms
   receive_timeout: 10_000,    # ms
   max_response_bytes: 65_536
@@ -183,6 +183,71 @@ The other keys of `config :converger, :broker_channels` (application config only
 | `inbound_backoff_ms`, `inbound_max_backoff_ms` | `500`, `30000` | Backoff between those attempts (doubling, capped). |
 | `dead_letter_max_backoff_ms` | `30000` | Cap of the backoff between attempts to write a message to the dead-letter topic or queue (retried until it succeeds). |
 | `publisher_idle_ms` | `900000` | A node's producer connection to a broker channel is closed after this long without deliveries. |
+
+## Event backbone
+
+Where platform events are published and consumed ([Event backbone](../architecture/event-backbone.md),
+[ADR-0070](../adr/0070-pluggable-event-backbone.md)). How to choose one and migrate without downtime:
+[Deployment](../deployment.md#choosing-an-event-backbone). All variables apply in every environment; unset or empty
+ones keep the `config.exs` defaults.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `BACKBONE` | `native` | The backbone: `native`, `kafka`, `nats` or `rabbitmq`. Any other value fails the boot. |
+| `BACKBONE_MIRROR` | unset | Comma-separated backbones that also receive every event (dual publish while migrating). |
+| `BACKBONE_CONSUMERS` | `true` | `false` / `0`: this node declares the subscriptions but runs no broker consumer. Publishing is not affected. |
+| `BACKBONE_TOPIC_PREFIX` | `converger` | Kafka topics and NATS subjects `<prefix>.activities`, `.deliveries`, `.events`; NATS streams `<PREFIX>_ACTIVITIES` ...; the RabbitMQ exchange. |
+| `BACKBONE_KAFKA_BROKERS` | `localhost:9092` | Bootstrap brokers, `host:port,host:port`. |
+| `BACKBONE_KAFKA_SASL_MECHANISM` | unset | `plain`, `scram_sha_256` or `scram_sha_512`, with `BACKBONE_KAFKA_SASL_USERNAME` / `_PASSWORD`. |
+| `BACKBONE_KAFKA_TLS` | `false` | Connect with TLS (verifying the broker certificate against the OS trust store). |
+| `BACKBONE_KAFKA_PARTITIONS` | `12` | Partitions of topics created at boot. More partitions, more consumer parallelism. |
+| `BACKBONE_KAFKA_REPLICATION_FACTOR` | `1` | Replication factor of topics created at boot; use 3 on a production cluster. |
+| `BACKBONE_KAFKA_START_OFFSET` | `earliest` | Where a new consumer group starts: `earliest` or `latest`. |
+| `BACKBONE_NATS_SERVERS` | `nats://localhost:4222` | Servers, `nats://host:port` or `tls://host:port`, comma-separated. |
+| `BACKBONE_NATS_USERNAME` / `_PASSWORD` / `_TOKEN` | unset | NATS credentials. |
+| `BACKBONE_NATS_TLS` | `false` | Connect with TLS. |
+| `BACKBONE_NATS_REPLICAS` | `1` | Replicas of streams created at boot. |
+| `BACKBONE_RABBITMQ_URL` | `amqp://localhost:5672` | `amqp://` or `amqps://` URL (host, port, virtual host). |
+| `BACKBONE_RABBITMQ_USERNAME` / `_PASSWORD` | unset | RabbitMQ credentials. |
+
+Broker hosts come from the operator, so the webhook SSRF guard does not apply to them.
+
+Application config:
+
+```elixir
+config :converger, :backbone, Converger.Backbone.Native   # .Kafka | .Nats | .RabbitMQ
+
+config :converger, Converger.Backbone,
+  topic_prefix: "converger",
+  mirror: [],                 # e.g. [Converger.Backbone.Kafka] while migrating
+  consumers: true,
+  subscriptions: [],          # extra subscriptions: [{name, topics, handler, opts}]
+  inline_attempts: 3,         # a failing handler on a broker consumer, then parked in Oban
+  inline_backoff_ms: 200,
+  down_ms: 5_000              # after a failed publish, park at once for this long
+
+config :converger, Converger.Backbone.Kafka,
+  brokers: "localhost:9092", sasl_mechanism: nil, sasl_username: nil, sasl_password: nil,
+  tls: false, tls_verify: true, tls_ca_cert: nil,
+  create_topics: true, partitions: 12, replication_factor: 1,
+  start_offset: "earliest", produce_timeout_ms: 10_000,
+  producer_concurrency: 2,    # consumer group members per node and subscription
+  fetch_config: [max_wait_time: 10],   # BroadwayKafka fetch options (ms an empty partition is waited for)
+  receive_interval: 100,      # ms before a drained producer polls again
+  group_config: []            # BroadwayKafka group options (session_timeout_seconds, ...)
+
+config :converger, Converger.Backbone.Nats,
+  servers: "nats://localhost:4222", username: nil, password: nil, token: nil, creds: nil, nkey_seed: nil,
+  tls: false, tls_verify: true, tls_ca_cert: nil,
+  replicas: 1, max_age_seconds: 604_800, duplicate_window_seconds: 120,
+  ack_wait_seconds: 30, batch_size: 10, publish_timeout_ms: 10_000
+
+config :converger, Converger.Backbone.RabbitMQ,
+  url: "amqp://localhost:5672", username: nil, password: nil, tls_verify: true, tls_ca_cert: nil,
+  prefetch_count: 20, publish_timeout_ms: 10_000
+```
+
+Idempotency receipts are pruned after `BACKBONE_RECEIPT_RETENTION_DAYS` (7, `backbone_receipt_days` of `config :converger, Converger.Retention`).
 
 ## Pagination
 
@@ -407,7 +472,7 @@ config :converger, Oban,
        {"*/10 * * * *", Converger.Workers.SessionPruneWorker}
      ]}
   ],
-  queues: [default: 10, deliveries_high: 10, deliveries: 20, deliveries_bulk: 5, maintenance: 1, webhooks: 10]
+  queues: [default: 10, deliveries_high: 10, deliveries: 20, deliveries_bulk: 5, maintenance: 1, webhooks: 10, backbone: 10]
 ```
 
 | Setting | Value | Notes |
@@ -416,6 +481,7 @@ config :converger, Oban,
 | Queue `maintenance` | 1 concurrent job per node | Data lifecycle: partitions (daily 00:15 UTC), pruning (daily 01:30 UTC), retention (monthly, 1st at 02:00 UTC), expired admin/portal sessions and password reset tokens (every 10 minutes, `SessionPruneWorker`) and the `PurgeWorker` jobs enqueued by tenant, channel and conversation deletes. See [Data retention](retention.md). |
 | Queues `deliveries_high`, `deliveries`, `deliveries_bulk` | 10 / 20 / 5 concurrent jobs per node | `Converger.Workers.ActivityDeliveryWorker` (unique per activity and channel), one queue per tenant tier (`tenants.tier`: `high`, `default`, `bulk`); see [flow control](../delivery.md#tenant-tiers-fair-queueing). |
 | Queue `webhooks` | 10 concurrent jobs per node | `Converger.Workers.WebhookEventWorker`: [platform event webhooks](../platform-webhooks.md). |
+| Queue `backbone` | 10 concurrent jobs per node | `Converger.Workers.BackboneEventWorker` (Native backbone subscriptions, and broker events whose handler failed) and `Converger.Workers.BackbonePublishWorker` (events parked while a broker was unreachable); see [Event backbone](../architecture/event-backbone.md). |
 | `Pruner` | completed/discarded jobs older than 24 h | Keeps `oban_jobs` small. |
 | `Lifeline` | rescues jobs stuck in `executing` after 30 min | Recovers deliveries from a crashed node. |
 | Test | `testing: :inline` | Jobs run synchronously in tests. |
@@ -481,6 +547,7 @@ config :converger, Converger.Retention,
   health_check_days: 7,       # HEALTH_CHECK_RETENTION_DAYS, 0 or nil disables
   audit_log_days: 365,        # AUDIT_LOG_RETENTION_DAYS, 0 or nil disables
   webhook_event_days: 7,      # WEBHOOK_EVENT_RETENTION_DAYS, 0 or nil disables
+  backbone_receipt_days: 7,   # BACKBONE_RECEIPT_RETENTION_DAYS, 0 or nil disables
   prune_batch_size: 10_000
 
 config :converger, Converger.Archive,

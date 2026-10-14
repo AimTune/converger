@@ -128,6 +128,20 @@ plugin rescues it; only then is the delivery retried. See
 | `OBAN_LIFELINE_RESCUE_AFTER_SECONDS` | `1800` (30 min) | Seconds after which a job still `executing` is considered orphaned and made available again. Lower it to re-deliver sooner after a crash, but keep it well above the longest job runtime (a webhook delivery takes at most about 90 s: connect plus receive timeout), or a slow job that is still running is executed a second time. Receivers de-duplicate by `x-converger-delivery-id` either way. |
 | `OBAN_LIFELINE_INTERVAL_SECONDS` | `60` | How often Lifeline looks for orphaned jobs. |
 
+### Event backbone
+
+Where platform events are published ([Event backbone](architecture/event-backbone.md),
+[ADR-0070](adr/0070-pluggable-event-backbone.md)). Switching is the one variable `BACKBONE`; how to choose and how
+to migrate without downtime are [below](#choosing-an-event-backbone). The full list, with the broker connection
+settings, is in the [Configuration reference](operations/configuration.md#event-backbone).
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `BACKBONE` | `native` | `native` (Phoenix.PubSub + Oban on Postgres), `kafka`, `nats` (JetStream) or `rabbitmq`. |
+| `BACKBONE_MIRROR` | unset | Comma-separated backbones that also receive every event (dual publish while migrating). |
+| `BACKBONE_CONSUMERS` | `true` | `false` keeps this node's broker consumers off (web-only nodes). |
+| `BACKBONE_KAFKA_BROKERS` / `BACKBONE_NATS_SERVERS` / `BACKBONE_RABBITMQ_URL` | `localhost` defaults | The broker of the selected backbone. |
+
 ### Rate limiting
 
 | Variable | Default | Description |
@@ -531,6 +545,59 @@ Rollback:
   backfill or channel encryption): restore the pre-upgrade backup / PITR point
   instead, accepting the loss of data written since. Prefer a forward fix when
   possible.
+
+## Choosing an event backbone
+
+Platform events (activity created, delivery status changes, conversation, channel and participant events) go
+through the [event backbone](architecture/event-backbone.md). Channel deliveries and the WebSocket fan-out do not
+depend on it: they work the same on every backbone. What changes is what else runs next to Converger, and who
+besides Converger can read the events.
+
+| Your situation | Team size | Existing infrastructure | Event throughput | Replay / downstream consumers | Recommended backbone |
+| --- | --- | --- | --- | --- | --- |
+| Getting started, one product team, Converger is the only consumer of its events | 1-5 | Postgres | up to a few thousand events/s | not needed (webhooks are enough) | **Native** (default) |
+| Several services react to conversation traffic, no broker yet | any | Postgres | up to a few thousand events/s | platform webhooks per tenant | **Native**; add a broker only when you need one of the rows below |
+| A data or platform team already runs Kafka; analytics, CRM or bots consume from topics | 5+ | Kafka / Redpanda | high, bursty | yes: rewind, reprocess, many independent consumer groups | **Kafka** |
+| Lightweight messaging already on NATS; edge or multi-region | any | NATS with JetStream | high | yes, within the stream's `max_age` | **NATS JetStream** |
+| Existing RabbitMQ estate, consumers are queue workers | any | RabbitMQ | moderate | no (a message is gone once acknowledged) | **RabbitMQ** |
+| Strict per-conversation ordering for downstream consumers | any | Kafka | any | yes | **Kafka** (one partition per conversation) |
+
+Rules of thumb:
+
+- **Do not add a broker to get durability.** Native is durable: events live in Postgres as Oban jobs until handled,
+  the same database the activities are in. A broker adds durability *outside* Converger, for other consumers.
+- **Kafka when events are a product of their own**: other teams build on them, need replay, or need per-conversation
+  order. It is the only backbone with order per conversation and replay over a long retention.
+- **Numbers**: see the [backbone matrix](benchmarks/backbone-matrix.md) (Native and Kafka, 1 and 3 nodes). Measure
+  with your own traffic profile before you switch.
+
+Whatever the backbone, Postgres stays the source of truth and Erlang distribution stays required for clustering
+(PubSub, presence, rate limits).
+
+## Migrating between backbones without downtime
+
+Every event keeps one id wherever it travels, and the backbone's subscriptions apply each id once (idempotency
+receipts). That makes a dual-publish period safe. To move from Native to Kafka (any pair works the same way):
+
+1. **Prepare the target.** Make sure the broker is reachable from every node. Topics are created at boot when
+   missing (`BACKBONE_KAFKA_PARTITIONS`, default 12, and `BACKBONE_KAFKA_REPLICATION_FACTOR`, default 1: set 3 on a
+   production cluster); create them beforehand if your cluster forbids topic creation.
+2. **Dual publish.** Set `BACKBONE_MIRROR=kafka` (keep `BACKBONE=native`) and roll the nodes. Events now reach both
+   backbones; only Native's subscriptions consume. Downstream consumers can start reading the Kafka topics.
+3. **Switch the primary.** Set `BACKBONE=kafka` and `BACKBONE_MIRROR=native`, and roll the nodes. During the roll,
+   old nodes still publish to Native (and mirror to Kafka), new nodes publish to Kafka (and mirror to Native). The
+   new nodes' consumer groups start at the earliest offset (`BACKBONE_KAFKA_START_OFFSET`), so they also see the
+   events mirrored before; their receipts skip every event Native already handled. Native jobs already queued keep
+   running on every node (Oban runs everywhere), with the same receipts.
+4. **Drain and drop the mirror.** When the `backbone` Oban queue is empty, unset `BACKBONE_MIRROR` and roll again.
+
+Keep steps 2 and 3 within the receipt retention (`BACKBONE_RECEIPT_RETENTION_DAYS`, 7 days): an event older than its receipt
+would be applied again. If the dual-publish period must be longer, raise the retention, or set
+`BACKBONE_KAFKA_START_OFFSET=latest` for step 3 (safe because, until the switch, every event was published to
+Native too). Rolling back is the same procedure in reverse.
+
+While a broker is unreachable, nothing fails: events are parked in Postgres (the `backbone` queue grows) and are
+published when the broker is back. Alert on that queue's depth.
 
 ## Capacity guidance
 

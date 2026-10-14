@@ -137,6 +137,7 @@ or import into a separate database.
 | `channel_health_checks` | 7 days (by `checked_at`) | `HEALTH_CHECK_RETENTION_DAYS` |
 | `audit_logs` | 365 days (by `inserted_at`) | `AUDIT_LOG_RETENTION_DAYS` |
 | `webhook_events` ([platform event webhooks](../platform-webhooks.md)) | 7 days (by `inserted_at`) | `WEBHOOK_EVENT_RETENTION_DAYS` |
+| `backbone_receipts` ([event backbone](../architecture/event-backbone.md#delivery-guarantees) idempotency receipts) | 7 days (by `inserted_at`) | `BACKBONE_RECEIPT_RETENTION_DAYS` |
 
 `0` disables a window. These rows are not archived; export them first if you need them longer (for example
 `COPY (SELECT * FROM audit_logs WHERE inserted_at < ...) TO ...`).
@@ -149,6 +150,7 @@ or import into a separate database.
 | `HEALTH_CHECK_RETENTION_DAYS` | `7` | Health check pruning window, `0` disables. |
 | `AUDIT_LOG_RETENTION_DAYS` | `365` | Audit log pruning window, `0` disables. |
 | `WEBHOOK_EVENT_RETENTION_DAYS` | `7` | Platform webhook event log pruning window, `0` disables. |
+| `BACKBONE_RECEIPT_RETENTION_DAYS` | `7` | Event backbone idempotency receipts. Keep it longer than any redelivery or dual-publish window (an event older than its receipt would be applied again); `0` disables pruning. |
 | `PARTITION_MONTHS_AHEAD` | `3` | Months of future partitions kept in place. |
 | `ARCHIVE_BUCKET` / `ARCHIVE_CONTAINER` / `ARCHIVE_DIR` | unset | Archive to a different bucket (S3, MinIO, R2, GCS), Azure container or local directory, with the attachment storage credentials. Unset: the attachment bucket. |
 | `ARCHIVE_PREFIX` | `archive` | First path segment of archive keys. |
