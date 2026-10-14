@@ -157,7 +157,7 @@ class ClientAPI:
         """Start a conversation; the returned token is bound to it."""
         return self._root._send(r.create_conversation(token))
 
-    def get_conversation(self, token: str, conversation_id: str, *, watermark: str | None = None) -> ConversationToken:
+    def get_conversation(self, token: str, conversation_id: str, *, watermark: str | int | None = None) -> ConversationToken:
         return self._root._send(r.get_conversation(token, conversation_id, watermark))
 
     def close_conversation(self, token: str, conversation_id: str) -> ConversationStatus:
@@ -282,7 +282,7 @@ class AsyncClientAPI:
         return await self._root._send(r.create_conversation(token))
 
     async def get_conversation(
-        self, token: str, conversation_id: str, *, watermark: str | None = None
+        self, token: str, conversation_id: str, *, watermark: str | int | None = None
     ) -> ConversationToken:
         return await self._root._send(r.get_conversation(token, conversation_id, watermark))
 

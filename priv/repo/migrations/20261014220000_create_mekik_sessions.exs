@@ -24,8 +24,7 @@ defmodule Converger.Repo.Migrations.CreateMekikSessions do
           references(:conversations, type: :binary_id, on_delete: :delete_all),
           null: false
 
-      add :tenant_id, references(:tenants, type: :binary_id, on_delete: :delete_all),
-        null: false
+      add :tenant_id, references(:tenants, type: :binary_id, on_delete: :delete_all), null: false
 
       add :mekik_conversation_id, :text, null: false
       add :mekik_user_id, :text, null: false

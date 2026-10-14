@@ -6,7 +6,7 @@ description: Activities are ordered by a gap-free per-conversation seq allocated
 
 | | |
 | --- | --- |
-| **Status** | Accepted |
+| **Status** | Accepted; the opaque-watermark part is superseded by [ADR-0068](0068-integer-seq-watermarks-on-every-surface.md) |
 | **Date** | 2026-10-08 |
 | **Issue** | [#6](https://github.com/AimTune/converger/issues/6) |
 | **Pull request** | [#78](https://github.com/AimTune/converger/pull/78) |

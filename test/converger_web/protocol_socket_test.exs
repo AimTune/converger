@@ -128,15 +128,39 @@ defmodule ConvergerWeb.ProtocolSocketTest do
       assert {%{"seq" => 1}, _client} = Client.recv(client)
     end
 
-    test "accepts the legacy opaque watermark", ctx do
+    test "accepts the legacy opaque watermarks and reports them as deprecated", ctx do
       first = activity!(ctx.conversation, "one")
       activity!(ctx.conversation, "two")
-      legacy = Converger.ConvergerAPI.Watermark.encode(first.seq)
+      test_pid = self()
+      handler = "protocol-watermark-#{inspect(make_ref())}"
+
+      :telemetry.attach(
+        handler,
+        [:converger, :deprecated, :use],
+        fn _event, _measurements, metadata, _ -> send(test_pid, {:deprecated, metadata}) end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach(handler) end)
+
+      for legacy <- [
+            Converger.ConvergerAPI.Watermark.encode(first.seq),
+            Base.url_encode64(first.id, padding: false)
+          ] do
+        {welcome, client} =
+          join(ctx.port, token(ctx.channel, ctx.conversation), %{"watermark" => legacy})
+
+        # The server only ever emits the integer seq.
+        assert welcome["data"]["watermark"] == 2
+        assert {%{"seq" => 2}, _client} = Client.recv(client)
+        assert_receive {:deprecated, %{surface: :opaque_watermark, api: :protocol}}
+      end
 
       {_welcome, client} =
-        join(ctx.port, token(ctx.channel, ctx.conversation), %{"watermark" => legacy})
+        join(ctx.port, token(ctx.channel, ctx.conversation), %{"watermark" => first.seq})
 
       assert {%{"seq" => 2}, _client} = Client.recv(client)
+      refute_received {:deprecated, %{surface: :opaque_watermark}}
     end
 
     test "a watermark above the head draws invalid_watermark and no replay", ctx do

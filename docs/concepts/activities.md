@@ -213,7 +213,7 @@ Lists are ordered by `seq` ascending. Migration [`20261008150000_add_seq_to_acti
 
 ### Watermarks
 
-Clients resume with an opaque **watermark**, the position of the last activity they received. It is `Base.url_encode64("seq:" <> seq, padding: false)`, so `seq` 2 encodes as `c2VxOjI`. Clients must treat it as opaque. Decoding needs no database lookup. Watermarks from before `seq` (Base64 activity ids) are still accepted for one release.
+Clients resume with a **watermark**, the position of the last activity they received: the integer `seq` itself (since v3.0, [ADR-0068](../adr/0068-integer-seq-watermarks-on-every-surface.md)). Resuming needs no database lookup. For one release the server still accepts the pre-v3.0 opaque form, `Base.url_encode64("seq:" <> seq, padding: false)` (`seq` 2 encodes as `c2VxOjI`), and Base64 activity ids from before `seq`; only the legacy Phoenix `activitySet` still emits the opaque form ([migration](../protocol/v1.md#65-the-watermark-and-its-migration)).
 
 | Endpoint | Watermark | Response |
 | --- | --- | --- |

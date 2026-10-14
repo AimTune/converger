@@ -197,7 +197,7 @@ Live frames are not durable: a client that was disconnected misses them. Both ch
 
 Without `last_activity_id` / `watermark` neither channel replays; the client starts live. An invalid watermark is treated like no watermark.
 
-Watermarks encode the per-conversation `seq` (`Converger.ConvergerAPI.Watermark`: URL-safe Base64 of `seq:<n>`), so resuming needs no lookup and is exact ([ADR-0006](../adr/0006-per-conversation-seq-and-opaque-watermarks.md)). Legacy watermarks (Base64 activity ids) are still accepted.
+Watermarks are the per-conversation `seq`, so resuming needs no lookup and is exact ([ADR-0006](../adr/0006-per-conversation-seq-and-opaque-watermarks.md)). REST and Protocol v1 carry the integer; `ConvergerChannel`'s `activitySet` still emits the pre-v3.0 opaque form (`Converger.ConvergerAPI.Watermark`: URL-safe Base64 of `seq:<n>`) for one release, and every input accepts the integer, its decimal string, the opaque form and legacy Base64 activity ids ([ADR-0068](../adr/0068-integer-seq-watermarks-on-every-surface.md)).
 
 `ConvergerChannel` queues the replay, then subscribes to the PubSub topic in `join/3`, so every live frame is handled after the replay and dropped when the replay already covered it (`last_seq`, see above). After a replay, it marks the replayed activities' pending deliveries to a `websocket` channel `sent` unless the channel has `require_ack: true` (`Converger.Deliveries.acknowledge/3`). A routed socket's replay runs the activities through its channel's middleware. Clients that also page over REST de-duplicate by activity `id`.
 

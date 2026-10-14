@@ -83,7 +83,7 @@ def create_conversation(token: str) -> Request:
     return Request("POST", "/api/v1/converger/conversations", ConversationToken.model_validate, headers=_bearer(token, "token"))
 
 
-def get_conversation(token: str, conversation_id: str, watermark: str | None) -> Request:
+def get_conversation(token: str, conversation_id: str, watermark: str | int | None) -> Request:
     return Request(
         "GET",
         f"/api/v1/converger/conversations/{_seg(conversation_id)}",

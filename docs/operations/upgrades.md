@@ -272,3 +272,19 @@ is no longer started by default, and `/metrics` answers `404` until one of the t
 - Password reset by email needs a mailer: set `SMTP_HOST` (and `SMTP_*`, `MAILER_FROM`), see
   [Accounts, sessions and email](configuration.md#accounts-sessions-and-email). Without it reset links are never
   delivered.
+
+### Watermarks are the integer `seq`
+
+[#63](https://github.com/AimTune/converger/issues/63)
+([ADR-0068](../adr/0068-integer-seq-watermarks-on-every-surface.md),
+[Protocol v1, section 6.5](../protocol/v1.md#65-the-watermark-and-its-migration)). No migration.
+
+- `watermark` in `GET /api/v1/converger/conversations/:id/activities` and `meta.watermark` in
+  `GET /api/v1/conversations/:id/activities` are now a JSON number (the `seq` of the last activity), not an opaque
+  string. Integrations that pass the value back unchanged keep working; **typed clients that declared it as a
+  string must accept a number** (the SDKs in `packages/` accept both).
+- For one release the server still accepts the opaque forms (`seq:<n>` Base64 and legacy activity-id watermarks)
+  everywhere. Each use on a surface that emits integers is logged and counted as the deprecated
+  `opaque_watermark` surface (`[:converger, :deprecated, :use]`); watch it to find clients to update before the
+  release that drops them, which is announced one release ahead.
+- The legacy Phoenix `activitySet` frame on `/socket/converger` is unchanged (still the opaque string).

@@ -72,7 +72,10 @@ defmodule ConvergerClient.TenantAPI do
          do: {:ok, Activity.from_map(body["data"])}
   end
 
-  @doc "A conversation's activities after a watermark, oldest first. Options: `:watermark`, `:limit`."
+  @doc """
+  A conversation's activities after a watermark, oldest first. Options: `:watermark`
+  (the integer seq or a legacy opaque string, sent as is), `:limit`.
+  """
   @spec list_activities(ConvergerClient.t(), String.t(), keyword()) :: result(ActivityPage.t())
   def list_activities(client, conversation_id, opts \\ []) do
     p = params(watermark: opts[:watermark], limit: opts[:limit])

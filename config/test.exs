@@ -26,6 +26,9 @@ config :converger, ConvergerWeb.Endpoint,
   secret_key_base: "9Ov2AhAq9kITaSWzIOHQlF0OjtggqukSSK19U94ghQsnmuWqnKNRkQ/2PjUT9xNm",
   server: false
 
+# Agent group members become eligible quickly (the group tests wait for it).
+config :converger, ConvergerWeb.Protocol, group_settle_ms: 100
+
 # Tests sync the token revocation cache explicitly (RevocationCache.sync/0).
 config :converger, Converger.Auth.RevocationCache, sync_interval_ms: nil
 

@@ -66,7 +66,7 @@ defmodule ConvergerWeb.ConvergerAPI.EventStreamController do
     operation_id: "streamEvents",
     parameters: [
       conversation_id: path_id("Conversation id"),
-      watermark: query(%OpenApiSpex.Schema{type: :string}, "Replay after this seq"),
+      watermark: query(watermark_param_schema(), "Replay after this seq"),
       "Last-Event-ID": [
         in: :header,
         schema: %OpenApiSpex.Schema{type: :string},
@@ -328,7 +328,7 @@ defmodule ConvergerWeb.ConvergerAPI.EventStreamController do
         _ -> params["watermark"]
       end
 
-    case Protocol.parse_watermark(value) do
+    case Protocol.parse_watermark(value, deprecation: [api: :sse]) do
       {:ok, position} -> position
       {:error, _} -> nil
     end

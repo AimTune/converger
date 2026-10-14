@@ -31,7 +31,7 @@ export interface RestClientOptions {
 
 /** Options of {@link RestClient.history}. */
 export interface HistoryOptions {
-  /** Start after this watermark (integer seq or opaque); absent starts at the beginning. */
+  /** Start after this watermark (the integer seq, or a legacy opaque string, passed as is); absent starts at the beginning. */
   watermark?: number | string;
   /** Page size (the server clamps it). */
   limit?: number;
