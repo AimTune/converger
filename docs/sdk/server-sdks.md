@@ -16,6 +16,8 @@ land in one pull request. The design is recorded in
 | Elixir 1.15+ | `converger_client` on Hex | [`packages/client-elixir`](https://github.com/AimTune/converger/tree/main/packages/client-elixir) | [Elixir client](elixir.md) |
 
 Browser, mobile and Node front ends use the [TypeScript SDK](typescript.md) ([#46](https://github.com/AimTune/converger/issues/46)).
+AI agents and bots that serve a whole channel use the agent SDKs ([#67](https://github.com/AimTune/converger/issues/67)):
+[Python agent SDK](agent-python.md) (`converger-agent`, with a LangChain / LangGraph adapter).
 
 ## What every SDK covers
 
@@ -84,11 +86,17 @@ activities through a routing rule and points at `http://127.0.0.1:<port>/webhook
 5. receives the webhook delivery and verifies its signature with the webhook channel's secret,
 6. closes the conversation and checks the normalized `409 conversation_closed` error.
 
+For the agent SDKs (`agent-python`) the server also creates a tenant with a `websocket` widget channel routed to a
+`websocket` bot channel: the agent connects to the bot channel with its secret, and an end user on the widget channel
+sends turns through the server and receives the agent's tool trace, stream, text, interrupt and, after its `resume`,
+the answer.
+
 ```bash
 docker compose up -d db
 mix deps.get
 DB_NAME=converger_sdk PORT=4047 packages/conformance/integration/run.sh            # all three
 PYTHON_DOCKER=1 packages/conformance/integration/run.sh python                      # Python in Docker
+PYTHON_DOCKER=1 packages/conformance/integration/run.sh agent-python                # the Python agent SDK
 ```
 
 `DB_NAME` selects a separate database (created and migrated by the script). The fixtures file
@@ -98,14 +106,16 @@ the `SDKs` workflow.
 ## CI and releases
 
 `.github/workflows/sdks.yml` runs on changes to `packages/`, `lib/` and `priv/protocol/`: Python 3.10 and 3.13,
-Go 1.22 and stable (`gofmt`, `go vet`, `go test -race`), the Elixir client (format, warnings as errors, tests),
-then the end-to-end job above against a Postgres service.
+Go 1.22 and stable (`gofmt`, `go vet`, `go test -race`), the Elixir client (format, warnings as errors, tests), the
+Python agent SDK (3.10 and 3.13) and its `examples/agents/langchain-faq` example, then the end-to-end job above
+against a Postgres service.
 
 | SDK | Tag | Workflow | Publishes to |
 | --- | --- | --- | --- |
 | Python | `client-python/vX.Y.Z` | `sdk-python-release.yml` | PyPI, with trusted publishing (OIDC, `pypi` environment); no token is stored |
 | Go | `packages/client-go/vX.Y.Z` | `sdk-go-release.yml` | Nothing to upload: the tag is the release. The workflow tests the commit, warms `proxy.golang.org` and creates a GitHub release |
 | Elixir | `client-elixir/vX.Y.Z` | `sdk-elixir-release.yml` | Hex, with the `HEX_API_KEY` secret (`hex` environment) |
+| Python agent | none: run manually (`workflow_dispatch`, `publish` checked) | `agent-sdk-python-release.yml` | PyPI (`converger-agent`), trusted publishing as above. Unchecked, it only builds and tests |
 
 Each release workflow first checks that the tag matches the version in the package (`_version.py`, `Version` in
 `client.go`, `@version` in `mix.exs`). Before the first Hex release a license must be chosen and added to the

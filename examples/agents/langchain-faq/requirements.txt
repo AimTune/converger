@@ -1,0 +1,3 @@
+# The SDK from this repository (use "converger-agent[langchain]" from PyPI once released).
+-e ../../../packages/agent-python[langchain]
+langchain-anthropic>=0.3

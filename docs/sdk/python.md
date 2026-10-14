@@ -16,6 +16,9 @@ pip install converger
 
 Python 3.10 or later. Dependencies: `httpx`, `pydantic` 2, `websockets` 13 or later.
 
+To build an AI agent or bot that answers every conversation of a channel (WhatsApp, the web widget, ...) over one
+socket, use the [Python agent SDK](agent-python.md) (`converger-agent`) instead.
+
 ## Clients
 
 ```python
