@@ -102,6 +102,19 @@ sequenceDiagram
 
 The same channel-scoped token can also join `converger:conversation:<id>` for one routed conversation (an unscoped token cannot join; an end user gets a conversation token). Such a routed socket receives the console's deliveries, after the console's middleware; a socket of the conversation's own channel receives every activity as committed.
 
+## Agents and bots on the native endpoint (Protocol v1)
+
+**Implemented (#64).** The same channel-scoped token opens a Converger Protocol v1 connection on the native endpoint `/socket/converger/v1`: a `hello` without a conversation gets a channel `welcome`, and every conversation-level frame travels as `{conversationId, frame}` ([Protocol v1, section 10](../protocol/v1.md#10-channel-scoped-sockets-implemented-64-on-the-native-endpoint)). This is how an AI agent (the `@converger/agent` SDKs, #67) or a mekik server (the `@mekik/converger` transport) serves the conversations of every channel routed to this one:
+
+```json
+{ "type": "hello", "protocol": "converger/1", "token": "<channel-scoped token>", "group": "faq-bot", "watermarks": { "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70": 17 } }
+```
+
+- User turns from WhatsApp, Telegram, the web widget, ... arrive as typed message frames with `from: "user"`; the agent answers with message frames, rich messages (`buttons`, `card`, ...), `tool_call`, `genui` and `interrupt` frames, which are stored and routed back to the end user's channel.
+- The end user's bot-only frames (`resume`, `genui_event`, `abort`, ...) are forwarded to the agent; a tapped button that answers an open `interrupt` arrives as `resume`. The agent's `run`, `genui_components`, `skills` and `error` frames are relayed to the end user's connections. While no agent is connected, those frames draw `bot_unavailable` ([section 9](../protocol/v1.md#9-the-bot-channel-and-mekik-relay-implemented-64)).
+- Several agent processes can share a channel with the same `hello.group`: each conversation is served by exactly one of them.
+- A connection follows at most `maxConversations` conversations (default 5 000, `config :converger, ConvergerWeb.Protocol, max_conversations:`).
+
 ## Related
 
 - [WebSocket API](../websocket.md)

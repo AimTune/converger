@@ -21,13 +21,21 @@ defmodule ConvergerWeb.Protocol.Feed do
   alias ConvergerWeb.Protocol
   alias ConvergerWeb.Protocol.Frames
 
-  defstruct [:conversation_id, :user_id, last_seq: 0, own: MapSet.new()]
+  # `prepare` (optional) runs on each activity before it becomes a frame:
+  # `{:ok, activity}` or `:skip`. A channel-scoped connection uses it for a
+  # routed channel's middleware (section 10).
+  defstruct [:conversation_id, :user_id, :prepare, last_seq: 0, own: MapSet.new()]
 
   @type t :: %__MODULE__{}
 
-  @doc "A feed for `conversation_id`, rendering frames for the end user `user_id`."
-  def new(conversation_id, user_id) do
-    %__MODULE__{conversation_id: conversation_id, user_id: user_id}
+  @doc """
+  A feed for `conversation_id`, rendering frames for `viewer`: the end user's
+  id, or an agent (`ConvergerWeb.Protocol.Frames.activity/3`).
+
+  Options: `:prepare`, see the struct.
+  """
+  def new(conversation_id, viewer, opts \\ []) do
+    %__MODULE__{conversation_id: conversation_id, user_id: viewer, prepare: opts[:prepare]}
   end
 
   @doc """
@@ -77,26 +85,34 @@ defmodule ConvergerWeb.Protocol.Feed do
   @doc """
   A live activity (the canonical map of the `new_activity` broadcast).
   Returns the frames to push, in order: any gap first, then the activity.
+
+  Options: `prepared: true` when the activity already went through the
+  feed's `prepare` (a delivery after the channel's middleware); gap fills are
+  always prepared.
   """
-  def live(%__MODULE__{last_seq: last} = feed, %{seq: seq}) when is_integer(seq) and seq <= last,
-    do: {[], feed}
+  def live(feed, canonical, opts \\ [])
 
-  def live(%__MODULE__{last_seq: last} = feed, %{seq: seq} = canonical)
+  def live(%__MODULE__{last_seq: last} = feed, %{seq: seq}, _opts)
+      when is_integer(seq) and seq <= last,
+      do: {[], feed}
+
+  def live(%__MODULE__{last_seq: last} = feed, %{seq: seq} = canonical, opts)
       when is_integer(seq) and seq == last + 1,
-      do: deliver(feed, [canonical], true)
+      do: deliver(feed, [canonical], true, opts[:prepared] == true)
 
-  def live(%__MODULE__{last_seq: last} = feed, %{seq: seq} = canonical) when is_integer(seq) do
+  def live(%__MODULE__{last_seq: last} = feed, %{seq: seq} = canonical, opts)
+      when is_integer(seq) do
     # The range (last, seq) is committed: seq is allocated under the
     # conversation row lock, so a committed seq implies all lower ones are.
     {missing, _has_more} =
       Activities.page_activities_since(feed.conversation_id, {:seq, last}, limit: seq - last - 1)
 
     {gap_frames, feed} = deliver(feed, missing, true)
-    {frames, feed} = deliver(feed, [canonical], true)
+    {frames, feed} = deliver(feed, [canonical], true, opts[:prepared] == true)
     {gap_frames ++ frames, feed}
   end
 
-  def live(feed, _canonical), do: {[], feed}
+  def live(feed, _canonical, _opts), do: {[], feed}
 
   @doc "Record a turn sent on this connection: it is never delivered back (echo rule)."
   def own(%__MODULE__{} = feed, seq) when is_integer(seq) do
@@ -110,7 +126,7 @@ defmodule ConvergerWeb.Protocol.Feed do
     %{feed | last_seq: max(feed.last_seq, seq), own: prune(feed.own, seq)}
   end
 
-  defp deliver(feed, activities, live?) do
+  defp deliver(feed, activities, live?, prepared? \\ false) do
     {frames, feed} =
       Enum.reduce(activities, {[], feed}, fn activity, {frames, feed} ->
         seq = activity.seq
@@ -119,12 +135,22 @@ defmodule ConvergerWeb.Protocol.Feed do
         if MapSet.member?(feed.own, seq) do
           {frames, %{advanced | own: MapSet.delete(feed.own, seq)}}
         else
-          {[Frames.activity(activity, feed.user_id, live?) | frames], advanced}
+          case prepare(feed, activity, prepared?) do
+            {:ok, activity} ->
+              {[Frames.activity(activity, feed.user_id, live?) | frames], advanced}
+
+            :skip ->
+              {frames, advanced}
+          end
         end
       end)
 
     {Enum.reverse(frames), feed}
   end
+
+  defp prepare(%{prepare: nil}, activity, _prepared?), do: {:ok, activity}
+  defp prepare(_feed, activity, true), do: {:ok, activity}
+  defp prepare(%{prepare: prepare}, activity, false), do: prepare.(activity)
 
   defp prune(own, seq), do: own |> Enum.reject(&(&1 <= seq)) |> MapSet.new()
 end

@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+### Agent sockets and the bot relay: channel-scoped Protocol v1 connections (#64)
+
+- A `scope: "channel"` token of a `websocket` channel opens a channel-scoped connection on the native endpoint:
+  a channel `welcome`, then every conversation-level frame as `{conversationId, frame}`. Conversations are
+  followed from `hello.watermarks`, from deliveries to the channel and from the agent's own frames; owned and
+  routed conversations as on the Phoenix binding. At most `max_conversations` (default 5 000) at once
+  ([ADR-0063](docs/adr/0063-channel-scoped-agent-sockets-and-the-bot-relay.md)).
+- Agents send message frames, rich messages and mekik-native `tool_call` / `genui` / `interrupt` /
+  `interrupt_resolved` / `skill` frames (stored, routed back to the end user's channel, idempotent per
+  conversation by `clientId` or mekik message `id`), transient `run` / `genui_components` / `skills` / `error`
+  (relayed to the end user's connections), `typing`, `read` and `sync`.
+- Bot relay (Protocol v1 section 9): end users' `resume`, `genui_event`, `client_tools`, `client_skills`,
+  `abort`, `survey`, `regenerate`, `edit` reach the conversation's bot channel on the native endpoint and the
+  Phoenix binding (they drew `bot_unavailable` before); a turn's `meta` arrives with the turn; a user turn
+  answering an open interrupt reaches the bot as `resume`.
+- `hello.group`: several agent processes share a channel's conversations, each served by one of them.
+- The canonical activity (tenant API, outbound webhooks, PubSub) now includes `source_channel_id`.
+- Schemas: new `frames/channel/agent-frame.schema.json`; the envelopes and `hello.group` updated.
+- Docs: [Protocol v1](docs/protocol/v1.md) sections 5, 9, 10, 11; [WebSocket channel type](docs/channels/websocket.md);
+  [activities](docs/concepts/activities.md).
+
+
 ### Typed message payloads: buttons, cards, media, tool traces, GenUI and interrupts are stored (#68, #63)
 
 - A `message` activity can carry a typed message of Converger Protocol v1: new columns `message_type` and

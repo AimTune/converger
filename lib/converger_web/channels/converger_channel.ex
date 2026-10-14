@@ -51,11 +51,9 @@ defmodule ConvergerWeb.ConvergerChannel do
   alias Converger.{
     Activities,
     Channels,
-    Conversations,
     Deliveries,
     Inbound,
-    RateLimit,
-    RoutingRules
+    RateLimit
   }
 
   alias Converger.Auth.ConvergerToken
@@ -67,6 +65,9 @@ defmodule ConvergerWeb.ConvergerChannel do
   alias ConvergerWeb.ConvergerAPI.ActivityJSON
   alias ConvergerWeb.{ConversationSignals, SocketGuard}
   alias ConvergerWeb.Protocol.{Frames, InFlight, Send}
+
+  # Client frames only the bot answers (section 9, ConvergerWeb.Protocol.BotRelay).
+  @bot_frames ConvergerWeb.Protocol.BotRelay.forwarded_types()
 
   # Receiving a conversation needs the token's `read` permission (ADR-0059).
   @impl true
@@ -239,6 +240,32 @@ defmodule ConvergerWeb.ConvergerChannel do
   # sections 2.2 and 7). The protocol answer is pushed as a `frame` event;
   # the Phoenix reply only says the frame arrived. Typing and read receipts
   # have their own events on this binding.
+  # Section 9: frames only the bot answers go to the conversation.s bot channel.
+  defp do_handle_in(
+         "frame",
+         %{"type" => type} = frame,
+         %{assigns: %{conversation_id: id}} = socket
+       )
+       when is_binary(id) and type in @bot_frames do
+    case ConvergerWeb.Protocol.BotRelay.forward(
+           Converger.Conversations.get_conversation(id),
+           frame
+         ) do
+      :ok ->
+        :ok
+
+      {:error, :bot_unavailable} ->
+        push_frames(socket, [
+          Frames.error("bot_unavailable", "this conversation has no bot channel",
+            frame_type: type,
+            client_id: valid_client_id(frame)
+          )
+        ])
+    end
+
+    {:reply, :ok, socket}
+  end
+
   defp do_handle_in("frame", %{} = frame, socket) do
     case Send.kind(frame["type"]) do
       kind when kind in [:text, :rich] ->
@@ -640,6 +667,12 @@ defmodule ConvergerWeb.ConvergerChannel do
     {:noreply, socket}
   end
 
+  # A bot.s transient frame (run, genui_components, skills, error), BotRelay.
+  def handle_info(%Phoenix.Socket.Broadcast{event: "bot_transient", payload: frame}, socket) do
+    push(socket, "frame", frame)
+    {:noreply, socket}
+  end
+
   def handle_info(%Phoenix.Socket.Broadcast{event: "new_activity", payload: payload}, socket) do
     {:noreply, push_live(socket, payload)}
   end
@@ -775,36 +808,7 @@ defmodule ConvergerWeb.ConvergerChannel do
   # --- Authorization ---
 
   # {:ok, :owned | :routed, conversation} when the token may follow the
-  # conversation. Only conversation tokens and channel-scoped tokens may join:
-  # an unscoped channel-level token (from POST /tokens/generate, typically
-  # held by an end-user widget) must first create or resume a conversation,
-  # which returns a conversation token; letting it join any conversation of
-  # the channel would expose other users' conversations.
-  defp conversation_access(conversation_id, channel, claims) do
-    restricted = claims["conversation_id"]
-
-    with {:ok, conversation_id} <- Ecto.UUID.cast(conversation_id),
-         true <- is_binary(restricted) or claims["scope"] == "channel",
-         true <- is_nil(restricted) or restricted == conversation_id,
-         %Conversations.Conversation{} = conversation <-
-           Conversations.get_conversation(conversation_id, channel.tenant_id) do
-      cond do
-        conversation.channel_id == channel.id ->
-          {:ok, :owned, conversation}
-
-        channel.type == "websocket" and
-            RoutingRules.routes_to?(conversation.channel_id, channel.id, channel.tenant_id) ->
-          {:ok, :routed, conversation}
-
-        # A token issued for this one conversation.
-        is_binary(restricted) ->
-          {:ok, :owned, conversation}
-
-        true ->
-          :error
-      end
-    else
-      _ -> :error
-    end
-  end
+  # conversation (ConvergerWeb.Protocol.Access).
+  defp conversation_access(conversation_id, channel, claims),
+    do: ConvergerWeb.Protocol.Access.conversation(conversation_id, channel, claims)
 end

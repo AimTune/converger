@@ -40,20 +40,28 @@ defmodule ConvergerWeb.Protocol.Frames do
   def error_codes, do: @errors |> Map.keys() |> Enum.sort()
 
   @doc """
-  The persistent frame for an activity, as seen by the end user `user_id`.
+  The persistent frame for an activity, as seen by `viewer`.
 
-  `from` and `sender.role` are relative to that user (section 5.1): their own
-  activities are `user`, lifecycle activities are `system`, every other party
-  is `bot`. `live?` is false for replayed frames (it only affects legacy
-  persisted `typing` activities).
+  On a conversation connection `viewer` is the end user's id: `from` and
+  `sender.role` are relative to that user (section 5.1), their own activities
+  are `user`, lifecycle activities are `system`, every other party is `bot`.
+
+  On a channel-scoped connection (section 10) `viewer` is
+  `{:agent, agent_sender, origin_channel_id}`: the end user's side is `user`
+  (activities that came in on the conversation's origin channel, or without
+  a channel and not from the agent); the agent itself and every other bot or
+  agent is `bot`.
+
+  `live?` is false for replayed frames (it only affects legacy persisted
+  `typing` activities).
   """
-  def activity(activity, user_id, live? \\ true)
+  def activity(activity, viewer, live? \\ true)
 
-  def activity(%Activity{} = activity, user_id, live?),
-    do: activity |> Serializer.canonical() |> activity(user_id, live?)
+  def activity(%Activity{} = activity, viewer, live?),
+    do: activity |> Serializer.canonical() |> activity(viewer, live?)
 
-  def activity(%{} = canonical, user_id, live?) do
-    role = role(canonical.sender, user_id)
+  def activity(%{} = canonical, viewer, live?) do
+    role = role(canonical, viewer)
 
     base = %{
       "id" => canonical.id,
@@ -163,9 +171,19 @@ defmodule ConvergerWeb.Protocol.Frames do
     |> put_client_id(role, canonical.sender, canonical.idempotency_key)
   end
 
-  defp role("system", _user_id), do: "system"
-  defp role(sender, user_id) when is_binary(user_id) and sender == user_id, do: "user"
-  defp role(_sender, _user_id), do: "bot"
+  defp role(%{sender: "system"}, _viewer), do: "system"
+
+  defp role(%{sender: sender} = canonical, {:agent, agent_sender, origin_channel_id}) do
+    case Map.get(canonical, :source_channel_id) do
+      _ when sender == agent_sender -> "bot"
+      ^origin_channel_id -> "user"
+      nil -> "user"
+      _other_channel -> "bot"
+    end
+  end
+
+  defp role(%{sender: sender}, user_id) when is_binary(user_id) and sender == user_id, do: "user"
+  defp role(_canonical, _viewer), do: "bot"
 
   defp sender_id(sender) when is_binary(sender) and sender != "", do: sender
   defp sender_id(_sender), do: "unknown"
@@ -267,9 +285,44 @@ defmodule ConvergerWeb.Protocol.Frames do
     }
   end
 
-  @doc "A `heartbeat` frame (section 8.5)."
+  @doc """
+  The `welcome` of a channel-scoped connection (section 10): no
+  conversation, user, watermark or pending.
+  """
+  def channel_welcome(fields) do
+    %{
+      "type" => "welcome",
+      "data" => %{
+        "protocol" => Protocol.version(),
+        "compat" => Protocol.compat(),
+        "scope" => "channel",
+        "channelId" => fields.channel_id,
+        "connectionId" => fields.connection_id,
+        "expiresAt" => fields.expires_at,
+        "capabilities" => %{
+          "acks" => true,
+          "receipts" => true,
+          "presence" => false,
+          "typing" => true,
+          "regenerate" => false,
+          "edit" => false
+        },
+        "limits" => Protocol.limits()
+      }
+    }
+  end
+
+  @doc """
+  A conversation-level frame on a channel-scoped connection (section 10):
+  `{conversationId, frame}`, without a `type`.
+  """
+  def envelope(conversation_id, frame),
+    do: %{"conversationId" => conversation_id, "frame" => frame}
+
+  @doc "A `heartbeat` frame (section 8.5). Channel-scoped connections have no `headSeq`."
   def heartbeat(head_seq, nonce \\ nil) do
-    %{"type" => "heartbeat", "timestamp" => Protocol.to_ms(nil), "headSeq" => head_seq}
+    %{"type" => "heartbeat", "timestamp" => Protocol.to_ms(nil)}
+    |> maybe_put("headSeq", head_seq)
     |> maybe_put("nonce", if(is_binary(nonce), do: nonce))
   end
 

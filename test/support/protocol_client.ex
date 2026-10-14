@@ -273,12 +273,35 @@ defmodule ConvergerWeb.ProtocolClient do
 
   ## Schema validation
 
+  # Channel-scoped connections (section 10) wrap conversation frames as
+  # {conversationId, frame}, without a type.
+  defp validated(%{"conversationId" => _} = frame) when not is_map_key(frame, "type") do
+    root = cached_root(:envelope, "frames/channel/server-envelope.schema.json")
+
+    case ProtocolSchemas.validate(frame, root) do
+      :ok -> frame
+      {:error, message} -> flunk("invalid server envelope #{inspect(frame)}: #{message}")
+    end
+  end
+
   defp validated(frame) do
     root = server_frame_root()
 
     case ProtocolSchemas.validate(frame, root) do
       :ok -> frame
       {:error, message} -> flunk("invalid server frame #{inspect(frame)}: #{message}")
+    end
+  end
+
+  defp cached_root(key, path) do
+    case :persistent_term.get({__MODULE__, key}, nil) do
+      nil ->
+        root = ProtocolSchemas.build!(path)
+        :persistent_term.put({__MODULE__, key}, root)
+        root
+
+      root ->
+        root
     end
   end
 

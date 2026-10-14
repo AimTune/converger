@@ -39,6 +39,12 @@ defmodule Converger.Application do
           {Phoenix.PubSub, name: Converger.PubSub},
           ConvergerWeb.SocketPresence,
           ConvergerWeb.ConversationPresence,
+          # Agent groups of channel-scoped connections (hello.group, #64): which
+          # connection of a group serves a conversation, across nodes.
+          %{
+            id: ConvergerWeb.Protocol.AgentGroups,
+            start: {:pg, :start_link, [ConvergerWeb.Protocol.AgentGroups]}
+          },
           # Native v1 WebSockets and SSE streams, drained by ConvergerWeb.Drain.
           ConvergerWeb.ProtocolConnections,
           # Open client connections, for the connection gauge (ConvergerWeb.Telemetry).
