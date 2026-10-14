@@ -2,6 +2,34 @@
 
 ## Unreleased
 
+### chativa is the reference WebSocket client: mekik/1 profile, history cursor, conversation list (#65)
+
+- **mekik/1 profile on the native endpoint.** A connection that offers no WebSocket subprotocol and sends no
+  `hello.protocol` (an unmodified mekik/1 client such as `@chativa/connector-mekik`) no longer receives `ack`,
+  `deliveryStatus`, `presence`, `tokenRefreshed` or `replayTruncated`, which mekik/1's open rule rendered as empty
+  chat bubbles; its `heartbeat` is a WebSocket ping, so idle widgets are no longer closed with 4408; `token_expired`
+  and `token_revoked` are reported as `unauthorized` so its auth provider refreshes. **Behaviour change** for
+  hand-written clients without a subprotocol and without `hello.protocol`: offer `converger.v1` or send
+  `hello.protocol: "converger/1"` to keep acks and receipts (every Converger SDK already does)
+  ([ADR-0065](docs/adr/0065-chativa-as-reference-client-and-history-cursor.md), Protocol v1 section 14.1).
+- `GET /api/v1/converger/conversations/:id/activities` pages backwards: `direction=backward` (newest page) and
+  `before=<seq>`, with a `cursor` (a seq) for the next older page; pages stay oldest first. `format=frames` returns
+  the page as Protocol v1 frames (`?userId=` for tokens without `user_id`). Every client API activity now carries
+  `seq` (REST and the Phoenix binding's `activitySet`).
+- New `GET /api/v1/converger/conversations` for **channel-scoped** tokens (agent consoles, chativa's agent-panel
+  mode): the channel's conversations, most recently active first, keyset-paginated, filters `status` and
+  `updated_since`, with `title`, `contact`, `lastMessage`, `lastMessageAt` and `lastSeq`. Other tokens get
+  `403`. Migration `20261014210000` adds the index `conversations (channel_id, updated_at, id)` (concurrently).
+- `POST /api/v1/converger/conversations` accepts an optional `title` (stored as `metadata.title`).
+- The upload response adds `seq`, the attachment `name` and `frame` (the attachment message as the socket delivers
+  it). REST activities and uploads without `from.id` are stored with the token's `user_id` as sender (was `"user"`).
+- CI: new job "chativa reference client compatibility" runs `test/protocol/chativa_compat_test.exs`: chativa's real
+  `MekikConnector` and `parseChatFrame` (vendored at a pinned commit in `test/protocol/fixtures/chativa/`) in Node 24
+  against a real server. Locally it runs when Node >= 22.18 is on the PATH and is skipped otherwise.
+- `priv/static/openapi.json` is regenerated. Docs: new [connecting chat clients](docs/protocol/clients.md),
+  [client API](docs/api/client-api.md) (conversation list, history paging backwards, upload), [Protocol v1](docs/protocol/v1.md)
+  sections 2.1, 5.4, 8.5, 14.1 and 15.
+
 ### Typed message payloads: buttons, cards, media, tool traces, GenUI and interrupts are stored (#68, #63)
 
 - A `message` activity can carry a typed message of Converger Protocol v1: new columns `message_type` and

@@ -451,6 +451,32 @@ defmodule ConvergerWeb.ApiContractTest do
       |> get(~p"/api/v1/converger/conversations/#{id}/activities")
       |> check(200)
 
+      # History paging and frames for chativa (ADR-0065).
+      bearer(conversation_token)
+      |> get(~p"/api/v1/converger/conversations/#{id}/activities?direction=backward&limit=1")
+      |> check(200)
+
+      bearer(conversation_token)
+      |> get(~p"/api/v1/converger/conversations/#{id}/activities?before=2&format=frames")
+      |> check(200)
+
+      bearer(conversation_token)
+      |> get(~p"/api/v1/converger/conversations/#{id}/activities?before=x")
+      |> check(400)
+
+      {:ok, agent_token, _} = ConvergerToken.generate_token(channel, scope: "channel")
+      bearer(agent_token) |> get(~p"/api/v1/converger/conversations") |> check(200)
+
+      bearer(agent_token)
+      |> get(~p"/api/v1/converger/conversations?cursor=nope")
+      |> check(400)
+
+      bearer(conversation_token) |> get(~p"/api/v1/converger/conversations") |> check(403)
+
+      bearer(token)
+      |> post(~p"/api/v1/converger/conversations", %{"title" => "Support"})
+      |> check(201)
+
       bearer(conversation_token)
       |> post(~p"/api/v1/converger/conversations/#{id}/close")
       |> check(200)

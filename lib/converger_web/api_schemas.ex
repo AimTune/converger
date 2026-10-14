@@ -1293,6 +1293,63 @@ defmodule ConvergerWeb.ApiSchemas do
           },
           [:conversationId, :token, :expires_in, :streamUrl]
         ),
+      "ClientConversationRequest" =>
+        object(
+          "ClientConversationRequest",
+          "Optional fields of a new conversation.",
+          %{
+            title: %Schema{
+              type: :string,
+              maxLength: 200,
+              description: "Stored as `metadata.title` (chativa's createConversation title)"
+            }
+          },
+          []
+        ),
+      "ClientConversationListItem" =>
+        object(
+          "ClientConversationListItem",
+          "A conversation of the channel; field names follow chativa's Conversation where one exists.",
+          %{
+            id: @uuid,
+            title:
+              nullable(%Schema{type: :string, description: "`metadata.title`, else `contact`"}),
+            contact:
+              nullable(%Schema{
+                type: :string,
+                description: "The participant's display name, else external id"
+              }),
+            status: %Schema{type: :string, enum: ~w(active closed)},
+            lastMessage:
+              nullable(%Schema{type: :string, description: "Text of the latest message"}),
+            lastMessageAt:
+              nullable(%Schema{type: :integer, description: "Milliseconds since the epoch"}),
+            lastSeq: %Schema{type: :integer, description: "Head seq of the conversation"},
+            metadata: @object,
+            createdAt: @datetime,
+            updatedAt: %Schema{
+              type: :string,
+              format: :"date-time",
+              description: "Last activity (the list order)"
+            }
+          },
+          :all
+        ),
+      "ClientConversationList" =>
+        object(
+          "ClientConversationList",
+          "A page of the channel's conversations, most recently active first.",
+          %{
+            conversations: %Schema{type: :array, items: ref("ClientConversationListItem")},
+            cursor:
+              nullable(%Schema{
+                type: :string,
+                description: "Pass back as `cursor` for the next page"
+              }),
+            has_more: %Schema{type: :boolean}
+          },
+          [:conversations, :cursor, :has_more]
+        ),
       "ClientConversationStatus" =>
         object(
           "ClientConversationStatus",
@@ -1306,6 +1363,12 @@ defmodule ConvergerWeb.ApiSchemas do
           "An activity as the client API renders it.",
           %{
             id: @uuid,
+            seq:
+              nullable(%Schema{
+                type: :integer,
+                description:
+                  "Per-conversation sequence number (the Protocol v1 watermark and history cursor)"
+              }),
             type: ref("ActivityType"),
             from: object(nil, "The sender", %{id: %Schema{type: :string}}, [:id]),
             text: nullable(%Schema{type: :string}),
@@ -1332,6 +1395,7 @@ defmodule ConvergerWeb.ApiSchemas do
           },
           [
             :id,
+            :seq,
             :type,
             :from,
             :text,
@@ -1381,13 +1445,28 @@ defmodule ConvergerWeb.ApiSchemas do
       "ActivitySet" =>
         object(
           "ActivitySet",
-          "A page of activities and the watermark to resume after them.",
+          "A page of activities (oldest first) and the watermark to resume after them. `activities` by default, `frames` with `format=frames`; `cursor` on backward pages.",
           %{
             activities: %Schema{type: :array, items: ref("ClientActivity")},
+            frames: %Schema{
+              type: :array,
+              items: @object,
+              description:
+                "With `format=frames`: the Protocol v1 server frames (docs/protocol/v1.md section 5.4)"
+            },
             watermark: nullable(%Schema{type: :string}),
-            has_more: %Schema{type: :boolean}
+            has_more: %Schema{
+              type: :boolean,
+              description: "Forward: newer activities follow. Backward: older activities exist"
+            },
+            cursor:
+              nullable(%Schema{
+                type: :string,
+                description:
+                  "Backward pages only: pass as `before` for the next older page; null when there is none"
+              })
           },
-          [:activities, :watermark, :has_more]
+          [:watermark, :has_more]
         ),
       "UploadRequest" =>
         object(
@@ -1410,6 +1489,7 @@ defmodule ConvergerWeb.ApiSchemas do
             id: @uuid,
             contentType: %Schema{type: :string},
             contentUrl: %Schema{type: :string},
+            name: %Schema{type: :string, description: "The uploaded file name"},
             size: %Schema{type: :integer}
           },
           [:id, :contentType, :contentUrl, :size]
@@ -1417,8 +1497,18 @@ defmodule ConvergerWeb.ApiSchemas do
       "UploadResponse" =>
         object(
           "UploadResponse",
-          "The activity created for the upload and its attachment.",
-          %{id: @uuid, attachments: %Schema{type: :array, items: ref("UploadedAttachment")}},
+          "The activity created for the upload, its attachment, and the attachment message as a Protocol v1 frame.",
+          %{
+            id: @uuid,
+            seq: %Schema{type: :integer, description: "The activity's seq"},
+            attachments: %Schema{type: :array, items: ref("UploadedAttachment")},
+            frame: %Schema{
+              type: :object,
+              additionalProperties: true,
+              description:
+                "The `text` frame with `data.attachments` that the WebSocket delivers (chativa's sendFile result)"
+            }
+          },
           [:id, :attachments]
         )
     }

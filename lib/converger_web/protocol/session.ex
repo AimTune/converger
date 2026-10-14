@@ -101,6 +101,10 @@ defmodule ConvergerWeb.Protocol.Session do
       permitted: %{},
       conversation_id: nil,
       user_id: nil,
+      # `hello.protocol` as the client sent it (nil when absent): with no
+      # negotiated subprotocol it selects the mekik/1 profile of the native
+      # endpoint (ConvergerWeb.Protocol.MekikProfile).
+      protocol: nil,
       feed: nil,
       expiry_timer: nil,
       participant: nil,
@@ -114,6 +118,10 @@ defmodule ConvergerWeb.Protocol.Session do
   end
 
   defp own_backlog, do: SocketGuard.queue_len(self())
+
+  @doc "The `protocol` the client named in `hello`, or nil (absent, or no `hello` yet)."
+  @spec protocol(t()) :: String.t() | nil
+  def protocol(state), do: state.protocol
 
   @doc """
   An inbound frame of `size` bytes on the wire. `decode` is called only when
@@ -307,7 +315,7 @@ defmodule ConvergerWeb.Protocol.Session do
   ## Frames
 
   defp handle_frame(%{"type" => "hello"} = frame, %{phase: :awaiting_hello} = state),
-    do: handshake(frame, state)
+    do: handshake(frame, %{state | protocol: string(frame["protocol"])})
 
   defp handle_frame(%{"type" => type}, %{phase: :awaiting_hello} = state) do
     reply([error("no_session", "send hello first", frame_type: type)], state)

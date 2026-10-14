@@ -81,6 +81,7 @@ supersedes the old one and both are linked. Read
 
 | ADR | Decision | Status | Issue / PR |
 | --- | --- | --- | --- |
+| [0065](0065-chativa-as-reference-client-and-history-cursor.md) | chativa's unmodified `connector-mekik` is the reference WebSocket client, kept working by a CI suite that runs its vendored code in Node against a real server; mekik/1 clients (no subprotocol, no `hello.protocol`) get a profile without Converger-only frames and heartbeats as pings; REST history pages backwards with a seq `cursor` (`format=frames`), channel-scoped tokens list conversations | Accepted | [#65](https://github.com/AimTune/converger/issues/65) / (this PR) |
 | [0052](0052-server-side-sdks-in-the-monorepo-with-a-shared-conformance-suite.md) | Server-side SDKs (Python, Go, Elixir) in `packages/` of this repository, a shared conformance suite (REST, errors, protocol resume state machine, webhook signature vectors generated from the server signer), generator-shaped hand-written models until #45, per-language tag releases | Accepted | [#47](https://github.com/AimTune/converger/issues/47) / [#144](https://github.com/AimTune/converger/pull/144) |
 | [0051](0051-typescript-sdk-transport-abstraction-and-outbox.md) | TypeScript SDK `@converger/client`: one session core over native / Phoenix / SSE transports, a persistent clientId outbox resent once after the replay, hand-written types in a generator-compatible shape until #45 | Accepted | [#46](https://github.com/AimTune/converger/issues/46) / [#142](https://github.com/AimTune/converger/pull/142) |
 
