@@ -773,16 +773,18 @@ defmodule Converger.Channels.Mekik.Connection do
 
   defp send_ws(%{websocket: nil} = state, _frame), do: {:error, state, :not_connected}
 
+  # Two steps instead of one `with`: telling the failures apart by matching
+  # on `%Mint.WebSocket{}` breaks its opacity (Dialyzer).
   defp send_ws(state, frame) do
-    with {:ok, websocket, data} <- Mint.WebSocket.encode(state.websocket, frame),
-         {:ok, conn} <- Mint.WebSocket.stream_request_body(state.conn, state.ref, data) do
-      {:ok, %{state | conn: conn, websocket: websocket}}
-    else
-      {:error, %Mint.WebSocket{} = websocket, reason} ->
-        {:error, %{state | websocket: websocket}, reason}
+    case Mint.WebSocket.encode(state.websocket, frame) do
+      {:ok, websocket, data} ->
+        case Mint.WebSocket.stream_request_body(state.conn, state.ref, data) do
+          {:ok, conn} -> {:ok, %{state | conn: conn, websocket: websocket}}
+          {:error, conn, reason} -> {:error, %{state | conn: conn, websocket: websocket}, reason}
+        end
 
-      {:error, conn, reason} ->
-        {:error, %{state | conn: conn}, reason}
+      {:error, websocket, reason} ->
+        {:error, %{state | websocket: websocket}, reason}
     end
   end
 
