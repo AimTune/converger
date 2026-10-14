@@ -65,7 +65,7 @@ consoles) are served over REST and the full protocol, for `@chativa/connector-co
 | chativa / mekik/1 | over Converger | status |
 | --- | --- | --- |
 | `hello` / `welcome`, identity adopted, server-minted conversation | as mekik/1; `welcome.data.watermark` is the head seq | Implemented |
-| Watermark resume (`resumeConversation`) | replay of every persistent frame after `hello.watermark` | Implemented |
+| Watermark resume (`resumeConversation`) | replay of every persistent frame after `hello.watermark`; open interrupts re-announced in `welcome.data.pending` | Implemented (pending: #65) |
 | User turns (`sendMessage`) | stored once: the message `id` chativa stamps is used as the `clientId` ([v1 section 7](./v1.md#7-sending-acks-and-idempotency-implemented-native-endpoint-26-phoenix-binding-24)) | Implemented |
 | Bot and agent messages, `from: "user"` replays of the user's own turns | `text` frames; `from` is relative to the token's `user_id` | Implemented |
 | Quick-reply chips (`text` with `actions`) | `parseChatFrame` turns them into a `quick-reply` with `keepActions` | Implemented |
@@ -74,12 +74,35 @@ consoles) are served over REST and the full protocol, for `@chativa/connector-co
 | `typing` from other participants | the flat `typing` frame `parseChatFrame` expects | Implemented (#25) |
 | Auth rejection, expiry | `error` `unauthorized` and close 4401; `TokenAuth` with a function fetches a new token and reconnects | Implemented |
 | `regenerate` / `edit` buttons | hidden: `welcome.data.capabilities` reports them as false | Implemented |
-| Live frames from a mekik bot behind Converger: `run` (typing), `genui_components`, `skills`, live `tool_call` / `genui` / `interrupt` | relayed from the bot channel | Planned (#64) |
-| `resume`, `genui_event`, `client_tools`, `client_skills`, `abort`, `survey` | forwarded to the bot channel; until then answered with `error` `bot_unavailable`, which connector-mekik ignores | Planned (#64) |
+| Live frames from a mekik bot behind Converger: `run` (typing), `genui_components`, `skills`, live `tool_call` / `genui` / `interrupt` | relayed from the bot channel ([v1 section 9](./v1.md#9-the-bot-channel-and-mekik-relay-implemented-64)) | Implemented (#64), verified live (#65) |
+| `resume`, `genui_event`, `client_tools`, `client_skills`, `abort`, `survey` | forwarded to the bot channel; without one, answered with `error` `bot_unavailable`, which connector-mekik ignores | Implemented (#64); `resume` verified live (#65) |
 
 The suite checks each "Implemented" row with the real connector: a replayed transcript of every frame family, a live
 message and a typing indicator, a send that is persisted once, an idle connection kept open by pings, the REST
 history in frame form, and agent-panel switching.
+
+### A mekik bot behind Converger: verified live (#63, #65)
+
+`test/protocol/chativa_live_bot_test.exs` (same CI job) puts a mekik bot behind Converger and talks to it through the
+unmodified connector, on a `websocket` widget channel routed to the bot. It runs once per bot mode:
+
+- **Mode A**: a [`mekik` channel](../channels/mekik.md). The adapter dials a mekik/1 server (a scripted fake in the
+  tests).
+- **Mode B**: an agent on a channel-scoped socket ([v1 section 10](./v1.md#10-channel-scoped-sockets-implemented-64-on-the-native-endpoint))
+  that sends the same mekik frames.
+
+What chativa's UI callbacks receive, in order:
+
+1. The user sends a text. The bot's `run started` turns typing on, then `onToolCall` gets the `tool_call` running
+   and completed, `onGenUIChunk` gets the GenUI chunk, `onMessage` gets the bot's `text` and the `interrupt` as a
+   quick reply with one chip per action. `run interrupted` turns typing off.
+2. The user taps a chip. connector-mekik sends its own `resume` frame (`answers: {<interrupt id>: <action value>}`),
+   which the bot receives unchanged. The bot's `interrupt_resolved` renders nothing, and its final `text` renders.
+3. The connector disconnects, the bot sends two more frames, and the connector reconnects with its watermark. It
+   renders exactly those two frames, once.
+4. A page reload while the bot waits on the interrupt (`resumeConversation`, so the stored watermark is already past
+   the interrupt): nothing is replayed, `welcome.data.pending` re-announces the interrupt, connector-mekik renders the
+   same chips, and a tap still resumes the bot.
 
 ### The mekik/1 profile
 

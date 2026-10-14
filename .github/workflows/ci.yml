@@ -218,6 +218,9 @@ jobs:
   # test/protocol/fixtures/chativa) run against a real server. A protocol
   # change that breaks chativa fails this job. CHATIVA_COMPAT=required turns
   # a missing Node into a failure instead of a skip.
+  # `--only chativa` runs every test tagged :chativa: chativa_compat_test.exs
+  # (stored transcripts) and chativa_live_bot_test.exs (a live mekik bot
+  # behind Converger, Mode A and Mode B, #63/#65).
   chativa:
     name: chativa reference client compatibility
     runs-on: ubuntu-latest

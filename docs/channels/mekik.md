@@ -170,7 +170,20 @@ delivery touches.
 `test/converger/channels/mekik_integration_test.exs` runs the adapter end to end against a fake mekik/1
 server (`test/support/mekik/`): a scripted refund turn (`run`, `tool_call`, an approval `interrupt`),
 the end user's tapped button reaching the server as `resume`, replay after a reconnect, resume after a
-restart, rejected tokens and idle eviction. `test/converger/channels/mekik_live_test.exs` (tag `:mekik`,
+restart, rejected tokens and idle eviction.
+
+**chativa through Mode A, verified ([#63](https://github.com/AimTune/converger/issues/63),
+[#65](https://github.com/AimTune/converger/issues/65)).** `test/protocol/chativa_live_bot_test.exs` puts the
+unmodified `@chativa/connector-mekik` on the widget side of this setup (a `websocket` channel routed to a `mekik`
+channel served by the fake server, started with `genui: true`), and runs the same scenario through a Mode B agent
+socket. chativa renders the bot's live `run` as typing, the `tool_call` traces, a GenUI chunk, the `text` and the
+`interrupt` as chips. A tapped chip goes out as chativa's `resume` and reaches the mekik server unchanged, and the
+bot's final text renders. chativa then reconnects with its watermark and gets exactly the missed frames once, and
+after a page reload `welcome.pending` re-renders the open interrupt
+([connecting chat clients](../protocol/clients.md#a-mekik-bot-behind-converger-verified-live-63-65)). It runs in the
+CI job "chativa reference client compatibility".
+
+`test/converger/channels/mekik_live_test.exs` (tag `:mekik`,
 excluded by default) runs the same scenario against a real server:
 
 ```bash
