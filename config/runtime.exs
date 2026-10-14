@@ -463,6 +463,112 @@ if interval = System.get_env("BROKER_RECONCILE_INTERVAL_MS") do
   config :converger, :broker_channels, reconcile_interval_ms: String.to_integer(interval)
 end
 
+# Event backbone (issue #66, Converger.Backbone, ADR-0070, docs/deployment.md):
+# switching backbone is this one variable.
+#   BACKBONE                native (default) | kafka | nats | rabbitmq
+#   BACKBONE_MIRROR         comma-separated backbones that also receive every
+#                           event (dual publish while migrating)
+#   BACKBONE_CONSUMERS      false keeps broker consumers off this node
+#   BACKBONE_TOPIC_PREFIX   broker topic/subject prefix (default converger)
+#   BACKBONE_KAFKA_BROKERS, BACKBONE_KAFKA_SASL_MECHANISM / _USERNAME / _PASSWORD,
+#   BACKBONE_KAFKA_TLS, BACKBONE_KAFKA_PARTITIONS, BACKBONE_KAFKA_REPLICATION_FACTOR,
+#   BACKBONE_KAFKA_START_OFFSET (earliest | latest)
+#   BACKBONE_NATS_SERVERS, BACKBONE_NATS_USERNAME / _PASSWORD / _TOKEN,
+#   BACKBONE_NATS_TLS, BACKBONE_NATS_REPLICAS
+#   BACKBONE_RABBITMQ_URL, BACKBONE_RABBITMQ_USERNAME / _PASSWORD
+backbone_module = fn name, variable ->
+  case name do
+    "native" -> Converger.Backbone.Native
+    "kafka" -> Converger.Backbone.Kafka
+    "nats" -> Converger.Backbone.Nats
+    "rabbitmq" -> Converger.Backbone.RabbitMQ
+    other -> raise "#{variable} must be native, kafka, nats or rabbitmq, got: #{inspect(other)}"
+  end
+end
+
+if backbone = System.get_env("BACKBONE") do
+  config :converger, :backbone, backbone_module.(String.trim(backbone), "BACKBONE")
+end
+
+backbone_overrides =
+  [
+    mirror:
+      case System.get_env("BACKBONE_MIRROR") do
+        nil ->
+          nil
+
+        mirrors ->
+          mirrors
+          |> String.split(",", trim: true)
+          |> Enum.map(&String.trim/1)
+          |> Enum.reject(&(&1 == ""))
+          |> Enum.map(&backbone_module.(&1, "BACKBONE_MIRROR"))
+      end,
+    consumers:
+      case System.get_env("BACKBONE_CONSUMERS") do
+        nil -> nil
+        value -> value in ~w(true 1)
+      end,
+    topic_prefix: System.get_env("BACKBONE_TOPIC_PREFIX")
+  ]
+  |> Enum.reject(fn {_key, value} -> is_nil(value) end)
+
+if backbone_overrides != [] do
+  config :converger, Converger.Backbone, backbone_overrides
+end
+
+backbone_env = fn variables ->
+  variables
+  |> Enum.map(fn {key, variable, cast} ->
+    case System.get_env(variable) do
+      nil -> {key, nil}
+      "" -> {key, nil}
+      value -> {key, cast.(value)}
+    end
+  end)
+  |> Enum.reject(fn {_key, value} -> is_nil(value) end)
+end
+
+string = & &1
+boolean = &(&1 in ~w(true 1))
+integer = &String.to_integer/1
+
+kafka_backbone =
+  backbone_env.([
+    {:brokers, "BACKBONE_KAFKA_BROKERS", string},
+    {:sasl_mechanism, "BACKBONE_KAFKA_SASL_MECHANISM", string},
+    {:sasl_username, "BACKBONE_KAFKA_SASL_USERNAME", string},
+    {:sasl_password, "BACKBONE_KAFKA_SASL_PASSWORD", string},
+    {:tls, "BACKBONE_KAFKA_TLS", boolean},
+    {:partitions, "BACKBONE_KAFKA_PARTITIONS", integer},
+    {:replication_factor, "BACKBONE_KAFKA_REPLICATION_FACTOR", integer},
+    {:start_offset, "BACKBONE_KAFKA_START_OFFSET", string}
+  ])
+
+if kafka_backbone != [], do: config(:converger, Converger.Backbone.Kafka, kafka_backbone)
+
+nats_backbone =
+  backbone_env.([
+    {:servers, "BACKBONE_NATS_SERVERS", string},
+    {:username, "BACKBONE_NATS_USERNAME", string},
+    {:password, "BACKBONE_NATS_PASSWORD", string},
+    {:token, "BACKBONE_NATS_TOKEN", string},
+    {:tls, "BACKBONE_NATS_TLS", boolean},
+    {:replicas, "BACKBONE_NATS_REPLICAS", integer}
+  ])
+
+if nats_backbone != [], do: config(:converger, Converger.Backbone.Nats, nats_backbone)
+
+rabbitmq_backbone =
+  backbone_env.([
+    {:url, "BACKBONE_RABBITMQ_URL", string},
+    {:username, "BACKBONE_RABBITMQ_USERNAME", string},
+    {:password, "BACKBONE_RABBITMQ_PASSWORD", string}
+  ])
+
+if rabbitmq_backbone != [],
+  do: config(:converger, Converger.Backbone.RabbitMQ, rabbitmq_backbone)
+
 # Rate-limit backend: "local" (per-node counters) or "cluster" (counters
 # replicated between nodes over PubSub). Defaults to "cluster" when node
 # discovery is configured (CLUSTER_STRATEGY other than none), otherwise "local".
@@ -637,7 +743,8 @@ retention_env = [
   min_retention_days: "RETENTION_MIN_DAYS",
   health_check_days: "HEALTH_CHECK_RETENTION_DAYS",
   audit_log_days: "AUDIT_LOG_RETENTION_DAYS",
-  webhook_event_days: "WEBHOOK_EVENT_RETENTION_DAYS"
+  webhook_event_days: "WEBHOOK_EVENT_RETENTION_DAYS",
+  backbone_receipt_days: "BACKBONE_RECEIPT_RETENTION_DAYS"
 ]
 
 retention_overrides =

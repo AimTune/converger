@@ -193,6 +193,18 @@ defmodule ConvergerWeb.Telemetry do
         tags: [:channel_type],
         description: "Inbound broker messages retried in place after a transient failure"
       ),
+      # Event backbone (Converger.Backbone, ADR-0070)
+      distribution("converger.backbone.publish.stop.duration",
+        unit: {:native, :millisecond},
+        tags: [:backbone, :topic, :result],
+        description: "Publishing an event to the backbone (:error: parked in Postgres)",
+        reporter_options: [buckets: @request_buckets]
+      ),
+      counter("converger.backbone.handle.count",
+        event_name: [:converger, :backbone, :handle],
+        tags: [:subscription, :outcome],
+        description: "Backbone events handed to a subscription, by outcome"
+      ),
 
       # Realtime connections (ConvergerWeb.ClientConnections)
       last_value("converger.ws.connections.count",

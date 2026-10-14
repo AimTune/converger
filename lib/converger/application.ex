@@ -23,6 +23,8 @@ defmodule Converger.Application do
     # CLUSTER_STRATEGY; see Converger.Cluster.
     # Protocol v1 over gRPC (ADR-0056), when GRPC_ENABLED: on its own port,
     # stopped after ConvergerWeb.Drain drained its streams.
+    # Event backbone (ADR-0070): subscriptions are declared and broker
+    # clients started before Oban runs jobs that publish events.
     children =
       [
         ConvergerWeb.Telemetry,
@@ -61,7 +63,10 @@ defmodule Converger.Application do
           # Broker channels (kafka, rabbitmq, nats, redis_streams, mqtt): per-channel publishers, started
           # on first delivery, so before Oban runs delivery jobs.
           {Registry, keys: :unique, name: Converger.Channels.Broker.Registry},
-          Converger.Channels.Broker.Publishers,
+          Converger.Channels.Broker.Publishers
+        ] ++
+        Converger.Backbone.child_specs() ++
+        [
           {Oban, oban_config()}
         ] ++
         Converger.Partitions.boot_children() ++

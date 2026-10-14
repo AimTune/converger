@@ -221,6 +221,7 @@ baseline_alias_usage = [
                :activity_id,
                :attempt,
                :attempts,
+               :backbone,
                :cap,
                :channel_id,
                :channel_type,
@@ -233,6 +234,7 @@ baseline_alias_usage = [
                :delivery_id,
                :error,
                :errors,
+               :event_id,
                :event_type,
                :legacy,
                :month,
@@ -244,9 +246,11 @@ baseline_alias_usage = [
                :signal,
                :source,
                :status,
+               :subscription,
                :subscription_id,
                :tenant_id,
                :total,
+               :type,
                :webhook_event_id
              ]
            ]},

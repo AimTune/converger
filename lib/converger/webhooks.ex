@@ -5,9 +5,12 @@ defmodule Converger.Webhooks do
   A tenant subscribes a URL to event types from `Converger.Webhooks.Catalog`
   (`Converger.Webhooks.Subscription`). The places where those things happen
   call `emit/3` (from the hooks that already broadcast them over PubSub),
-  which writes one `Converger.Webhooks.Event` row per matching subscription
-  and enqueues a `Converger.Workers.WebhookEventWorker` job for each, in one
-  transaction.
+  which publishes the event to the event backbone (`Converger.Backbone`,
+  ADR-0070). The `webhooks` backbone subscription
+  (`Converger.Webhooks.BackboneHandler`) writes one
+  `Converger.Webhooks.Event` row per matching subscription and enqueues a
+  `Converger.Workers.WebhookEventWorker` job for each, in one transaction
+  with the event's idempotency receipt (`record/1`).
 
   The worker POSTs the event, signed with the subscription secret using the
   outbound scheme of the webhook adapter (`x-converger-signature:
@@ -207,15 +210,30 @@ defmodule Converger.Webhooks do
   # --- Emitting ---
 
   @doc """
-  Records an event of `type` for every enabled subscription of `tenant_id`
-  that wants it and enqueues its delivery. `data` is any JSON-encodable
-  map. Returns `:ok` whatever happens (errors are logged).
+  Publishes an event of `type` to the event backbone (`Converger.Backbone`,
+  topic by `Converger.Backbone.topic_for_type/1`). The platform webhooks
+  subscription (`Converger.Webhooks.BackboneHandler`) records it for every
+  enabled subscription of `tenant_id` that wants it and enqueues its
+  delivery (`record/1`). `data` is any JSON-encodable map. Returns `:ok`
+  whatever happens (errors are logged).
   """
   def emit(tenant_id, type, data) when is_binary(tenant_id) and is_map(data) do
-    if enabled?() and Catalog.known?(type) do
-      tenant_id
-      |> subscriptions_for(type, data)
-      |> enqueue(tenant_id, type, data)
+    if Catalog.known?(type) do
+      case Converger.Backbone.publish(Converger.Backbone.topic_for_type(type), %{
+             type: type,
+             tenant_id: tenant_id,
+             data: data
+           }) do
+        :ok ->
+          :ok
+
+        {:error, reason} ->
+          Logger.error("Failed to publish platform event",
+            tenant_id: tenant_id,
+            event_type: type,
+            error: inspect(reason)
+          )
+      end
     end
 
     :ok
@@ -231,6 +249,35 @@ defmodule Converger.Webhooks do
   end
 
   def emit(_tenant_id, _type, _data), do: :ok
+
+  @doc """
+  Whether a backbone event is wanted by any enabled subscription of its
+  tenant (and platform webhooks are enabled).
+  """
+  def wants?(%Converger.Backbone.Event{tenant_id: tenant_id, type: type, data: data})
+      when is_binary(tenant_id) do
+    enabled?() and Catalog.known?(type) and subscriptions_for(tenant_id, type, data) != []
+  end
+
+  def wants?(_event), do: false
+
+  @doc """
+  Records a backbone event for every enabled subscription of its tenant that
+  wants it (one `Converger.Webhooks.Event` row each, `event_id` = the
+  backbone event id) and enqueues their deliveries, in one transaction.
+  """
+  def record(%Converger.Backbone.Event{tenant_id: tenant_id, type: type, data: data} = event)
+      when is_binary(tenant_id) do
+    if enabled?() and Catalog.known?(type) do
+      tenant_id
+      |> subscriptions_for(type, data)
+      |> enqueue(tenant_id, type, data, event.id)
+    end
+
+    :ok
+  end
+
+  def record(_event), do: :ok
 
   defp enabled? do
     :converger |> Application.get_env(:platform_webhooks, []) |> Keyword.get(:enabled, true)
@@ -252,11 +299,10 @@ defmodule Converger.Webhooks do
 
   defp legacy_wants?(_managed_by, _type, _data), do: true
 
-  defp enqueue([], _tenant_id, _type, _data), do: :ok
+  defp enqueue([], _tenant_id, _type, _data, _event_id), do: :ok
 
-  defp enqueue(subscriptions, tenant_id, type, data) do
+  defp enqueue(subscriptions, tenant_id, type, data, event_id) do
     now = DateTime.utc_now()
-    event_id = Ecto.UUID.generate()
     payload = data |> Jason.encode!() |> Jason.decode!()
 
     rows =
