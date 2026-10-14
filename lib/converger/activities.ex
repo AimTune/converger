@@ -159,6 +159,35 @@ defmodule Converger.Activities do
   end
 
   @doc """
+  The latest `message` activity of each conversation in `conversation_ids`,
+  as `%{conversation_id => %{text, seq, inserted_at, deleted_at}}`
+  (conversations without a message are absent). One query: a lateral join
+  that reads one row per conversation from the `(conversation_id, seq)`
+  index, for conversation list previews (ADR-0065).
+  """
+  def last_messages([]), do: %{}
+
+  def last_messages(conversation_ids) when is_list(conversation_ids) do
+    latest =
+      from(a in Activity,
+        where: a.conversation_id == parent_as(:conversation).id and a.type == "message",
+        order_by: [desc: a.seq],
+        limit: 1,
+        select: %{text: a.text, seq: a.seq, inserted_at: a.inserted_at, deleted_at: a.deleted_at}
+      )
+
+    from(c in Conversation,
+      as: :conversation,
+      where: c.id in ^conversation_ids,
+      inner_lateral_join: a in subquery(latest),
+      on: true,
+      select: {c.id, a}
+    )
+    |> Repo.all()
+    |> Map.new()
+  end
+
+  @doc """
   The activity `id` of conversation `conversation_id`, or nil (also for an id
   that is not a UUID).
   """

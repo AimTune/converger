@@ -36,8 +36,9 @@ defmodule ConvergerWeb.ProtocolClient do
 
   @doc """
   Open a WebSocket. Options: `:path` (default `/socket/converger/v1`),
-  `:headers`, `:subprotocols` (offered in order), `:encoding` (`:json` or
-  `:msgpack`, how frames are sent).
+  `:headers`, `:subprotocols` (offered in order; default `["converger.v1"]`,
+  pass `[]` to connect as a mekik/1 client, ADR-0065), `:encoding` (`:json`
+  or `:msgpack`, how frames are sent).
 
   Returns `{:ok, client}` or `{:error, status}` when the upgrade is refused.
   """
@@ -46,7 +47,7 @@ defmodule ConvergerWeb.ProtocolClient do
     headers = Keyword.get(opts, :headers, [])
 
     headers =
-      case Keyword.get(opts, :subprotocols, []) do
+      case Keyword.get(opts, :subprotocols, ["converger.v1"]) do
         [] -> headers
         protocols -> [{"sec-websocket-protocol", Enum.join(protocols, ", ")} | headers]
       end
@@ -113,8 +114,8 @@ defmodule ConvergerWeb.ProtocolClient do
     do: push(client, {:binary, Msgpax.pack!(frame, iodata: false)})
 
   @doc """
-  The next server frame: `{frame, client}`, `{{:close, code}, client}`, or
-  `{:timeout, client}`.
+  The next server frame: `{frame, client}`, `{{:close, code}, client}`,
+  `{:ping, client}` (a WebSocket ping), or `{:timeout, client}`.
   """
   def recv(client, timeout \\ 1_000)
 
@@ -149,6 +150,7 @@ defmodule ConvergerWeb.ProtocolClient do
   defp frame({:text, json}), do: [validated(Jason.decode!(json))]
   defp frame({:binary, data}), do: [validated(Msgpax.unpack!(data))]
   defp frame({:close, code, _reason}), do: [{:close, code}]
+  defp frame({:ping, _data}), do: [:ping]
   defp frame(_control), do: []
 
   @doc "Receive frames until one matches `type`, returning it (others are dropped)."

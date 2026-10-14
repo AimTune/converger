@@ -157,8 +157,16 @@ jobs:
       - run: mix deps.get
       - run: mix compile --warnings-as-errors
 
+      # test/protocol/chativa_compat_test.exs runs chativa's connector code in
+      # Node (TypeScript type stripping, Node >= 22.18); see the chativa job.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+
       - name: Run tests with coverage
         # --warnings-as-errors also fails the run on warnings in test files.
+        env:
+          CHATIVA_COMPAT: required
         run: |
           mix ecto.create --quiet
           mix ecto.migrate --quiet
@@ -204,6 +212,54 @@ jobs:
           files: cover/lcov.info
           token: ${{ env.CODECOV_TOKEN }}
           fail_ci_if_error: false
+
+  # chativa is the reference WebSocket client (#65, ADR-0065): its unmodified
+  # @chativa/connector-mekik and parseChatFrame (vendored in
+  # test/protocol/fixtures/chativa) run against a real server. A protocol
+  # change that breaks chativa fails this job. CHATIVA_COMPAT=required turns
+  # a missing Node into a failure instead of a skip.
+  chativa:
+    name: chativa reference client compatibility
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          otp-version: ${{ env.OTP_VERSION }}
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            deps
+            _build
+          key: mix-${{ runner.os }}-${{ env.ELIXIR_VERSION }}-${{ env.OTP_VERSION }}-${{ hashFiles('mix.lock') }}
+          restore-keys: mix-${{ runner.os }}-${{ env.ELIXIR_VERSION }}-${{ env.OTP_VERSION }}-
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+
+      - run: mix deps.get
+      - run: mix compile --warnings-as-errors
+
+      - name: Run the chativa compatibility suite
+        env:
+          CHATIVA_COMPAT: required
+        run: mix test --only chativa --warnings-as-errors
 
   storage-integration:
     name: Storage integration (MinIO, Azurite)
