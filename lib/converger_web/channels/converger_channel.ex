@@ -63,7 +63,7 @@ defmodule ConvergerWeb.ConvergerChannel do
   alias Converger.Pipeline
   alias Converger.Repo.Pressure
   alias ConvergerWeb.ConvergerAPI.ActivityJSON
-  alias ConvergerWeb.{ConversationSignals, SocketGuard}
+  alias ConvergerWeb.{ConversationSignals, Protocol, SocketGuard}
   alias ConvergerWeb.Protocol.{Frames, InFlight, Send}
 
   # Client frames only the bot answers (section 9, ConvergerWeb.Protocol.BotRelay).
@@ -584,22 +584,14 @@ defmodule ConvergerWeb.ConvergerChannel do
 
   defp ack_conversation(socket, _payload), do: {:ok, socket.assigns.conversation_id}
 
-  defp ack_seq(seq) when is_integer(seq) and seq >= 0, do: {:ok, seq}
-
-  defp ack_seq(watermark) when is_binary(watermark) do
-    case Integer.parse(watermark) do
-      {seq, ""} when seq >= 0 ->
-        {:ok, seq}
-
-      _ ->
-        case Watermark.decode(watermark) do
-          {:ok, {:seq, seq}} -> {:ok, seq}
-          _ -> :error
-        end
+  # The integer seq, its decimal string or an opaque `seq:<n>` watermark (a
+  # legacy activity-id watermark names no seq).
+  defp ack_seq(watermark) do
+    case Protocol.parse_watermark(watermark) do
+      {:ok, {:seq, seq}} -> {:ok, seq}
+      _ -> :error
     end
   end
-
-  defp ack_seq(_watermark), do: :error
 
   # --- Server pushes ---
 
@@ -638,7 +630,7 @@ defmodule ConvergerWeb.ConvergerChannel do
     # rest over GET /api/v1/converger/conversations/:id/activities?watermark=<frame watermark>
     # until `has_more` is false.
     socket =
-      case Watermark.decode(watermark) do
+      case Protocol.parse_watermark(watermark) do
         {:ok, {_, _} = position} -> replay(socket, position)
         _ -> socket
       end

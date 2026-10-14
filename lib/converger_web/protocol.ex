@@ -77,20 +77,49 @@ defmodule ConvergerWeb.Protocol do
   window, the pre-v1 opaque forms (`Converger.ConvergerAPI.Watermark`).
   Returns `{:ok, nil}` when absent, `{:ok, {:seq, n}}`,
   `{:ok, {:activity_id, id}}` or `{:error, :invalid_watermark}`.
-  """
-  def parse_watermark(nil), do: {:ok, nil}
-  def parse_watermark(""), do: {:ok, nil}
-  def parse_watermark(seq) when is_integer(seq) and seq >= 0, do: {:ok, {:seq, seq}}
 
-  def parse_watermark(value) when is_binary(value) do
+  With `deprecation: metadata`, a valid opaque watermark is also reported as
+  a use of the deprecated `:opaque_watermark` surface
+  (`ConvergerWeb.Deprecation`), so operators can find the clients that still
+  send one before those forms are dropped. Surfaces that still emit the
+  opaque form (the legacy Phoenix `activitySet`) leave it out.
+  """
+  def parse_watermark(value, opts \\ [])
+  def parse_watermark(nil, _opts), do: {:ok, nil}
+  def parse_watermark("", _opts), do: {:ok, nil}
+  def parse_watermark(seq, _opts) when is_integer(seq) and seq >= 0, do: {:ok, {:seq, seq}}
+
+  def parse_watermark(value, opts) when is_binary(value) do
     if value =~ ~r/^(0|[1-9][0-9]{0,18})$/ do
       {:ok, {:seq, String.to_integer(value)}}
     else
-      Watermark.decode(value)
+      value |> Watermark.decode() |> report_opaque(opts[:deprecation])
     end
   end
 
-  def parse_watermark(_value), do: {:error, :invalid_watermark}
+  def parse_watermark(_value, _opts), do: {:error, :invalid_watermark}
+
+  defp report_opaque({:ok, {_, _}} = result, metadata) when is_list(metadata) do
+    ConvergerWeb.Deprecation.warn(:opaque_watermark, metadata)
+    result
+  end
+
+  defp report_opaque(result, _metadata), do: result
+
+  @doc """
+  The integer watermark to hand back for a parsed `position` when a page is
+  empty (the client is at the head): the seq itself, the seq of a legacy
+  activity-id watermark's activity, or nil.
+  """
+  def watermark_seq(nil, _conversation_id), do: nil
+  def watermark_seq({:seq, seq}, _conversation_id), do: seq
+
+  def watermark_seq({:activity_id, id}, conversation_id) do
+    case Converger.Activities.get_conversation_activity(conversation_id, id) do
+      %{seq: seq} -> seq
+      nil -> nil
+    end
+  end
 
   @doc "Whether `value` is a valid `clientId` (1 to 128 of `A-Z a-z 0-9 . _ : ~ -`)."
   def client_id?(value) when is_binary(value), do: value =~ ~r/^[A-Za-z0-9._:~-]{1,128}$/

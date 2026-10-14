@@ -37,8 +37,8 @@
     {
       "name": "client_api get_conversation with watermark",
       "operation": "client_api.get_conversation",
-      "args": { "token": "tok-conv", "conversation_id": "3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10", "watermark": "c2VxOjQy" },
-      "request": { "method": "GET", "path": "/api/v1/converger/conversations/3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10", "query": { "watermark": "c2VxOjQy" }, "headers": { "authorization": "Bearer tok-conv" } },
+      "args": { "token": "tok-conv", "conversation_id": "3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10", "watermark": 42 },
+      "request": { "method": "GET", "path": "/api/v1/converger/conversations/3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10", "query": { "watermark": "42" }, "headers": { "authorization": "Bearer tok-conv" } },
       "response": { "status": 200, "body": { "conversationId": "3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10", "token": "tok-conv-2", "expires_in": 1800, "streamUrl": "ws://converger.test/socket/converger/websocket?token=tok-conv-2" } },
       "result": { "token": "tok-conv-2" }
     },
@@ -77,10 +77,18 @@
     {
       "name": "client_api list_activities",
       "operation": "client_api.list_activities",
-      "args": { "token": "tok-conv", "conversation_id": "3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10", "watermark": "c2VxOjQx", "limit": 50 },
-      "request": { "method": "GET", "path": "/api/v1/converger/conversations/3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10/activities", "query": { "watermark": "c2VxOjQx", "limit": "50" }, "headers": { "authorization": "Bearer tok-conv" } },
-      "response": { "status": 200, "body": { "activities": [{ "id": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d", "type": "message", "from": { "id": "bot" }, "text": "Sure, what is your order number?", "timestamp": "2026-10-09T12:05:43.118020Z", "attachments": [], "conversationId": "3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10", "channelData": {}, "replyToId": null, "editedAt": null, "deletedAt": null, "futureField": 1 }], "watermark": "c2VxOjQy", "has_more": false } },
-      "result": { "watermark": "c2VxOjQy", "has_more": false, "activities.0.id": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d", "activities.0.from.id": "bot", "activities.0.text": "Sure, what is your order number?", "activities.0.conversation_id": "3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10" }
+      "args": { "token": "tok-conv", "conversation_id": "3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10", "watermark": 41, "limit": 50 },
+      "request": { "method": "GET", "path": "/api/v1/converger/conversations/3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10/activities", "query": { "watermark": "41", "limit": "50" }, "headers": { "authorization": "Bearer tok-conv" } },
+      "response": { "status": 200, "body": { "activities": [{ "id": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d", "type": "message", "from": { "id": "bot" }, "text": "Sure, what is your order number?", "timestamp": "2026-10-09T12:05:43.118020Z", "attachments": [], "conversationId": "3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10", "channelData": {}, "replyToId": null, "editedAt": null, "deletedAt": null, "futureField": 1 }], "watermark": 42, "has_more": false } },
+      "result": { "watermark": 42, "has_more": false, "activities.0.id": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d", "activities.0.from.id": "bot", "activities.0.text": "Sure, what is your order number?", "activities.0.conversation_id": "3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10" }
+    },
+    {
+      "name": "client_api list_activities with a legacy opaque watermark",
+      "operation": "client_api.list_activities",
+      "args": { "token": "tok-conv", "conversation_id": "3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10", "watermark": "c2VxOjQx" },
+      "request": { "method": "GET", "path": "/api/v1/converger/conversations/3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10/activities", "query": { "watermark": "c2VxOjQx" }, "headers": { "authorization": "Bearer tok-conv" } },
+      "response": { "status": 200, "body": { "activities": [], "watermark": 41, "has_more": false } },
+      "result": { "watermark": 41, "has_more": false }
     },
     {
       "name": "client_api post_activity into a closed conversation",
@@ -135,8 +143,8 @@
       "operation": "tenant_api.list_activities",
       "args": { "conversation_id": "3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10", "limit": 2 },
       "request": { "method": "GET", "path": "/api/v1/conversations/3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10/activities", "query": { "limit": "2" }, "headers": { "x-api-key": "cvg_live_test" } },
-      "response": { "status": 200, "body": { "data": [{ "id": "0f1e2d3c-4b5a-4968-8776-655443322110", "type": "message", "sender": "16505551234", "text": "What are your hours?", "attachments": [], "metadata": {}, "idempotency_key": null, "seq": 1, "reply_to_id": null, "edited_at": null, "deleted_at": null, "conversation_id": "3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10", "tenant_id": "c2a4e6f8-1b3d-4f5a-9c7e-2d4f6a8b0c1e", "inserted_at": "2026-10-09T12:04:10.551200Z" }], "meta": { "watermark": "c2VxOjE", "has_more": true, "limit": 2 } } },
-      "result": { "watermark": "c2VxOjE", "has_more": true, "data.0.seq": 1, "data.0.sender": "16505551234" }
+      "response": { "status": 200, "body": { "data": [{ "id": "0f1e2d3c-4b5a-4968-8776-655443322110", "type": "message", "sender": "16505551234", "text": "What are your hours?", "attachments": [], "metadata": {}, "idempotency_key": null, "seq": 1, "reply_to_id": null, "edited_at": null, "deleted_at": null, "conversation_id": "3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10", "tenant_id": "c2a4e6f8-1b3d-4f5a-9c7e-2d4f6a8b0c1e", "inserted_at": "2026-10-09T12:04:10.551200Z" }], "meta": { "watermark": 1, "has_more": true, "limit": 2 } } },
+      "result": { "watermark": 1, "has_more": true, "data.0.seq": 1, "data.0.sender": "16505551234" }
     },
     {
       "name": "tenant_api unauthorized",

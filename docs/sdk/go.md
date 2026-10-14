@@ -51,6 +51,11 @@ Options: `WithAPIKey` (tenant API), `WithChannelSecret` (`ClientAPI.GenerateToke
 | `PostActivity(ctx, id, ActivityInput{Type, Sender, Text, Attachments, Metadata, ReplyToID, IdempotencyKey})` | `POST .../activities` | `*Activity` |
 | `ListActivities(ctx, id, ListActivitiesParams{Watermark, Limit})` | `GET .../activities` | `*ActivityPage` |
 
+Page watermarks are a `converger.Watermark`, which decodes the integer seq of v3.0 servers (a JSON number) and the
+opaque string of older ones ([migration](../protocol/v1.md#65-the-watermark-and-its-migration)). Pass it back
+unchanged (`ListActivitiesParams{Watermark: *page.Watermark}`); `Seq()` returns the integer, `SeqWatermark(n)`
+builds one from a socket's `Watermark()`.
+
 Errors from the server are `*converger.APIError` (`Status`, `Code`, `Message`, `Details`, `RequestID`,
 `RetryAfter`, `Body`), normalized as described in [Server-side SDKs](server-sdks.md#errors):
 

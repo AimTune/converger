@@ -18,6 +18,11 @@ defmodule ConvergerWeb.Deprecation do
     * `:token_endpoint` - `POST /api/v1/tokens` (legacy conversation tokens).
     * `:channel_token` - any other `x-channel-token` authentication
       (`POST /api/v1/conversations`, the tenant API).
+    * `:opaque_watermark` - a pre-v1 base64url watermark (`seq:<n>` or a
+      legacy activity id) sent to a surface that emits the integer seq
+      (Converger REST, the tenant API, Protocol v1 frames, SSE). Logged
+      only, no response headers: the endpoint itself is not deprecated
+      (#63, docs/protocol/v1.md section 6.5).
   """
 
   require Logger
@@ -34,10 +39,12 @@ defmodule ConvergerWeb.Deprecation do
     token_endpoint:
       "issue Converger tokens with POST /api/v1/converger/tokens/generate (channel secret)",
     channel_token:
-      "use the tenant API key (x-api-key) server side, or the Converger API with a Converger token"
+      "use the tenant API key (x-api-key) server side, or the Converger API with a Converger token",
+    opaque_watermark:
+      "send the integer seq the server now returns as the watermark (docs/protocol/v1.md section 6.5)"
   }
 
-  @type surface :: :legacy_socket | :token_endpoint | :channel_token
+  @type surface :: :legacy_socket | :token_endpoint | :channel_token | :opaque_watermark
 
   @doc "URL of the migration guide."
   def migration_guide, do: @migration_guide

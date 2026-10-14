@@ -57,6 +57,9 @@ coroutines and adds `socket()`.
 | `post_activity(id, text=, type=, sender=, attachments=, metadata=, reply_to_id=, idempotency_key=)` | `POST .../activities` | `Activity` (with `seq`) |
 | `list_activities(id, watermark=None, limit=None)` | `GET .../activities` | `ActivityPage` (`data`, `watermark`, `has_more`) |
 
+`watermark` on both page models is `int | str | None`: the integer seq from v3.0 servers, an opaque string from older
+ones ([migration](../protocol/v1.md#65-the-watermark-and-its-migration)). Pass it back unchanged as `watermark=`.
+
 Models keep unknown fields (`model_extra`), so fields the server adds later are not lost.
 
 ### Errors

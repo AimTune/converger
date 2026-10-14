@@ -292,7 +292,7 @@ reload. Pass `watermark` to have it appended to `streamUrl`, so the socket repla
 | `watermark` | Optional. The last watermark the client processed. Appended to `streamUrl` verbatim. |
 
 ```bash
-curl -s "$CONVERGER/api/v1/converger/conversations/$CONV?watermark=c2VxOjQy" \
+curl -s "$CONVERGER/api/v1/converger/conversations/$CONV?watermark=42" \
   -H "authorization: Bearer $TOKEN"
 ```
 
@@ -303,7 +303,7 @@ curl -s "$CONVERGER/api/v1/converger/conversations/$CONV?watermark=c2VxOjQy" \
   "conversationId": "3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10",
   "token": "eyJhbGciOi...",
   "expires_in": 1800,
-  "streamUrl": "ws://localhost:4000/socket/converger/websocket?token=eyJhbGciOi...&conversation_id=3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10&watermark=c2VxOjQy"
+  "streamUrl": "ws://localhost:4000/socket/converger/websocket?token=eyJhbGciOi...&conversation_id=3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10&watermark=42"
 }
 ```
 
@@ -440,14 +440,14 @@ The same activity can also be sent over the socket with the `postActivity` event
 
 `GET /api/v1/converger/conversations/:conversation_id/activities`
 
-The activities after a watermark, oldest first ([ADR-0006](../adr/0006-per-conversation-seq-and-opaque-watermarks.md)).
+The activities after a watermark, oldest first ([ADR-0006](../adr/0006-per-conversation-seq-and-opaque-watermarks.md), [ADR-0068](../adr/0068-integer-seq-watermarks-on-every-surface.md)).
 Use it to catch up after a reconnect, to fetch what the socket replay did not include, or to poll without a socket.
 It also pages **backwards** for "load older messages" (see [below](#history-paging-backwards)), and returns
 Protocol v1 frames with `format=frames`.
 
 | Query param | Notes |
 | --- | --- |
-| `watermark` | The `watermark` of the previous response, or of the last socket `activitySet` frame. Omit to start at the first activity. |
+| `watermark` | The `watermark` of the previous response (the integer seq), the `seq` of the last v1 frame you processed, or the `watermark` of the last legacy Phoenix `activitySet` frame. Omit to start at the first activity. |
 | `before` | Backward paging: the activities with a `seq` below this one (a positive integer: the `cursor` of the previous backward page). Anything else is a `400`. |
 | `direction` | `forward` (default) or `backward`. `backward` without `before` starts at the newest activity. |
 | `format` | `activities` (default) or `frames`: the page as [Protocol v1 frames](../protocol/v1.md#54-activities-as-frames) in `frames` |
@@ -455,7 +455,7 @@ Protocol v1 frames with `format=frames`.
 | `limit` | Default `100`, max `1000` |
 
 ```bash
-curl -s "$CONVERGER/api/v1/converger/conversations/$CONV/activities?watermark=c2VxOjQx&limit=50" \
+curl -s "$CONVERGER/api/v1/converger/conversations/$CONV/activities?watermark=41&limit=50" \
   -H "authorization: Bearer $TOKEN"
 ```
 
@@ -475,27 +475,40 @@ curl -s "$CONVERGER/api/v1/converger/conversations/$CONV/activities?watermark=c2
       "channelData": {}
     }
   ],
-  "watermark": "c2VxOjQy",
+  "watermark": 42,
   "has_more": false
 }
 ```
 
 #### Watermarks
 
-- A watermark is opaque. Today it is URL-safe Base64 without padding of `seq:<n>`, where `n` is the `seq` of the
-  last activity in the response (`c2VxOjQy` is `seq:42`). Store it as a string; do not build or parse it.
+- The watermark is the **integer `seq`** of the last activity in the response, a JSON number (`42`), the same
+  number [Protocol v1](../protocol/v1.md) frames carry as `seq` and `watermark` (issue
+  [#63](https://github.com/AimTune/converger/issues/63)). Before v3.0 it was an opaque string (URL-safe Base64 of
+  `seq:<n>`, `c2VxOjQy` for `seq:42`); see [migration](#watermark-migration) below.
 - To resume, send the watermark back. The response contains activities with a higher `seq` only, so nothing is
   delivered twice and, because `seq` is gap-free and assigned under the conversation lock, nothing is skipped.
 - If `has_more` is `true`, call again immediately with the new watermark; otherwise you are caught up.
-- An empty page returns the watermark you sent unchanged (`null` if you sent none).
-- The socket and REST share the watermark format: on join the socket replays at most `ws_replay_limit` (default 100)
-  activities after the watermark in an `activitySet` frame with `has_more`; fetch the rest here starting from that
-  frame's watermark.
+- An empty page returns the position you sent, as an integer (`null` if you sent none).
+- REST and the sockets share the position: resume a v1 socket (`hello.watermark`) from a REST page's watermark, or
+  page REST from the `seq` of the last v1 frame (for example the `watermark` of a `replayTruncated` frame). On the
+  legacy Phoenix binding the join replays at most `ws_replay_limit` (default 100) activities in an `activitySet`
+  frame with `has_more`; fetch the rest here starting from that frame's watermark.
 - Unlike the tenant API, an invalid watermark is not an error here: the list starts at the beginning of the
-  conversation. Watermarks issued before `seq` existed (Base64 activity ids) are still accepted.
-- The integer `seq` used by [Protocol v1](../protocol/v1.md) frames (for example the `watermark` of a
-  `replayTruncated` frame) is also accepted: `?watermark=42` means "after seq 42". Responses still return the
-  opaque form until the migration in section 6.5 of the spec.
+  conversation.
+
+#### Watermark migration
+
+Since v3.0 ([section 6.5 of the spec](../protocol/v1.md#65-the-watermark-and-its-migration),
+[ADR-0068](../adr/0068-integer-seq-watermarks-on-every-surface.md)) responses carry the integer. For one release
+the server still **accepts** every earlier form in `?watermark=`: the integer, its decimal string, the opaque
+`seq:<n>` watermark and a legacy Base64 activity-id watermark (issued before `seq` existed). Opaque forms are
+logged as the deprecated `opaque_watermark` surface (telemetry `[:converger, :deprecated, :use]`) so operators can
+find the clients still sending them. Only the legacy Phoenix `activitySet` frame still emits the opaque string.
+
+A client that stores the watermark and sends it back unchanged keeps working. A typed client must accept a number
+where it used to expect a string; the [SDKs](../sdk/typescript.md) accept both. The release that stops accepting
+the opaque forms is announced in the changelog one release ahead.
 
 #### History paging backwards
 
@@ -514,7 +527,7 @@ curl -s "$CONVERGER/api/v1/converger/conversations/$CONV/activities?direction=ba
     { "type": "text", "id": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d", "seq": 81, "from": "user", "sender": { "id": "user-42", "role": "user" }, "data": { "text": "Where is my order?" }, "timestamp": 1791936076762 },
     { "type": "tool_call", "seq": 82, "data": { "id": "t1", "name": "get_order", "status": "completed" } }
   ],
-  "watermark": "c2VxOjgy",
+  "watermark": 82,
   "has_more": true,
   "cursor": "81"
 }

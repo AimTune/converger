@@ -5,7 +5,6 @@ defmodule ConvergerWeb.ConvergerAPI.ActivityController do
   import ConvergerWeb.ApiSchemas
 
   alias Converger.{Activities, Conversations}
-  alias Converger.ConvergerAPI.Watermark
   alias Converger.Pagination
 
   import ConvergerWeb.Helpers.Authorization,
@@ -43,8 +42,8 @@ defmodule ConvergerWeb.ConvergerAPI.ActivityController do
   operation(:index,
     summary: "List activities",
     description: """
-    Forward (default): oldest first, after `watermark` (opaque, or a Protocol v1 integer seq); an \
-    invalid watermark starts from the beginning. Backward (`before`, or `direction=backward` for the \
+    Forward (default): oldest first, after `watermark` (the integer seq; the pre-v1 opaque form is \
+    still accepted during the migration window); an invalid watermark starts from the beginning. Backward (`before`, or `direction=backward` for the \
     newest page): the page just before the seq `before`, still oldest first, with `cursor` to pass \
     as `before` for the next older page ("load older messages"). `format=frames` returns the page \
     as Protocol v1 frames (`frames`) instead of `activities`.
@@ -52,7 +51,7 @@ defmodule ConvergerWeb.ConvergerAPI.ActivityController do
     operation_id: "getActivities",
     parameters: [
       conversation_id: path_id("Conversation id"),
-      watermark: query(%OpenApiSpex.Schema{type: :string}, "Resume after this watermark"),
+      watermark: query(watermark_param_schema(), "Resume after this watermark (the integer seq)"),
       before:
         query(
           %OpenApiSpex.Schema{type: :integer, minimum: 1},
@@ -163,11 +162,13 @@ defmodule ConvergerWeb.ConvergerAPI.ActivityController do
   defp sender(_from, _claims), do: "user"
 
   # Forward: after the watermark, oldest first. An invalid watermark starts
-  # from the beginning, as before; the integer seq of Protocol v1 (e.g. from
-  # `replayTruncated`) is accepted next to the opaque form.
+  # from the beginning, as before. The integer seq is the watermark; the
+  # pre-v1 opaque forms are still accepted and reported as deprecated (#63).
   defp page(conversation_id, :forward, params, limit) do
     position =
-      case ConvergerWeb.Protocol.parse_watermark(params["watermark"]) do
+      case ConvergerWeb.Protocol.parse_watermark(params["watermark"],
+             deprecation: [api: :converger]
+           ) do
         {:ok, position} -> position
         {:error, _} -> nil
       end
@@ -179,7 +180,7 @@ defmodule ConvergerWeb.ConvergerAPI.ActivityController do
       activities: activities,
       has_more: has_more,
       cursor: nil,
-      watermark: watermark(activities, params["watermark"])
+      watermark: watermark(activities, position, conversation_id)
     }
   end
 
@@ -200,12 +201,16 @@ defmodule ConvergerWeb.ConvergerAPI.ActivityController do
       activities: activities,
       has_more: has_more,
       cursor: cursor,
-      watermark: watermark(activities, nil)
+      watermark: watermark(activities, nil, conversation_id)
     }
   end
 
-  defp watermark([], fallback), do: fallback
-  defp watermark(activities, _fallback), do: Watermark.encode(List.last(activities).seq)
+  # The integer seq of the last activity; on an empty page the position the
+  # client sent (as an integer, whatever form it came in).
+  defp watermark([], position, conversation_id),
+    do: ConvergerWeb.Protocol.watermark_seq(position, conversation_id)
+
+  defp watermark(activities, _position, _conversation_id), do: List.last(activities).seq
 
   defp direction(%{"before" => before}) when is_binary(before) and before != "" do
     case Integer.parse(before) do

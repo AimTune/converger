@@ -163,6 +163,10 @@ Channel-scoped sockets belong to `@converger/agent` (#67).
 `listActivities` and `history` (paged by `has_more`), `allActivities`, `upload` (multipart) and
 `downloadAttachment`.
 
+A page's `watermark` is typed `number | string | null`: the integer seq from v3.0 servers, an opaque string from
+older ones ([migration](../protocol/v1.md#65-the-watermark-and-its-migration)). `history` passes it back unchanged;
+`parseWatermark` turns either form into a seq.
+
 Failed requests throw `ConvergerApiError` with `status`, `code`, `message`, `details`, `requestId` and
 `retryAfterMs` (from `Retry-After`). It understands the standard error envelope
 `{"error": {"code", "message", "details", "request_id"}}` (planned in
