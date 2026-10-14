@@ -15,7 +15,7 @@ defmodule Converger.Inbound do
 
   alias Converger.{Activities, Conversations, Deliveries, Participants}
   alias Converger.Channels.Channel
-  alias Converger.Inbound.Media
+  alias Converger.Inbound.{Answers, Media}
 
   @type message :: map()
   @type result ::
@@ -40,6 +40,11 @@ defmodule Converger.Inbound do
   `"thread_activity_ids"` (activity ids) of the messages the message replies
   to; the active conversation of the first one that went through this
   channel is used before the participant's.
+
+  Adapters that rendered a typed message's actions natively add `"answer"`
+  (`%{"ref", "source", "label"}`, see `Converger.Channels.RichContent.put_answer/4`)
+  when the provider reply names an answer key; that answer and numeric
+  replies are normalised by `Converger.Inbound.Answers` (#68).
 
   SMS channels add `"opt_out"` (`"stop"` or `"start"`) to an opt-out keyword:
   the participant is marked opted out or opted in again
@@ -77,7 +82,7 @@ defmodule Converger.Inbound do
   defp do_receive(channel, message, conversation_id) do
     key = message["idempotency_key"]
 
-    case Activities.get_activity_by_channel_idempotency_key(channel.id, key) do
+    case existing_activity(channel, conversation_id, key) do
       %Activities.Activity{} = existing ->
         Logger.info("Duplicate inbound message ignored",
           channel_id: channel.id,
@@ -106,6 +111,16 @@ defmodule Converger.Inbound do
         end
     end
   end
+
+  # A send that names its conversation (WebSocket clients, agents) is unique
+  # within that conversation (Protocol v1 section 7): the same clientId may be
+  # reused in another one. Provider webhooks name no conversation, and their
+  # message ids are unique per channel.
+  defp existing_activity(_channel, conversation_id, key) when is_binary(conversation_id),
+    do: Activities.get_activity_by_idempotency_key(conversation_id, key)
+
+  defp existing_activity(channel, _conversation_id, key),
+    do: Activities.get_activity_by_channel_idempotency_key(channel.id, key)
 
   # SMS adapters mark a STOP / START keyword with "opt_out" ("stop" or
   # "start", see Converger.Channels.Sms). The participant flag is set before
@@ -136,6 +151,7 @@ defmodule Converger.Inbound do
 
   defp create_activity(channel, conversation, message) do
     message = resolve_reference(channel, conversation, message)
+    message = Answers.normalise(channel, conversation, message)
     {message, stored_media} = Media.store(channel, conversation, message)
 
     case Activities.create_client_activity(message, %{

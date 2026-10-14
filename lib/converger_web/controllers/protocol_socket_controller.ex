@@ -34,7 +34,7 @@ defmodule ConvergerWeb.ProtocolSocketController do
         |> maybe_put_subprotocol(subprotocol)
         |> WebSockAdapter.upgrade(
           ConvergerWeb.ProtocolSocket,
-          [encoding: encoding, token: credential(conn, params)],
+          [encoding: encoding, subprotocol: subprotocol, token: credential(conn, params)],
           # The handler enforces the protocol's own idle timeout (close 4408).
           timeout: :infinity,
           # Frames above maxFrameBytes get `payload_too_large`; above this hard

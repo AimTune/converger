@@ -343,7 +343,7 @@
         "type": "object"
       },
       "ActivitySet": {
-        "description": "A page of activities and the watermark to resume after them.",
+        "description": "A page of activities (oldest first) and the watermark to resume after them. `activities` by default, `frames` with `format=frames`; `cursor` on backward pages.",
         "properties": {
           "activities": {
             "items": {
@@ -351,7 +351,23 @@
             },
             "type": "array"
           },
+          "cursor": {
+            "description": "Backward pages only: pass as `before` for the next older page; null when there is none",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "frames": {
+            "description": "With `format=frames`: the Protocol v1 server frames (docs/protocol/v1.md section 5.4)",
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
+          },
           "has_more": {
+            "description": "Forward: newer activities follow. Backward: older activities exist",
             "type": "boolean"
           },
           "watermark": {
@@ -362,7 +378,6 @@
           }
         },
         "required": [
-          "activities",
           "watermark",
           "has_more"
         ],
@@ -1090,6 +1105,13 @@
               "null"
             ]
           },
+          "seq": {
+            "description": "Per-conversation sequence number (the Protocol v1 watermark and history cursor)",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "text": {
             "type": [
               "string",
@@ -1109,6 +1131,7 @@
         },
         "required": [
           "id",
+          "seq",
           "type",
           "from",
           "text",
@@ -1201,6 +1224,121 @@
           "streamUrl"
         ],
         "title": "ClientConversation",
+        "type": "object"
+      },
+      "ClientConversationList": {
+        "description": "A page of the channel's conversations, most recently active first.",
+        "properties": {
+          "conversations": {
+            "items": {
+              "$ref": "#/components/schemas/ClientConversationListItem"
+            },
+            "type": "array"
+          },
+          "cursor": {
+            "description": "Pass back as `cursor` for the next page",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "has_more": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "conversations",
+          "cursor",
+          "has_more"
+        ],
+        "title": "ClientConversationList",
+        "type": "object"
+      },
+      "ClientConversationListItem": {
+        "description": "A conversation of the channel; field names follow chativa's Conversation where one exists.",
+        "properties": {
+          "contact": {
+            "description": "The participant's display name, else external id",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "lastMessage": {
+            "description": "Text of the latest message",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "lastMessageAt": {
+            "description": "Milliseconds since the epoch",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "lastSeq": {
+            "description": "Head seq of the conversation",
+            "type": "integer"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "status": {
+            "enum": [
+              "active",
+              "closed"
+            ],
+            "type": "string"
+          },
+          "title": {
+            "description": "`metadata.title`, else `contact`",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "updatedAt": {
+            "description": "Last activity (the list order)",
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "contact",
+          "createdAt",
+          "id",
+          "lastMessage",
+          "lastMessageAt",
+          "lastSeq",
+          "metadata",
+          "status",
+          "title",
+          "updatedAt"
+        ],
+        "title": "ClientConversationListItem",
+        "type": "object"
+      },
+      "ClientConversationRequest": {
+        "description": "Optional fields of a new conversation.",
+        "properties": {
+          "title": {
+            "description": "Stored as `metadata.title` (chativa's createConversation title)",
+            "maxLength": 200,
+            "type": "string"
+          }
+        },
+        "title": "ClientConversationRequest",
         "type": "object"
       },
       "ClientConversationStatus": {
@@ -3261,7 +3399,7 @@
         "type": "object"
       },
       "UploadResponse": {
-        "description": "The activity created for the upload and its attachment.",
+        "description": "The activity created for the upload, its attachment, and the attachment message as a Protocol v1 frame.",
         "properties": {
           "attachments": {
             "items": {
@@ -3269,9 +3407,18 @@
             },
             "type": "array"
           },
+          "frame": {
+            "additionalProperties": true,
+            "description": "The `text` frame with `data.attachments` that the WebSocket delivers (chativa's sendFile result)",
+            "type": "object"
+          },
           "id": {
             "format": "uuid",
             "type": "string"
+          },
+          "seq": {
+            "description": "The activity's seq",
+            "type": "integer"
           }
         },
         "required": [
@@ -3292,6 +3439,10 @@
           },
           "id": {
             "format": "uuid",
+            "type": "string"
+          },
+          "name": {
+            "description": "The uploaded file name",
             "type": "string"
           },
           "size": {
@@ -5081,11 +5232,103 @@
       }
     },
     "/api/v1/converger/conversations": {
+      "get": {
+        "callbacks": {},
+        "description": "The conversations of the token's channel, most recently active first (`updatedAt`, bumped by     every activity), keyset-paginated: pass `cursor` back for the next page. For agent consoles,     such as chativa's agent-panel mode (ADR-0065). Needs a `scope: channel` token     (`POST /tokens/generate` with `{\"scope\": \"channel\"}`); other tokens get 403.\n",
+        "operationId": "clientListConversations",
+        "parameters": [
+          {
+            "description": "Page size (clamped to the max)",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "`cursor` of the previous page",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by status",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "enum": [
+                "active",
+                "closed"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only conversations active at or after this time (ISO 8601, or milliseconds since the epoch)",
+            "in": "query",
+            "name": "updated_since",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientConversationList"
+                }
+              }
+            },
+            "description": "A page"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "convergerToken": []
+          }
+        ],
+        "summary": "List the channel's conversations",
+        "tags": [
+          "Client: Conversations"
+        ]
+      },
       "post": {
         "callbacks": {},
-        "description": "Returns a token bound to the new conversation and its WebSocket `streamUrl`.",
+        "description": "Returns a token bound to the new conversation and its WebSocket `streamUrl`. An optional `title` is stored as `metadata.title`.",
         "operationId": "startConversation",
         "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClientConversationRequest"
+              }
+            }
+          },
+          "description": "Optional",
+          "required": false
+        },
         "responses": {
           "201": {
             "content": {
@@ -5096,6 +5339,9 @@
               }
             },
             "description": "Started"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -5124,7 +5370,7 @@
     "/api/v1/converger/conversations/{conversation_id}/activities": {
       "get": {
         "callbacks": {},
-        "description": "Oldest first, after `watermark` (opaque, or a Protocol v1 integer seq). An invalid watermark starts from the beginning.",
+        "description": "Forward (default): oldest first, after `watermark` (opaque, or a Protocol v1 integer seq); an invalid watermark starts from the beginning. Backward (`before`, or `direction=backward` for the newest page): the page just before the seq `before`, still oldest first, with `cursor` to pass as `before` for the next older page (\"load older messages\"). `format=frames` returns the page as Protocol v1 frames (`frames`) instead of `activities`.\n",
         "operationId": "getActivities",
         "parameters": [
           {
@@ -5141,6 +5387,51 @@
             "description": "Resume after this watermark",
             "in": "query",
             "name": "watermark",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Backward paging: activities with a seq below this one (the previous page's `cursor`)",
+            "in": "query",
+            "name": "before",
+            "required": false,
+            "schema": {
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "`backward` without `before` starts at the newest activity (default `forward`)",
+            "in": "query",
+            "name": "direction",
+            "required": false,
+            "schema": {
+              "enum": [
+                "forward",
+                "backward"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "`frames`: Protocol v1 frames, as the WebSocket delivers them (default `activities`)",
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "enum": [
+                "activities",
+                "frames"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "With `format=frames` and a token without `user_id`: the end user whose turns are `from: user`",
+            "in": "query",
+            "name": "userId",
             "required": false,
             "schema": {
               "type": "string"
@@ -5167,6 +5458,9 @@
               }
             },
             "description": "A page"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -5353,7 +5647,7 @@
     "/api/v1/converger/conversations/{conversation_id}/upload": {
       "post": {
         "callbacks": {},
-        "description": "Stores the file (type sniffed and allow-listed) and posts an activity carrying it.",
+        "description": "Stores the file (type sniffed and allow-listed) and posts an activity carrying it. The response includes the activity's `seq` and its Protocol v1 `frame`, the attachment message the WebSocket delivers.",
         "operationId": "uploadFile",
         "parameters": [
           {

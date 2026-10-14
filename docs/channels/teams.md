@@ -154,6 +154,17 @@ The default outbound rate limit is `50/s`; Teams also throttles to about 7 messa
 
 The probe requests an access token, which catches a wrong or expired client secret.
 
+## Typed messages
+
+The adapter declares `message_types: image file video audio` ([#68](https://github.com/AimTune/converger/issues/68),
+[ADR-0064](../adr/0064-per-channel-rendering-of-typed-messages-and-normalised-answers.md)): typed media arrive as
+file attachments and are sent as described above. Every other typed message is sent as its text rendering
+([messages.md section 5](../protocol/messages.md)): the prompt with its actions as a numbered list
+(`1. Track an order`), links as `label: url`, cards as text blocks; native quick replies or buttons for typed
+messages are a follow-up. A reply that is only a number (`2`) within 24 hours of the conversation's most recent
+actionable message becomes the normalised answer, with `metadata.action` (`source: "numeric"`) and `reply_to_id`
+([messages.md section 6](../protocol/messages.md)).
+
 ## Testing
 
 [`teams_test.exs`](https://github.com/AimTune/converger/blob/main/test/converger/channels/adapters/teams_test.exs)

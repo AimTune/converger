@@ -221,7 +221,7 @@ List a channel's approved templates with [`GET /api/v1/channels/:id/templates`](
 
 ### Interactive messages
 
-Until typed cards exist ([#68](https://github.com/AimTune/converger/issues/68)), reply buttons and lists are card attachments:
+Reply buttons and lists can also be sent as card attachments (the format before [typed messages](#typed-messages)):
 
 ```json
 {
@@ -267,6 +267,22 @@ Until typed cards exist ([#68](https://github.com/AimTune/converger/issues/68)),
 | `list` | `button` (the label of the list button) is required; 1 to 10 rows in total, each with a `title`; `id` defaults to the title |
 
 A card that breaks these rules fails the delivery permanently with the reason. The user's choice comes back as an inbound `message` whose `text` is the button or row title and whose `metadata.interactive_reply.id` is the `id` you set (see [inbound message mapping](#inbound-message-mapping)). Meta gets `{"type": "interactive", "interactive": {"type": "button" | "list", ...}}`; Infobip gets `/whatsapp/1/message/interactive/buttons` or `/interactive/list`.
+
+### Typed messages
+
+Both adapters render typed messages ([#68](https://github.com/AimTune/converger/issues/68), [messages.md section 5](../protocol/messages.md), [ADR-0064](../adr/0064-per-channel-rendering-of-typed-messages-and-normalised-answers.md)); they declare `message_types: text quick-reply buttons card carousel interrupt image file video audio location contact`. Send these instead of card attachments:
+
+| Typed message | Sent as |
+| --- | --- |
+| `text` + `actions`, `quick-reply`, `buttons`, `interrupt` (without `tool` / `event`) | 1 to 3 answerable actions: reply buttons (titles cut to 20 characters); 4 to 10: a list message (button `Options`, row titles cut to 24 characters, the full label up to 72 as row description); more than 10: a text with a numbered list. The body is `data.text` (an interrupt's `payload.title`), else the stored text fallback, cut to 1024 characters; `url` actions are appended to it as `label: url` |
+| `card` | its image as an image message (no caption), then its title, subtitle and text with its buttons as above; without buttons, the image with that text as caption (or a text message) |
+| `carousel` | `data.text` as a text message, then each card as above (at most 10) |
+| `image`, `file`, `video`, `audio` | an image, document, video or audio message (caption from `caption` / `text`); Converger uploads are sent through the Media API |
+| `location`, `contact` | a location or contacts message |
+| `genui` | one text message when the stream is done (its text chunks) |
+| `tool_call` | nothing, unless the channel sets `show_tool_traces` |
+
+Every button and row id is the answer key `a:<activity id>:<index>`. When the user taps one, the inbound message (`button_reply` or `list_reply`) becomes the normalised answer: `text` is the action's value (or its label), `metadata.action = {label, value, source: "button" | "list"}` and `reply_to_id` is the typed message ([messages.md section 6](../protocol/messages.md)); `metadata.interactive_reply` is kept as well. A reply such as `2` within 24 hours of an actionable message picks its second numbered action (`source: "numeric"`).
 
 ### Several messages per activity
 
@@ -649,5 +665,5 @@ WhatsApp shows the indicator for up to 25 seconds or until the next message is s
 ## Planned
 
 - Native outbound reactions and edits, and outbound replies quoting a message (`context.message_id`).
-- Typed cards and quick replies instead of `application/vnd.converger.card.*` attachments: Planned ([#68](https://github.com/AimTune/converger/issues/68)).
+- Image headers on interactive messages for cards (today the card image is a separate image message).
 - Infobip health probe (`health_probe/1`), so idle Infobip channels report a status like Meta ones do.

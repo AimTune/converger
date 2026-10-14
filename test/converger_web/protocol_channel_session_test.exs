@@ -176,6 +176,37 @@ defmodule ConvergerWeb.ProtocolChannelSessionTest do
                Activities.list_activities_since(ctx.conversation.id, nil)
     end
 
+    test "the agent's typing reaches the user as from bot, role agent", ctx do
+      {_welcome, agent} = agent(ctx, %{}, user_id: "agent-7")
+      {_welcome, user} = user(ctx)
+
+      _agent =
+        Client.push(agent, envelope(ctx.conversation, %{"type" => "typing", "isTyping" => true}))
+
+      {frame, _user} = Client.recv_type(user, "typing")
+      assert %{"from" => "bot", "sender" => %{"id" => "agent-7", "role" => "agent"}} = frame
+    end
+
+    test "an end user may reuse a clientId in another conversation (section 7)", ctx do
+      other = conversation_fixture(ctx.tenant, ctx.widget)
+
+      for conversation <- [ctx.conversation, other] do
+        {:ok, token, _} =
+          ConvergerToken.generate_conversation_token(ctx.widget, conversation.id,
+            user_id: "alice"
+          )
+
+        {_welcome, user} = open(ctx.port, token)
+
+        user =
+          Client.push(user, %{"type" => "text", "clientId" => "c-1", "data" => %{"text" => "hi"}})
+
+        {ack, _user} = Client.recv_type(user, "ack")
+        refute ack["duplicate"]
+        assert [_] = Activities.list_activities_since(conversation.id, nil)
+      end
+    end
+
     test "a mekik message id is kept and makes the send idempotent per conversation", ctx do
       {_welcome, agent} = agent(ctx)
       other = conversation_fixture(ctx.tenant, ctx.widget)
@@ -239,6 +270,54 @@ defmodule ConvergerWeb.ProtocolChannelSessionTest do
       assert resume == %{"type" => "resume", "answers" => %{"approve#0" => %{"ok" => true}}}
     end
 
+    test "interrupt and interrupt_resolved share an id; a replyTo {seq} answers the interrupt",
+         ctx do
+      {_welcome, agent} = agent(ctx)
+      {_welcome, user} = user(ctx)
+
+      interrupt = %{
+        "type" => "interrupt",
+        "id" => "i1",
+        "data" => %{
+          "payload" => %{"title" => "Go?"},
+          "actions" => [%{"label" => "Yes", "value" => "yes"}]
+        }
+      }
+
+      agent = Client.push(agent, envelope(ctx.conversation, interrupt))
+      {frame, user} = Client.recv_type(user, "interrupt")
+
+      _user =
+        Client.push(user, %{
+          "type" => "text",
+          "data" => %{"text" => "Yes"},
+          "replyTo" => %{"seq" => frame["seq"]},
+          "metadata" => %{"action" => %{"label" => "Yes", "value" => "yes", "source" => "web"}}
+        })
+
+      {_id, resume, agent} = recv_enveloped(agent, "resume")
+      assert resume["answers"] == %{"i1" => "yes"}
+
+      _agent =
+        Client.push(
+          agent,
+          envelope(ctx.conversation, %{
+            "type" => "interrupt_resolved",
+            "id" => "i1",
+            "data" => %{"answer" => "yes"}
+          })
+        )
+
+      Process.sleep(200)
+
+      types =
+        ctx.conversation.id
+        |> Activities.list_activities_since(nil)
+        |> Enum.map(& &1.message_type)
+
+      assert types == ["interrupt", nil, "interrupt_resolved"]
+    end
+
     test "a user turn's meta reaches the agent with the turn", ctx do
       {_welcome, agent} = agent(ctx)
       {_welcome, user} = user(ctx)
@@ -251,7 +330,14 @@ defmodule ConvergerWeb.ProtocolChannelSessionTest do
         })
 
       {_id, frame, _agent} = recv_enveloped(agent, "text")
-      assert frame["meta"] == %{"locale" => "tr-TR"}
+
+      assert %{
+               "locale" => "tr-TR",
+               "participant" => %{"id" => "alice"},
+               "channel" => %{"id" => widget_id, "type" => "websocket"}
+             } = frame["meta"]
+
+      assert widget_id == ctx.widget.id
     end
   end
 

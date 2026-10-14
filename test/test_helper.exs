@@ -23,7 +23,9 @@ ExUnit.start(
     :rabbitmq,
     :nats,
     :redis_streams,
-    :mqtt
+    :mqtt,
+    # a real mekik/1 server (MEKIK_URL), see test/converger/channels/mekik_live_test.exs
+    :mekik
   ],
   assert_receive_timeout: 1_000
 )

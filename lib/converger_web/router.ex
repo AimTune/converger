@@ -189,6 +189,7 @@ defmodule ConvergerWeb.Router do
     pipe_through [:api, :converger_token_auth]
 
     post "/conversations", ConversationController, :create
+    get "/conversations", ConversationController, :index
     get "/conversations/:id", ConversationController, :show
     post "/conversations/:id/close", ConversationController, :close
     post "/conversations/:id/reopen", ConversationController, :reopen
