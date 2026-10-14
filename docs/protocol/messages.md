@@ -249,6 +249,10 @@ Native buttons carry an opaque answer key `a:<activity id>:<index>` (at most 41 
 id, row id, `callback_data` or button value; the action value stays in the stored payload and the
 answer is resolved from it (section 6).
 
+The `buttons` row of the matrix below is verified end to end for the web widget, WhatsApp, Telegram
+and email by `test/acceptance/buttons_across_channels_acceptance_test.exs`, and `tool_call` staying
+off WhatsApp (no `show_tool_traces`) by `test/acceptance/mekik_whatsapp_acceptance_test.exs`.
+
 The target matrix:
 
 | type | web (chativa) | WhatsApp | Telegram | email | SMS |
@@ -340,6 +344,17 @@ inline keyboard press, a numeric reply "2", a reply mail) is normalised to an or
 
 So an agent sends one `buttons` message and receives the same normalised turn from the web widget,
 WhatsApp, Telegram, Slack and email.
+
+**Verified by** `test/acceptance/buttons_across_channels_acceptance_test.exs` (#68): an agent on a
+channel-scoped native socket sends one `buttons` message into conversations on a web widget, WhatsApp,
+Telegram and email channel. The widget receives the `buttons` frame, the Graph API stub an interactive
+reply-buttons message, the Bot API stub an inline keyboard and the mail a numbered list (section 5).
+The user picks the second option on each (a `text` frame with `metadata.action`, a WhatsApp
+`button_reply`, a Telegram `callback_query`, a reply mail "2"), and all four reach the agent as a
+`text` frame with the same `data.text`, `metadata.action {label, value}` (only `source` differs) and
+`replyTo.id` naming the buttons activity. `test/acceptance/mekik_whatsapp_acceptance_test.exs` covers
+the interrupt case: a WhatsApp tap or numeric reply answering a mekik `interrupt` reaches the bot as
+`resume`.
 
 ## 7. Today and migration
 

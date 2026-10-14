@@ -171,7 +171,18 @@ delivery touches.
 server (`test/support/mekik/`): a scripted refund turn (`run`, `tool_call`, an approval `interrupt`),
 the end user's tapped button reaching the server as `resume`, replay after a reconnect, resume after a
 restart, rejected tokens and idle eviction. `test/converger/channels/mekik_live_test.exs` (tag `:mekik`,
-excluded by default) runs the same scenario against a real server:
+excluded by default) runs the same scenario against a real server.
+
+The Mode A acceptance criterion of #64 is verified by
+`test/acceptance/mekik_whatsapp_acceptance_test.exs`: a `whatsapp_meta` channel with a routing rule
+to a `mekik` channel served by the fake server. A signed WhatsApp text webhook reaches mekik as the
+user turn; the tool traces stay off WhatsApp; the approval `interrupt` reaches the Graph API as an
+interactive reply-buttons message (Approve / Reject, answer keys as button ids); the button-reply
+webhook reaches mekik as `resume {answers: {int-1: {approved: true}}}`; `interrupt_resolved` is stored
+and the final text reaches WhatsApp. A typed reply "2" resumes the graph with the second action
+(Reject) the same way.
+
+Against a real server:
 
 ```bash
 node examples/refund.ts --serve        # in mekik/ts

@@ -112,6 +112,12 @@ Hex advisories go in `mix.exs` under `hex: [ignore_advisories: ...]`, also with 
 
 To debug failures: `mix test test/path/to/file_test.exs`, `mix test --failed`.
 
+`test/acceptance/` holds end-to-end tests of an issue's acceptance criteria, driven only through the
+public edges (signed inbound webhooks, native sockets via `ConvergerWeb.ProtocolClient`, provider APIs
+stubbed with `Req.Test`, mail captured by `Swoosh.Adapters.Test`). Deliveries there run in socket,
+connection and pipeline processes that are not the test's callers, so these tests are `async: false`
+and use `Req.Test.set_req_test_to_shared/1` and `config :swoosh, :shared_test_process`.
+
 ### What CI runs
 
 [`.github/workflows/ci.yml`](https://github.com/AimTune/converger/blob/main/.github/workflows/ci.yml) runs on every
