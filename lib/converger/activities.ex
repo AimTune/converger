@@ -136,6 +136,13 @@ defmodule Converger.Activities do
   @doc "An activity by id, or nil."
   def get_activity(id), do: Repo.get(Activity, id)
 
+  @doc "The activity of `conversation_id` with `seq`, or nil."
+  def get_activity_by_seq(conversation_id, seq) when is_integer(seq) do
+    Repo.one(from(a in Activity, where: a.conversation_id == ^conversation_id and a.seq == ^seq))
+  end
+
+  def get_activity_by_seq(_conversation_id, _seq), do: nil
+
   @doc """
   Whether the mekik `interrupt` `interrupt_id` of a conversation is still open:
   no `interrupt_resolved` with the same id was stored after it (#64).

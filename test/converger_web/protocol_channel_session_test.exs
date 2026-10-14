@@ -250,6 +250,54 @@ defmodule ConvergerWeb.ProtocolChannelSessionTest do
       assert resume == %{"type" => "resume", "answers" => %{"approve#0" => %{"ok" => true}}}
     end
 
+    test "interrupt and interrupt_resolved share an id; a replyTo {seq} answers the interrupt",
+         ctx do
+      {_welcome, agent} = agent(ctx)
+      {_welcome, user} = user(ctx)
+
+      interrupt = %{
+        "type" => "interrupt",
+        "id" => "i1",
+        "data" => %{
+          "payload" => %{"title" => "Go?"},
+          "actions" => [%{"label" => "Yes", "value" => "yes"}]
+        }
+      }
+
+      agent = Client.push(agent, envelope(ctx.conversation, interrupt))
+      {frame, user} = Client.recv_type(user, "interrupt")
+
+      _user =
+        Client.push(user, %{
+          "type" => "text",
+          "data" => %{"text" => "Yes"},
+          "replyTo" => %{"seq" => frame["seq"]},
+          "metadata" => %{"action" => %{"label" => "Yes", "value" => "yes", "source" => "web"}}
+        })
+
+      {_id, resume, agent} = recv_enveloped(agent, "resume")
+      assert resume["answers"] == %{"i1" => "yes"}
+
+      _agent =
+        Client.push(
+          agent,
+          envelope(ctx.conversation, %{
+            "type" => "interrupt_resolved",
+            "id" => "i1",
+            "data" => %{"answer" => "yes"}
+          })
+        )
+
+      Process.sleep(200)
+
+      types =
+        ctx.conversation.id
+        |> Activities.list_activities_since(nil)
+        |> Enum.map(& &1.message_type)
+
+      assert types == ["interrupt", nil, "interrupt_resolved"]
+    end
+
     test "a user turn's meta reaches the agent with the turn", ctx do
       {_welcome, agent} = agent(ctx)
       {_welcome, user} = user(ctx)

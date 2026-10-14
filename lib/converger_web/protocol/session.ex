@@ -710,6 +710,7 @@ defmodule ConvergerWeb.Protocol.Session do
     with {:ok, client_id} <- Send.client_id(frame),
          {:ok, params} <- Send.message_params(frame, client_id),
          :ok <- rate_limit(state.claims) do
+      params = Send.resolve_reply_to(params, frame, state.conversation_id)
       persist(params, client_id, state, frame["meta"])
     else
       {:error, code, message, opts} ->

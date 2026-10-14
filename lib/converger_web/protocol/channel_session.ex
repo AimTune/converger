@@ -297,8 +297,14 @@ defmodule ConvergerWeb.Protocol.ChannelSession do
     end
   end
 
-  # A mekik bot's message `id` is its clientId when it has the clientId syntax.
-  defp client_id(frame), do: Send.client_id(frame)
+  # A mekik bot.s message `id` is its clientId when it has the clientId syntax.
+  # A mekik-native frame.s `id` names the interrupt (an `interrupt` and its
+  # `interrupt_resolved` share it), so only an explicit clientId counts there.
+  defp client_id(%{"type" => type} = frame) do
+    if MessagePayload.native?(type),
+      do: Send.client_id(Map.delete(frame, "id")),
+      else: Send.client_id(frame)
+  end
 
   defp bot_params(%{"type" => type} = frame) do
     metadata = Map.get(frame, "metadata") || %{}

@@ -276,7 +276,8 @@ inline keyboard press, a numeric reply "2", a reply mail) is normalised to an or
 - `data.text` is the action's `value` when it is a string, else its `label` (mekik/1 and chativa rule).
 - `metadata.action` keeps `{label, value, source}`, with `source` one of `button`, `list`,
   `keyboard`, `numeric`, `email`, `web`; non-string values survive here.
-- `replyTo` names the message that offered the action. A numeric reply is matched against the most
+- `replyTo` names the message that offered the action. A client may name it by `seq` alone (`replyTo: {seq}`), which is how
+  an answer to a mekik-native `interrupt` (no activity id on the wire) is addressed. A numeric reply is matched against the most
   recent actionable message of the conversation still open (at most 24 hours old); otherwise it is
   plain text.
 - If the answered message is, or belongs to, an open `interrupt`, the hub converts the answer to
