@@ -176,6 +176,17 @@ defmodule ConvergerWeb.ProtocolChannelSessionTest do
                Activities.list_activities_since(ctx.conversation.id, nil)
     end
 
+    test "the agent's typing reaches the user as from bot, role agent", ctx do
+      {_welcome, agent} = agent(ctx, %{}, user_id: "agent-7")
+      {_welcome, user} = user(ctx)
+
+      _agent =
+        Client.push(agent, envelope(ctx.conversation, %{"type" => "typing", "isTyping" => true}))
+
+      {frame, _user} = Client.recv_type(user, "typing")
+      assert %{"from" => "bot", "sender" => %{"id" => "agent-7", "role" => "agent"}} = frame
+    end
+
     test "a mekik message id is kept and makes the send idempotent per conversation", ctx do
       {_welcome, agent} = agent(ctx)
       other = conversation_fixture(ctx.tenant, ctx.widget)
