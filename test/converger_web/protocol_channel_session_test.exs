@@ -318,6 +318,63 @@ defmodule ConvergerWeb.ProtocolChannelSessionTest do
       assert types == ["interrupt", nil, "interrupt_resolved"]
     end
 
+    test "welcome.pending re-announces open interrupts until they are resolved", ctx do
+      interrupt = fn id, title ->
+        %{
+          "type" => "interrupt",
+          "id" => id,
+          "data" => %{
+            "payload" => %{"title" => title},
+            "actions" => [%{"label" => "Yes", "value" => true}]
+          }
+        }
+      end
+
+      resolved = fn id ->
+        %{"type" => "interrupt_resolved", "id" => id, "data" => %{"answer" => true}}
+      end
+
+      {_welcome, agent} = agent(ctx)
+
+      agent =
+        Enum.reduce(
+          [
+            interrupt.("a#0", "First?"),
+            resolved.("a#0"),
+            interrupt.("b#0", "Second?"),
+            # mekik numbers interrupts per node: an id may pause again later.
+            interrupt.("a#0", "First, again?")
+          ],
+          agent,
+          &Client.push(&2, envelope(ctx.conversation, &1))
+        )
+
+      eventually = fn check ->
+        Enum.find_value(1..40, fn _ ->
+          {welcome, user} = user(ctx)
+          Client.close(user)
+          if check.(welcome["data"]["pending"]), do: true, else: Process.sleep(50) && nil
+        end)
+      end
+
+      # Oldest first, as PendingViews ({id, data}), without seq.
+      assert eventually.(fn pending ->
+               pending == [
+                 Map.delete(interrupt.("b#0", "Second?"), "type"),
+                 Map.delete(interrupt.("a#0", "First, again?"), "type")
+               ]
+             end)
+
+      _agent =
+        Enum.reduce(
+          [resolved.("a#0"), resolved.("b#0")],
+          agent,
+          &Client.push(&2, envelope(ctx.conversation, &1))
+        )
+
+      assert eventually.(&(&1 == []))
+    end
+
     test "a user turn's meta reaches the agent with the turn", ctx do
       {_welcome, agent} = agent(ctx)
       {_welcome, user} = user(ctx)

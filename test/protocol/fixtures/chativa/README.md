@@ -2,8 +2,10 @@
 
 chativa is Converger's reference WebSocket client (#65,
 [ADR-0065](../../../../docs/adr/0065-chativa-as-reference-client-and-history-cursor.md)).
-`test/protocol/chativa_compat_test.exs` runs chativa's real connector code in Node against a real
-Converger server, so a protocol change that breaks chativa fails the build.
+`test/protocol/chativa_compat_test.exs` and `test/protocol/chativa_live_bot_test.exs` (a live mekik bot behind
+Converger) run chativa's real connector code in Node against a real Converger server, through
+`Converger.ChativaHarness` (`test/support/chativa_harness.ex`), so a protocol change that breaks chativa fails the
+build.
 
 These files are copied from [AimTune/chativa](https://github.com/AimTune/chativa) at commit
 `f919c92ded52276249538f15a1e16043564b1867`:
@@ -24,7 +26,8 @@ Not vendored, written for Converger:
 
 - `core/frames.ts`: the stand-in for `@chativa/core/frames`, re-exporting the two vendored files.
 - `harness.mjs`: drives a `MekikConnector` (or `parseChatFrame`) and prints what chativa's
-  ChatEngine would receive as JSON lines; see the comment at its top.
+  ChatEngine would receive as JSON lines; it can disconnect and reconnect the same connector and keep
+  localStorage in a file (a page reload). See the comment at its top.
 - `package.json`: marks the directory as ES modules.
 
 Requirements: Node >= 22.18 (or >= 23.6), where TypeScript type stripping is on by default. CI

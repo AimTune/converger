@@ -340,6 +340,17 @@ defmodule ConvergerWeb.Protocol.Session do
       {[replay_unavailable(watermark)], Feed.seek(feed, head)}
   end
 
+  # Like the replay, the open interrupts are best effort under database
+  # pressure: the session starts without them (a later reconnect or the
+  # replay of the interrupt frame itself renders them).
+  defp pending(conversation_id) do
+    Activities.open_interrupts(conversation_id)
+  rescue
+    error in DBConnection.ConnectionError ->
+      Pressure.report(:protocol, error)
+      []
+  end
+
   defp replay_unavailable(watermark) do
     details = if is_integer(watermark), do: %{"watermark" => watermark}
 
@@ -663,6 +674,9 @@ defmodule ConvergerWeb.Protocol.Session do
         user_id: user_id,
         connection_id: state.connection_id,
         watermark: head,
+        # Open interrupts, so a client whose watermark is past them (a
+        # reloaded page) renders them again (mekik/1 section 3.2).
+        pending: pending(conversation_id),
         expires_at: claims["exp"] * 1000,
         presence: presence?
       })

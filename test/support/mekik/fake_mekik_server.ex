@@ -16,7 +16,9 @@ defmodule Converger.FakeMekikServer do
   `interrupt_resolved`, the reply `text` and `run finished`.
 
   Options: `:token` (connections must present it, else `error unauthorized`
-  and close 4401), `:greeting` (a bot text sent on a fresh conversation).
+  and close 4401), `:greeting` (a bot text sent on a fresh conversation),
+  `:genui` (the refund turn also sends a GenUI chunk and a text, see
+  `refund_turn/1`).
 
   Every connection reports `{:mekik_connected, socket, params}` (the merged
   hello) and every client frame `{:mekik_frame, socket, frame}` to the test
@@ -45,6 +47,97 @@ defmodule Converger.FakeMekikServer do
     {:ok, {_ip, port}} = ThousandIsland.listener_info(server)
     {:ok, %{server: server, port: port, state: state, url: "ws://127.0.0.1:#{port}/ws"}}
   end
+
+  @doc """
+  The bot's frames of the scripted refund turn (the answer to `ORD-42`), in
+  order, without `seq`: `run started`, `tool_call` running and completed,
+  with `genui: true` a GenUI order card and a `text`, the approval
+  `interrupt` (id `int-1`) and `run interrupted`. `run` is transient, the rest
+  persistent. A channel-scoped agent can send the same frames (Mode B).
+  """
+  def refund_turn(opts \\ []) do
+    rich =
+      if opts[:genui] do
+        [
+          %{
+            "type" => "genui",
+            "streamId" => "order-ORD-42",
+            "chunk" => %{
+              "type" => "ui",
+              "component" => "order-card",
+              "props" => %{"id" => "ORD-42", "total" => 249.9},
+              "id" => 1
+            },
+            "done" => true
+          },
+          %{
+            "type" => "text",
+            "id" => "msg-order",
+            "from" => "bot",
+            "data" => %{"text" => "ORD-42 was delivered damaged."}
+          }
+        ]
+      else
+        []
+      end
+
+    [
+      run("started"),
+      %{
+        "type" => "tool_call",
+        "data" => %{
+          "id" => "tool-1",
+          "name" => "get_order",
+          "status" => "running",
+          "params" => %{"id" => "ORD-42"}
+        }
+      },
+      %{
+        "type" => "tool_call",
+        "data" => %{
+          "id" => "tool-1",
+          "name" => "get_order",
+          "status" => "completed",
+          "params" => %{"id" => "ORD-42"},
+          "result" => %{"id" => "ORD-42", "total" => 249.9}
+        }
+      }
+    ] ++
+      rich ++
+      [
+        %{
+          "type" => "interrupt",
+          "id" => "int-1",
+          "data" => %{
+            "payload" => %{"title" => "Refund $249.9 for ORD-42?"},
+            "ui" => %{"component" => "approval-form", "props" => %{"orderId" => "ORD-42"}},
+            "actions" => [
+              %{"label" => "Approve", "value" => %{"approved" => true}},
+              %{"label" => "Reject", "value" => %{"approved" => false}}
+            ]
+          }
+        },
+        run("interrupted")
+      ]
+  end
+
+  @doc """
+  The bot's frames answering a `resume` of the refund interrupt with `answer`:
+  `run started`, `interrupt_resolved`, the reply `text`, `run finished`.
+  """
+  def refund_reply(answer) do
+    reply =
+      if answer == %{"approved" => true}, do: "Refund complete: ORD-42", else: "Refund declined."
+
+    [
+      run("started"),
+      %{"type" => "interrupt_resolved", "id" => "int-1", "data" => %{"answer" => answer}},
+      %{"type" => "text", "id" => "msg-reply", "from" => "bot", "data" => %{"text" => reply}},
+      run("finished")
+    ]
+  end
+
+  defp run(status), do: %{"type" => "run", "data" => %{"status" => status}}
 
   @doc "Stop the server and its state."
   def stop(server) do

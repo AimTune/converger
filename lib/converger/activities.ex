@@ -159,6 +159,42 @@ defmodule Converger.Activities do
   end
 
   @doc """
+  The open mekik `interrupt`s of a conversation as mekik/1 `PendingView`s
+  (`%{"id" => id, "data" => data}`), oldest first: interrupts with no
+  `interrupt_resolved` of the same id stored after them. An id interrupted
+  again is listed once, with its latest data. Re-announced in
+  `welcome.data.pending` so a reconnecting client renders them again even
+  when its watermark is past them (mekik/1 section 3.2).
+  """
+  def open_interrupts(conversation_id) do
+    from(a in Activity,
+      as: :interrupt,
+      where:
+        a.conversation_id == ^conversation_id and a.message_type == "interrupt" and
+          is_nil(a.deleted_at),
+      where:
+        not exists(
+          from(r in Activity,
+            where:
+              r.conversation_id == parent_as(:interrupt).conversation_id and
+                r.message_type == "interrupt_resolved" and
+                r.seq > parent_as(:interrupt).seq and
+                fragment("?->>'id'", r.payload) ==
+                  fragment("?->>'id'", parent_as(:interrupt).payload)
+          )
+        ),
+      order_by: a.seq,
+      select: a.payload
+    )
+    |> Repo.all()
+    |> Enum.filter(&(is_binary(&1["id"]) and is_map(&1["data"])))
+    |> Enum.reverse()
+    |> Enum.uniq_by(& &1["id"])
+    |> Enum.reverse()
+    |> Enum.map(&Map.take(&1, ["id", "data"]))
+  end
+
+  @doc """
   The latest `message` activity of each conversation in `conversation_ids`,
   as `%{conversation_id => %{text, seq, inserted_at, deleted_at}}`
   (conversations without a message are absent). One query: a lateral join

@@ -276,7 +276,10 @@ defmodule ConvergerWeb.Protocol.Frames do
     %{"type" => "error", "data" => data}
   end
 
-  @doc "The `welcome` frame (section 4)."
+  @doc """
+  The `welcome` frame (section 4). `fields.pending` lists the open
+  interrupts (mekik/1 PendingView), `[]` when absent.
+  """
   def welcome(fields) do
     %{
       "type" => "welcome",
@@ -288,7 +291,7 @@ defmodule ConvergerWeb.Protocol.Frames do
         "userId" => fields.user_id,
         "connectionId" => fields.connection_id,
         "watermark" => fields.watermark,
-        "pending" => [],
+        "pending" => Map.get(fields, :pending, []),
         "expiresAt" => fields.expires_at,
         "capabilities" => %{
           "acks" => true,

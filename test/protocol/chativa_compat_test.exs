@@ -19,31 +19,22 @@ defmodule Converger.ChativaCompatTest do
   import Converger.TenantsFixtures
   import Converger.ChannelsFixtures
   import Converger.ConversationsFixtures
+  import Converger.ChativaHarness, only: [command: 2, await: 2, drain: 2, shown: 1]
 
   alias Converger.{Activities, Repo}
   alias Converger.Activities.{Activity, MessagePayload}
   alias Converger.Auth.ConvergerToken
+  alias Converger.ChativaHarness
   alias ConvergerWeb.ProtocolClient, as: Client
 
   @moduletag :protocol
   @moduletag :chativa
 
-  @fixtures Path.expand("fixtures/chativa", __DIR__)
-  @harness Path.join(@fixtures, "harness.mjs")
-
-  node = System.find_executable("node")
-
-  # `process.features.typescript` is "strip" (or "transform") where Node runs
-  # .ts files directly, undefined on older versions.
-  typescript? =
-    node != nil and
-      case System.cmd(node, ["-p", "process.features.typescript"], stderr_to_stdout: true) do
-        {out, 0} -> String.trim(out) in ["strip", "transform"]
-        _ -> false
-      end
+  @fixtures ChativaHarness.fixtures()
+  @harness ChativaHarness.harness()
 
   cond do
-    typescript? ->
+    node = ChativaHarness.node_executable() ->
       @node node
 
     System.get_env("CHATIVA_COMPAT") == "required" ->
@@ -103,57 +94,13 @@ defmodule Converger.ChativaCompatTest do
   # Starts chativa's MekikConnector, configured as docs/protocol/clients.md
   # describes: TokenAuth, the conversation id, routeInUrl, no subprotocol.
   defp start_chativa(ctx, token) do
-    options = %{
+    ChativaHarness.start(@node, %{
       url: "ws://127.0.0.1:#{ctx.port}/socket/converger/v1",
       token: token,
       conversationId: ctx.conversation.id,
       routeInUrl: true
-    }
-
-    port =
-      Port.open({:spawn_executable, @node}, [
-        :binary,
-        :exit_status,
-        {:line, 1_000_000},
-        args: [@harness, "connect", Jason.encode!(options)],
-        cd: @fixtures
-      ])
-
-    on_exit(fn -> if Port.info(port), do: Port.close(port) end)
-
-    {welcome, events} = await(port, &match?(%{"event" => "capabilities", "identity" => %{}}, &1))
-    {port, welcome, events}
+    })
   end
-
-  defp command(port, command), do: Port.command(port, Jason.encode!(command) <> "\n")
-
-  # Receives harness events until one matches `fun`: {event, events_before}.
-  defp await(port, fun, seen \\ [], timeout \\ 5_000) do
-    receive do
-      {^port, {:data, {:eol, line}}} ->
-        event = Jason.decode!(line)
-        if event["event"] == "error", do: flunk("chativa harness failed: #{event["message"]}")
-        if fun.(event), do: {event, Enum.reverse(seen)}, else: await(port, fun, [event | seen])
-
-      {^port, {:exit_status, status}} ->
-        flunk("chativa harness exited (#{status}) after #{inspect(Enum.reverse(seen))}")
-    after
-      timeout -> flunk("no matching chativa event, got #{inspect(Enum.reverse(seen))}")
-    end
-  end
-
-  # Every event that arrives within `ms`.
-  defp drain(port, ms, seen \\ []) do
-    receive do
-      {^port, {:data, {:eol, line}}} -> drain(port, ms, [Jason.decode!(line) | seen])
-    after
-      ms -> Enum.reverse(seen)
-    end
-  end
-
-  # What ChatEngine shows: everything but the typing toggles connector-mekik
-  # emits around each bot frame.
-  defp shown(events), do: Enum.reject(events, &(&1["event"] in ["typing", "capabilities"]))
 
   defp refute_converger_frames(events) do
     for %{"event" => "message", "message" => %{"type" => type} = message} <- events do

@@ -87,43 +87,11 @@ defmodule Converger.FakeMekikServer.Socket do
       "meta" => frame["meta"]
     })
 
+    settings = Agent.get(state.state, & &1.settings)
+
     frames =
       if text == "ORD-42" do
-        [
-          run("started"),
-          emit(state, %{
-            "type" => "tool_call",
-            "data" => %{
-              "id" => "tool-1",
-              "name" => "get_order",
-              "status" => "running",
-              "params" => %{"id" => "ORD-42"}
-            }
-          }),
-          emit(state, %{
-            "type" => "tool_call",
-            "data" => %{
-              "id" => "tool-1",
-              "name" => "get_order",
-              "status" => "completed",
-              "params" => %{"id" => "ORD-42"},
-              "result" => %{"id" => "ORD-42", "total" => 249.9}
-            }
-          }),
-          emit(state, %{
-            "type" => "interrupt",
-            "id" => @interrupt_id,
-            "data" => %{
-              "payload" => %{"title" => "Refund $249.9 for ORD-42?"},
-              "ui" => %{"component" => "approval-form", "props" => %{"orderId" => "ORD-42"}},
-              "actions" => [
-                %{"label" => "Approve", "value" => %{"approved" => true}},
-                %{"label" => "Reject", "value" => %{"approved" => false}}
-              ]
-            }
-          }),
-          run("interrupted")
-        ]
+        settings |> Map.to_list() |> FakeMekikServer.refund_turn() |> Enum.map(&emit(state, &1))
       else
         [
           run("started"),
@@ -141,31 +109,17 @@ defmodule Converger.FakeMekikServer.Socket do
   end
 
   defp handle_frame(%{"type" => "resume", "answers" => %{@interrupt_id => answer}}, state) do
-    reply =
-      if answer == %{"approved" => true}, do: "Refund complete: ORD-42", else: "Refund declined."
-
-    frames = [
-      run("started"),
-      emit(state, %{
-        "type" => "interrupt_resolved",
-        "id" => @interrupt_id,
-        "data" => %{"answer" => answer}
-      }),
-      emit(state, %{
-        "type" => "text",
-        "id" => "msg-reply",
-        "from" => "bot",
-        "data" => %{"text" => reply}
-      }),
-      run("finished")
-    ]
-
+    frames = answer |> FakeMekikServer.refund_reply() |> Enum.map(&emit(state, &1))
     {:push, Enum.map(frames, &{:text, Jason.encode!(&1)}), state}
   end
 
   defp handle_frame(_frame, state), do: {:ok, state}
 
   defp run(status), do: %{"type" => "run", "data" => %{"status" => status}}
+
+  # Persistent frames are recorded (stamped with the next seq); `run` is
+  # transient.
+  defp emit(_state, %{"type" => "run"} = frame), do: frame
 
   defp emit(state, frame) do
     {frame, _socket} =
