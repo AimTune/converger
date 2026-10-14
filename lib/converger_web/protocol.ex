@@ -17,7 +17,8 @@ defmodule ConvergerWeb.Protocol do
         heartbeat_interval_ms: 30_000,
         idle_timeout_ms: 60_000,
         replay_max: 10_000,
-        max_conversations: 5_000
+        max_conversations: 5_000,
+        group_settle_ms: 1_000
 
   The replay batch size is the existing `:ws_replay_limit` pagination setting.
   Frame size, message rate, backpressure and draining are the shared client
@@ -34,7 +35,10 @@ defmodule ConvergerWeb.Protocol do
     idle_timeout_ms: 60_000,
     replay_max: 10_000,
     # Conversations one channel-scoped connection follows at once (section 10).
-    max_conversations: 5_000
+    max_conversations: 5_000,
+    # A new agent group member serves the turns committed this long after it
+    # joined (ConvergerWeb.Protocol.GroupMembership, ADR-0069).
+    group_settle_ms: 1_000
   ]
 
   @doc "The protocol version string, `\"converger/1\"`."

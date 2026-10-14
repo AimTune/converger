@@ -57,6 +57,17 @@ jobs:
 
       - run: pnpm install --frozen-lockfile --filter "@converger/agent..." --filter "create-converger-agent..." --filter "@converger/example-llm-tool-loop-ts..."
 
+      # src/generated/protocol.ts is committed: regenerate it from priv/protocol/v1
+      # and fail when the schemas changed without it.
+      - name: "@converger/agent: generated protocol types are up to date"
+        if: matrix.node == '22'
+        run: |
+          pnpm --filter @converger/agent run generate:types
+          git diff --exit-code -- packages/agent-ts/src/generated || {
+            echo "::error::packages/agent-ts/src/generated is stale: run 'pnpm --filter @converger/agent run generate:types' and commit the result."
+            exit 1
+          }
+
       - name: "@converger/agent: typecheck, unit tests, build"
         run: |
           pnpm --filter @converger/agent typecheck

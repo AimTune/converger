@@ -19,7 +19,9 @@ description: Typed message payloads compatible with chativa and mekik/1, and how
 
 The schemas are in
 [`priv/protocol/v1/messages/`](https://github.com/AimTune/converger/tree/main/priv/protocol/v1/messages);
-they are the source of truth for SDK type generation (#67) and for chativa's schema-drift tests.
+they are the source of truth for SDK type generation and for chativa's schema-drift tests: `@converger/agent`
+generates its message data types (`ButtonsMessageData`, `CardMessageData`, ...) from them
+([Types generated from the schemas](../sdk/agent.md#types-generated-from-the-schemas)).
 
 ## 1. Rules
 

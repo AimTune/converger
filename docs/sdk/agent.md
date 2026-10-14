@@ -133,6 +133,28 @@ usually routed from another channel.
 | `send(frame)` | a raw frame in this conversation |
 | `end()` | idempotent; called automatically when the handler returns |
 
+In TypeScript, `message(type, data)` checks `data` against the message type's schema for the vocabulary's types
+(`buttons`, `card`, `carousel`, `quick-reply`, `image`, `file`, `video`, `audio`, `location`, `contact`, `text`;
+see `MessageDataMap`); any other type name takes an object.
+
+### Types generated from the schemas
+
+The TypeScript SDK's protocol types are generated from the Protocol v1 JSON Schemas (`priv/protocol/v1/`, published
+under `https://converger.aimtune.dev/schemas/protocol/v1/`, the single source of truth of [messages.md](../protocol/messages.md)
+and [Protocol v1](../protocol/v1.md)):
+
+- `packages/agent-ts/scripts/generate-types.mjs` compiles the message data schemas (`messages/*.schema.json`), the
+  server frames (`frames/server/*`), the client and agent frames (`frames/client/*`, `frames/channel/*`) and the
+  shared definitions (`common.schema.json`) with `json-schema-to-typescript` into `src/generated/protocol.ts`. `$ref`s
+  are resolved from `priv/protocol/v1`, never fetched.
+- `src/frames.ts` gives them the SDK's public names (`WelcomeFrame`, `AckFrame`, `ErrorData`, `HelloFrame`,
+  `ToolCallData`, `InterruptData`, `AIChunk`, ...), exports the message data types (`ButtonsMessageData`,
+  `CardMessageData`, ...) and `MessageDataMap`, and every generated type under the `protocol` namespace
+  (`protocol.ServerPresenceFrame`). `MessageFrame` and `InboundFrame` stay hand-written and open, because a receiver
+  ignores unknown fields and frame types (section 5.5).
+- The generated file is committed. After changing a schema run `pnpm --filter @converger/agent run generate:types`
+  (`run check:types` only checks); the `agent-ts` workflow regenerates it and fails when it differs from the commit.
+
 ## Wire mapping
 
 Every frame below travels in a `{conversationId, frame}` envelope and is valid against
@@ -171,10 +193,20 @@ frames per second per connection.
 
 ## Groups
 
-Processes started with the same `group` share the channel's conversations: the server assigns each conversation to
-one live member (rendezvous hashing), so a turn is answered once. When a member leaves, its conversations move to the
-others. Without a group, every connection sees every conversation. Groups are how an agent scales horizontally and
-how a second process takes over without duplicate replies.
+Processes started with the same `group` share the channel's conversations: the server delivers each user turn to one
+member (rendezvous hashing), so a turn is answered once, and every turn of a conversation goes to the same member
+while the membership is stable. Without a group, every connection sees every conversation. Groups are how an agent
+scales horizontally and how a second process takes over without duplicate replies
+([Protocol v1, section 10](../protocol/v1.md#10-channel-scoped-sockets-implemented-64-on-the-native-endpoint),
+[ADR-0069](../adr/0069-agent-group-eligibility-and-takeover.md)):
+
+- A process that joins serves turns committed about a second (the server's `group_settle_ms`) after it connected, and
+  takes over only some conversations; a turn already handed to another member is never delivered to it.
+- When a process stops or crashes, the remaining members take its conversations over and receive their unanswered
+  user turns (no bot or agent frame after them) once, then every later turn.
+- Converger does not serialise turns: a conversation's next turn can arrive while the handler of the previous one is
+  running. The SDK queues turns per conversation; an agent that rejects concurrent turns instead sends
+  `error {code: "busy"}` (`reply.send`), which reaches the end user.
 
 ## Reconnect, resume and delivery
 

@@ -69,6 +69,8 @@
   },
   "scripts": {
     "build": "tsup",
+    "generate:types": "node scripts/generate-types.mjs",
+    "check:types": "node scripts/generate-types.mjs --check",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
     "test": "vitest run --project unit",
     "test:watch": "vitest --project unit",
@@ -80,6 +82,7 @@
     "@types/node": "^22.20.5",
     "@types/ws": "^8.18.2",
     "ajv": "^8.17.1",
+    "json-schema-to-typescript": "^16.0.0",
     "tsup": "^8.5.1",
     "typedoc": "^0.28.20",
     "typescript": "^5.9.3",
