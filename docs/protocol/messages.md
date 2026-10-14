@@ -304,7 +304,7 @@ Provider limits the downgrade enforces (current published limits; adapters keep 
 - **Email**: HTML plus a plain-text alternative with a numbered list answered by reply mail. Buttons
   as links to a Converger reply endpoint (opt-in per channel) are **Planned (#68)**.
 
-## 6. Answers come back as one shape: **Implemented (#68)**; interrupt `resume` **Planned (#68)**
+## 6. Answers come back as one shape: **Implemented (#68, #64)**
 
 Whatever the channel, a user's answer to an actionable message (a tapped chip, a list choice, an
 inline keyboard press, a numeric reply "2", a reply mail) is normalised to an ordinary user turn:

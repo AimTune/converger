@@ -108,7 +108,7 @@ package: `createAgent({ ..., WebSocket })`.
 | `participant` | `message.sender` (`{id, role}`) |
 | `channel` | `meta.channel` or `metadata.channel` when the frame carries one |
 | `meta` | the user turn's per-turn context (`meta`, relayed and never stored) |
-| `metadata`, `action` | stored metadata, and `metadata.action` of a tapped button or numeric reply ([messages, section 6](../protocol/messages.md#6-answers-come-back-as-one-shape)) |
+| `metadata`, `action` | stored metadata, and `metadata.action` of a tapped button or numeric reply ([messages, section 6](../protocol/messages.md#6-answers-come-back-as-one-shape-implemented-68-64)) |
 | `replyTo`, `id`, `seq` | the activity the turn answers, and the turn's own id and seq |
 | `signal` | an `AbortSignal`, aborted when the user sends `abort` or the agent stops |
 | `raw` | the `{conversationId, frame}` envelope |
