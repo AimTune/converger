@@ -15,14 +15,19 @@ defmodule ConvergerWeb.ProtocolClient do
 
   defstruct [:conn, :ref, :websocket, :encoding, :status, buffer: [], sse_buffer: ""]
 
-  @doc "Serve `ConvergerWeb.Endpoint` over HTTP on a random port; returns the port."
-  def start_server do
+  @doc """
+  Serve `ConvergerWeb.Endpoint` over HTTP on a random port; returns the port.
+
+  Options: `:ip` (default `:loopback`; `:any` for clients outside this host,
+  such as a Docker container reaching it through `host.docker.internal`).
+  """
+  def start_server(opts \\ []) do
     pid =
       ExUnit.Callbacks.start_supervised!({
         Bandit,
         # Open SSE streams and sockets must not hold up the test.
         plug: ConvergerWeb.Endpoint,
-        ip: :loopback,
+        ip: Keyword.get(opts, :ip, :loopback),
         port: 0,
         startup_log: false,
         thousand_island_options: [shutdown_timeout: 100]

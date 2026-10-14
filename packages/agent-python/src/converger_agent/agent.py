@@ -175,6 +175,8 @@ class Agent:
         free_text_answers: bool = True,
         auto_read: bool = True,
         text_fallback: bool = False,
+        stream_flush: float = 0.15,
+        max_frames_per_second: float = 12.0,
         history_size: int = 200,
         history_timeout: float = 3.0,
         refresh_margin: float = 60.0,
@@ -201,6 +203,17 @@ class Agent:
         self.free_text_answers = free_text_answers
         self.auto_read = auto_read
         self.text_fallback = text_fallback
+        self.stream_flush = stream_flush
+        self.max_frames_per_second = max_frames_per_second
+        # Outbound pacing (a token bucket): the server accepts 20 inbound
+        # frames per second per connection (docs/protocol/v1.md, section 11)
+        # and refuses the rest with rate_limited, which would lose native
+        # frames. A burst of a third of the rate keeps any 1 s window below
+        # burst + rate frames.
+        self._pace_burst = max(1.0, (max_frames_per_second or 0) / 3)
+        self._pace_tokens = self._pace_burst
+        self._pace_at = 0.0
+        self._pace_lock: asyncio.Lock | None = None
         self.history_size = history_size
         self.history_timeout = history_timeout
         self.refresh_margin = refresh_margin
@@ -431,7 +444,27 @@ class Agent:
             raise ConnectionClosed(None, "agent is not running")
         await self._ready.wait()
 
+    async def _pace(self) -> None:
+        rate = self.max_frames_per_second
+        if not rate or rate <= 0:
+            return
+        if self._pace_lock is None:
+            self._pace_lock = asyncio.Lock()
+        async with self._pace_lock:
+            loop = asyncio.get_running_loop()
+            now = loop.time()
+            self._pace_tokens = min(self._pace_burst, self._pace_tokens + (now - self._pace_at) * rate)
+            self._pace_at = now
+            if self._pace_tokens < 1:
+                await asyncio.sleep((1 - self._pace_tokens) / rate)
+                self._pace_tokens, self._pace_at = 1.0, loop.time()
+            self._pace_tokens -= 1
+
     async def _send_raw(self, frame: Mapping[str, Any]) -> None:
+        ws = self._ws
+        if ws is None:
+            return
+        await self._pace()
         ws = self._ws
         if ws is None:
             return

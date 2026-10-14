@@ -132,8 +132,9 @@ defmodule Converger.Activities.Downgrade do
   defp plain(activity, text),
     do: %{activity | type: "message", text: text, message_type: nil, payload: nil}
 
-  # The text of a GenUI stream, on its `done` chunk: the latest content of
-  # each text chunk (a chunk id seen again replaces its element), in order.
+  # The text of a GenUI stream, on its `done` chunk: its text runs in order,
+  # each the concatenation of the deltas that share its chunk id (mekik
+  # PROTOCOL.md 4.1, as chativa renders them; ADR-0072).
   defp genui_text(%{payload: %{"done" => true, "streamId" => stream_id} = payload} = activity)
        when is_binary(stream_id) do
     earlier =
@@ -142,13 +143,15 @@ defmodule Converger.Activities.Downgrade do
         _ -> []
       end
 
-    {order, contents} =
-      Enum.reduce(earlier ++ [payload], {[], %{}}, &collect_text_chunk/2)
+    # The stored stream already holds this `done` payload once the activity
+    # is committed; a run is concatenated, so it must not count twice.
+    payloads = if payload in earlier, do: earlier, else: earlier ++ [payload]
+    {order, contents} = Enum.reduce(payloads, {[], %{}}, &collect_text_chunk/2)
 
     order
     |> Enum.reverse()
-    |> Enum.map(&contents[&1])
-    |> Enum.reject(&(String.trim(&1) == ""))
+    |> Enum.map(&String.trim(contents[&1]))
+    |> Enum.reject(&(&1 == ""))
     |> case do
       [] -> nil
       texts -> Enum.join(texts, "\n\n")
@@ -164,7 +167,7 @@ defmodule Converger.Activities.Downgrade do
        when is_binary(content) do
     key = Map.get(chunk, "id", make_ref())
     order = if Map.has_key?(contents, key), do: order, else: [key | order]
-    {order, Map.put(contents, key, content)}
+    {order, Map.update(contents, key, content, &(&1 <> content))}
   end
 
   defp collect_text_chunk(_payload, acc), do: acc

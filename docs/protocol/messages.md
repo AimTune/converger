@@ -165,7 +165,10 @@ They are persistent but not message frames: they have no `from` or `timestamp`.
 ### genui
 
 `{type, seq, streamId, done, chunk}`; `chunk` is chativa's `AIChunk` (`ui`, `text` or `event`). A
-chunk whose id is already on screen updates that element in place.
+`ui` or `event` chunk whose id is already on screen updates that element in place. `text` chunks are deltas: those
+sharing an id form one **text run** that clients concatenate into one growing bubble (mekik PROTOCOL.md 4.1, a token
+stream sends every delta with the run's id), and a new id starts a new run. A stream ends with a `done: true` chunk,
+usually the event `{type: "event", name: "stream_done"}`.
 
 ```json schema=frames/server/genui.schema.json
 { "type": "genui", "seq": 13, "streamId": "stream-1", "done": false, "chunk": { "type": "ui", "component": "order-card", "props": { "id": "ORD-42", "total": 249.9 }, "id": 1 } }
@@ -233,9 +236,9 @@ message types with a `message_types: [...]` entry (or `:all`). Without one, an a
 On an end-user channel the pipeline (`Converger.Activities.Downgrade`) decides per typed message:
 
 - `tool_call`: only with `show_tool_traces`, as a `name: status` line;
-- `genui`: nothing until the stream's `done` chunk, then one text message with the latest content of
-  each `text` chunk of the stream (a chunk id seen again replaces its element), joined by blank lines;
-  `ui` and `event` chunks are never sent;
+- `genui`: nothing until the stream's `done` chunk, then one text message with the stream's text runs (the
+  `text` chunks sharing an id, concatenated, [ADR-0072](../adr/0072-genui-text-runs-concatenate-when-joined.md)),
+  each trimmed, joined by blank lines; `ui` and `event` chunks are never sent;
 - `interrupt` with a `tool` or an `event`: skipped;
 - a type the adapter declares: delivered natively. Media (`image`, `file`, `video`, `audio`),
   `location` and `contact` reach the adapter as the legacy attachment it already renders (`contentUrl`,

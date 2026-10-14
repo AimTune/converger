@@ -138,7 +138,12 @@ class Stream:
     """Token streaming as GenUI text chunks of one ``streamId``.
 
     ``write`` sends ``genui {streamId, done: false, chunk: {type: "text", content}}``;
-    ``end`` sends the closing ``done: true`` chunk. Usable as an async context manager.
+    consecutive deltas share one chunk id (a text run: clients concatenate
+    them into one growing bubble, as for a mekik ``emitToken``), a ``ui``
+    chunk closes the run. Deltas written within ``Agent(stream_flush=...)``
+    seconds are coalesced into one chunk (the server accepts 20 frames per
+    second per connection). ``end`` sends the closing ``done: true``
+    ``stream_done`` event chunk. Usable as an async context manager.
     """
 
     def __init__(self, reply: Reply, stream_id: str, text_fallback: bool) -> None:
@@ -147,6 +152,10 @@ class Stream:
         self.text_fallback = text_fallback
         self.parts: list[str] = []
         self._n = 0
+        self._text_run: int | None = None
+        self._buffer = ""
+        self._lock = asyncio.Lock()
+        self._flusher: asyncio.Future[None] | None = None
         self.done = False
 
     @property
@@ -159,26 +168,55 @@ class Stream:
         if not delta:
             return
         self.parts.append(delta)
-        self._n += 1
-        await self._reply._native(
-            {"type": "genui", "streamId": self.stream_id, "done": False, "chunk": {"type": "text", "content": delta, "id": self._n}}
-        )
+        if self._text_run is None:
+            self._n += 1
+            self._text_run = self._n
+        self._buffer += delta
+        delay = self._reply._agent.stream_flush
+        if delay <= 0:
+            await self.flush()
+        elif self._flusher is None:
+            self._flusher = asyncio.ensure_future(self._flush_after(delay))
+
+    async def _flush_after(self, delay: float) -> None:
+        await asyncio.sleep(delay)
+        self._flusher = None
+        try:
+            await self.flush()
+        except Exception:  # noqa: BLE001 - nobody awaits this task
+            self._reply._agent.log.exception("converger agent: stream flush failed")
+
+    async def flush(self) -> None:
+        """Send the deltas written since the last chunk now."""
+        async with self._lock:
+            if not self._buffer or self._text_run is None:
+                return
+            content, self._buffer = self._buffer, ""
+            await self._reply._emit(
+                {"type": "genui", "streamId": self.stream_id, "done": False, "chunk": {"type": "text", "content": content, "id": self._text_run}}
+            )
 
     async def ui(self, component: str, props: Mapping[str, Any] | None = None) -> None:
-        """A GenUI component chunk inside this stream."""
+        """A GenUI component chunk inside this stream (it closes the open text run)."""
+        await self.flush()
+        self._text_run = None
         self._n += 1
         chunk: dict[str, Any] = {"type": "ui", "component": component, "id": self._n}
         if props is not None:
             chunk["props"] = dict(props)
-        await self._reply._native({"type": "genui", "streamId": self.stream_id, "done": False, "chunk": chunk})
+        await self._reply._emit({"type": "genui", "streamId": self.stream_id, "done": False, "chunk": chunk})
 
     async def end(self) -> None:
         if self.done:
             return
         self.done = True
         self._reply._streams.discard(self)
-        await self._reply._native(
-            {"type": "genui", "streamId": self.stream_id, "done": True, "chunk": {"type": "text", "content": "", "id": self._n + 1}}
+        await self.flush()
+        if self._flusher is not None:
+            self._flusher.cancel()
+            self._flusher = None
+        await self._reply._emit(
+            {"type": "genui", "streamId": self.stream_id, "done": True, "chunk": {"type": "event", "name": "stream_done", "id": self._n + 1}}
         )
         if self.text_fallback and self.text:
             # Channels that do not render GenUI yet (messages.md section 5)
@@ -217,8 +255,18 @@ class Reply:
     def _next(self, kind: str) -> str:
         return f"{self._key}.{kind}{self._bump()}"
 
-    async def _native(self, frame: Frame) -> None:
+    async def _flush_streams(self) -> None:
+        # Coalesced deltas go out before any later frame of the reply, so the
+        # conversation keeps the order the handler wrote in.
+        for s in list(self._streams):
+            await s.flush()
+
+    async def _emit(self, frame: Frame) -> None:
         await self._agent.send(self.conversation_id, frame)
+
+    async def _native(self, frame: Frame) -> None:
+        await self._flush_streams()
+        await self._emit(frame)
 
     async def text(
         self,
@@ -258,6 +306,7 @@ class Reply:
         if reply_to:
             frame["replyTo"] = {"id": reply_to}
         await self._stop_typing()
+        await self._flush_streams()
         return await self._agent.send(self.conversation_id, frame)
 
     def stream(self, *, text_fallback: bool | None = None) -> Stream:
