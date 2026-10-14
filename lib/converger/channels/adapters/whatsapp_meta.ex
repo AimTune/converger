@@ -1,7 +1,7 @@
 defmodule Converger.Channels.Adapters.WhatsAppMeta do
   use Converger.Channels.Adapter, type: "whatsapp_meta"
 
-  alias Converger.Channels.DeliveryError
+  alias Converger.Channels.{DeliveryError, RichContent}
   alias Converger.Channels.Meta.Graph
   alias Converger.Channels.WhatsApp.Outbound
   alias Converger.{Participants, Uploads}
@@ -29,7 +29,11 @@ defmodule Converger.Channels.Adapters.WhatsAppMeta do
       :provider_ack,
       :media,
       :templates,
-      activity_types: ~w(message)
+      activity_types: ~w(message),
+      # Typed messages rendered natively (#68, ADR-0064): interactive buttons
+      # and lists, media, location and contacts messages.
+      message_types: ~w(text quick-reply buttons card carousel interrupt
+                        image file video audio location contact)
     ]
   end
 
@@ -513,7 +517,17 @@ defmodule Converger.Channels.Adapters.WhatsAppMeta do
       "reply_to_provider_id" => reply_to_provider_id(type, message),
       "participant" => %{"external_id" => from, "display_name" => metadata["profile_name"]}
     }
+    |> put_answer(metadata["interactive_reply"])
   end
+
+  # A tapped reply button or list row whose id is an answer key (#68):
+  # normalised by Converger.Inbound.Answers.
+  defp put_answer(message, %{"id" => id, "type" => type} = reply) do
+    source = if type == "list_reply", do: "list", else: "button"
+    RichContent.put_answer(message, id, source, reply["title"])
+  end
+
+  defp put_answer(message, _reply), do: message
 
   @media_types ~w(image audio video document sticker)
 

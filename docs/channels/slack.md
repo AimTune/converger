@@ -116,6 +116,7 @@ for apps that keep failing. Slack also retries callbacks that take longer than 3
 | `reaction_added` | `messageReaction`, text `:<name>:` (for example `:thumbsup:`) | the reacted-to message |
 | `reaction_removed` | `messageReaction` with empty text | the reacted-to message |
 | `block_actions` (a click on a card button) | `message` whose text is the button value | the message with the card |
+| `block_actions` on a button of a [typed message](#typed-messages) | the normalised answer: `text` = the action's value (or label), `metadata.action` with `source: "button"` | the typed message |
 
 Ignored, with `200`: messages from bots (`bot_id` set, or subtype `bot_message`), which includes
 Converger's own replies; other `message` subtypes (joins, topic changes, ...); other event types;
@@ -209,6 +210,26 @@ The delivery is marked `sent` with metadata `slack_channel`, `slack_ts`, `slack_
 
 Slack's limits are applied by truncation: 3000 characters per section, 75 per button label, 2000 per
 value, 25 buttons per card and 50 blocks per message. `text` stays the notification fallback.
+
+### Typed messages
+
+The adapter renders typed messages ([#68](https://github.com/AimTune/converger/issues/68),
+[messages.md section 5](../protocol/messages.md),
+[ADR-0064](../adr/0064-per-channel-rendering-of-typed-messages-and-normalised-answers.md)) and declares
+`message_types: text quick-reply buttons card carousel interrupt image file video audio`:
+
+- `text` + `actions`, `quick-reply`, `buttons` and `interrupt` (without `tool` / `event`): a `section` with
+  `data.text` (an interrupt's `payload.title`) and an `actions` block, one button per action (`action_id`
+  `converger_a_<index>`); `url` actions open their link;
+- `card`: a section as for card attachments, then its buttons; `carousel`: `data.text`, then one section and
+  actions block per card;
+- `image`, `file`, `video`, `audio`: uploaded as files (see below), the caption as the message text;
+- `location`, `contact`, `genui` (when the stream is done) and unknown types: text.
+
+A button's `value` is the answer key `a:<activity id>:<index>`; a click comes back as the normalised answer
+([messages.md section 6](../protocol/messages.md)) with `metadata.action = {label, value, source: "button"}` and
+`reply_to_id` on the typed message. A reply such as `2` within 24 hours of an actionable message picks its second
+numbered action (`source: "numeric"`).
 
 ### Files (`files.uploadV2`)
 

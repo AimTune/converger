@@ -6,6 +6,7 @@ defmodule Converger.Channels.Adapters.Telegram do
   `POST /api/v1/channels/:id/inbound`, with the channel's `secret_token` in
   `X-Telegram-Bot-Api-Secret-Token` (`setWebhook`, see `register_webhook/2`).
   Outbound: Bot API methods (`sendMessage`, `sendPhoto`, `sendDocument`,
+  `sendVideo`, `sendAudio`, `sendVoice`, `sendLocation`, `sendContact`,
   `sendChatAction`).
 
   Telegram message ids are only unique within a chat, so a message is named
@@ -19,7 +20,7 @@ defmodule Converger.Channels.Adapters.Telegram do
 
   alias Converger.{Activities, Participants, Uploads}
   alias Converger.Activities.ActivityAttachment
-  alias Converger.Channels.{DeliveryError, InboundSignature}
+  alias Converger.Channels.{DeliveryError, InboundSignature, RichContent}
   alias Converger.Pipeline.RetryPolicy
 
   require Logger
@@ -34,6 +35,11 @@ defmodule Converger.Channels.Adapters.Telegram do
 
   # Bot API limits: callback data 1-64 bytes, secret token 1-256 of [A-Za-z0-9_-].
   @max_callback_data_bytes 64
+  @max_text 4096
+  @max_caption 1024
+
+  @location_type "application/vnd.converger.location"
+  @contacts_type "application/vnd.converger.contacts"
   @secret_token_format ~r/\A[A-Za-z0-9_-]{1,256}\z/
 
   # The Bot API serves files up to 20 MB through getFile.
@@ -48,7 +54,11 @@ defmodule Converger.Channels.Adapters.Telegram do
       :typing,
       :provider_ack,
       :media,
-      activity_types: ~w(message)
+      activity_types: ~w(message),
+      # Typed messages rendered natively (#68, ADR-0064): inline keyboards,
+      # photos, documents, videos, audio and voice, locations and contacts.
+      message_types: ~w(text quick-reply buttons card carousel interrupt
+                        image file video audio location contact)
     ]
   end
 
@@ -148,6 +158,40 @@ defmodule Converger.Channels.Adapters.Telegram do
     end
   end
 
+  # A typed message with actions (#68, ADR-0064): the prompt with an inline
+  # keyboard, one button per row; a card as a photo with its text as caption
+  # and its buttons as keyboard (a message without image), a carousel one
+  # card after the other. Callback data is the answer key
+  # `RichContent.ref/2` (at most 41 bytes); links are URL buttons.
+  defp build_requests(channel, %{message_type: type, payload: payload} = activity, chat_id)
+       when is_binary(type) and is_map(payload) do
+    actions = RichContent.actions(type, payload)
+    fallback = blank_to_nil(activity.text)
+
+    case RichContent.cards(type, payload) do
+      [] ->
+        text_request(
+          channel,
+          chat_id,
+          RichContent.prompt(type, payload) || fallback,
+          actions,
+          activity
+        )
+
+      cards ->
+        intro =
+          if type == "carousel",
+            do: text_request(channel, chat_id, RichContent.prompt(type, payload), [], activity),
+            else: []
+
+        intro ++
+          Enum.flat_map(Enum.with_index(cards), fn {card, index} ->
+            card_actions = Enum.filter(actions, &(&1["card"] == index))
+            card_request(channel, chat_id, card, card_actions, activity)
+          end)
+    end
+  end
+
   defp build_requests(channel, activity, chat_id) do
     attachments = activity.attachments || []
     keyboard = inline_keyboard(attachments)
@@ -167,8 +211,90 @@ defmodule Converger.Channels.Adapters.Telegram do
         do: [],
         else: [{"sendMessage", chat_id, %{"text" => text}, parse_mode_params(channel)}]
 
-    put_keyboard(media_requests ++ text_requests, keyboard)
+    put_keyboard(
+      media_requests ++ well_known_requests(attachments, chat_id) ++ text_requests,
+      keyboard
+    )
   end
+
+  defp text_request(_channel, _chat_id, nil, _actions, _activity), do: []
+
+  defp text_request(channel, chat_id, text, actions, activity) do
+    [
+      {"sendMessage", chat_id, %{"text" => String.slice(text, 0, @max_text)},
+       Map.merge(parse_mode_params(channel), action_keyboard(actions, activity))}
+    ]
+  end
+
+  defp card_request(channel, chat_id, card, actions, activity) do
+    text = RichContent.card_text(card)
+
+    case RichContent.media_url(card["image"]) do
+      nil ->
+        text_request(channel, chat_id, text || card_labels(actions), actions, activity)
+
+      url ->
+        caption = if text, do: %{"caption" => String.slice(text, 0, @max_caption)}, else: %{}
+
+        [
+          {"sendPhoto", chat_id,
+           %{"photo" => {:media, %{"contentType" => "image/jpeg", "contentUrl" => url}}},
+           Map.merge(caption, action_keyboard(actions, activity))}
+        ]
+    end
+  end
+
+  defp card_labels([]), do: nil
+  defp card_labels(actions), do: Enum.map_join(actions, " | ", & &1["label"])
+
+  defp action_keyboard([], _activity), do: %{}
+
+  defp action_keyboard(actions, activity) do
+    rows =
+      for action <- actions do
+        if action["url"],
+          do: [%{"text" => action["label"], "url" => action["url"]}],
+          else: [
+            %{
+              "text" => action["label"],
+              "callback_data" => RichContent.ref(activity.id, action["index"])
+            }
+          ]
+      end
+
+    %{"reply_markup" => %{"inline_keyboard" => rows}}
+  end
+
+  # Location and contacts attachments (ADR-0039): sendLocation, and one
+  # sendContact per contact with a phone number.
+  defp well_known_requests(attachments, chat_id) do
+    Enum.flat_map(attachments, fn
+      %{"contentType" => @location_type, "content" => %{} = location} ->
+        if is_number(location["latitude"]) and is_number(location["longitude"]),
+          do: [
+            {"sendLocation", chat_id,
+             %{"latitude" => location["latitude"], "longitude" => location["longitude"]}, %{}}
+          ],
+          else: []
+
+      %{"contentType" => @contacts_type, "content" => contacts} when is_list(contacts) ->
+        for contact <- contacts,
+            is_map(contact),
+            phone = Enum.find(List.wrap(contact["phones"]), &is_binary/1),
+            do:
+              {"sendContact", chat_id,
+               %{"phone_number" => phone, "first_name" => contact["name"] || "Contact"}, %{}}
+
+      _attachment ->
+        []
+    end)
+  end
+
+  defp blank_to_nil(value) when is_binary(value) do
+    if String.trim(value) == "", do: nil, else: value
+  end
+
+  defp blank_to_nil(_value), do: nil
 
   defp message_text(text, _attachments) when is_binary(text) and text != "", do: text
   defp message_text(_text, attachments), do: card_text(attachments)
@@ -196,6 +322,16 @@ defmodule Converger.Channels.Adapters.Telegram do
 
   defp media_method(%{"contentType" => "image/gif"}), do: {"sendDocument", "document"}
   defp media_method(%{"contentType" => "image/" <> _}), do: {"sendPhoto", "photo"}
+  defp media_method(%{"contentType" => "video/" <> _}), do: {"sendVideo", "video"}
+
+  defp media_method(%{"contentType" => "audio/" <> _} = attachment) do
+    case attachment["channelData"] do
+      %{"voice" => true} -> {"sendVoice", "voice"}
+      %{"kind" => "voice"} -> {"sendVoice", "voice"}
+      _ -> {"sendAudio", "audio"}
+    end
+  end
+
   defp media_method(_attachment), do: {"sendDocument", "document"}
 
   defp caption_params(attachment) do
@@ -618,8 +754,41 @@ defmodule Converger.Channels.Adapters.Telegram do
         "reply_to_provider_id" => message_key(chat_id, message["message_id"]),
         "participant" => participant(chat, from)
       }
+      |> keyboard_answer(query)
     ]
   end
+
+  # A press on a keyboard Converger rendered for a typed message (#68): its
+  # callback data is an answer key, so it is a user turn (a `message`
+  # normalised by Converger.Inbound.Answers), not an event. The button text
+  # is kept as the text if the key does not resolve.
+  defp keyboard_answer(message, %{"data" => data} = query) when is_binary(data) do
+    case RichContent.parse_ref(data) do
+      {:ok, _id, _index} ->
+        label = button_text(get_in(query, ["message", "reply_markup", "inline_keyboard"]), data)
+
+        message
+        |> Map.put("type", "message")
+        |> Map.put("text", label || "")
+        |> RichContent.put_answer(data, "keyboard", label)
+
+      :error ->
+        message
+    end
+  end
+
+  defp keyboard_answer(message, _query), do: message
+
+  defp button_text(rows, data) when is_list(rows) do
+    rows
+    |> Enum.flat_map(&list/1)
+    |> Enum.find_value(fn
+      %{"callback_data" => ^data, "text" => text} -> text
+      _ -> nil
+    end)
+  end
+
+  defp button_text(_rows, _data), do: nil
 
   # Telegram keeps a spinner on the button until the query is answered.
   # Best effort, off the request path: the event is stored either way.

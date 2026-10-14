@@ -15,7 +15,7 @@ defmodule Converger.Inbound do
 
   alias Converger.{Activities, Conversations, Deliveries, Participants}
   alias Converger.Channels.Channel
-  alias Converger.Inbound.Media
+  alias Converger.Inbound.{Answers, Media}
 
   @type message :: map()
   @type result ::
@@ -40,6 +40,11 @@ defmodule Converger.Inbound do
   `"thread_activity_ids"` (activity ids) of the messages the message replies
   to; the active conversation of the first one that went through this
   channel is used before the participant's.
+
+  Adapters that rendered a typed message's actions natively add `"answer"`
+  (`%{"ref", "source", "label"}`, see `Converger.Channels.RichContent.put_answer/4`)
+  when the provider reply names an answer key; that answer and numeric
+  replies are normalised by `Converger.Inbound.Answers` (#68).
 
   SMS channels add `"opt_out"` (`"stop"` or `"start"`) to an opt-out keyword:
   the participant is marked opted out or opted in again
@@ -146,6 +151,7 @@ defmodule Converger.Inbound do
 
   defp create_activity(channel, conversation, message) do
     message = resolve_reference(channel, conversation, message)
+    message = Answers.normalise(channel, conversation, message)
     {message, stored_media} = Media.store(channel, conversation, message)
 
     case Activities.create_client_activity(message, %{
