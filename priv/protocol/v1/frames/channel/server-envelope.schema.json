@@ -8,7 +8,20 @@
   "not": { "required": ["type"] },
   "properties": {
     "conversationId": { "$ref": "../../common.schema.json#/$defs/conversationId" },
-    "frame": { "$ref": "../../server-frame.schema.json" }
+    "frame": {
+      "description": "A server frame, or an end user.s bot-only frame forwarded unchanged (section 9).",
+      "anyOf": [
+        { "$ref": "../../server-frame.schema.json" },
+        { "$ref": "../client/resume.schema.json" },
+        { "$ref": "../client/genui_event.schema.json" },
+        { "$ref": "../client/client_tools.schema.json" },
+        { "$ref": "../client/client_skills.schema.json" },
+        { "$ref": "../client/abort.schema.json" },
+        { "$ref": "../client/survey.schema.json" },
+        { "$ref": "../client/regenerate.schema.json" },
+        { "$ref": "../client/edit.schema.json" }
+      ]
+    }
   },
   "examples": [
     { "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "frame": { "type": "text", "id": "msg-9", "seq": 19, "from": "user", "data": { "text": "Where is my order?" }, "timestamp": 1750000004000 } },

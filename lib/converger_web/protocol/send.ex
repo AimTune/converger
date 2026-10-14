@@ -124,4 +124,23 @@ defmodule ConvergerWeb.Protocol.Send do
   # stored as the activity's `reply_to_id` (#28).
   defp reply_to_id(%{"replyTo" => %{"id" => id}}) when is_binary(id), do: id
   defp reply_to_id(_frame), do: nil
+
+  @doc """
+  `replyTo {seq}` without an `id` (an answer to a mekik-native frame such as
+  `interrupt`, which has no activity id on the wire) is resolved to the
+  activity with that seq in the conversation.
+  """
+  def resolve_reply_to(
+        %{"reply_to_id" => nil} = params,
+        %{"replyTo" => %{"seq" => seq}},
+        conversation_id
+      )
+      when is_integer(seq) do
+    case Converger.Activities.get_activity_by_seq(conversation_id, seq) do
+      nil -> params
+      activity -> Map.put(params, "reply_to_id", activity.id)
+    end
+  end
+
+  def resolve_reply_to(params, _frame, _conversation_id), do: params
 end

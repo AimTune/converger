@@ -16,7 +16,8 @@ defmodule ConvergerWeb.Protocol do
       config :converger, ConvergerWeb.Protocol,
         heartbeat_interval_ms: 30_000,
         idle_timeout_ms: 60_000,
-        replay_max: 10_000
+        replay_max: 10_000,
+        max_conversations: 5_000
 
   The replay batch size is the existing `:ws_replay_limit` pagination setting.
   Frame size, message rate, backpressure and draining are the shared client
@@ -31,7 +32,9 @@ defmodule ConvergerWeb.Protocol do
   @defaults [
     heartbeat_interval_ms: 30_000,
     idle_timeout_ms: 60_000,
-    replay_max: 10_000
+    replay_max: 10_000,
+    # Conversations one channel-scoped connection follows at once (section 10).
+    max_conversations: 5_000
   ]
 
   @doc "The protocol version string, `\"converger/1\"`."
@@ -62,7 +65,8 @@ defmodule ConvergerWeb.Protocol do
       "heartbeatIntervalMs" => config(:heartbeat_interval_ms),
       "idleTimeoutMs" => config(:idle_timeout_ms),
       "replayBatch" => Converger.Pagination.config(:ws_replay_limit),
-      "replayMax" => config(:replay_max)
+      "replayMax" => config(:replay_max),
+      "maxConversations" => config(:max_conversations)
     }
   end
 

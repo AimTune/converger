@@ -39,6 +39,12 @@ defmodule Converger.Application do
           {Phoenix.PubSub, name: Converger.PubSub},
           ConvergerWeb.SocketPresence,
           ConvergerWeb.ConversationPresence,
+          # Agent groups of channel-scoped connections (hello.group, #64): which
+          # connection of a group serves a conversation, across nodes.
+          %{
+            id: ConvergerWeb.Protocol.AgentGroups,
+            start: {:pg, :start_link, [ConvergerWeb.Protocol.AgentGroups]}
+          },
           # Native v1 WebSockets and SSE streams, drained by ConvergerWeb.Drain.
           ConvergerWeb.ProtocolConnections,
           # Open client connections, for the connection gauge (ConvergerWeb.Telemetry).
@@ -61,6 +67,7 @@ defmodule Converger.Application do
         Converger.Partitions.boot_children() ++
         Converger.Pipeline.child_specs() ++
         [ConvergerWeb.Endpoint] ++
+        mekik_connections() ++
         broker_consumers() ++
         ConvergerWeb.GRPC.child_specs() ++
         [
@@ -74,6 +81,12 @@ defmodule Converger.Application do
     opts = [strategy: :one_for_one, name: Converger.Supervisor]
     Supervisor.start_link(children, opts)
   end
+
+  # Upstream connections of mekik channels (Mode A of #64) and the relay of
+  # the end users' bot-only frames. They create activities, so they start
+  # after the endpoint and, on shutdown, stop before it.
+  defp mekik_connections,
+    do: Converger.Channels.Mekik.Connections.child_specs() ++ [Converger.Channels.Mekik.Relay]
 
   # Broker channel consumers create activities (PubSub broadcasts through the
   # endpoint), so they start after it and, on shutdown, drain before it stops.

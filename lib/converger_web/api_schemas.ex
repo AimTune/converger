@@ -763,6 +763,13 @@ defmodule ConvergerWeb.ApiSchemas do
           additionalProperties: true,
           description: "The typed message: the frame body without the server envelope, else null"
         }),
+      source_channel_id:
+        nullable(%Schema{
+          type: :string,
+          format: :uuid,
+          description:
+            "The channel the activity came in on; null for the tenant API and system events"
+        }),
       edited_at: nullable(@datetime),
       deleted_at: nullable(@datetime),
       conversation_id: @uuid,

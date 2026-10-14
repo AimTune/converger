@@ -233,6 +233,14 @@
               "null"
             ]
           },
+          "source_channel_id": {
+            "description": "The channel the activity came in on; null for the tenant API and system events",
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "tenant_id": {
             "format": "uuid",
             "type": "string"
@@ -261,6 +269,7 @@
           "reply_to_id",
           "sender",
           "seq",
+          "source_channel_id",
           "tenant_id",
           "text",
           "type"
@@ -1883,6 +1892,14 @@
               "null"
             ]
           },
+          "source_channel_id": {
+            "description": "The channel the activity came in on; null for the tenant API and system events",
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "tenant_id": {
             "format": "uuid",
             "type": "string"
@@ -1911,6 +1928,7 @@
           "reply_to_id",
           "sender",
           "seq",
+          "source_channel_id",
           "tenant_id",
           "text",
           "type"
