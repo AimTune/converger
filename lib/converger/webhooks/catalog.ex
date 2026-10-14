@@ -5,7 +5,7 @@ defmodule Converger.Webhooks.Catalog do
 
   | Type | Source |
   | --- | --- |
-  | `activity.created` | `Converger.Pipeline.broadcast/1` (after commit, every backend) |
+  | `activity.created` | `Converger.Activities.create_activity/2`, in the activity's transaction (`emit_in_transaction/3`, ADR-0071) |
   | `delivery.sent`, `delivery.delivered`, `delivery.read`, `delivery.failed` | delivery status changes in `Converger.Deliveries` |
   | `conversation.created` | `Converger.Conversations.insert_conversation/1` |
   | `conversation.closed`, `conversation.reopened` | conversation lifecycle transitions (manual and inactivity expiry) |

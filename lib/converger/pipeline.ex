@@ -119,9 +119,6 @@ defmodule Converger.Pipeline do
       canonical
     )
 
-    # Platform event webhooks (ADR-0053): the same after-commit hook.
-    Converger.Webhooks.emit(activity.tenant_id, "activity.created", canonical)
-
     :ok
   end
 

@@ -113,6 +113,16 @@ Because `oban_jobs` lives in the same database, the jobs commit or roll back wit
 
 `websocket` channels are deliverable like the other types. Sockets that joined a conversation of its own channel get the after-commit broadcast below; the `websocket` adapter reaches sockets that follow the whole channel or a routed conversation ([Delivery pipeline](delivery-pipeline.md#adapters), [ADR-0033](../adr/0033-websocket-channel-adapter-delivery.md)).
 
+### 5b. Publish `activity.created` (transactional outbox)
+
+Still inside the transaction, `create_activity/2` publishes the `activity.created` platform event with
+`Converger.Webhooks.emit_in_transaction/3` (`Converger.Backbone.publish_in_transaction/2`): the Native backbone
+inserts its subscriptions' Oban jobs there, a broker backbone a publish job. The event commits or rolls back with
+the activity, so a node that dies right after the commit loses no event, and a failure to store the event rolls the
+activity back ([Event backbone](event-backbone.md#delivery-guarantees),
+[ADR-0071](../adr/0071-activity-created-in-the-activity-transaction.md)). After the commit,
+`Converger.Backbone.after_commit/1` hands the event to Native broadcast subscriptions (best effort).
+
 ### 6. After commit: broadcast
 
 Only once the transaction has committed does `create_activity/2` emit the `[:converger, :activities, :create]` telemetry event and call `Pipeline.after_commit/1`. For the Oban backend that is just the broadcast:

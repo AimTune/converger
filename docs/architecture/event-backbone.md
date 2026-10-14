@@ -116,7 +116,22 @@ skipped; a handler that fails rolls its receipt back and the event is retried. A
 therefore applied exactly once per event, on every backbone; anything it does outside the database (an HTTP call)
 is at least once. Receipts are pruned after 7 days (`backbone_receipt_days`, see [Retention](../operations/retention.md)).
 
-**Publishing never loses an acknowledged event.** `publish/2` returns once the backbone accepted the event. When a
+**`activity.created` is published in the activity's transaction.** `Converger.Activities.create_activity/2`
+stores the activity, its delivery jobs and its `activity.created` event in one transaction
+(`Converger.Backbone.publish_in_transaction/2`, [ADR-0071](../adr/0071-activity-created-in-the-activity-transaction.md)).
+On Native the shared subscriptions' jobs are inserted in that transaction. On a broker a
+`Converger.Workers.BackbonePublishWorker` job is, and it publishes the event once the transaction committed; the
+broker cannot join the transaction. Either way the event exists exactly when the activity does: a node that dies
+right after the commit loses nothing, and an activity that rolls back has no event. A failure to store the event
+rolls the activity back, so its sender retries instead of the event being lost. Publishing it after the commit,
+as before, lost a few hundred of 42,777 events per benchmark run on 3 nodes during rolling restarts and node kills.
+On a broker the event goes through one Oban job before it reaches the broker.
+
+**Other platform events are published after their change commits** (`delivery.*`, `conversation.*`, `channel.*`,
+`participant.opted_out`, through `Converger.Webhooks.emit/3`). A node that dies between that commit and the publish
+loses the event: until they move to the outbox too, they are at most once in that window and at least once after it.
+
+**Publishing does not lose an event the backbone refused.** `publish/2` returns once the backbone accepted the event. When a
 broker refuses it or cannot be reached, the event is parked in Postgres (`Converger.Workers.BackbonePublishWorker`,
 queue `backbone`) and published later with the same id; the request that produced it is not failed. After a failed
 publish, further publishes to that broker are parked at once for `down_ms` (5 s), so requests do not each wait for

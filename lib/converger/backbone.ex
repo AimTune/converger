@@ -70,7 +70,8 @@ defmodule Converger.Backbone do
 
   require Logger
 
-  alias Converger.Backbone.{Event, Registry, Subscription}
+  alias Converger.Backbone.{Event, Native, Registry, Subscription}
+  alias Converger.Workers.BackbonePublishWorker
 
   @type topic :: :activities | :deliveries | :events
   @type guarantee :: :at_least_once | :best_effort
@@ -177,6 +178,63 @@ defmodule Converger.Backbone do
   def publish(topic, attrs) when topic in @topics, do: publish(topic, Event.new(topic, attrs))
 
   @doc """
+  Publish `event` as part of the caller's `Converger.Repo` transaction: a
+  transactional outbox. The event is stored with the transaction, so it is
+  published exactly when the transaction commits, even when the node dies
+  right after the commit.
+
+    * Native: the shared subscriptions' jobs are inserted in the transaction.
+    * A broker (and any mirror): a `Converger.Workers.BackbonePublishWorker`
+      job is inserted in the transaction and publishes the event once the
+      transaction committed (the broker cannot join the transaction). The
+      event keeps its id, so a retried publish is a duplicate the
+      subscriptions' receipts skip.
+
+  Raises when the outbox insert fails, so the transaction rolls back rather
+  than committing without its event. Call `after_commit/1` with the returned
+  event once the transaction committed (broadcast subscriptions, best
+  effort).
+  """
+  @spec publish_in_transaction(topic(), Event.t() | map() | keyword()) :: Event.t()
+  def publish_in_transaction(topic, %Event{} = event) when topic in @topics do
+    unless Converger.Repo.in_transaction?() do
+      raise ArgumentError, "publish_in_transaction/2 must run inside a Repo transaction"
+    end
+
+    event = %{event | topic: topic}
+    Enum.each([impl() | mirrors()], &outbox(&1, event))
+    event
+  end
+
+  def publish_in_transaction(topic, attrs) when topic in @topics,
+    do: publish_in_transaction(topic, Event.new(topic, attrs))
+
+  @doc """
+  After the transaction of `publish_in_transaction/2` committed: deliver the
+  event to the Native broadcast subscriptions (they are not in the outbox).
+  """
+  @spec after_commit(Event.t() | nil) :: :ok
+  def after_commit(%Event{} = event) do
+    if Native in [impl() | mirrors()],
+      do: Native.broadcast(event.topic, event)
+
+    :ok
+  end
+
+  def after_commit(nil), do: :ok
+
+  defp outbox(Native, event),
+    do: Native.enqueue(event.topic, event)
+
+  defp outbox(module, event) do
+    %{"backbone" => name_of(module), "event" => Event.to_map(event)}
+    |> BackbonePublishWorker.new()
+    |> Oban.insert!()
+
+    :ok
+  end
+
+  @doc """
   Publish `event` to one backbone `module`, parking it in Postgres when the
   backbone refuses it. Used by `publish/2` and the parked-publish worker.
   """
@@ -244,7 +302,7 @@ defmodule Converger.Backbone do
     )
 
     %{"backbone" => name_of(module), "event" => Event.to_map(event)}
-    |> Converger.Workers.BackbonePublishWorker.new()
+    |> BackbonePublishWorker.new()
     |> Oban.insert()
     |> case do
       {:ok, _job} -> :ok

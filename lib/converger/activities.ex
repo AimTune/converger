@@ -391,20 +391,24 @@ defmodule Converger.Activities do
         {:ok, activity}
 
       nil ->
-        # 2. Persist the activity and enqueue its deliveries in one transaction
-        #    (transactional outbox): either both commit or neither does.
+        # 2. Persist the activity, enqueue its deliveries and publish its
+        #    `activity.created` platform event in one transaction (transactional
+        #    outbox): all of them commit or none does. A node that dies right
+        #    after the commit loses nothing (#66).
         result =
           Repo.transaction(fn ->
             with {:ok, activity} <- insert_with_seq(attrs, opts),
                  :ok <- enqueue_deliveries(activity) do
-              activity
+              {activity, publish_created(activity)}
             else
               {:error, reason} -> Repo.rollback(reason)
             end
           end)
 
         case result do
-          {:ok, activity} ->
+          {:ok, {activity, event}} ->
+            Converger.Backbone.after_commit(event)
+
             :telemetry.execute([:converger, :activities, :create], %{count: 1}, %{
               tenant_id: activity.tenant_id
             })
@@ -444,6 +448,15 @@ defmodule Converger.Activities do
   end
 
   defp count_unknown_message_type(_activity), do: :ok
+
+  # The `activity.created` platform event, in the create transaction.
+  defp publish_created(activity) do
+    Converger.Webhooks.emit_in_transaction(
+      activity.tenant_id,
+      "activity.created",
+      Converger.Activities.Serializer.canonical(activity)
+    )
+  end
 
   # The unique index rejected a concurrent duplicate: return the winner.
   defp recover_idempotency_race(changeset, attrs) do
