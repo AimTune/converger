@@ -80,6 +80,14 @@ Cutting a release (maintainers):
 
 ## Checks
 
+### Required check on `main`
+
+`main` requires the CI job **chativa reference client compatibility** (branch protection, #65): chativa's unmodified
+`@chativa/connector-mekik` and `parseChatFrame` run against a real server
+([connecting chat clients](protocol/clients.md)), so a protocol change that breaks the reference client cannot be
+merged. The other jobs are not required (the `hex.audit` step carries a known advisory without a fixed release), but
+keep them green.
+
 ### Run `mix precommit` before pushing
 
 The `precommit` alias in `mix.exs` mirrors the CI `lint` and `test` jobs. It runs in the `test` environment (so
