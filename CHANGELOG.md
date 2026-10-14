@@ -1,5 +1,9 @@
 # Changelog
 
+This file is written when a release is cut, from the merged pull requests (see
+[Contributing](https://converger.aimtune.dev/contributing#changelog-and-releases)); pull requests do not edit it.
+The **Unreleased** section below collects what was merged before this rule and goes into the first tagged release.
+
 ## Unreleased
 
 ### Agent SDKs for Go, .NET and Elixir (#67)

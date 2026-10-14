@@ -481,7 +481,7 @@ Every pull request updates the docs it affects ([ADR-0025](../adr/0025-docusauru
 - add `docs/channels/<adapter>.md` with config keys, outbound mapping, inbound payloads (real JSON), signature scheme, receipts and error classification;
 - add a row to the capability matrix in [Channels and adapters](overview.md#capability-matrix) and a link to the new page;
 - write an ADR in `docs/adr/` if the adapter introduces a decision (a new signature scheme, a new idempotency strategy, a change to the behaviour) and add it to the ADR index;
-- update `CHANGELOG.md`.
+- describe the new adapter in the pull request description (`CHANGELOG.md` is written when a release is cut, see [Contributing](../contributing.md#changelog-and-releases)).
 
 ## Checklist
 

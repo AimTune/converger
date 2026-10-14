@@ -6,6 +6,10 @@
 
 -
 
+## Release notes
+
+<!-- Do not edit CHANGELOG.md: it is written when a release is cut, from these descriptions. List user-facing changes, and add "Breaking changes" / "Deployment notes" when integrators or operators must act. -->
+
 ## Testing
 
 <!-- How was this verified? `mix precommit`, new/updated tests, manual steps. -->

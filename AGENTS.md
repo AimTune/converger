@@ -21,6 +21,26 @@ repository's `docs/` folder (single source of truth). Documentation is part of e
   `priv/repo/migrations/` change without any change under `docs/`. Only for changes with genuinely no documentation
   impact may a maintainer add the `no-docs` label, with the reason stated in the PR description.
 
+## Changelog and releases
+
+`CHANGELOG.md` is written **only when a release is cut**, never in feature or fix PRs (parallel PRs kept
+conflicting on it). PR descriptions carry the details instead; the release notes are compiled from them.
+
+- **Do not edit `CHANGELOG.md` in a PR.** Put user-facing changes, **Breaking changes** and **Deployment notes**
+  in the PR description.
+- **Cutting a release** (only when the maintainer asks for one):
+  1. Collect what changed since the last tag: `git describe --tags --abbrev=0` (no tag yet: since the start),
+     `git log <last-tag>..origin/main --merges --first-parent`, and the merged PRs' titles and descriptions
+     (`gh pr list --state merged --search "merged:>=<date of last tag>"`).
+  2. Draft the release notes (Keep a Changelog groups: Added / Changed / Fixed / Deprecated / Removed / Security,
+     plus Breaking changes and Deployment notes, each line linking its PR or issue) and the proposed version
+     (SemVer: breaking → major, features → minor, fixes → patch).
+  3. **Show the draft and the version to the maintainer and wait for approval.** Do not commit, tag or push before
+     that.
+  4. After approval: one `chore(release): vX.Y.Z` PR that adds the `## [X.Y.Z] - YYYY-MM-DD` section to
+     `CHANGELOG.md` (and bumps `version` in `mix.exs`); once it is merged, tag that commit `vX.Y.Z` and create
+     the GitHub release from the same notes (`gh release create vX.Y.Z --notes-file ...`).
+
 ### Phoenix v1.8 guidelines
 
 - **Always** begin your LiveView templates with `<Layouts.app flash={@flash} ...>` which wraps all inner content
