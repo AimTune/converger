@@ -187,6 +187,26 @@ defmodule ConvergerWeb.ProtocolChannelSessionTest do
       assert %{"from" => "bot", "sender" => %{"id" => "agent-7", "role" => "agent"}} = frame
     end
 
+    test "an end user may reuse a clientId in another conversation (section 7)", ctx do
+      other = conversation_fixture(ctx.tenant, ctx.widget)
+
+      for conversation <- [ctx.conversation, other] do
+        {:ok, token, _} =
+          ConvergerToken.generate_conversation_token(ctx.widget, conversation.id,
+            user_id: "alice"
+          )
+
+        {_welcome, user} = open(ctx.port, token)
+
+        user =
+          Client.push(user, %{"type" => "text", "clientId" => "c-1", "data" => %{"text" => "hi"}})
+
+        {ack, _user} = Client.recv_type(user, "ack")
+        refute ack["duplicate"]
+        assert [_] = Activities.list_activities_since(conversation.id, nil)
+      end
+    end
+
     test "a mekik message id is kept and makes the send idempotent per conversation", ctx do
       {_welcome, agent} = agent(ctx)
       other = conversation_fixture(ctx.tenant, ctx.widget)

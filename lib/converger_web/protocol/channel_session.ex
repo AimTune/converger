@@ -279,13 +279,8 @@ defmodule ConvergerWeb.Protocol.ChannelSession do
       message =
         Map.merge(params, %{"sender" => state.agent, "idempotency_key" => key})
 
-      # Inbound de-duplicates per channel; a routed conversation belongs to
-      # another channel, so a resend is recognised here first.
-      result =
-        case Converger.Activities.get_activity_by_idempotency_key(id, key) do
-          nil -> Inbound.receive_message(state.channel, message, conversation_id: id)
-          existing -> {:duplicate, existing}
-        end
+      # Inbound de-duplicates within the named conversation.
+      result = Inbound.receive_message(state.channel, message, conversation_id: id)
 
       persisted(id, result, client_id, type, state)
     else

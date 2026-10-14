@@ -77,7 +77,7 @@ defmodule Converger.Inbound do
   defp do_receive(channel, message, conversation_id) do
     key = message["idempotency_key"]
 
-    case Activities.get_activity_by_channel_idempotency_key(channel.id, key) do
+    case existing_activity(channel, conversation_id, key) do
       %Activities.Activity{} = existing ->
         Logger.info("Duplicate inbound message ignored",
           channel_id: channel.id,
@@ -106,6 +106,16 @@ defmodule Converger.Inbound do
         end
     end
   end
+
+  # A send that names its conversation (WebSocket clients, agents) is unique
+  # within that conversation (Protocol v1 section 7): the same clientId may be
+  # reused in another one. Provider webhooks name no conversation, and their
+  # message ids are unique per channel.
+  defp existing_activity(_channel, conversation_id, key) when is_binary(conversation_id),
+    do: Activities.get_activity_by_idempotency_key(conversation_id, key)
+
+  defp existing_activity(channel, _conversation_id, key),
+    do: Activities.get_activity_by_channel_idempotency_key(channel.id, key)
 
   # SMS adapters mark a STOP / START keyword with "opt_out" ("stop" or
   # "start", see Converger.Channels.Sms). The participant flag is set before
