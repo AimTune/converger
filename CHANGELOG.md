@@ -2,22 +2,21 @@
 
 ## Unreleased
 
-### Agent SDK for TypeScript: `@converger/agent`, `create-converger-agent` and a Claude tool-loop example (#67)
+### Agent SDKs for Go, .NET and Elixir (#67)
 
-- `packages/agent-ts` (`@converger/agent`, not yet published): `createAgent({url, token | getToken, group})` serves every
-  conversation of a channel from one channel-scoped socket with `onTurn(async (turn, reply) => ...)`. `reply.text`,
-  `message`, `stream` (genui text chunks), `toolCall`, `ui`, `ask` (interrupt / resume from any channel), `typing`,
-  `end`; `run` frames around handlers; turns serialised per conversation; agent groups; reconnect with jittered
-  backoff and per-conversation watermarks; acked, idempotent, paced sends; `turn.history()` over `sync`;
-  `channelTokenProvider` from the channel secret; `@converger/agent/testing` with a fake server
-  ([ADR-0067](docs/adr/0067-agent-sdk-api-and-wire-mapping.md)).
-- `packages/create-converger-agent`: `npx create-converger-agent my-agent` scaffolds a TypeScript agent with a sample
-  handler, `.env.example` and a test against the fake server.
-- `examples/agents/llm-tool-loop-ts`: an Anthropic tool loop (`claude-sonnet-5-5`) with streamed tokens, a tool trace
-  and an approval through `reply.ask`.
-- CI: `.github/workflows/agent-ts.yml` (typecheck, unit tests, build, template and example); a manual-dispatch
-  `agent-ts-publish` workflow.
-- Docs: [Agent SDK](docs/sdk/agent.md).
+- `packages/agent-go` (`github.com/AimTune/converger/packages/agent-go`), `packages/agent-dotnet` (`Converger.Agent`)
+  and `packages/agent-elixir` (`converger_agent`): a bot backend serves every conversation of a `websocket` channel
+  over one channel-scoped Protocol v1 connection. `onTurn` handlers get the turn (text, typed message, participant,
+  meta, tapped action) and reply with text (with chips), rich messages, `tool_call` traces, typing and `ask`
+  (an `interrupt` answered by `resume` or a tapped button, then `interrupt_resolved`). Runs are framed by
+  `run started`/`finished`/`error`; turns of one conversation are serialised; message sends are acked and
+  re-sent with their `clientId` after a reconnect; reconnects use jittered backoff and per-conversation
+  `hello.watermarks`. Not published yet.
+- `packages/conformance/agent.json`: the shared agent wire-exchange fixture (text turn, duplicates and bot frames,
+  ask with a queued turn, rich replies, refused send, reconnect with watermarks), run by each SDK against a fake
+  server with every agent frame validated against `frames/channel/client-envelope.schema.json`.
+- CI: `.github/workflows/agent-sdks.yml`. Docs: [Go](docs/sdk/agent-go.md), [.NET](docs/sdk/agent-dotnet.md),
+  [Elixir](docs/sdk/agent-elixir.md).
 
 ### chativa is the reference WebSocket client: mekik/1 profile, history cursor, conversation list (#65)
 
