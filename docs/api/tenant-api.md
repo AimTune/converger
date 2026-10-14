@@ -576,12 +576,15 @@ curl -s "$CONVERGER/api/v1/conversations/3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10/ac
       "inserted_at": "2026-10-09T12:05:41.004512Z"
     }
   ],
-  "meta": { "watermark": "c2VxOjI", "has_more": true, "limit": 2 }
+  "meta": { "watermark": 2, "has_more": true, "limit": 2 }
 }
 ```
 
-Continue with `?watermark=c2VxOjI` until `has_more` is `false`. When there is nothing new, `data` is empty and
-`meta.watermark` echoes the watermark you sent (`null` if you sent none), so the same request can be used to poll.
+Continue with `?watermark=2` until `has_more` is `false`. When there is nothing new, `data` is empty and
+`meta.watermark` echoes the position you sent as an integer (`null` if you sent none), so the same request can be
+used to poll. `meta.watermark` is the integer `seq` of the last activity since v3.0; the opaque watermarks returned
+before (`c2VxOjI`) are still accepted for one release and logged as deprecated
+([migration](../protocol/v1.md#65-the-watermark-and-its-migration)).
 
 | Status | Error (`code: message`) | Cause |
 | --- | --- | --- |

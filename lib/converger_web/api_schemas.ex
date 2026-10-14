@@ -24,6 +24,15 @@ defmodule ConvergerWeb.ApiSchemas do
   @datetime %Schema{type: :string, format: :"date-time"}
   @object %Schema{type: :object, additionalProperties: true}
 
+  # The integer seq of the last activity served (docs/protocol/v1.md section 6.5).
+  @watermark %Schema{
+    type: :integer,
+    minimum: 0,
+    nullable: true,
+    description:
+      "The seq of the last activity served: pass it back as `watermark` to continue (null before any)"
+  }
+
   @doc "A reference to the component schema `name`."
   @spec ref(String.t()) :: Reference.t()
   def ref(name), do: %Reference{"$ref": "#/components/schemas/#{name}"}
@@ -46,6 +55,20 @@ defmodule ConvergerWeb.ApiSchemas do
       description:
         "Makes the request idempotent per conversation: a repeat returns the original activity"
     ]
+  end
+
+  @doc """
+  Schema of a `watermark` query parameter: the integer seq the server
+  returns, or (during the migration window, docs/protocol/v1.md section 6.5)
+  a pre-v1 opaque base64url watermark.
+  """
+  def watermark_param_schema do
+    %Schema{
+      oneOf: [
+        %Schema{type: :integer, minimum: 0},
+        %Schema{type: :string, description: "Deprecated: a pre-v1 opaque watermark"}
+      ]
+    }
   end
 
   @doc "`limit` query parameter."
@@ -277,7 +300,7 @@ defmodule ConvergerWeb.ApiSchemas do
           "WatermarkPageMeta",
           "Watermark pagination: pass `watermark` back to continue.",
           %{
-            watermark: nullable(%Schema{type: :string}),
+            watermark: @watermark,
             has_more: %Schema{type: :boolean},
             limit: %Schema{type: :integer}
           },
@@ -1461,7 +1484,7 @@ defmodule ConvergerWeb.ApiSchemas do
               description:
                 "With `format=frames`: the Protocol v1 server frames (docs/protocol/v1.md section 5.4)"
             },
-            watermark: nullable(%Schema{type: :string}),
+            watermark: @watermark,
             has_more: %Schema{
               type: :boolean,
               description: "Forward: newer activities follow. Backward: older activities exist"

@@ -2,9 +2,10 @@
  * Watermarks (spec section 6.5).
  *
  * In Protocol v1 a watermark is the integer `seq` of the last persistent frame
- * a client has durably seen. The pre-v1 surfaces (REST `activitySet`, the
- * Phoenix binding's join payload) still emit and accept the opaque form,
- * base64url of `seq:N`. These helpers convert between the two.
+ * a client has durably seen; REST `activitySet.watermark` is that integer too
+ * since server v3.0 (#63). The legacy Phoenix binding still emits the opaque
+ * form, base64url of `seq:N`, for one release, and older servers emit it on
+ * REST. Every server input accepts all forms. These helpers convert between them.
  *
  * @module
  */

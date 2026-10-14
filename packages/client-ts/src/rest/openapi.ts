@@ -61,8 +61,11 @@ export interface components {
     /** A page of activities (`GET /conversations/:id/activities`). */
     ActivitySet: {
       activities: components["schemas"]["Activity"][];
-      /** Opaque watermark of the last activity; pass it back for the next page. */
-      watermark: string | null;
+      /**
+       * Watermark of the last activity; pass it back unchanged for the next page.
+       * The integer seq since server v3.0 (#63); older servers send an opaque string.
+       */
+      watermark: number | string | null;
       has_more: boolean;
     };
     /** `POST /conversations/:id/activities`. */

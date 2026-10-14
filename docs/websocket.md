@@ -435,7 +435,7 @@ Activities are committed before they are broadcast, and each frame tells you its
    The same event, with the socket's last pushed watermark, reports a gap fill that failed; the next live activity
    retries it.
 
-Watermarks are opaque; today they are URL-safe Base64 of `seq:<n>` (`c2VxOjQy` is `seq:42`), and older activity-id watermarks are still accepted. An invalid watermark is treated as "no watermark". Do not parse or construct them.
+The `activitySet` watermark of this binding is still opaque (URL-safe Base64 of `seq:<n>`, `c2VxOjQy` is `seq:42`) for one release; REST and Protocol v1 frames carry the integer `seq` instead ([migration](protocol/v1.md#65-the-watermark-and-its-migration)). The join payload accepts either, as well as older activity-id watermarks. An invalid watermark is treated as "no watermark". Pass the value back as received.
 
 ### Raw frames
 

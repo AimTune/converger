@@ -20,7 +20,6 @@ defmodule ConvergerWeb.ConversationSignals do
 
   alias Converger.{Channels, Conversations, Receipts}
   alias Converger.Channels.Signals
-  alias Converger.ConvergerAPI.Watermark
   alias ConvergerWeb.{ConvergerFrames, ConversationPresence}
 
   # A client sends at most one typing frame per 2 s (protocol v1, section 11);
@@ -258,22 +257,12 @@ defmodule ConvergerWeb.ConversationSignals do
     end
   end
 
-  defp read_watermark(seq) when is_integer(seq) and seq >= 1, do: {:ok, seq}
-
-  defp read_watermark(watermark) when is_binary(watermark) do
-    case Integer.parse(watermark) do
-      {seq, ""} when seq >= 1 ->
-        {:ok, seq}
-
-      _ ->
-        case Watermark.decode(watermark) do
-          {:ok, {:seq, seq}} when seq >= 1 -> {:ok, seq}
-          _ -> {:error, :invalid_watermark}
-        end
+  defp read_watermark(watermark) do
+    case ConvergerWeb.Protocol.parse_watermark(watermark) do
+      {:ok, {:seq, seq}} when seq >= 1 -> {:ok, seq}
+      _ -> {:error, :invalid_watermark}
     end
   end
-
-  defp read_watermark(_watermark), do: {:error, :invalid_watermark}
 
   ## Presence
 

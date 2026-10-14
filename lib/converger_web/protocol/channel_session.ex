@@ -225,7 +225,7 @@ defmodule ConvergerWeb.Protocol.ChannelSession do
   defp conversation_frame(id, %{"type" => "sync"} = frame, state) do
     head = Conversations.get_conversation(id).last_seq
 
-    case Protocol.parse_watermark(frame["watermark"]) do
+    case Protocol.parse_watermark(frame["watermark"], deprecation: [api: :protocol]) do
       {:ok, {:seq, seq}} when seq > head ->
         message = "watermark #{seq} is above the head #{head}"
 
@@ -516,7 +516,7 @@ defmodule ConvergerWeb.Protocol.ChannelSession do
   end
 
   defp follow_from(id, watermark, state) do
-    with {:ok, position} <- Protocol.parse_watermark(watermark),
+    with {:ok, position} <- Protocol.parse_watermark(watermark, deprecation: [api: :protocol]),
          {:ok, source, conversation} <- Access.conversation(id, state.channel, state.claims),
          true <- serves?(state, conversation.id) do
       {evicted, state} = make_room(state)

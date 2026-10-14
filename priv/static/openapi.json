@@ -371,8 +371,10 @@
             "type": "boolean"
           },
           "watermark": {
+            "description": "The seq of the last activity served: pass it back as `watermark` to continue (null before any)",
+            "minimum": 0,
             "type": [
-              "string",
+              "integer",
               "null"
             ]
           }
@@ -3468,8 +3470,10 @@
             "type": "integer"
           },
           "watermark": {
+            "description": "The seq of the last activity served: pass it back as `watermark` to continue (null before any)",
+            "minimum": 0,
             "type": [
-              "string",
+              "integer",
               "null"
             ]
           }
@@ -5370,7 +5374,7 @@
     "/api/v1/converger/conversations/{conversation_id}/activities": {
       "get": {
         "callbacks": {},
-        "description": "Forward (default): oldest first, after `watermark` (opaque, or a Protocol v1 integer seq); an invalid watermark starts from the beginning. Backward (`before`, or `direction=backward` for the newest page): the page just before the seq `before`, still oldest first, with `cursor` to pass as `before` for the next older page (\"load older messages\"). `format=frames` returns the page as Protocol v1 frames (`frames`) instead of `activities`.\n",
+        "description": "Forward (default): oldest first, after `watermark` (the integer seq; the pre-v1 opaque form is still accepted during the migration window); an invalid watermark starts from the beginning. Backward (`before`, or `direction=backward` for the newest page): the page just before the seq `before`, still oldest first, with `cursor` to pass as `before` for the next older page (\"load older messages\"). `format=frames` returns the page as Protocol v1 frames (`frames`) instead of `activities`.\n",
         "operationId": "getActivities",
         "parameters": [
           {
@@ -5384,12 +5388,21 @@
             }
           },
           {
-            "description": "Resume after this watermark",
+            "description": "Resume after this watermark (the integer seq)",
             "in": "query",
             "name": "watermark",
             "required": false,
             "schema": {
-              "type": "string"
+              "oneOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "description": "Deprecated: a pre-v1 opaque watermark",
+                  "type": "string"
+                }
+              ]
             }
           },
           {
@@ -5590,7 +5603,16 @@
             "name": "watermark",
             "required": false,
             "schema": {
-              "type": "string"
+              "oneOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "description": "Deprecated: a pre-v1 opaque watermark",
+                  "type": "string"
+                }
+              ]
             }
           },
           {
@@ -5750,7 +5772,16 @@
             "name": "watermark",
             "required": false,
             "schema": {
-              "type": "string"
+              "oneOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "description": "Deprecated: a pre-v1 opaque watermark",
+                  "type": "string"
+                }
+              ]
             }
           }
         ],
@@ -6216,12 +6247,21 @@
             }
           },
           {
-            "description": "`meta.watermark` of the previous page",
+            "description": "`meta.watermark` of the previous page (the integer seq)",
             "in": "query",
             "name": "watermark",
             "required": false,
             "schema": {
-              "type": "string"
+              "oneOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "description": "Deprecated: a pre-v1 opaque watermark",
+                  "type": "string"
+                }
+              ]
             }
           }
         ],

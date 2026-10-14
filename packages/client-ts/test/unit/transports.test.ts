@@ -173,8 +173,8 @@ describe("sse transport", () => {
 describe("REST client", () => {
   it("pages the history until has_more is false", async () => {
     const pages = [
-      { activities: [restActivity("a1", "u", "1"), restActivity("a2", "u", "2")], watermark: "w2", has_more: true },
-      { activities: [restActivity("a3", "u", "3")], watermark: "w3", has_more: false },
+      { activities: [restActivity("a1", "u", "1"), restActivity("a2", "u", "2")], watermark: 2, has_more: true },
+      { activities: [restActivity("a3", "u", "3")], watermark: 3, has_more: false },
     ];
     const urls: string[] = [];
     const fetch: FetchLike = async (url) => {
@@ -186,7 +186,26 @@ describe("REST client", () => {
     expect(all.map((a) => a.text)).toEqual(["1", "2", "3"]);
     expect(urls).toEqual([
       `http://r.test/api/v1/converger/conversations/${CONVERSATION}/activities?limit=2`,
-      `http://r.test/api/v1/converger/conversations/${CONVERSATION}/activities?watermark=w2&limit=2`,
+      `http://r.test/api/v1/converger/conversations/${CONVERSATION}/activities?watermark=2&limit=2`,
+    ]);
+  });
+
+  it("passes a legacy opaque watermark back unchanged", async () => {
+    const pages = [
+      { activities: [restActivity("a1", "u", "1")], watermark: "c2VxOjE", has_more: true },
+      { activities: [restActivity("a2", "u", "2")], watermark: 2, has_more: false },
+    ];
+    const urls: string[] = [];
+    const fetch: FetchLike = async (url) => {
+      urls.push(url);
+      return new Response(JSON.stringify(pages.shift()), { status: 200 });
+    };
+    const rest = new RestClient({ baseUrl: "http://r.test", getToken: () => "tok", fetch });
+    const all = await rest.allActivities(CONVERSATION, { watermark: "c2VxOjA" });
+    expect(all.map((a) => a.text)).toEqual(["1", "2"]);
+    expect(urls).toEqual([
+      `http://r.test/api/v1/converger/conversations/${CONVERSATION}/activities?watermark=c2VxOjA`,
+      `http://r.test/api/v1/converger/conversations/${CONVERSATION}/activities?watermark=c2VxOjE`,
     ]);
   });
 
