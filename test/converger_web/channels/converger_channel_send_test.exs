@@ -206,6 +206,44 @@ defmodule ConvergerWeb.ConvergerChannelSendTest do
       assert activity.metadata == %{"locale" => "tr-TR"}
     end
 
+    test "an answer with metadata.action and replyTo is stored as sent (#68)", %{
+      socket: socket,
+      conversation: conversation
+    } do
+      {:ok, offer} =
+        Converger.Activities.create_activity(%{
+          "tenant_id" => conversation.tenant_id,
+          "conversation_id" => conversation.id,
+          "sender" => "bot-1",
+          "type" => "message",
+          "message_type" => "interrupt",
+          "payload" => %{
+            "id" => "approve/0:interrupt#0",
+            "data" => %{
+              "payload" => %{"title" => "Refund?"},
+              "actions" => [%{"label" => "Approve", "value" => %{"approved" => true}}]
+            }
+          }
+        })
+
+      action = %{"label" => "Approve", "value" => %{"approved" => true}, "source" => "web"}
+
+      push(socket, "frame", %{
+        "type" => "text",
+        "clientId" => "c-answer",
+        "data" => %{"text" => "Approve"},
+        "metadata" => %{"action" => action},
+        "replyTo" => %{"id" => offer.id}
+      })
+
+      assert_frame("ack")
+      assert [answer] = activities(conversation)
+      assert answer.text == "Approve"
+      assert answer.reply_to_id == offer.id
+      assert answer.metadata == %{"action" => action}
+      assert is_nil(answer.message_type)
+    end
+
     test "on a non-websocket channel a resend is acked as a duplicate too" do
       tenant = tenant_fixture()
       channel = webhook_channel_fixture(tenant)

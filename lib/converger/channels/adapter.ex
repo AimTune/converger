@@ -79,6 +79,10 @@ defmodule Converger.Channels.Adapter do
       natively. Other types are downgraded to text or skipped per channel,
       see `Converger.Activities.Downgrade`. Without this entry every client
       type is delivered as is.
+    * `message_types: [String.t()] | :all` - the typed message types (#68)
+      the adapter renders natively (`message_types/1`); media, location and
+      contact reach it as legacy attachments, the others with their
+      `message_type` and `payload` (ADR-0064)
   """
   @type capability ::
           :inbound
@@ -94,6 +98,7 @@ defmodule Converger.Channels.Adapter do
           | :reactions
           | :edits
           | {:activity_types, [String.t()]}
+          | {:message_types, [String.t()] | :all}
 
   @typedoc """
   One config field (`c:config_schema/0`):

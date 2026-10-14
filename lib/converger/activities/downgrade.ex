@@ -19,16 +19,18 @@ defmodule Converger.Activities.Downgrade do
   adapter declares the type in a `message_types:` capability entry (`:all`
   for adapters that forward the canonical activity, see
   `Converger.Channels.Adapter.message_types/1`). Otherwise the channel gets a
-  plain `message` with the text fallback, or nothing when there is none;
-  `tool_call` traces only reach channels whose config sets
-  `show_tool_traces: true`, as a `name: status` line.
+  plain `message` with the text rendering of `Converger.Channels.RichContent`
+  (the prompt and its actions as a numbered list), or nothing when there is
+  none; `tool_call` traces only reach channels whose config sets
+  `show_tool_traces: true`, as a `name: status` line; GenUI streams arrive as
+  one text message when done. See ADR-0064.
 
   Internal types (`deliveryReceipt`) are never delivered to channels.
   WebSocket clients always receive every type through the PubSub broadcast.
   """
 
   alias Converger.Activities.Activity
-  alias Converger.Channels.Adapter
+  alias Converger.Channels.{Adapter, RichContent}
 
   @policies ~w(downgrade skip)
   @default_policy "downgrade"
@@ -45,7 +47,7 @@ defmodule Converger.Activities.Downgrade do
       type in Activity.internal_types() ->
         :skip
 
-      typed_message?(activity) and not native_message_type?(activity, channel_type) ->
+      typed_message?(activity) and end_user_channel?(channel_type) ->
         plan_message_type(activity, channel)
 
       type in Adapter.activity_types(channel_type) ->
@@ -64,17 +66,20 @@ defmodule Converger.Activities.Downgrade do
 
   defp typed_message?(activity), do: is_binary(Map.get(activity, :message_type))
 
-  defp native_message_type?(%{message_type: message_type}, channel_type) do
-    case Adapter.message_types(channel_type) do
-      :all -> true
-      types -> message_type in types
-    end
-  end
+  defp end_user_channel?(channel_type), do: Adapter.message_types(channel_type) != :all
 
-  # A typed message (#68) the channel cannot render: tool traces only when
-  # the channel enables `show_tool_traces`, everything else as its text
-  # fallback (`activities.text`), or skipped when there is none
-  # (docs/protocol/messages.md, section 5).
+  # A typed message (#68) on an end-user channel (one that lists its
+  # activity types), docs/protocol/messages.md section 5:
+  #
+  #   * `tool_call` - only with `show_tool_traces`, as a `name: status` line;
+  #   * `genui` - the text chunks of the stream joined into one message when
+  #     the stream is `done`; nothing before, `ui` and `event` chunks never;
+  #   * an `interrupt` with a `tool` or an `event` - skipped;
+  #   * a type the adapter declares in `message_types` - delivered natively;
+  #     media, location and contact as the legacy attachment the adapter
+  #     already renders (`RichContent.attachment/2`);
+  #   * anything else - a plain `message` with the text rendering of
+  #     `RichContent.text/1` (numbered actions), else the stored fallback.
   defp plan_message_type(%{message_type: "tool_call"} = activity, channel) do
     data = (Map.get(activity, :payload) || %{})["data"] || %{}
 
@@ -83,8 +88,42 @@ defmodule Converger.Activities.Downgrade do
       else: :skip
   end
 
-  defp plan_message_type(activity, _channel) do
-    case text(activity) do
+  defp plan_message_type(%{message_type: "genui"} = activity, _channel) do
+    case genui_text(activity) do
+      nil -> :skip
+      text -> {:downgrade, plain(activity, text)}
+    end
+  end
+
+  defp plan_message_type(%{message_type: message_type} = activity, channel) do
+    cond do
+      RichContent.skip?(activity) ->
+        :skip
+
+      message_type in Adapter.message_types(channel.type) ->
+        native_message(activity)
+
+      true ->
+        text_message(activity)
+    end
+  end
+
+  defp native_message(%{message_type: type, payload: payload} = activity) do
+    if type in RichContent.media_types() or type in RichContent.well_known_types() do
+      case RichContent.attachment(type, payload) do
+        {caption, attachment} ->
+          {:downgrade, %{plain(activity, caption) | attachments: [attachment]}}
+
+        nil ->
+          text_message(activity)
+      end
+    else
+      :native
+    end
+  end
+
+  defp text_message(activity) do
+    case RichContent.text(activity) || text(activity) do
       nil -> :skip
       text -> {:downgrade, plain(activity, text)}
     end
@@ -92,6 +131,43 @@ defmodule Converger.Activities.Downgrade do
 
   defp plain(activity, text),
     do: %{activity | type: "message", text: text, message_type: nil, payload: nil}
+
+  # The text of a GenUI stream, on its `done` chunk: the latest content of
+  # each text chunk (a chunk id seen again replaces its element), in order.
+  defp genui_text(%{payload: %{"done" => true, "streamId" => stream_id} = payload} = activity)
+       when is_binary(stream_id) do
+    earlier =
+      case Map.get(activity, :conversation_id) do
+        id when is_binary(id) -> Converger.Activities.genui_stream_payloads(id, stream_id)
+        _ -> []
+      end
+
+    {order, contents} =
+      Enum.reduce(earlier ++ [payload], {[], %{}}, &collect_text_chunk/2)
+
+    order
+    |> Enum.reverse()
+    |> Enum.map(&contents[&1])
+    |> Enum.reject(&(String.trim(&1) == ""))
+    |> case do
+      [] -> nil
+      texts -> Enum.join(texts, "\n\n")
+    end
+  end
+
+  defp genui_text(_activity), do: nil
+
+  defp collect_text_chunk(
+         %{"chunk" => %{"type" => "text", "content" => content} = chunk},
+         {order, contents}
+       )
+       when is_binary(content) do
+    key = Map.get(chunk, "id", make_ref())
+    order = if Map.has_key?(contents, key), do: order, else: [key | order]
+    {order, Map.put(contents, key, content)}
+  end
+
+  defp collect_text_chunk(_payload, acc), do: acc
 
   defp show_tool_traces?(channel),
     do: (Map.get(channel, :config) || %{})["show_tool_traces"] == true

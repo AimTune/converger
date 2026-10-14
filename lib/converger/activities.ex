@@ -163,6 +163,67 @@ defmodule Converger.Activities do
   end
 
   @doc """
+  The activity `id` of conversation `conversation_id`, or nil (also for an id
+  that is not a UUID).
+  """
+  def get_conversation_activity(conversation_id, id) do
+    case Ecto.UUID.cast(id) do
+      {:ok, id} ->
+        Repo.one(
+          from(a in Activity, where: a.id == ^id and a.conversation_id == ^conversation_id)
+        )
+
+      :error ->
+        nil
+    end
+  end
+
+  @doc """
+  The most recent typed messages of `message_types` in a conversation,
+  newest first: at most `limit`, not older than `since`, not sent by
+  `exclude_sender`. Used to match numeric replies (#68,
+  docs/protocol/messages.md section 6).
+  """
+  def recent_typed_messages(conversation_id, message_types, since, exclude_sender, limit \\ 20) do
+    query =
+      from(a in Activity,
+        where:
+          a.conversation_id == ^conversation_id and a.type == "message" and
+            a.message_type in ^message_types and a.inserted_at >= ^since and
+            is_nil(a.deleted_at),
+        order_by: [desc: a.seq],
+        limit: ^limit
+      )
+
+    query =
+      if is_binary(exclude_sender),
+        do: where(query, [a], a.sender != ^exclude_sender),
+        else: query
+
+    Repo.all(query)
+  end
+
+  @doc """
+  The payloads of the `genui` chunks of stream `stream_id` in a conversation,
+  oldest first (at most 1000, from the last day).
+  """
+  def genui_stream_payloads(conversation_id, stream_id) do
+    since = DateTime.add(DateTime.utc_now(), -1, :day)
+
+    Repo.all(
+      from(a in Activity,
+        where:
+          a.conversation_id == ^conversation_id and a.message_type == "genui" and
+            a.inserted_at >= ^since and
+            fragment("?->>'streamId' = ?", a.payload, ^stream_id),
+        order_by: [asc: a.seq],
+        limit: 1000,
+        select: a.payload
+      )
+    )
+  end
+
+  @doc """
   The activity with `idempotency_key` in any conversation of `channel_id`, or
   nil. Inbound webhooks use it to recognise a re-delivered provider message
   (provider message ids are unique per channel) before a conversation has

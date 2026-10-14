@@ -97,6 +97,18 @@ subject is `Re: <its subject>`.
 **Body.** A text part (the activity text, then a `name: url` line per linked attachment) and an HTML part (the
 escaped text with line breaks, then a link per linked attachment).
 
+**Typed messages** ([#68](https://github.com/AimTune/converger/issues/68),
+[ADR-0064](../adr/0064-per-channel-rendering-of-typed-messages-and-normalised-answers.md)). The adapter declares
+`message_types: text quick-reply buttons card carousel interrupt image file video audio`. A message with actions
+(`text` + `actions`, `quick-reply`, `buttons`, `card`, `carousel`, `interrupt` without `tool` / `event`) is rendered
+by `Converger.Channels.RichContent`: the text part is the prompt, the answerable actions as a numbered list
+(`1. Track an order`) and `label: url` lines for links; the HTML part has the prompt as paragraphs, the actions as an
+`<ol>`, links as links and card images inline. A carousel is one block per card, numbering continuing across cards.
+The user answers by reply mail: a reply whose text is just a number (`2`) within 24 hours becomes the normalised
+answer (`metadata.action` with `source: "email"`, `reply_to_id` on the offering message,
+[messages.md section 6](../protocol/messages.md)). Media types are sent as attachments or links as above; location
+and contact as text with a map link or the numbers; a GenUI stream as one email when it is done.
+
 **Attachments.** An attachment whose `contentUrl` is a Converger upload of the channel's tenant
 (`/api/v1/converger/attachments/:id`) is read from storage and attached, while the total stays under
 `max_attachment_bytes`. Every other attachment, and uploads over the budget, are linked.
@@ -215,7 +227,9 @@ bounce or a complaint); a status never moves back from `read`.
 - The SMTP host is checked against the SSRF guard, but the connection is not pinned to the checked address
   (unlike webhook requests).
 - SendGrid's signed Event Webhook (ECDSA) and Postmark's IP allowlist are not checked; use basic auth.
-- Outbound email is plain: the HTML part is the escaped text. Cards are downgraded to text.
+- Outbound email is plain: the HTML part is the escaped text; typed messages add numbered lists, links and card
+  images, but there is no styled card layout, and card attachments are downgraded to text. Buttons as links to a
+  Converger reply endpoint are Planned ([#68](https://github.com/AimTune/converger/issues/68)).
 
 ## Testing
 

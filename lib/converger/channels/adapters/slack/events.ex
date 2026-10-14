@@ -37,6 +37,7 @@ defmodule Converger.Channels.Adapters.Slack.Events do
   """
 
   alias Converger.{Activities, Participants}
+  alias Converger.Channels.RichContent
 
   require Logger
 
@@ -330,6 +331,22 @@ defmodule Converger.Channels.Adapters.Slack.Events do
         }),
       "participant" => context.participant
     }
+    |> button_answer(action["value"], label)
+  end
+
+  # A click on a button Converger rendered for a typed message (#68): its
+  # value is an answer key, normalised by Converger.Inbound.Answers; the
+  # button label is the text if the key does not resolve.
+  defp button_answer(message, value, label) do
+    case RichContent.parse_ref(value) do
+      {:ok, _id, _index} ->
+        message
+        |> Map.put("text", label || "")
+        |> RichContent.put_answer(value, "button", label)
+
+      :error ->
+        message
+    end
   end
 
   ## Helpers
