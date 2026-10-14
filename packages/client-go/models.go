@@ -60,7 +60,7 @@ type ClientActivity struct {
 // ClientActivityPage is a page of ClientAPI.ListActivities.
 type ClientActivityPage struct {
 	Activities []ClientActivity `json:"activities"`
-	Watermark  *string          `json:"watermark"`
+	Watermark  *Watermark       `json:"watermark"`
 	HasMore    bool             `json:"has_more"`
 }
 
@@ -164,7 +164,7 @@ type ConversationPage struct {
 // ActivityPage is a watermark page of TenantAPI.ListActivities.
 type ActivityPage struct {
 	Data      []Activity
-	Watermark *string
+	Watermark *Watermark
 	HasMore   bool
 	Limit     int
 }

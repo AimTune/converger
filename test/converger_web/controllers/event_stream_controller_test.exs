@@ -67,6 +67,16 @@ defmodule ConvergerWeb.ConvergerAPI.EventStreamControllerTest do
              Client.sse_recv(client)
   end
 
+  test "accepts a pre-v1 opaque watermark during the migration window", ctx do
+    activity!(ctx.conversation, "one")
+    activity!(ctx.conversation, "two")
+
+    client = open(ctx, "?watermark=" <> Converger.ConvergerAPI.Watermark.encode(1))
+
+    assert {%{id: "2", frame: %{"seq" => 2}}, client} = Client.sse_recv(client)
+    assert {:timeout, _client} = Client.sse_recv(client, 200)
+  end
+
   test "Last-Event-ID wins over ?watermark= on reconnect", ctx do
     for text <- ~w(one two three), do: activity!(ctx.conversation, text)
 

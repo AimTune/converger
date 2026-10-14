@@ -154,8 +154,9 @@ func itoa(n int) string {
 
 // ListActivitiesParams pages activities after a watermark.
 type ListActivitiesParams struct {
-	// Watermark is the watermark of the previous page (an opaque string or an integer seq).
-	Watermark string
+	// Watermark is the watermark of the previous page, passed back unchanged (the
+	// integer seq, or an opaque string from servers before v3.0).
+	Watermark Watermark
 	// Limit is the page size (server default 100, max 1000).
 	Limit int
 }
@@ -284,7 +285,7 @@ func (a *ClientAPI) ListActivities(ctx context.Context, token, conversationID st
 	r := request{
 		method:  "GET",
 		path:    "/api/v1/converger/conversations/" + seg(conversationID) + "/activities",
-		query:   query("watermark", p.Watermark, "limit", itoa(p.Limit)),
+		query:   query("watermark", p.Watermark.String(), "limit", itoa(p.Limit)),
 		headers: h,
 	}
 	if err := a.c.do(ctx, r, &out); err != nil {
@@ -314,10 +315,10 @@ type dataEnvelope[T any] struct {
 type listEnvelope[T any] struct {
 	Data []T `json:"data"`
 	Meta struct {
-		NextCursor *string `json:"next_cursor"`
-		Watermark  *string `json:"watermark"`
-		HasMore    bool    `json:"has_more"`
-		Limit      int     `json:"limit"`
+		NextCursor *string    `json:"next_cursor"`
+		Watermark  *Watermark `json:"watermark"`
+		HasMore    bool       `json:"has_more"`
+		Limit      int        `json:"limit"`
 	} `json:"meta"`
 }
 
@@ -389,7 +390,7 @@ func (a *TenantAPI) ListActivities(ctx context.Context, conversationID string, p
 	r := request{
 		method:  "GET",
 		path:    "/api/v1/conversations/" + seg(conversationID) + "/activities",
-		query:   query("watermark", p.Watermark, "limit", itoa(p.Limit)),
+		query:   query("watermark", p.Watermark.String(), "limit", itoa(p.Limit)),
 		headers: h,
 	}
 	if err := a.c.do(ctx, r, &env); err != nil {

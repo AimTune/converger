@@ -79,8 +79,11 @@ class ClientActivity(_Model):
 
 
 class ClientActivityPage(_Model):
+    """A page of the Converger API. ``watermark`` is the integer seq of the last
+    activity (an opaque string from servers before v3.0); pass it back unchanged."""
+
     activities: list[ClientActivity]
-    watermark: str | None = None
+    watermark: int | str | None = None
     has_more: bool = False
 
 
@@ -143,10 +146,11 @@ class Page(_Model, Generic[T]):
 
 
 class ActivityPage(_Model):
-    """A watermark page of the tenant API (``meta.watermark``)."""
+    """A watermark page of the tenant API (``meta.watermark``: the integer seq,
+    an opaque string from servers before v3.0; pass it back unchanged)."""
 
     data: list[Activity]
-    watermark: str | None = None
+    watermark: int | str | None = None
     has_more: bool = False
     limit: int | None = None
 

@@ -10,7 +10,10 @@ defmodule Converger.MultiNodeTest do
     * a client token revoked on one node is rejected by the other within a
       second (ADR-0059);
     * every delivery job is executed exactly once although both nodes run
-      the Oban queues.
+      the Oban queues;
+    * an agent group (`hello.group`, ADR-0069) with a member on each node
+      delivers each user turn to one member, and the member on the other
+      node takes over when one leaves.
 
   Excluded by default (it starts extra VMs). Run it with
 
@@ -23,6 +26,7 @@ defmodule Converger.MultiNodeTest do
 
   alias Converger.{ActivitiesFixtures, ChannelsFixtures, ConversationsFixtures, TenantsFixtures}
   alias Converger.TestCluster.{Peer, WebhookSink, WsClient}
+  alias ConvergerWeb.ProtocolClient
 
   @moduletag :cluster
   @moduletag timeout: 300_000
@@ -228,6 +232,105 @@ defmodule Converger.MultiNodeTest do
 
     executing_nodes = jobs |> Enum.map(fn [_, _, node] -> node end) |> Enum.uniq()
     assert Enum.all?(executing_nodes, &(&1 in [to_string(a.node), to_string(b.node)]))
+  end
+
+  test "an agent group spans the nodes: one member per turn, takeover when a node's member leaves",
+       %{a: a, b: b} do
+    tenant = Peer.call(a.pid, TenantsFixtures, :tenant_fixture, [%{}])
+    widget = Peer.call(a.pid, ChannelsFixtures, :channel_fixture, [tenant])
+    bot = Peer.call(a.pid, ChannelsFixtures, :channel_fixture, [tenant])
+
+    {:ok, _rule} =
+      Peer.call(a.pid, Converger.RoutingRules, :create_routing_rule, [
+        %{
+          name: "widget to bot",
+          tenant_id: tenant.id,
+          source_channel_id: widget.id,
+          target_channel_ids: [bot.id]
+        }
+      ])
+
+    conversations =
+      for _ <- 1..12,
+          do: Peer.call(a.pid, ConversationsFixtures, :conversation_fixture, [tenant, widget])
+
+    # One agent process on each node, in the same group.
+    agent_a = group_agent(a, bot, "agent-a")
+    agent_b = group_agent(b, bot, "agent-b")
+    # Longer than the settle delay and the :pg propagation between the nodes.
+    Process.sleep(1_000)
+
+    # Turns are committed on both nodes.
+    for {conversation, i} <- Enum.with_index(conversations) do
+      user_turn(if(rem(i, 2) == 0, do: a, else: b), widget, conversation, "first")
+    end
+
+    {turns_a, agent_a} = drain_turns(agent_a)
+    {turns_b, agent_b} = drain_turns(agent_b)
+
+    assert Enum.sort(turns_a ++ turns_b) ==
+             Enum.sort(for c <- conversations, do: {c.id, "first"})
+
+    served_a = turns_a |> Enum.map(&elem(&1, 0)) |> MapSet.new()
+    assert MapSet.size(served_a) in 1..11
+
+    # The member on node A leaves without answering: the member on node B
+    # takes its conversations over (their unanswered turns, once) and gets
+    # every later turn, once.
+    ProtocolClient.close(agent_a)
+    {taken_over, agent_b} = drain_turns(agent_b)
+    assert Enum.sort(taken_over) == Enum.sort(for id <- served_a, do: {id, "first"})
+
+    for conversation <- conversations, do: user_turn(a, widget, conversation, "second")
+    {turns, agent_b} = drain_turns(agent_b)
+    assert Enum.sort(turns) == Enum.sort(for c <- conversations, do: {c.id, "second"})
+
+    ProtocolClient.close(agent_b)
+  end
+
+  defp group_agent(node, bot, name) do
+    {:ok, token, _claims} =
+      Peer.call(node.pid, Converger.Auth.ConvergerToken, :generate_token, [
+        bot,
+        [scope: "channel", user_id: name]
+      ])
+
+    {:ok, client} =
+      ProtocolClient.connect(node.port, headers: [{"authorization", "Bearer #{token}"}])
+
+    client = ProtocolClient.push(client, %{"type" => "hello", "group" => "workers"})
+    assert {%{"type" => "welcome"}, client} = ProtocolClient.recv(client, 5_000)
+    client
+  end
+
+  defp user_turn(node, widget, conversation, text) do
+    message = %{"type" => "message", "sender" => "alice", "text" => text}
+
+    assert {:created, _activity} =
+             Peer.call(node.pid, Converger.Inbound, :receive_message, [
+               widget,
+               message,
+               [conversation_id: conversation.id]
+             ])
+  end
+
+  # The user turns an agent receives until it is quiet for 2 s (deliveries go
+  # through the Oban queues of both nodes).
+  defp drain_turns(client, acc \\ []) do
+    case ProtocolClient.recv(client, 2_000) do
+      {:timeout, client} ->
+        {Enum.reverse(acc), client}
+
+      {%{"conversationId" => id, "frame" => %{"type" => "text", "from" => "user"} = frame},
+       client} ->
+        drain_turns(client, [{id, frame["data"]["text"]} | acc])
+
+      {%{}, client} ->
+        drain_turns(client, acc)
+
+      {other, _client} ->
+        flunk("unexpected #{inspect(other)}")
+    end
   end
 
   defp http(method, port, path, opts \\ []) do

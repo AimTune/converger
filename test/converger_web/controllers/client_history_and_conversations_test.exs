@@ -65,7 +65,7 @@ defmodule ConvergerWeb.ConvergerAPI.ClientHistoryAndConversationsTest do
       assert Enum.map(first["activities"], & &1["seq"]) == [4, 5]
       assert first["has_more"] == true
       assert first["cursor"] == "4"
-      assert first["watermark"] == Converger.ConvergerAPI.Watermark.encode(5)
+      assert first["watermark"] == 5
 
       second = history(conn, ctx, "before=#{first["cursor"]}&limit=2")
       assert Enum.map(second["activities"], & &1["text"]) == ["m2", "m3"]

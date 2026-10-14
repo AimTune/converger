@@ -202,6 +202,14 @@ func str(m map[string]any, k string) string { s, _ := m[k].(string); return s }
 
 func num(m map[string]any, k string) int { n, _ := asInt(m[k]); return n }
 
+// wmArg is the `watermark` argument as sent: an integer seq or an opaque string.
+func wmArg(m map[string]any) string {
+	if n, ok := asInt(m["watermark"]); ok {
+		return strconv.Itoa(n)
+	}
+	return str(m, "watermark")
+}
+
 func mapOf(m map[string]any, k string) map[string]any { v, _ := m[k].(map[string]any); return v }
 
 func listOfMaps(m map[string]any, k string) []map[string]any {
@@ -226,7 +234,7 @@ func callOperation(ctx context.Context, c *Client, op string, a map[string]any) 
 	case "client_api.create_conversation":
 		return c.ClientAPI.CreateConversation(ctx, str(a, "token"))
 	case "client_api.get_conversation":
-		return c.ClientAPI.GetConversation(ctx, str(a, "token"), str(a, "conversation_id"), str(a, "watermark"))
+		return c.ClientAPI.GetConversation(ctx, str(a, "token"), str(a, "conversation_id"), wmArg(a))
 	case "client_api.close_conversation":
 		return c.ClientAPI.CloseConversation(ctx, str(a, "token"), str(a, "conversation_id"))
 	case "client_api.reopen_conversation":
@@ -239,7 +247,7 @@ func callOperation(ctx context.Context, c *Client, op string, a map[string]any) 
 		})
 	case "client_api.list_activities":
 		return c.ClientAPI.ListActivities(ctx, str(a, "token"), str(a, "conversation_id"),
-			ListActivitiesParams{Watermark: str(a, "watermark"), Limit: num(a, "limit")})
+			ListActivitiesParams{Watermark: Watermark(wmArg(a)), Limit: num(a, "limit")})
 	case "tenant_api.list_conversations":
 		return c.TenantAPI.ListConversations(ctx, ListConversationsParams{
 			Limit: num(a, "limit"), Cursor: str(a, "cursor"), Status: str(a, "status"),
@@ -259,7 +267,7 @@ func callOperation(ctx context.Context, c *Client, op string, a map[string]any) 
 		})
 	case "tenant_api.list_activities":
 		return c.TenantAPI.ListActivities(ctx, str(a, "conversation_id"),
-			ListActivitiesParams{Watermark: str(a, "watermark"), Limit: num(a, "limit")})
+			ListActivitiesParams{Watermark: Watermark(wmArg(a)), Limit: num(a, "limit")})
 	}
 	return nil, fmt.Errorf("unknown operation %s", op)
 }

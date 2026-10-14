@@ -66,8 +66,7 @@ defmodule ConvergerWeb.ConvergerAPI.ConversationController do
     operation_id: "reconnectConversation",
     parameters: [
       id: path_id("Conversation id"),
-      watermark:
-        query(%OpenApiSpex.Schema{type: :string}, "Resume the stream after this watermark")
+      watermark: query(watermark_param_schema(), "Resume the stream after this watermark")
     ],
     responses:
       with_errors(%{200 => json_schema("Reconnected", ref("ClientConversation"))}, [401, 403, 404])

@@ -238,6 +238,15 @@ defmodule ConvergerWeb.Protocol.Session do
     close(4401, "token expired", [error("token_expired", "token expired, refresh it")], state)
   end
 
+  # A member joined or left the connection's agent group (`:pg` monitor).
+  def handle_info({ref, event, _group, _pids} = message, %{mode: :channel} = state)
+      when is_reference(ref) and event in [:join, :leave] and state.phase == :ready do
+    case ChannelSession.handle_group(message, state) do
+      :ignore -> {:ok, state}
+      {frames, state} -> reply(frames, state)
+    end
+  end
+
   def handle_info(_message, state), do: {:ok, state}
 
   @doc """
@@ -689,7 +698,7 @@ defmodule ConvergerWeb.Protocol.Session do
 
   # Wrong types are ignored as if absent (mekik/1), which replays from 0.
   defp watermark_position(value) do
-    case Protocol.parse_watermark(value) do
+    case Protocol.parse_watermark(value, deprecation: [api: :protocol]) do
       {:ok, position} -> position
       {:error, _} -> nil
     end
@@ -840,7 +849,7 @@ defmodule ConvergerWeb.Protocol.Session do
   defp sync(frame, state) do
     head = Conversations.get_conversation(state.conversation_id).last_seq
 
-    case Protocol.parse_watermark(frame["watermark"]) do
+    case Protocol.parse_watermark(frame["watermark"], deprecation: [api: :protocol]) do
       {:ok, {:seq, seq}} when seq > head ->
         message = "watermark #{seq} is above the head #{head}"
         reply([error("invalid_watermark", message, frame_type: "sync")], state)

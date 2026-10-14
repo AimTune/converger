@@ -47,6 +47,9 @@ failures.
 | `post_activity(client, id, %{sender:, text:, type:, attachments:, metadata:, reply_to_id:}, idempotency_key: ...)` | `%Activity{seq: ...}` |
 | `list_activities(client, id, watermark: ..., limit: ...)` | `%ActivityPage{data, watermark, has_more}` |
 
+`watermark` on both page structs is the integer seq from v3.0 servers or an opaque string from older ones
+([migration](../protocol/v1.md#65-the-watermark-and-its-migration)); pass it back unchanged as `watermark:`.
+
 Every struct keeps unknown response keys in `:extra`. Timestamps are ISO 8601 strings.
 
 ## WebSocket (Protocol v1)

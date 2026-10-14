@@ -272,18 +272,20 @@ URL-safe Base64 of `ts:<ISO 8601 timestamp>|<uuid>`, but clients must not build 
 ### Sequence watermarks (activities)
 
 Activities are paged oldest first on the per-conversation `seq` that the server assigns under the conversation row
-lock ([ADR-0006](../adr/0006-per-conversation-seq-and-opaque-watermarks.md)). The position is an opaque
-**watermark**:
+lock ([ADR-0006](../adr/0006-per-conversation-seq-and-opaque-watermarks.md)). The position is the
+**watermark**, the integer `seq` itself ([ADR-0068](../adr/0068-integer-seq-watermarks-on-every-surface.md)):
 
 | Param | Meaning |
 | --- | --- |
 | `limit` | Default `100`, capped at `1000` (same clamping rules). |
 | `watermark` | The previous response's watermark: return activities with a higher `seq`. Omit to start at the beginning of the conversation. |
 
-The watermark is the `seq` of the last activity returned, encoded as URL-safe Base64 without padding of `seq:<n>`
-(for example `c2VxOjQy` is `seq:42`). Resuming needs no database lookup. When a page is empty, the watermark you
-sent is returned unchanged. Legacy watermarks (Base64 of an activity id, issued before `seq` existed) are still
-accepted. The tenant API answers a malformed watermark with `400`; the client API starts from the beginning instead.
+The watermark is the `seq` of the last activity returned, a JSON number (`42`), the same number Protocol v1 frames
+carry. Resuming needs no database lookup. When a page is empty, the position you sent is returned as an integer
+(`null` if you sent none). Before v3.0 the watermark was opaque (URL-safe Base64 of `seq:<n>`, `c2VxOjQy` for
+`seq:42`); for one release both APIs still accept that form, its decimal string and legacy Base64 activity-id
+watermarks, and log them as the deprecated `opaque_watermark` surface
+([migration](../protocol/v1.md#65-the-watermark-and-its-migration)). The tenant API answers a malformed watermark with `400`; the client API starts from the beginning instead.
 The response shapes differ per family; see [tenant API](tenant-api.md#list-activities) and
 [client API](client-api.md#list-activities).
 

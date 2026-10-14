@@ -109,7 +109,10 @@ defmodule ConvergerClient.ClientAPI do
     end
   end
 
-  @doc "Activities after a watermark, oldest first. Options: `:watermark`, `:limit`."
+  @doc """
+  Activities after a watermark, oldest first. Options: `:watermark` (the
+  integer seq or a legacy opaque string, sent as is), `:limit`.
+  """
   @spec list_activities(ConvergerClient.t(), String.t(), String.t(), keyword()) ::
           result(ClientActivityPage.t())
   def list_activities(client, token, conversation_id, opts \\ []) do

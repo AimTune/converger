@@ -380,12 +380,12 @@ curl -s "http://localhost:4000/api/v1/converger/conversations/$CONV/activities" 
       "channelData": { "echo_of": "0e7d4c1a-8b2f-4f6e-a1c3-7d9e2b4f6a80" }
     }
   ],
-  "watermark": "c2VxOjI",
+  "watermark": 2,
   "has_more": false
 }
 ```
 
-`watermark` is opaque (it encodes the `seq` of the last activity returned). Pass it back as `?watermark=c2VxOjI` to fetch only newer activities. Use `?limit=` to change the page size (default 100, at most 1000).
+`watermark` is the `seq` of the last activity returned. Pass it back as `?watermark=2` to fetch only newer activities. Use `?limit=` to change the page size (default 100, at most 1000).
 
 The same conversation is visible through the server-to-server API with the tenant API key. That API returns the canonical activity shape, including `seq`:
 
@@ -423,7 +423,7 @@ curl -s "http://localhost:4000/api/v1/conversations/$CONV/activities" -H "x-api-
       "inserted_at": "2026-10-09T10:15:02.733914Z"
     }
   ],
-  "meta": { "watermark": "c2VxOjI", "has_more": false, "limit": 100 }
+  "meta": { "watermark": 2, "has_more": false, "limit": 100 }
 }
 ```
 

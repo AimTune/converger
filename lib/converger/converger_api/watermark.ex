@@ -1,10 +1,13 @@
 defmodule Converger.ConvergerAPI.Watermark do
   @moduledoc """
-  Encodes and decodes opaque watermark strings for Converger activity pagination.
+  The pre-v1 opaque watermark: URL-safe Base64 of `seq:<n>`.
 
-  A watermark is the position of the last activity a client has received:
-  the activity's per-conversation `seq`, encoded opaquely. Resuming from a
-  watermark needs no database lookup.
+  Since #63 the watermark is the integer `seq` itself (docs/protocol/v1.md
+  section 6.5): the Converger REST API, the tenant API and every Protocol v1
+  surface emit the number. Only the legacy Phoenix `activitySet` (and its
+  `postActivity` reply and `replay_unavailable` error) still emits the
+  opaque string from `encode/1`, for one release; every input accepts all
+  forms through `ConvergerWeb.Protocol.parse_watermark/2`.
 
   Legacy watermarks (Base64-encoded activity ids, issued before `seq`
   existed) are still accepted for one release and decode to

@@ -89,7 +89,7 @@ and its socket identity ([ADR-0020](../adr/0020-per-subject-socket-ids-and-prese
 | `metadata` | `channelData` |
 | `inserted_at` | `timestamp` |
 | `conversation_id` | `conversationId` |
-| `seq` | not in the activity: it is in the `watermark` (opaque) |
+| `seq` | not in the activity: it is the `watermark` of the activity set (the integer seq on REST since v3.0, still opaque in the Phoenix `activitySet`) |
 | `idempotency_key`, `tenant_id`, `status`, `delivery_status` | not exposed |
 
 ### Sending

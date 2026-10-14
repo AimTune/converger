@@ -50,7 +50,10 @@ config :converger, ConvergerWeb.Protocol,
   # inbound silence before the socket is closed with 4408
   idle_timeout_ms: 60_000,
   # frames replayed per handshake or `sync`; beyond it `replayTruncated`
-  replay_max: 10_000
+  replay_max: 10_000,
+  # a new agent group member (hello.group) serves the turns committed this long
+  # after it joined, so that every node knows of it first (ADR-0069)
+  group_settle_ms: 1_000
 
 # Converger Protocol v1 over gRPC (ConvergerWeb.GRPC, ADR-0056): a bidirectional
 # stream per connection on its own port, off unless GRPC_ENABLED=true
