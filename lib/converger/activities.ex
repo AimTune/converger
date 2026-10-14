@@ -133,6 +133,31 @@ defmodule Converger.Activities do
 
   def get_activity!(id), do: Repo.get!(Activity, id)
 
+  @doc "An activity by id, or nil."
+  def get_activity(id), do: Repo.get(Activity, id)
+
+  @doc "The activity of `conversation_id` with `seq`, or nil."
+  def get_activity_by_seq(conversation_id, seq) when is_integer(seq) do
+    Repo.one(from(a in Activity, where: a.conversation_id == ^conversation_id and a.seq == ^seq))
+  end
+
+  def get_activity_by_seq(_conversation_id, _seq), do: nil
+
+  @doc """
+  Whether the mekik `interrupt` `interrupt_id` of a conversation is still open:
+  no `interrupt_resolved` with the same id was stored after it (#64).
+  """
+  def interrupt_open?(conversation_id, interrupt_id) when is_binary(interrupt_id) do
+    resolved =
+      from(a in Activity,
+        where:
+          a.conversation_id == ^conversation_id and a.message_type == "interrupt_resolved" and
+            fragment("?->>?", a.payload, "id") == ^interrupt_id
+      )
+
+    not Repo.exists?(resolved)
+  end
+
   @doc """
   The latest `message` activity of each conversation in `conversation_ids`,
   as `%{conversation_id => %{text, seq, inserted_at, deleted_at}}`

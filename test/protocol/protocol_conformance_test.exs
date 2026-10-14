@@ -28,7 +28,8 @@ defmodule Converger.ProtocolConformanceTest do
       "s2c" => Schemas.build!("server-frame.schema.json"),
       "c2s" => Schemas.build!("client-frame.schema.json"),
       "s2c-envelope" => Schemas.build!("frames/channel/server-envelope.schema.json"),
-      "c2s-envelope" => Schemas.build!("frames/channel/client-envelope.schema.json")
+      "c2s-envelope" => Schemas.build!("frames/channel/client-envelope.schema.json"),
+      "agent" => Schemas.build!("frames/channel/agent-frame.schema.json")
     }
 
     {:ok, roots: roots}
@@ -67,6 +68,7 @@ defmodule Converger.ProtocolConformanceTest do
             "frames/client/" <> _ -> "c2s"
             "frames/channel/server" <> _ -> "s2c-envelope"
             "frames/channel/client" <> _ -> "c2s-envelope"
+            "frames/channel/agent" <> _ -> "agent"
           end
 
         for example <- Schemas.read!(path)["examples"] do

@@ -21,6 +21,12 @@
       "description": "Converger, channel scope only: per-conversation watermarks to replay from on (re)connect.",
       "type": "object",
       "additionalProperties": { "$ref": "../../common.schema.json#/$defs/watermark" }
+    },
+    "group": {
+      "description": "Converger, channel scope only: the agent group to join. The connections of a group share the channel.s conversations, each served by one live member (#64).",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
     }
   },
   "examples": [

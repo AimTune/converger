@@ -317,7 +317,9 @@ inline keyboard press, a numeric reply "2", a reply mail) is normalised to an or
 - `metadata.action` keeps `{label, value, source}`, with `source` one of `button`, `list`,
   `keyboard`, `numeric`, `email`, `web`; non-string values survive here. An action without `value`
   has its `label` as value.
-- `replyTo` (`reply_to_id`) names the message that offered the action.
+- `replyTo` (`reply_to_id`) names the message that offered the action. A client may name it by `seq`
+  alone (`replyTo: {seq}`), which is how an answer to a mekik-native `interrupt` (no activity id on the
+  wire) is addressed.
 - A WhatsApp button (`button`) or list reply (`list`), a Telegram `callback_query` (`keyboard`) and a
   Slack `block_actions` click (`button`) carry the answer key of section 5. It must name an answerable
   action of an activity of the same conversation; otherwise the message keeps the provider's button
@@ -330,10 +332,11 @@ inline keyboard press, a numeric reply "2", a reply mail) is normalised to an or
   `numeric`, or `email` on an email channel.
 - Web clients send the answer themselves: a `text` frame with `metadata.action` and `replyTo` is stored
   as it is.
-- **Planned (#68):** if the answered message is, or belongs to, an open `interrupt`, the hub converts
-  the answer to `resume {answers: {INTERRUPT_ID: value}}` for the bot channel (mekik-compatible) and
-  stores the user turn as usual. Today the user turn is stored with `reply_to_id` on the interrupt
-  activity and `metadata.action`. Otherwise it is an ordinary turn for the agent or bot.
+- **Implemented (#64):** if the answered message is an open `interrupt`, the user turn is stored as
+  usual (`reply_to_id` on the interrupt, `metadata.action`) and reaches the bot channel as
+  `resume {answers: {INTERRUPT_ID: value}}` (mekik-compatible; `value` is `metadata.action.value`, else
+  the label, else the text), [v1.md section 9](./v1.md). Otherwise it is an ordinary turn for the agent
+  or bot.
 
 So an agent sends one `buttons` message and receives the same normalised turn from the web widget,
 WhatsApp, Telegram, Slack and email.

@@ -105,6 +105,19 @@ defmodule ConvergerWeb.Sockets do
   end
 
   @doc """
+  Number of channel-scoped connections (agent consoles, agent SDKs, the mekik
+  transport) following `channel_id`, on any node: the bot-channel test of
+  `ConvergerWeb.Protocol.BotRelay`.
+  """
+  def count_agents(channel_id) do
+    channel_id
+    |> topic()
+    |> SocketPresence.list()
+    |> Enum.flat_map(fn {_key, %{metas: metas}} -> metas end)
+    |> Enum.count(&(&1[:scope] == "channel"))
+  end
+
+  @doc """
   Track the calling channel process (a joined channel) under its socket id.
   The entry disappears automatically when the process exits.
   """

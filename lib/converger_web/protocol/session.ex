@@ -52,10 +52,13 @@ defmodule ConvergerWeb.Protocol.Session do
   alias Converger.Auth.ConvergerToken
   alias Converger.Repo.Pressure
   alias ConvergerWeb.{ClientConnections, ConversationSignals, Protocol, SocketGuard}
-  alias ConvergerWeb.Protocol.{Feed, Frames, Send}
+  alias ConvergerWeb.Protocol.{BotRelay, ChannelSession, Feed, Frames, Send}
 
   # Frames a client sends that need a bot channel (mekik relay, #64).
-  @bot_frames ~w(resume genui_event client_tools client_skills abort survey regenerate edit)
+  @bot_frames BotRelay.forwarded_types()
+
+  # Messages a channel-scoped session handles itself (ChannelSession).
+  @channel_events ~w(new_activity bot_frame turn_meta delivery_status typing read presence_diff)
 
   @type frame :: map()
   @type close :: %{code: pos_integer(), reason: String.t(), retry_after_ms: nil | pos_integer()}
@@ -86,6 +89,9 @@ defmodule ConvergerWeb.Protocol.Session do
 
     state = %{
       phase: :awaiting_hello,
+      # :conversation, or :channel for a channel-scoped token
+      # (ConvergerWeb.Protocol.ChannelSession).
+      mode: :conversation,
       transport: transport,
       handler: Keyword.fetch!(opts, :handler),
       backlog: Keyword.get(opts, :backlog, &own_backlog/0),
@@ -159,6 +165,23 @@ defmodule ConvergerWeb.Protocol.Session do
 
   @doc "A message of the connection process that is not a client frame."
   @spec handle_info(term(), t()) :: result()
+  def handle_info(%Phoenix.Socket.Broadcast{event: event} = broadcast, %{mode: :channel} = state)
+      when state.phase == :ready and event in @channel_events do
+    if event == "new_activity" and slow_consumer?(state) do
+      SocketGuard.emit(:slow_consumer, state.handler)
+      close_with_retry(4503, "slow_consumer", [], state)
+    else
+      {frames, state} = ChannelSession.handle_info(broadcast, state)
+      reply(frames, state)
+    end
+  end
+
+  # A bot's transient frame (run, genui_components, skills, error), relayed by
+  # BotRelay to every connection of the conversation (section 9).
+  def handle_info(%Phoenix.Socket.Broadcast{event: "bot_transient", payload: frame}, state)
+      when state.phase == :ready and state.mode == :conversation,
+      do: reply([frame], state)
+
   def handle_info(%Phoenix.Socket.Broadcast{event: "new_activity", payload: activity}, state)
       when state.phase == :ready do
     if slow_consumer?(state) do
@@ -204,7 +227,7 @@ defmodule ConvergerWeb.Protocol.Session do
         close(4408, "idle timeout", [], state)
 
       state.phase == :ready and now - state.last_out >= state.heartbeat_ms ->
-        reply([Frames.heartbeat(state.feed.last_seq)], state)
+        reply([Frames.heartbeat(head_seq(state))], state)
 
       true ->
         {:ok, state}
@@ -223,6 +246,11 @@ defmodule ConvergerWeb.Protocol.Session do
   hard cap is reported as `[:converger, :socket, :limit]` `frame_too_large`).
   """
   @spec terminate(term(), t()) :: :ok
+  def terminate(reason, %{phase: :ready, mode: :channel} = state) do
+    ChannelSession.terminate(state)
+    terminated(reason, state)
+  end
+
   def terminate(reason, %{phase: :ready} = state) do
     ConversationSignals.stop_typing(state.typing, state.conversation_id, state.participant)
     terminated(reason, state)
@@ -329,11 +357,18 @@ defmodule ConvergerWeb.Protocol.Session do
   defp handle_frame(%{"type" => "hello"}, state), do: {:ok, state}
 
   defp handle_frame(%{"type" => "ping"} = frame, state) do
-    reply([Frames.heartbeat(state.feed.last_seq, frame["nonce"])], state)
+    reply([Frames.heartbeat(head_seq(state), frame["nonce"])], state)
+  end
+
+  defp handle_frame(%{"type" => "auth"} = frame, state), do: refresh_token(frame, state)
+
+  # Section 10: everything else of a channel-scoped connection is enveloped.
+  defp handle_frame(frame, %{mode: :channel} = state) do
+    {frames, state} = ChannelSession.handle_frame(frame, state)
+    reply(frames, state)
   end
 
   defp handle_frame(%{"type" => "sync"} = frame, state), do: sync(frame, state)
-  defp handle_frame(%{"type" => "auth"} = frame, state), do: refresh_token(frame, state)
 
   # Token permissions (ADR-0059): typing needs `typing`, sends need `write`.
   defp handle_frame(%{"type" => "typing"}, state)
@@ -377,9 +412,23 @@ defmodule ConvergerWeb.Protocol.Session do
     end
   end
 
-  defp handle_frame(%{"type" => type}, state) when type in @bot_frames do
-    message = "this conversation has no bot channel"
-    reply([error("bot_unavailable", message, frame_type: type)], state)
+  # Section 9: frames only the bot answers go to the conversation's bot
+  # channel, unchanged.
+  defp handle_frame(%{"type" => type} = frame, state) when type in @bot_frames do
+    conversation = Conversations.get_conversation(state.conversation_id)
+
+    case BotRelay.forward(conversation, frame) do
+      :ok ->
+        {:ok, state}
+
+      {:error, :bot_unavailable} ->
+        message = "this conversation has no bot channel"
+
+        reply(
+          [error("bot_unavailable", message, frame_type: type) |> with_client_id(frame)],
+          state
+        )
+    end
   end
 
   defp handle_frame(%{"type" => type} = frame, state) when is_binary(type) do
@@ -408,9 +457,12 @@ defmodule ConvergerWeb.Protocol.Session do
     with :ok <- check_protocol(hello["protocol"]),
          {:ok, claims} <- authenticate(state.token || string(hello["token"])),
          :ok <- permit(claims, "read"),
-         {:ok, _channel} <- active_channel(claims),
-         {:ok, conversation} <- resolve_conversation(claims, hello) do
-      start_session(hello, claims, conversation, state)
+         {:ok, channel} <- active_channel(claims),
+         {:ok, scope} <- scope(claims, hello) do
+      case scope do
+        :channel -> start_channel_session(hello, claims, channel, state)
+        {:conversation, conversation} -> start_session(hello, claims, conversation, state)
+      end
     else
       {:error, :unsupported_protocol} ->
         frame = error("unsupported_protocol", "this server speaks #{Protocol.version()}")
@@ -474,6 +526,30 @@ defmodule ConvergerWeb.Protocol.Session do
     case Channels.get_active_channel(claims["channel_id"], claims["tenant_id"]) do
       {:ok, channel} -> {:ok, channel}
       _ -> {:error, :channel_inactive}
+    end
+  end
+
+  # Section 10: a channel-scoped token (no conversation) follows the channel.
+  defp scope(claims, hello) do
+    if ChannelSession.channel_token?(claims) do
+      {:ok, :channel}
+    else
+      with {:ok, conversation} <- resolve_conversation(claims, hello),
+           do: {:ok, {:conversation, conversation}}
+    end
+  end
+
+  defp start_channel_session(hello, claims, channel, state) do
+    state = %{state | permitted: permitted(claims)}
+
+    case ChannelSession.start(hello, claims, channel, state) do
+      {:ok, {frames, state}} ->
+        state = schedule_expiry(state, claims)
+        reply(frames, state)
+
+      {:error, :channel_type} ->
+        message = "channel-scoped connections need a websocket channel"
+        close(4403, "forbidden", [error("forbidden", message)], state)
     end
   end
 
@@ -642,7 +718,8 @@ defmodule ConvergerWeb.Protocol.Session do
     with {:ok, client_id} <- Send.client_id(frame),
          {:ok, params} <- Send.message_params(frame, client_id),
          :ok <- rate_limit(state.claims) do
-      persist(params, client_id, state)
+      params = Send.resolve_reply_to(params, frame, state.conversation_id)
+      persist(params, client_id, state, frame["meta"])
     else
       {:error, code, message, opts} ->
         reply([error(code, message, [frame_type: frame["type"]] ++ opts)], state)
@@ -659,12 +736,18 @@ defmodule ConvergerWeb.Protocol.Session do
     end
   end
 
-  defp persist(params, client_id, state) do
+  defp persist(params, client_id, state, meta) do
     key = idempotency_key(state.user_id, client_id)
 
     case Activities.get_activity_by_idempotency_key(state.conversation_id, key) do
-      nil -> create(params, client_id, key, state)
-      existing -> reply([Frames.ack(existing, client_id, true)], state)
+      nil ->
+        # A turn with meta needs a key the bot side can match it by (section 9).
+        key = key || meta_key(meta)
+        relay_meta(state.conversation_id, key, meta)
+        create(params, client_id, key, state)
+
+      existing ->
+        reply([Frames.ack(existing, client_id, true)], state)
     end
   end
 
@@ -712,6 +795,20 @@ defmodule ConvergerWeb.Protocol.Session do
         reply([error("internal", "the message could not be accepted, retry", opts)], state)
     end
   end
+
+  # mekik/1 per-turn context goes to the bot channel ahead of the turn, keyed
+  # by the turn.s idempotency key (section 9); it is never stored.
+  defp relay_meta(conversation_id, key, meta) when is_map(meta) and map_size(meta) > 0 do
+    case Conversations.get_conversation(conversation_id) do
+      nil -> :ok
+      conversation -> BotRelay.turn_meta(conversation, key, meta)
+    end
+  end
+
+  defp relay_meta(_conversation_id, _key, _meta), do: :ok
+
+  defp meta_key(meta) when is_map(meta) and map_size(meta) > 0, do: Protocol.random_id("meta")
+  defp meta_key(_meta), do: nil
 
   # On a `websocket` channel the connection is the channel's own transport:
   # the message is the channel's inbound message (Converger.Inbound, mode
@@ -820,6 +917,10 @@ defmodule ConvergerWeb.Protocol.Session do
     close = %{code: code, reason: reason, retry_after_ms: SocketGuard.retry_after_ms()}
     {:close, close, frames, state}
   end
+
+  # A channel-scoped connection has no single conversation head.
+  defp head_seq(%{mode: :channel}), do: nil
+  defp head_seq(state), do: state.feed.last_seq
 
   defp now, do: System.monotonic_time(:millisecond)
 end

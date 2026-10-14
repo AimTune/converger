@@ -28,7 +28,7 @@ Table `activities`:
 | `edited_at`, `deleted_at` | utc_datetime_usec | server | Stamped on a message when a `messageUpdate` or `messageDelete` for it is accepted. Never cast from input. |
 | `message_type` | text | client | Optional. A typed message ([#68](https://github.com/AimTune/converger/issues/68)): the Protocol v1 message type (`card`, `buttons`, `tool_call`, an open renderer name, ...). Only on `message`, always with `payload`. See [typed messages](#typed-messages). |
 | `payload` | jsonb | client | Optional. The typed message: the frame body without `type`, `seq` and the server envelope, validated against the Protocol v1 schemas, at most 131,072 bytes as JSON. |
-| `source_channel_id` | uuid | server | The channel the activity came in on (inbound webhook, WebSocket, client API token). `NULL` for the tenant API and system events. Not part of the wire format; the pipeline uses it to route replies back to the conversation's origin channel ([Routing rules](routing-rules.md#how-activities-fan-out)). |
+| `source_channel_id` | uuid | server | The channel the activity came in on (inbound webhook, WebSocket, client API token). `NULL` for the tenant API and system events. Part of the canonical shape (tenant API, outbound webhooks, the PubSub broadcast) since #64, not of the client API; the pipeline uses it to route replies back to the conversation's origin channel ([Routing rules](routing-rules.md#how-activities-fan-out)). |
 | `inserted_at`, `updated_at` | utc_datetime_usec | server | The server timestamp always wins. Clients cannot set it. |
 
 ### Types
@@ -264,6 +264,7 @@ If enqueueing the delivery jobs fails, the transaction rolls back and the caller
   "reply_to_id": null,
   "message_type": null,
   "payload": null,
+  "source_channel_id": null,
   "edited_at": null,
   "deleted_at": null,
   "conversation_id": "5b0c8f2e-3c1d-4a8e-9f3a-1d2e3f4a5b6c",
