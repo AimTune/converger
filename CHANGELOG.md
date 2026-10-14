@@ -24,6 +24,18 @@
   [activities](docs/concepts/activities.md).
 
 
+### Admin panel and tenant portal render rich messages (#68)
+
+- The conversation transcripts (`/admin/conversations/:id`, `/portal/conversations/:id`) render typed messages
+  natively with daisyUI: actions as chips, cards, carousels, media links with metadata, locations (OpenStreetMap
+  link), contacts, collapsible `tool_call` traces, GenUI chunks, interrupts with an open/resolved badge that
+  updates live, `interrupt_resolved` notes and skill badges; unknown types show `data.text` or their JSON.
+- Server-side (`ConvergerWeb.MessageComponents`), not chativa's web component (no Node or CDN in the asset
+  build, ADR-0060). Payloads are escaped, only `http(s)` and same-origin `/api/` URLs are linked, media are not
+  loaded inline, JSON previews are truncated.
+- Docs: [admin UI](docs/admin-ui.md#rich-messages-implemented-68), [rich message vocabulary](docs/protocol/messages.md)
+  section 5.
+
 ### Typed message payloads: buttons, cards, media, tool traces, GenUI and interrupts are stored (#68, #63)
 
 - A `message` activity can carry a typed message of Converger Protocol v1: new columns `message_type` and
