@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+### mekik channel adapter: Converger dials a mekik/1 server per conversation (#64, Mode A)
+
+- New channel type `mekik` (mode `duplex`): a routing rule from any end-user channel (WhatsApp, Telegram, the
+  web widget, ...) to it makes a stock mekik/1 server the conversation's bot. Config `url` (ws/wss), `token`
+  (secret; `hello.token` and `Authorization: Bearer`), `meta`, `bot_id`, `idle_timeout_seconds`
+  ([mekik channel](docs/channels/mekik.md), [ADR-0066](docs/adr/0066-mekik-channel-adapter-mode-a.md)).
+- One upstream WebSocket per conversation (`Converger.Channels.Mekik.Connections`, `:global` in the cluster),
+  opened on the first turn, closed after the idle timeout, reconnected with jittered backoff. End-user turns
+  go upstream as mekik/1 `text` with per-turn `meta`; a tapped button answering an open interrupt as
+  `resume`; native `resume`, `genui_event`, `abort`, ... are forwarded.
+- The bot's `text`, rich messages, `tool_call`, `genui`, `interrupt`, `interrupt_resolved` and `skill` frames
+  are stored as the channel's bot (exactly once, keyed by mekik conversation and `seq`) and routed back to
+  the end user; `run`, `genui_components`, `skills` and `error` are relayed; `run` drives the bot's typing.
+- Resume: the mekik conversation and watermark are recorded in the new `mekik_sessions` table (migration
+  `20261014220000`), so a reconnect or restart gets exactly the frames it missed. A rejected token (close
+  4401) dead-letters the waiting deliveries.
+- New adapter capability `:bot_relay`.
+
 ### Agent sockets and the bot relay: channel-scoped Protocol v1 connections (#64)
 
 - A `scope: "channel"` token of a `websocket` channel opens a channel-scoped connection on the native endpoint:
