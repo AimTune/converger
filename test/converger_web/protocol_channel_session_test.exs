@@ -310,7 +310,14 @@ defmodule ConvergerWeb.ProtocolChannelSessionTest do
         })
 
       {_id, frame, _agent} = recv_enveloped(agent, "text")
-      assert frame["meta"] == %{"locale" => "tr-TR"}
+
+      assert %{
+               "locale" => "tr-TR",
+               "participant" => %{"id" => "alice"},
+               "channel" => %{"id" => widget_id, "type" => "websocket"}
+             } = frame["meta"]
+
+      assert widget_id == ctx.widget.id
     end
   end
 
