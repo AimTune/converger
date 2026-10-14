@@ -104,6 +104,16 @@ What chativa's UI callbacks receive, in order:
    the interrupt): nothing is replayed, `welcome.data.pending` re-announces the interrupt, connector-mekik renders the
    same chips, and a tap still resumes the bot.
 
+With the real mekik code instead of scripted frames, `test/protocol/mekik_converger_live_test.exs` (tag
+`:mekik_converger`, excluded by default because it needs the mekik repository, see
+[live tests](../channels/mekik.md#live-tests-against-the-mekik-repository)) runs the stock refund demo behind
+Converger with `@mekik/converger` and drives the same connector through two refunds. On a reconnect while the second
+run waits on its approval, the connector gets `welcome.data.pending` and then the replay, both carrying the open
+interrupt under the same message id (`interrupt-<id>`); chativa's message store renders an id once, so the chips
+appear once. mekik names a pause by its node (`approve:interrupt#0`), so every run of a graph reuses the same
+interrupt id: a page that already rendered the first run's chips and is not reloaded (chativa's store remembers
+rendered ids) does not render the second run's chips again.
+
 ### The mekik/1 profile
 
 mekik/1 has an open rule: a frame type the client does not know is a rich message, rendered by name. connector-mekik
