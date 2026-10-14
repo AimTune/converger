@@ -127,3 +127,13 @@ config :converger, :api_docs, enabled: true
 # No role is forced to enroll in 2FA (ADR-0058); tests that cover the
 # enforcement set :require_2fa_roles themselves.
 config :converger, :require_2fa_roles, []
+
+# mekik channel connections (#64): fast reconnects, no periodic channel scan
+# (the relay process has no sandbox connection; tests watch channels).
+config :converger, Converger.Channels.Adapters.Mekik,
+  connect_timeout_ms: 2_000,
+  call_timeout_ms: 5_000,
+  backoff_base_ms: 20,
+  max_backoff_ms: 200,
+  auth_retry_ms: 200,
+  relay_scan_interval_ms: nil

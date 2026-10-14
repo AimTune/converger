@@ -11,6 +11,14 @@ defmodule Converger.Channels.WhatsApp.Outbound do
       template (HSM) message. Templates are the only messages WhatsApp
       accepts outside the 24-hour customer-service window. The activity's
       text and attachments are ignored.
+    * a typed message with actions (`text` + `actions`, `quick-reply`,
+      `buttons`, `card`, `carousel`, `interrupt`; #68, ADR-0064): reply
+      buttons (1 to 3 actions, titles cut to 20 characters), a list message
+      (4 to 10, rows cut to 24 with the full label as description) or a
+      numbered text (more); links are appended to the body (cut to 1024). A
+      card is its image, then its text with its buttons; a carousel one card
+      after the other. Button and row ids are answer keys
+      (`Converger.Channels.RichContent.ref/2`).
     * otherwise, in attachment order:
       * `application/vnd.converger.card.buttons` / `.card.list` -
         an interactive reply-button or list message;
@@ -26,7 +34,7 @@ defmodule Converger.Channels.WhatsApp.Outbound do
   See `docs/channels/whatsapp.md` and ADR-0039.
   """
 
-  alias Converger.Channels.DeliveryError
+  alias Converger.Channels.{DeliveryError, RichContent}
   alias Converger.Uploads
   alias Converger.Uploads.Attachment
 
@@ -41,6 +49,13 @@ defmodule Converger.Channels.WhatsApp.Outbound do
 
   @max_buttons 3
   @max_list_rows 10
+
+  # Cloud API limits (docs/protocol/messages.md section 5).
+  @max_button_title 20
+  @max_row_title 24
+  @max_row_description 72
+  @max_body 1024
+  @list_button "Options"
 
   @type part ::
           {:text, String.t()}
@@ -66,11 +81,118 @@ defmodule Converger.Channels.WhatsApp.Outbound do
   def parts(activity) do
     metadata = Map.get(activity, :metadata) || %{}
 
-    case metadata["template"] do
-      nil -> content_parts(activity)
-      template -> template_part(template)
+    cond do
+      metadata["template"] -> template_part(metadata["template"])
+      RichContent.typed?(activity) -> rich_parts(activity)
+      true -> content_parts(activity)
     end
   end
+
+  # A typed message the adapter declares (#68, ADR-0064; media, location and
+  # contact arrive as legacy attachments, see Converger.Activities.Downgrade):
+  # actions become reply buttons (1 to 3), a list (4 to 10) or a numbered
+  # text (more); every button and row id is the answer key
+  # `RichContent.ref/2`. A card is its image, then its text with its buttons;
+  # a carousel one card after the other (at most 10).
+  defp rich_parts(%{message_type: type, payload: payload} = activity) do
+    actions = RichContent.actions(type, payload)
+    fallback = blank_to_nil(Map.get(activity, :text))
+
+    parts =
+      case RichContent.cards(type, payload) do
+        [] ->
+          interactive_parts(RichContent.prompt(type, payload) || fallback, actions, activity)
+
+        cards ->
+          intro =
+            if type == "carousel",
+              do: text_parts(RichContent.prompt(type, payload)),
+              else: []
+
+          intro ++
+            Enum.flat_map(Enum.with_index(cards), fn {card, index} ->
+              card_parts(card, Enum.filter(actions, &(&1["card"] == index)), activity)
+            end)
+      end
+
+    finish(parts)
+  end
+
+  defp card_parts(card, actions, activity) do
+    text = RichContent.card_text(card)
+
+    image =
+      case RichContent.media_url(card["image"]) do
+        nil -> nil
+        url -> %{"contentType" => "image/jpeg", "contentUrl" => url}
+      end
+
+    cond do
+      actions == [] and image -> [{:media, "image", image, text}]
+      actions == [] -> text_parts(text)
+      image -> [{:media, "image", image, nil} | interactive_parts(text, actions, activity)]
+      true -> interactive_parts(text, actions, activity)
+    end
+  end
+
+  defp interactive_parts(text, actions, activity) do
+    choices = RichContent.choices(actions)
+    links = for a <- actions, a["url"], do: "#{a["label"]}: #{a["url"]}"
+    body = [text | links] |> Enum.reject(&is_nil/1) |> Enum.join("\n") |> blank_to_nil()
+    body_or_labels = body || Enum.map_join(choices, " | ", & &1["label"])
+
+    cond do
+      choices == [] ->
+        text_parts(body)
+
+      length(choices) <= @max_buttons ->
+        [{:buttons, interactive_card(body_or_labels, %{"buttons" => buttons(choices, activity)})}]
+
+      length(choices) <= @max_list_rows ->
+        [{:list, interactive_card(body_or_labels, list_action(choices, activity))}]
+
+      true ->
+        numbered = Enum.map_join(choices, "\n", &"#{&1["number"]}. #{&1["label"]}")
+        text_parts(Enum.join(Enum.reject([body, numbered], &is_nil/1), "\n\n"))
+    end
+  end
+
+  defp buttons(choices, activity) do
+    for c <- choices do
+      %{
+        "id" => RichContent.ref(activity.id, c["index"]),
+        "title" => RichContent.truncate(c["label"], @max_button_title)
+      }
+    end
+  end
+
+  defp list_action(choices, activity) do
+    rows = for c <- choices, do: list_row(c, activity)
+    %{"button" => @list_button, "sections" => [%{"title" => nil, "rows" => rows}]}
+  end
+
+  # A row title is at most 24 characters; a longer label is shown in full
+  # (up to 72) as the row description.
+  defp list_row(choice, activity) do
+    label = choice["label"]
+    title = RichContent.truncate(label, @max_row_title)
+
+    %{
+      "id" => RichContent.ref(activity.id, choice["index"]),
+      "title" => title,
+      "description" => if(title != label, do: RichContent.truncate(label, @max_row_description))
+    }
+  end
+
+  defp interactive_card(body, action) do
+    Map.merge(
+      %{"body" => RichContent.truncate(body, @max_body), "header" => nil, "footer" => nil},
+      action
+    )
+  end
+
+  defp text_parts(nil), do: []
+  defp text_parts(text), do: [{:text, text}]
 
   defp template_part(%{"name" => name} = template) when is_binary(name) and name != "" do
     case language_code(template["language"]) do

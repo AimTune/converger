@@ -168,6 +168,29 @@ two UCS-2 units. Every segment is billed, so a text longer than the channel's `m
 1,530 GSM-7 or 670 UCS-2 characters) fails permanently with
 `text is <n> <encoding> segments, the channel allows <max> (config max_segments)` instead of being sent.
 
+## Typed messages and numeric replies
+
+Neither SMS adapter declares `message_types` ([#68](https://github.com/AimTune/converger/issues/68),
+[ADR-0064](../adr/0064-per-channel-rendering-of-typed-messages-and-normalised-answers.md)): a typed message is sent as
+its text rendering ([messages.md section 5](../protocol/messages.md)). A message with actions becomes its prompt and a
+numbered list, for example
+
+```text
+How can I help?
+1. Track an order
+2. Talk to a human
+Pricing: https://example.com/pricing
+```
+
+A card is its title, subtitle, text and image URL before its list; a carousel one such block per card, numbering
+continuing; media are their caption and absolute URL (typed media are not sent as MMS); a location is its name and a
+map link; a contact its name and numbers. The list counts towards `max_segments` like any text.
+
+The user answers with the number. A reply that is only a number (`2`, `2.` or `2)`) within 24 hours of the
+conversation's most recent actionable message becomes the normalised answer: `text` is the action's value (or its
+label), `metadata.action = {label, value, source: "numeric"}` and `reply_to_id` the offering message
+([messages.md section 6](../protocol/messages.md)). Any other text, or a number out of range, stays as it was.
+
 ## Opt-out (STOP / START)
 
 An inbound message whose whole text (trimmed, any case) is an opt-out keyword opts the participant out; an opt-in

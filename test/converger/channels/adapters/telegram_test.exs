@@ -184,6 +184,34 @@ defmodule Converger.Channels.Adapters.TelegramTest do
                       %{"callback_query_id" => "4382bfdwdsb323b2d9"}}
     end
 
+    test "a press on an answer-key button is a message carrying the answer (#68)" do
+      stub_api(fn "answerCallbackQuery", _ -> true end)
+      ref = "a:6f1c2a4e-0b7d-4c55-9a1e-3d2f8e7b9c10:1"
+
+      update =
+        fixture("callback_query")
+        |> put_in(["callback_query", "data"], ref)
+        |> put_in(["callback_query", "message", "reply_markup"], %{
+          "inline_keyboard" => [
+            [%{"text" => "Track", "callback_data" => "a:6f1c2a4e-0b7d-4c55-9a1e-3d2f8e7b9c10:0"}],
+            [%{"text" => "Talk to a human", "callback_data" => ref}]
+          ]
+        })
+
+      assert {:ok, [message]} = Telegram.parse_inbound(@channel, update)
+
+      assert message["type"] == "message"
+      assert message["text"] == "Talk to a human"
+
+      assert message["answer"] == %{
+               "ref" => ref,
+               "source" => "keyboard",
+               "label" => "Talk to a human"
+             }
+
+      assert message["reply_to_provider_id"] == "123456789:42"
+    end
+
     test "a reaction is a messageReaction on the reacted-to message" do
       assert {:ok, [message]} = Telegram.parse_inbound(@channel, fixture("message_reaction"))
 
@@ -312,6 +340,120 @@ defmodule Converger.Channels.Adapters.TelegramTest do
                  [%{"text" => "Thanks", "callback_data" => "Thanks"}]
                ]
              }
+    end
+
+    test "typed buttons are an inline keyboard of answer keys, links as URL buttons (#68)" do
+      stub_api()
+      id = Ecto.UUID.generate()
+
+      buttons =
+        activity(%{
+          id: id,
+          text: "fallback",
+          message_type: "buttons",
+          payload: %{
+            "data" => %{
+              "text" => "How can I help?",
+              "buttons" => [
+                %{"label" => "Track an order", "value" => "/track"},
+                %{"label" => "Pricing", "url" => "https://example.com/pricing"}
+              ]
+            }
+          }
+        })
+
+      assert {:ok, %{telegram_messages: 1}} = Telegram.deliver_activity(@channel, buttons)
+      assert_received {:telegram, _, "sendMessage", params}
+      assert params["text"] == "How can I help?"
+
+      assert params["reply_markup"] == %{
+               "inline_keyboard" => [
+                 [%{"text" => "Track an order", "callback_data" => "a:#{id}:0"}],
+                 [%{"text" => "Pricing", "url" => "https://example.com/pricing"}]
+               ]
+             }
+
+      assert byte_size("a:#{id}:0") <= 64
+    end
+
+    test "a typed carousel is one photo with caption and keyboard per card (#68)" do
+      stub_api()
+      id = Ecto.UUID.generate()
+
+      carousel =
+        activity(%{
+          id: id,
+          message_type: "carousel",
+          payload: %{
+            "data" => %{
+              "cards" => [
+                %{
+                  "title" => "Basic",
+                  "subtitle" => "9 USD",
+                  "image" => "https://cdn.example.com/basic.png",
+                  "buttons" => [%{"label" => "Pick", "value" => "basic"}]
+                },
+                %{"title" => "Pro", "buttons" => [%{"label" => "Pick", "value" => "pro"}]}
+              ]
+            }
+          }
+        })
+
+      assert {:ok, %{telegram_messages: 2}} = Telegram.deliver_activity(@channel, carousel)
+
+      assert_received {:telegram, _, "sendPhoto",
+                       %{
+                         "photo" => "https://cdn.example.com/basic.png",
+                         "caption" => "Basic\n9 USD",
+                         "reply_markup" => %{"inline_keyboard" => [[%{"callback_data" => first}]]}
+                       }}
+
+      assert_received {:telegram, _, "sendMessage",
+                       %{
+                         "text" => "Pro",
+                         "reply_markup" => %{
+                           "inline_keyboard" => [[%{"callback_data" => second}]]
+                         }
+                       }}
+
+      assert first == "a:#{id}:0"
+      assert second == "a:#{id}:1"
+    end
+
+    test "video, voice, audio, location and contacts use their own methods" do
+      stub_api()
+
+      attachments = [
+        %{"contentType" => "video/mp4", "contentUrl" => "https://cdn.example.com/v.mp4"},
+        %{
+          "contentType" => "audio/ogg",
+          "contentUrl" => "https://cdn.example.com/v.ogg",
+          "channelData" => %{"voice" => true}
+        },
+        %{"contentType" => "audio/mpeg", "contentUrl" => "https://cdn.example.com/s.mp3"},
+        %{
+          "contentType" => "application/vnd.converger.location",
+          "content" => %{"latitude" => 41.0, "longitude" => 29.0}
+        },
+        %{
+          "contentType" => "application/vnd.converger.contacts",
+          "content" => [%{"name" => "Desk", "phones" => ["+90212"]}, %{"name" => "No phone"}]
+        }
+      ]
+
+      assert {:ok, %{telegram_messages: 5}} =
+               Telegram.deliver_activity(
+                 @channel,
+                 activity(%{text: nil, attachments: attachments})
+               )
+
+      assert_received {:telegram, _, "sendVideo", %{"video" => "https://cdn.example.com/v.mp4"}}
+      assert_received {:telegram, _, "sendVoice", %{"voice" => "https://cdn.example.com/v.ogg"}}
+      assert_received {:telegram, _, "sendAudio", %{"audio" => "https://cdn.example.com/s.mp3"}}
+      assert_received {:telegram, _, "sendLocation", %{"latitude" => 41.0, "longitude" => 29.0}}
+
+      assert_received {:telegram, _, "sendContact",
+                       %{"phone_number" => "+90212", "first_name" => "Desk"}}
     end
 
     test "without a recipient the failure is permanent" do

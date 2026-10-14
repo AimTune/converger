@@ -76,6 +76,33 @@ to the conversation's PubSub topic), marked by a **Live** badge. Each activity s
 opt-out date and profile metadata. **Close** and **Reopen** change the conversation's status; on the admin panel
 they are audited (`close`, `reopen`).
 
+### Rich messages: **Implemented (#68)**
+
+Typed messages ([rich message vocabulary](protocol/messages.md)) are rendered natively on both transcripts,
+server-side with daisyUI (`ConvergerWeb.MessageComponents`), each tagged with its type:
+
+| type | rendered as |
+| --- | --- |
+| `text` with `actions`, `quick-reply`, `buttons` | the text and the actions as chips (not clickable answers; a `url` action is a link) |
+| `card`, `carousel` | cards with title, subtitle, body, image link and buttons; a carousel scrolls horizontally |
+| `image`, `file`, `video`, `audio` | a link to the media with its name or alt text, caption, type, size, dimensions and duration |
+| `location` | name, address, coordinates and an OpenStreetMap link |
+| `contact` | name, organization, phone numbers and e-mail addresses |
+| `tool_call` | a collapsible trace: tool name, status badge, params and result as JSON |
+| `genui` | the stream id and the chunk: component name and props, text content, or event name |
+| `interrupt` | the prompt (`payload.title`), the actions as chips, the payload, and an **open** or **resolved** badge (resolved once an `interrupt_resolved` with the same id is in the transcript, also live) |
+| `interrupt_resolved`, `skill` | a short note with the answer; a skill badge with its status |
+| any other type | its `data.text`, else its payload as JSON |
+
+Plain messages show their text as before. The payload is client input, so the renderer escapes everything (no
+raw HTML), only links `http`/`https` URLs and same-origin `/api/` paths (`javascript:`, `data:` and other
+schemes are refused even though the schemas already reject them on write), and cuts JSON previews at 2,000
+characters. Media are never loaded inline: the admin Content-Security-Policy (`img-src 'self'`) does not load
+third-party content, which also keeps tracking pixels out, and attachment URLs need an API token. The issue
+suggested embedding chativa's web component for this; that needs chativa's JavaScript in the asset build, which
+has no Node and no CDN ([ADR-0060](adr/0060-tailwind-daisyui-admin-ui-without-node.md)), so the transcripts render server-side
+instead.
+
 ## Permissions
 
 | Action | Admin panel | Tenant portal |

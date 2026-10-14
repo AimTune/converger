@@ -6,6 +6,7 @@ defmodule ConvergerWeb.ConvergerAPI.UploadController do
 
   alias Converger.{Activities, Conversations, Uploads}
   alias ConvergerWeb.APIError
+  alias ConvergerWeb.Protocol.Frames
 
   import ConvergerWeb.Helpers.Authorization,
     only: [authorize_channel: 2, authorize_conversation: 2]
@@ -25,7 +26,7 @@ defmodule ConvergerWeb.ConvergerAPI.UploadController do
   operation(:create,
     summary: "Upload a file",
     description:
-      "Stores the file (type sniffed and allow-listed) and posts an activity carrying it.",
+      "Stores the file (type sniffed and allow-listed) and posts an activity carrying it. The response includes the activity's `seq` and its Protocol v1 `frame`, the attachment message the WebSocket delivers.",
     operation_id: "uploadFile",
     parameters: [conversation_id: path_id("Conversation id")],
     request_body: {"The file", "multipart/form-data", ref("UploadRequest")},
@@ -53,7 +54,7 @@ defmodule ConvergerWeb.ConvergerAPI.UploadController do
 
       activity_params = %{
         "type" => activity_meta["type"] || "message",
-        "sender" => get_in(activity_meta, ["from", "id"]) || "user",
+        "sender" => sender(activity_meta, claims),
         "text" => activity_meta["text"] || "",
         "attachments" => [
           %{
@@ -78,14 +79,19 @@ defmodule ConvergerWeb.ConvergerAPI.UploadController do
           |> put_status(:ok)
           |> json(%{
             id: activity.id,
+            seq: activity.seq,
             attachments: [
               %{
                 id: attachment.id,
                 contentType: attachment.content_type,
                 contentUrl: content_url,
+                name: attachment.filename,
                 size: attachment.size
               }
-            ]
+            ],
+            # The attachment message as the WebSocket delivers it (chativa's
+            # sendFile result, ADR-0065), rendered for the uploading end user.
+            frame: Frames.activity(activity, claims["user_id"] || activity.sender, false)
           })
 
         {:error, reason} ->
@@ -125,6 +131,12 @@ defmodule ConvergerWeb.ConvergerAPI.UploadController do
         {:error, APIError.new(:upstream_unavailable, "File could not be stored, please retry")}
     end
   end
+
+  # `from.id`, else the token's verified end user, so the upload renders as
+  # `from: "user"` for them (ADR-0065).
+  defp sender(%{"from" => %{"id" => id}}, _claims) when is_binary(id), do: id
+  defp sender(_meta, %{"user_id" => user_id}) when is_binary(user_id), do: user_id
+  defp sender(_meta, _claims), do: "user"
 
   defp upload_file(%{"file" => %Plug.Upload{} = upload}, tenant_id, conversation_id) do
     Uploads.create_attachment(tenant_id, upload, conversation_id: conversation_id)

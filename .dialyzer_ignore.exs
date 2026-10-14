@@ -19,5 +19,10 @@
   # (its success typing goes through the untyped private map of the Mint
   # connection), so it flags the {:ok, conn, websocket} branch. The branch is
   # taken on every connection (test/converger/channels/discord/gateway_test.exs).
-  {"lib/converger/channels/discord/gateway.ex", :pattern_match}
+  {"lib/converger/channels/discord/gateway.ex", :pattern_match},
+  # The same false positive in the mekik adapter (#64); with the success branch
+  # unreachable to Dialyzer, the hello frame helpers look unused. Both are
+  # exercised on every connection (test/converger/channels/mekik_integration_test.exs).
+  {"lib/converger/channels/mekik/connection.ex", :pattern_match},
+  {"lib/converger/channels/mekik/connection.ex", :unused_fun}
 ]

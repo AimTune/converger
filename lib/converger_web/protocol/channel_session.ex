@@ -279,13 +279,8 @@ defmodule ConvergerWeb.Protocol.ChannelSession do
       message =
         Map.merge(params, %{"sender" => state.agent, "idempotency_key" => key})
 
-      # Inbound de-duplicates per channel; a routed conversation belongs to
-      # another channel, so a resend is recognised here first.
-      result =
-        case Converger.Activities.get_activity_by_idempotency_key(id, key) do
-          nil -> Inbound.receive_message(state.channel, message, conversation_id: id)
-          existing -> {:duplicate, existing}
-        end
+      # Inbound de-duplicates within the named conversation.
+      result = Inbound.receive_message(state.channel, message, conversation_id: id)
 
       persisted(id, result, client_id, type, state)
     else
@@ -297,8 +292,14 @@ defmodule ConvergerWeb.Protocol.ChannelSession do
     end
   end
 
-  # A mekik bot's message `id` is its clientId when it has the clientId syntax.
-  defp client_id(frame), do: Send.client_id(frame)
+  # A mekik bot.s message `id` is its clientId when it has the clientId syntax.
+  # A mekik-native frame.s `id` names the interrupt (an `interrupt` and its
+  # `interrupt_resolved` share it), so only an explicit clientId counts there.
+  defp client_id(%{"type" => type} = frame) do
+    if MessagePayload.native?(type),
+      do: Send.client_id(Map.delete(frame, "id")),
+      else: Send.client_id(frame)
+  end
 
   defp bot_params(%{"type" => type} = frame) do
     metadata = Map.get(frame, "metadata") || %{}
@@ -477,7 +478,7 @@ defmodule ConvergerWeb.Protocol.ChannelSession do
           {live, feed} = Feed.live(entry.feed, activity, opts)
           {metas, state} = take_meta(state, id, activity)
           state = put_feed(touch(state, id), id, feed)
-          {frames ++ envelope_all(id, live, metas), state}
+          {frames ++ envelope_all(id, live, metas, state), state}
 
         :error ->
           {[], state}
@@ -590,7 +591,7 @@ defmodule ConvergerWeb.Protocol.ChannelSession do
       do: Deliveries.acknowledge(state.channel.id, id, head)
 
     state = put_feed(state, id, feed)
-    {envelope_all(id, frames, %{}), state}
+    {envelope_all(id, frames, %{}, state), state}
   end
 
   # Rendezvous hashing over the live members of the connection's group: the
@@ -607,17 +608,29 @@ defmodule ConvergerWeb.Protocol.ChannelSession do
   ## Helpers
 
   # `metas`: seq => the mekik/1 meta of that user turn.
-  defp envelope_all(id, frames, metas) do
+  defp envelope_all(id, frames, metas, state) do
     Enum.map(frames, fn frame ->
-      frame = frame |> BotRelay.turn_frame(id) |> put_meta(metas)
+      frame = frame |> put_channel_type(state) |> BotRelay.turn_frame(id) |> put_meta(metas)
       Frames.envelope(id, frame)
     end)
   end
 
   defp put_meta(%{"seq" => seq} = frame, metas) when is_map_key(metas, seq),
-    do: Map.put(frame, "meta", Map.fetch!(metas, seq))
+    do: Map.update(frame, "meta", Map.fetch!(metas, seq), &Map.merge(&1, Map.fetch!(metas, seq)))
 
   defp put_meta(frame, _metas), do: frame
+
+  defp put_channel_type(
+         %{"meta" => %{"channel" => %{"id" => channel_id} = ref} = meta} = frame,
+         state
+       ) do
+    case Converger.Channels.get_channel(channel_id, state.channel.tenant_id) do
+      %{type: type} -> %{frame | "meta" => %{meta | "channel" => Map.put(ref, "type", type)}}
+      _ -> frame
+    end
+  end
+
+  defp put_channel_type(frame, _state), do: frame
 
   # A turn's meta was relayed ahead of it, under its idempotency key.
   defp take_meta(state, id, activity) do

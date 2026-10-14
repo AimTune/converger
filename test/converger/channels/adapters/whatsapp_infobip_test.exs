@@ -130,6 +130,25 @@ defmodule Converger.Channels.Adapters.WhatsAppInfobipTest do
              ] = message["attachments"]
     end
 
+    test "a reply whose id is an answer key carries the answer (#68)" do
+      ref = "a:6f1c2a4e-0b7d-4c55-9a1e-3d2f8e7b9c10:3"
+
+      params = %{
+        "results" => [
+          inbound("ib-list", %{"type" => "INTERACTIVE_LIST_REPLY", "id" => ref, "title" => "Pro"}),
+          inbound("ib-btn", %{
+            "type" => "INTERACTIVE_BUTTON_REPLY",
+            "id" => "yes",
+            "title" => "Yes"
+          })
+        ]
+      }
+
+      assert {:ok, [list, legacy]} = WhatsAppInfobip.parse_inbound(@channel, params)
+      assert list["answer"] == %{"ref" => ref, "source" => "list", "label" => "Pro"}
+      refute Map.has_key?(legacy, "answer")
+    end
+
     test "skips delivery reports" do
       assert {:ok, []} = WhatsAppInfobip.parse_inbound(@channel, infobip_dlr("msg-1", "SEEN"))
     end

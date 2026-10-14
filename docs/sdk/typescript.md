@@ -13,7 +13,7 @@ Which client to use:
 
 | you are building | use |
 | --- | --- |
-| a web chat widget | [chativa](https://github.com/AimTune/chativa) with `@chativa/connector-converger` |
+| a web chat widget | [chativa](https://github.com/AimTune/chativa): `@chativa/connector-mekik` ([connecting chat clients](../protocol/clients.md)), or `@chativa/connector-converger` for the hub extras (receipts, upload, history, multi-conversation) |
 | a bot or an agent console that serves a whole channel | [`@converger/agent`](agent.md) (channel-scoped sockets, [#67](https://github.com/AimTune/converger/issues/67)) |
 | a Node service, a React Native app, a custom UI | **`@converger/client`** (this page) |
 

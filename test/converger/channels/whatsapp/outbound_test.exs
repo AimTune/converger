@@ -11,6 +11,93 @@ defmodule Converger.Channels.WhatsApp.OutboundTest do
   defp image(url \\ "https://cdn.example.com/a.jpg"),
     do: %{"contentType" => "image/jpeg", "contentUrl" => url}
 
+  describe "typed messages (#68)" do
+    @id "6f1c2a4e-0b7d-4c55-9a1e-3d2f8e7b9c10"
+
+    defp typed(type, payload, text \\ nil),
+      do: activity(id: @id, text: text, message_type: type, payload: payload)
+
+    defp labels(n), do: for(i <- 1..n, do: %{"label" => "Option #{i}", "value" => "v#{i}"})
+
+    test "1 to 3 actions are reply buttons whose ids are answer keys" do
+      payload = %{"data" => %{"text" => "Pick", "buttons" => labels(3)}}
+
+      assert {:ok, [{:buttons, %{"body" => "Pick", "buttons" => buttons}}]} =
+               Outbound.parts(typed("buttons", payload))
+
+      assert Enum.map(buttons, & &1["id"]) == for(i <- 0..2, do: "a:#{@id}:#{i}")
+    end
+
+    test "4 to 10 actions are a list; long labels are cut and kept as description" do
+      long = "A very long option label that WhatsApp cuts"
+      actions = [%{"label" => long} | labels(4)]
+      payload = %{"data" => %{"text" => "Choose"}, "actions" => actions}
+
+      assert {:ok,
+              [{:list, %{"body" => "Choose", "button" => "Options", "sections" => [section]}}]} =
+               Outbound.parts(typed("text", payload))
+
+      assert [%{"id" => "a:" <> _, "title" => title, "description" => description} | _] =
+               section["rows"]
+
+      assert String.length(title) == 24
+      assert description == long
+      assert length(section["rows"]) == 5
+    end
+
+    test "more than 10 actions are a numbered text" do
+      payload = %{"data" => %{"text" => "Many", "actions" => labels(11)}}
+
+      assert {:ok, [{:text, text}]} = Outbound.parts(typed("quick-reply", payload))
+      assert text =~ "Many\n\n1. Option 1\n"
+      assert text =~ "11. Option 11"
+    end
+
+    test "interrupts use their title as the body" do
+      payload = %{
+        "data" => %{
+          "payload" => %{"title" => "Refund?"},
+          "actions" => [%{"label" => "Approve", "value" => %{"approved" => true}}]
+        }
+      }
+
+      assert {:ok, [{:buttons, %{"body" => "Refund?"}}]} =
+               Outbound.parts(typed("interrupt", payload))
+    end
+
+    test "a carousel is its text, then one card after the other" do
+      payload = %{
+        "data" => %{
+          "text" => "Plans",
+          "cards" => [
+            %{"title" => "Basic", "image" => "https://x.test/b.png", "buttons" => labels(1)},
+            %{"title" => "Pro", "buttons" => [%{"label" => "Pick", "value" => "pro"}]},
+            %{"title" => "Info", "image" => "https://x.test/i.png"}
+          ]
+        }
+      }
+
+      assert {:ok,
+              [
+                {:text, "Plans"},
+                {:media, "image", %{"contentUrl" => "https://x.test/b.png"}, nil},
+                {:buttons, %{"body" => "Basic", "buttons" => [%{"id" => "a:" <> _ = first}]}},
+                {:buttons, %{"body" => "Pro", "buttons" => [%{"id" => second}]}},
+                {:media, "image", %{"contentUrl" => "https://x.test/i.png"}, "Info"}
+              ]} = Outbound.parts(typed("carousel", payload))
+
+      assert String.ends_with?(first, ":0")
+      assert String.ends_with?(second, ":1")
+    end
+
+    test "without a prompt the body is the stored fallback" do
+      payload = %{"data" => %{"buttons" => labels(2)}}
+
+      assert {:ok, [{:buttons, %{"body" => "Option 1 | Option 2"}}]} =
+               Outbound.parts(typed("buttons", payload, "Option 1 | Option 2"))
+    end
+  end
+
   test "plain text is one text part" do
     assert {:ok, [{:text, "hi"}]} = Outbound.parts(activity(text: "hi"))
   end
