@@ -111,6 +111,34 @@ defmodule Converger.Channels.Adapters.EmailTest do
       assert email.html_body =~ "Hello &lt;there&gt;<br>"
     end
 
+    test "a typed buttons message is a numbered list with links, in text and HTML (#68)", ctx do
+      activity =
+        activity_fixture(ctx.tenant, ctx.conversation, %{
+          message_type: "buttons",
+          payload: %{
+            "data" => %{
+              "text" => "How can I help?",
+              "buttons" => [
+                %{"label" => "Track an order", "value" => "/track"},
+                %{"label" => "Pricing", "url" => "https://example.com/pricing"},
+                %{"label" => "Talk to a human"}
+              ]
+            }
+          },
+          metadata: %{"email_to" => "jane@example.com"}
+        })
+
+      assert {:ok, _} = Email.deliver_activity(ctx.channel, activity)
+      assert_received {:email, email}
+
+      assert email.text_body ==
+               "How can I help?\n1. Track an order\n2. Talk to a human\nPricing: https://example.com/pricing"
+
+      assert email.html_body =~ "<ol start=\"1\">"
+      assert email.html_body =~ "<li>Talk to a human</li>"
+      assert email.html_body =~ ~s(<a href="https://example.com/pricing">Pricing</a>)
+    end
+
     test "renders the subject template", ctx do
       channel = %{
         ctx.channel
