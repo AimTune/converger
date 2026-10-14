@@ -17,6 +17,9 @@ defmodule Converger.Channels.Email.Outbound do
 
   The text part is the activity text, followed by links to its attachments
   that are not attached. The HTML part is the escaped text with line breaks.
+  A typed message with actions (#68, ADR-0064) is rendered by
+  `Converger.Channels.RichContent`: its prompt, its actions as a numbered
+  list (an `<ol>` in HTML) answered by reply mail, links as links.
   Attachments uploaded to Converger (`/api/v1/converger/attachments/:id` of
   the channel's tenant) are attached, up to `max_attachment_bytes` in total
   (default: the upload size limit); others are linked.
@@ -26,6 +29,7 @@ defmodule Converger.Channels.Email.Outbound do
 
   alias Converger.Activities.Activity
   alias Converger.Channels.Email.Address
+  alias Converger.Channels.RichContent
   alias Converger.{Repo, Uploads}
 
   @providers %{
@@ -146,8 +150,8 @@ defmodule Converger.Channels.Email.Outbound do
       |> Swoosh.Email.from(sender(config["from"]))
       |> Swoosh.Email.subject(subject(activity, config, thread))
       |> Swoosh.Email.header("Message-ID", Address.bracket(id))
-      |> Swoosh.Email.text_body(text_body(activity.text, linked))
-      |> Swoosh.Email.html_body(html_body(activity.text, linked))
+      |> Swoosh.Email.text_body(text_body(activity, linked))
+      |> Swoosh.Email.html_body(html_body(activity, linked))
       |> maybe_reply_to(config["reply_to"])
       |> thread_headers(thread)
 
@@ -204,23 +208,36 @@ defmodule Converger.Channels.Email.Outbound do
     end
   end
 
-  defp text_body(text, linked) do
+  # A typed message (#68, ADR-0064) is rendered by RichContent: its prompt,
+  # its actions as a numbered list answered by reply mail, links as links,
+  # card images inline.
+  defp text_body(activity, linked) do
+    text = if RichContent.typed?(activity), do: RichContent.text(activity), else: activity.text
     links = for {name, url} <- linked, do: "#{name}: #{url}"
     Enum.join(Enum.reject([text || "" | links], &(&1 == "")), "\n\n")
   end
 
-  defp html_body(text, linked) do
-    paragraphs =
-      (text || "")
-      |> escape()
-      |> String.replace(~r/\r?\n/, "<br>\n")
+  defp html_body(activity, linked) do
+    main =
+      case RichContent.typed?(activity) && RichContent.html(activity) do
+        html when is_binary(html) ->
+          html
+
+        _ ->
+          paragraphs =
+            (activity.text || "")
+            |> escape()
+            |> String.replace(~r/\r?\n/, "<br>\n")
+
+          "<p>#{paragraphs}</p>"
+      end
 
     links =
       for {name, url} <- linked do
         ~s(<p><a href="#{escape(url)}">#{escape(name)}</a></p>)
       end
 
-    Enum.join(["<p>#{paragraphs}</p>" | links], "\n")
+    Enum.join([main | links], "\n")
   end
 
   defp escape(text), do: text |> Phoenix.HTML.html_escape() |> Phoenix.HTML.safe_to_string()

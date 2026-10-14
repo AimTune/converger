@@ -393,6 +393,33 @@ defmodule Converger.Channels.Adapters.SlackTest do
       assert message["metadata"]["interactive_reply"]["title"] == "Track"
     end
 
+    test "a click on an answer-key button carries the answer (#68)" do
+      ref = "a:6f1c2a4e-0b7d-4c55-9a1e-3d2f8e7b9c10:0"
+
+      payload =
+        Jason.encode!(%{
+          "type" => "block_actions",
+          "user" => %{"id" => "U1"},
+          "channel" => %{"id" => "C1"},
+          "container" => %{"message_ts" => "1.5", "channel_id" => "C1"},
+          "message" => %{"ts" => "1.5"},
+          "actions" => [
+            %{
+              "action_id" => "converger_a_0",
+              "value" => ref,
+              "text" => %{"text" => "Track"},
+              "action_ts" => "1.6"
+            }
+          ]
+        })
+
+      assert {:ok, [message]} = Slack.parse_inbound(@channel, %{"payload" => payload})
+      assert message["type"] == "message"
+      assert message["text"] == "Track"
+      assert message["answer"] == %{"ref" => ref, "source" => "button", "label" => "Track"}
+      assert message["reply_to_provider_id"] == "C1:1.5"
+    end
+
     test "other well-formed bodies carry no message; garbage is an error" do
       assert {:ok, []} = Slack.parse_inbound(@channel, %{"type" => "app_rate_limited"})
       assert {:error, _} = Slack.parse_inbound(@channel, %{"foo" => "bar"})
@@ -427,7 +454,88 @@ defmodule Converger.Channels.Adapters.SlackTest do
     end
   end
 
+  describe "Blocks.from_message/1 (#68)" do
+    test "a typed buttons message is a section and buttons valued with answer keys" do
+      id = Ecto.UUID.generate()
+
+      activity =
+        activity(
+          id: id,
+          message_type: "buttons",
+          payload: %{
+            "data" => %{
+              "text" => "How can I help?",
+              "buttons" => [
+                %{"label" => "Track an order", "value" => "/track"},
+                %{"label" => "Pricing", "url" => "https://example.com/pricing"}
+              ]
+            }
+          }
+        )
+
+      assert [section, actions] = Blocks.from_message(activity)
+      assert section.text.text == "How can I help?"
+
+      assert [
+               %{action_id: "converger_a_0", value: value},
+               %{action_id: "converger_a_1", url: "https://example.com/pricing"}
+             ] = actions.elements
+
+      assert value == "a:#{id}:0"
+    end
+
+    test "a carousel is one section and actions block per card" do
+      activity =
+        activity(
+          message_type: "carousel",
+          payload: %{
+            "data" => %{
+              "text" => "Plans",
+              "cards" => [
+                %{
+                  "title" => "Basic",
+                  "image" => "https://example.com/b.png",
+                  "buttons" => [%{"label" => "Pick", "value" => "basic"}]
+                },
+                %{"title" => "Pro", "buttons" => [%{"label" => "Pick", "value" => "pro"}]}
+              ]
+            }
+          }
+        )
+
+      assert [intro, basic, basic_actions, pro, pro_actions] = Blocks.from_message(activity)
+      assert intro.text.text == "Plans"
+      assert basic.accessory.image_url == "https://example.com/b.png"
+      assert [%{action_id: "converger_a_0"}] = basic_actions.elements
+      assert pro.text.text == "*Pro*"
+      assert [%{action_id: "converger_a_1"}] = pro_actions.elements
+    end
+
+    test "plain activities have no message blocks" do
+      assert [] == Blocks.from_message(activity(text: "hi"))
+    end
+  end
+
   describe "deliver_activity/2" do
+    test "a typed message is posted as blocks with its text as notification text" do
+      capture_calls()
+
+      activity =
+        activity(
+          text: "Pick one",
+          message_type: "quick-reply",
+          payload: %{"data" => %{"text" => "Pick one", "actions" => [%{"label" => "Yes"}]}}
+        )
+
+      assert {:ok, _} = Slack.deliver_activity(@channel, activity)
+
+      assert_received {:slack_call, "chat.postMessage",
+                       %{
+                         "text" => "Pick one",
+                         "blocks" => [%{"type" => "section"}, %{"type" => "actions"}]
+                       }, _}
+    end
+
     test "posts to the default channel and returns the message reference" do
       capture_calls()
 

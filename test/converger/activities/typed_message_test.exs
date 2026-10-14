@@ -244,6 +244,12 @@ defmodule Converger.Activities.TypedMessageTest do
   end
 
   describe "downgrade" do
+    setup do
+      tenant = tenant_fixture()
+      channel = channel_fixture(tenant)
+      %{tenant: tenant, conversation: conversation_fixture(tenant, channel)}
+    end
+
     defp typed(message_type, payload, text) do
       %Activity{
         type: "message",
@@ -258,19 +264,106 @@ defmodule Converger.Activities.TypedMessageTest do
     test "adapters that forward the canonical activity get every type natively" do
       assert Adapter.message_types("webhook") == :all
       assert Adapter.message_types("websocket") == :all
-      assert Adapter.message_types("whatsapp_meta") == []
+      assert Adapter.message_types("sms_vonage") == []
+      assert "buttons" in Adapter.message_types("whatsapp_meta")
 
       assert :native == Downgrade.plan(typed("card", card(), "ORD-1"), %{type: "webhook"})
     end
 
-    test "end-user channels get the text fallback, or nothing without one" do
-      channel = %{type: "whatsapp_meta", config: %{}}
+    test "declared types are native; media arrive as legacy attachments" do
+      channel = %{type: "telegram", config: %{}}
+      assert :native == Downgrade.plan(typed("card", card(), "ORD-1"), channel)
+
+      image =
+        typed("image", %{"data" => %{"src" => "https://x.test/a.png", "caption" => "R"}}, "R")
 
       assert {:downgrade,
-              %Activity{type: "message", text: "ORD-1", message_type: nil, payload: nil}} =
+              %Activity{
+                text: "R",
+                message_type: nil,
+                attachments: [
+                  %{"contentType" => "image/png", "contentUrl" => "https://x.test/a.png"}
+                ]
+              }} = Downgrade.plan(image, channel)
+
+      location = typed("location", %{"data" => %{"latitude" => 1, "longitude" => 2}}, "1, 2")
+
+      assert {:downgrade,
+              %Activity{
+                text: nil,
+                attachments: [%{"contentType" => "application/vnd.converger.location"}]
+              }} = Downgrade.plan(location, channel)
+    end
+
+    test "other end-user channels get the numbered text rendering" do
+      channel = %{type: "sms_vonage", config: %{}}
+
+      assert {:downgrade,
+              %Activity{type: "message", text: "ORD-1\n1. Track", message_type: nil, payload: nil}} =
                Downgrade.plan(typed("card", card(), "ORD-1"), channel)
 
+      image = typed("image", %{"data" => %{"src" => "https://x.test/a.png"}}, nil)
+
+      assert {:downgrade, %Activity{text: "https://x.test/a.png", attachments: []}} =
+               Downgrade.plan(image, channel)
+
       assert :skip == Downgrade.plan(typed("genui", %{"chunk" => %{}}, nil), channel)
+
+      # Chat adapters without native buttons: numbered text, media as files.
+      for type <- ~w(messenger instagram viber discord teams sms_twilio) do
+        assert {:downgrade, %Activity{text: "ORD-1\n1. Track"}} =
+                 Downgrade.plan(typed("card", card(), "ORD-1"), %{type: type})
+      end
+
+      assert {:downgrade, %Activity{attachments: [%{"contentUrl" => "https://x.test/a.png"}]}} =
+               Downgrade.plan(image, %{type: "messenger"})
+    end
+
+    test "interrupts for a tool or an event are skipped" do
+      channel = %{type: "whatsapp_meta", config: %{}}
+      tool = typed("interrupt", %{"data" => %{"payload" => %{}, "tool" => %{"name" => "x"}}}, nil)
+      assert :skip == Downgrade.plan(tool, channel)
+
+      ask =
+        typed(
+          "interrupt",
+          %{"data" => %{"payload" => %{"title" => "OK?"}, "actions" => [%{"label" => "Yes"}]}},
+          "OK?"
+        )
+
+      assert :native == Downgrade.plan(ask, channel)
+
+      assert {:downgrade, %Activity{text: "OK?\n1. Yes"}} =
+               Downgrade.plan(ask, %{type: "sms_vonage"})
+    end
+
+    test "a GenUI stream reaches end-user channels as its joined text when done", ctx do
+      channel = %{type: "telegram", config: %{}}
+
+      chunk = fn chunk, done ->
+        %{"streamId" => "s-1", "done" => done, "chunk" => chunk}
+      end
+
+      for payload <- [
+            chunk.(%{"type" => "ui", "component" => "order-card", "id" => 1}, false),
+            chunk.(%{"type" => "text", "content" => "Process", "id" => 2}, false),
+            chunk.(%{"type" => "text", "content" => "Processing done", "id" => 2}, false),
+            chunk.(%{"type" => "text", "content" => "Anything else?", "id" => 3}, false)
+          ] do
+        {:ok, activity} = create(ctx, %{"message_type" => "genui", "payload" => payload})
+        assert :skip == Downgrade.plan(activity, channel)
+      end
+
+      {:ok, done} =
+        create(ctx, %{
+          "message_type" => "genui",
+          "payload" => chunk.(%{"type" => "event", "name" => "stream_done", "id" => 4}, true)
+        })
+
+      assert {:downgrade, %Activity{text: "Processing done\n\nAnything else?", message_type: nil}} =
+               Downgrade.plan(done, channel)
+
+      assert :native == Downgrade.plan(done, %{type: "webhook"})
     end
 
     test "tool traces reach end-user channels only with show_tool_traces" do

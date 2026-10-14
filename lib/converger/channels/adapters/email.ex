@@ -37,7 +37,10 @@ defmodule Converger.Channels.Adapters.Email do
       :receipts,
       :provider_ack,
       :media,
-      activity_types: ~w(message)
+      activity_types: ~w(message),
+      # Typed messages rendered natively (#68, ADR-0064): actions as a
+      # numbered list (HTML and text), media as attachments or links.
+      message_types: ~w(text quick-reply buttons card carousel interrupt image file video audio)
     ]
   end
 

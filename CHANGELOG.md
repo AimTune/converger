@@ -2,6 +2,37 @@
 
 ## Unreleased
 
+### Typed messages rendered per channel, answers normalised to one shape (#68)
+
+- End-user adapters declare what they render natively with `message_types:`
+  ([ADR-0064](docs/adr/0064-per-channel-rendering-of-typed-messages-and-normalised-answers.md),
+  [messages.md section 5](docs/protocol/messages.md)):
+  - **WhatsApp** (Cloud API and Infobip): actions as reply buttons (1 to 3, titles cut to 20 characters), a list
+    message (4 to 10, rows cut to 24 with the full label as description) or numbered text (more); cards as their
+    image followed by their text and buttons; carousels card by card; image, file, video, audio, location and
+    contact messages.
+  - **Telegram**: inline keyboards, cards as `sendPhoto` with caption and keyboard, carousels message by message;
+    `sendVideo`, `sendAudio` / `sendVoice`, `sendLocation` and `sendContact` (also for legacy attachments, which went
+    out as documents or not at all before).
+  - **Slack**: Block Kit sections and buttons; media as uploaded files.
+  - **Email**: a numbered list in the text part and an `<ol>` with links and card images in the HTML part.
+  - **Messenger, Instagram, Viber, Discord, Teams**: typed media as file attachments.
+  - Every other case on an end-user channel, including SMS: the prompt with its actions as a numbered list
+    (`Converger.Channels.RichContent.text/1`) instead of the plain fallback (`"Track | Pricing"`).
+- GenUI streams reach end-user channels as one text message (their text chunks) when the stream is `done`; an
+  `interrupt` with a `tool` or an `event` is not delivered to them.
+- Answers (messages.md section 6): native buttons carry the answer key `a:<activity id>:<index>`. A WhatsApp button or
+  list reply, a Telegram callback query and a Slack button click with a key, and a numeric reply (`2`) within 24
+  hours of the conversation's latest actionable message, are stored as a `message` whose `text` is the action's
+  value (or label), with `metadata.action = {label, value, source}` and `reply_to_id` on the offering message
+  (`Converger.Inbound.Answers`). Telegram callbacks with an answer key are now `message` activities (other callbacks
+  stay `event`s). WebSocket clients' `metadata.action` / `replyTo` answers are stored as sent.
+- Not yet: interrupt answers forwarded to the bot as `resume`, native quick replies on Messenger / Instagram / Viber /
+  Discord / Teams, email reply links.
+- Docs: [messages.md](docs/protocol/messages.md) sections 5 and 6, [activities](docs/concepts/activities.md),
+  channel pages (WhatsApp, Telegram, Slack, email, SMS, Messenger, Instagram, Viber, Discord, Teams, overview,
+  writing an adapter).
+
 ### Typed message payloads: buttons, cards, media, tool traces, GenUI and interrupts are stored (#68, #63)
 
 - A `message` activity can carry a typed message of Converger Protocol v1: new columns `message_type` and

@@ -199,6 +199,55 @@ defmodule ConvergerWeb.WhatsAppMetaMediaTest do
              ] = sent_messages()
     end
 
+    test "a typed card is its image, then reply buttons keyed by answer keys (#68)", %{
+      channel: channel
+    } do
+      stub_graph(fn conn, _ -> ok_message(conn) end)
+      id = Ecto.UUID.generate()
+
+      card =
+        activity(
+          id: id,
+          text: "ORD-1",
+          message_type: "card",
+          payload: %{
+            "data" => %{
+              "title" => "ORD-1",
+              "subtitle" => "249.90 USD",
+              "image" => "https://cdn.example.com/ord-1.png",
+              "buttons" => [
+                %{"label" => "Track this order right now", "value" => "/track ORD-1"},
+                %{"label" => "Invoice", "url" => "https://example.com/inv/1"}
+              ]
+            }
+          }
+        )
+
+      assert {:ok, %{whatsapp_message_ids: [_, _]}} = WhatsAppMeta.deliver_activity(channel, card)
+      assert [image, buttons] = sent_messages()
+
+      assert %{"type" => "image", "image" => %{"link" => "https://cdn.example.com/ord-1.png"}} =
+               image
+
+      ref = "a:#{id}:0"
+
+      assert %{
+               "type" => "interactive",
+               "interactive" => %{
+                 "type" => "button",
+                 "body" => %{"text" => "ORD-1\n249.90 USD\nInvoice: https://example.com/inv/1"},
+                 "action" => %{
+                   "buttons" => [
+                     %{
+                       "type" => "reply",
+                       "reply" => %{"id" => ^ref, "title" => "Track this order ri…"}
+                     }
+                   ]
+                 }
+               }
+             } = buttons
+    end
+
     test "buttons, list, location and contacts", %{channel: channel} do
       stub_graph(fn conn, _ -> ok_message(conn) end)
 
