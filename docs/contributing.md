@@ -60,6 +60,24 @@ is independent of the root `docker-compose.yml`, which runs the release image.
   [Upgrades](operations/upgrades.md).
 - Dependency updates arrive from Dependabot (`mix`, npm for the pnpm workspace and `website`, GitHub Actions, Docker; weekly).
 
+## Changelog and releases
+
+`CHANGELOG.md` is updated **only when a release is cut**, not in feature or fix pull requests: parallel pull
+requests kept conflicting on it. Describe user-facing changes, **Breaking changes** and **Deployment notes** in the
+pull request description instead; the release notes are compiled from those descriptions.
+
+Cutting a release (maintainers):
+
+1. List what was merged since the last tag (`git describe --tags --abbrev=0`; with no tag yet, everything): the
+   merge commits on `main` and the merged pull requests' descriptions.
+2. Draft the notes in [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) groups (Added, Changed, Fixed,
+   Deprecated, Removed, Security), plus Breaking changes and Deployment notes, each line linking its pull request,
+   and pick the [SemVer](https://semver.org/) version.
+3. The maintainer reviews and approves the draft and the version.
+4. A `chore(release): vX.Y.Z` pull request adds the `## [X.Y.Z] - YYYY-MM-DD` section to `CHANGELOG.md` and bumps
+   `version` in `mix.exs`. After it is merged, tag the merge commit `vX.Y.Z` and publish the GitHub release with the
+   same notes.
+
 ## Checks
 
 ### Run `mix precommit` before pushing
