@@ -58,7 +58,7 @@ const queuePrev = {};
 for (const row of lines("samples.csv")) {
   const ts = Number(row[0]);
   if (row[1] === "stats") {
-    const node = row[2].replace(/^.*-(app\d?|db)-\d+$/, "$1");
+    const node = row[2].replace(/^.*-(app\d?|db|kafka)-\d+$/, "$1");
     samples.stats.push({ ts, node, cpu: parseFloat(row[3]), rss: bytes(row[4]) });
   } else if (row[1] === "oban" && row[2] !== "") {
     samples.oban.push({ ts, depth: Number(row[2]) });
@@ -272,8 +272,45 @@ for (const name of ["reconnect_storm", "rolling_restart", "node_kill"]) {
   scenarios[name] = s;
 }
 
+
+// Event backbone zero-loss check (#66): every activity of the run was
+// published to the backbone; the platform webhook subscription of
+// load/setup.exs (activity.created -> mock /hook/backbone) is its subscriber.
+// Every stored activity must reach it exactly once: one webhook event per
+// backbone event (no duplicate rows), and one distinct event at the mock.
+if (db.tenant_activities !== undefined && db.backbone_webhook_events !== undefined) {
+  const hook = mock.paths.backbone || { delivered: 0, duplicates: 0, latency_ms: {} };
+  const expected = db.tenant_activities;
+  const s = {
+    params: { backbone: run.backbone, subscriber: "platform webhook (activity.created)" },
+    backbone: run.backbone,
+    events_expected: expected,
+    events_observed: hook.delivered,
+    webhook_event_rows: db.backbone_webhook_events,
+    duplicate_events: db.backbone_webhook_events - db.backbone_webhook_events_distinct,
+    http_redeliveries: hook.duplicates,
+    parked_jobs: db.backbone_parked_jobs,
+    publish_to_subscriber_ms: {
+      p50: round(hook.latency_ms.p50),
+      p95: round(hook.latency_ms.p95),
+      p99: round(hook.latency_ms.p99),
+      max: round(hook.latency_ms.max),
+    },
+  };
+  const m = marks.backbone || {};
+  s.caught_up_after_drain_s =
+    m.caught_up && m.deliveries_drained ? round((m.caught_up - m.deliveries_drained) / 1000) : null;
+  s.lost_acked_messages = Math.max(0, expected - hook.delivered);
+  check(
+    `backbone (${run.backbone}): every activity observed by the subscriber exactly once`,
+    s.lost_acked_messages === 0 && s.duplicate_events === 0 && db.backbone_webhook_events_distinct === expected,
+    `${hook.delivered}/${expected} observed, ${s.webhook_event_rows} webhook events (${s.duplicate_events} duplicates), ` +
+      `${hook.duplicates} HTTP redeliveries`,
+  );
+  scenarios.backbone = s;
+}
 for (const [name, s] of Object.entries(scenarios)) {
-  if (s.lost_acked_messages !== undefined && name !== "webhook_burst") {
+  if (s.lost_acked_messages !== undefined && name !== "webhook_burst" && name !== "backbone") {
     check(`${name}: zero lost acked messages`, s.lost_acked_messages === 0 && !s.never_acked, `lost ${s.lost_acked_messages}, never acked ${s.never_acked || 0}`);
   }
 }

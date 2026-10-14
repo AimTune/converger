@@ -8,11 +8,12 @@
 #
 # Main knobs (env):
 #   LOAD_NODES       1 | 3                                     (1)
-#   LOAD_BACKBONE    native (kafka is planned, #66)            (native)
+#   LOAD_BACKBONE    native | kafka (event backbone, #66)       (native)
 #   LOAD_PROFILE     full | smoke                              (full)
 #   LOAD_SCENARIOS   space-separated subset of
 #                    "e2e webhook_burst idle reconnect_storm rolling_restart node_kill"
-#   LOAD_SKIP_BUILD  1 reuses converger-load:local             (0)
+#   LOAD_SKIP_BUILD  1 reuses the image (LOAD_IMAGE)           (0)
+#   LOAD_IMAGE       image tag to build and run   (converger-load:local)
 #   LOAD_KEEP        1 leaves the stack running                (0)
 #   LOAD_APP_CPUS / LOAD_APP_MEMORY   per-node limits, e.g. 2 / 2g (unlimited)
 # Scenario sizes are listed under "profiles" below; every one can be
@@ -31,6 +32,7 @@ NODES="${LOAD_NODES:-1}"
 BACKBONE="${LOAD_BACKBONE:-native}"
 PROFILE="${LOAD_PROFILE:-full}"
 SCENARIOS="${LOAD_SCENARIOS:-e2e webhook_burst idle reconnect_storm rolling_restart node_kill}"
+export LOAD_IMAGE="${LOAD_IMAGE:-converger-load:local}"
 export LOAD_APP_PORT="${LOAD_APP_PORT:-14100}"
 export LOAD_APP2_PORT="${LOAD_APP2_PORT:-14101}"
 export LOAD_APP3_PORT="${LOAD_APP3_PORT:-14102}"
@@ -38,9 +40,9 @@ export LOAD_APP3_PORT="${LOAD_APP3_PORT:-14102}"
 log() { echo "[load $(date +%H:%M:%S)] $*"; }
 
 case "$BACKBONE" in
-  native) ;;
-  kafka | nats | rabbitmq)
-    log "backbone '$BACKBONE' is planned (#66); only 'native' (Phoenix.PubSub + Oban) exists today"
+  native | kafka) ;;
+  nats | rabbitmq)
+    log "backbone '$BACKBONE' is supported by Converger (#66) but not wired into the harness yet; use native or kafka"
     exit 2
     ;;
   *)
@@ -91,6 +93,14 @@ DELIVERY_TIMEOUT_S="${LOAD_DELIVERY_TIMEOUT_S:-300}"
 COMPOSE_FILES=(-f docker-compose.yml -f load/docker-compose.load.yml)
 if [ "$NODES" = "3" ]; then
   COMPOSE_FILES+=(-f docker-compose.cluster.yml -f load/docker-compose.load-cluster.yml)
+fi
+# The event backbone (#66): Kafka is one more container and one variable
+# (BACKBONE=kafka) on every node.
+BACKBONE_SERVICES=""
+if [ "$BACKBONE" = "kafka" ]; then
+  COMPOSE_FILES+=(-f load/docker-compose.load-kafka.yml)
+  [ "$NODES" = "3" ] && COMPOSE_FILES+=(-f load/docker-compose.load-kafka-cluster.yml)
+  BACKBONE_SERVICES="kafka"
 fi
 
 dc() {
@@ -161,6 +171,23 @@ wait_deliveries() {
   done
 }
 
+# The backbone zero-loss check (#66): every activity of the run is published
+# to the backbone, and the platform webhook subscription of load/setup.exs
+# consumes it. Wait until the subscriber has a webhook event for every
+# activity and none is left to send.
+wait_backbone() {
+  local deadline=$((SECONDS + DELIVERY_TIMEOUT_S)) behind
+  while :; do
+    behind=$(psql_q "SELECT (SELECT count(*) FROM activities WHERE tenant_id = '$TENANT_ID') - (SELECT count(DISTINCT event_id) FROM webhook_events WHERE subscription_id = '$BACKBONE_SUB_ID' AND status = 'delivered')")
+    [ "$behind" -le 0 ] 2>/dev/null && return 0
+    if [ "$SECONDS" -ge "$deadline" ]; then
+      log "backbone subscriber still $behind event(s) behind after ${DELIVERY_TIMEOUT_S}s"
+      return 1
+    fi
+    sleep 1
+  done
+}
+
 # CPU and memory of each node and Postgres (`docker stats --no-stream`, about
 # every 2.5 s on Docker Desktop), and every second the open Oban jobs and each
 # node's last DB pool queue time (/metrics). Streaming `docker stats` is not
@@ -168,7 +195,7 @@ wait_deliveries() {
 # compose exec`: the compose CLI takes over a second per call.
 sampler() {
   local containers=""
-  for svc in $SERVICES db; do containers="$containers ${PROJECT}-${svc}-1"; done
+  for svc in $SERVICES db $BACKBONE_SERVICES; do containers="$containers ${PROJECT}-${svc}-1"; done
   while [ ! -f "$RUN_DIR/stop-sampler" ]; do
     local ts
     ts=$(now_ms)
@@ -243,9 +270,9 @@ if [ "${LOAD_SKIP_BUILD:-0}" != "1" ]; then
   log "building image"
   dc build migrate
 fi
-log "starting db, migrate, $SERVICES, mock ($NODES node(s), project $PROJECT)"
+log "starting db, migrate, $SERVICES, mock $BACKBONE_SERVICES ($NODES node(s), backbone $BACKBONE, project $PROJECT)"
 # shellcheck disable=SC2086
-dc up -d db migrate $SERVICES mock
+dc up -d db migrate $BACKBONE_SERVICES $SERVICES mock
 for port in $PORTS; do wait_ready "$port" 240; done
 if [ "$NODES" = "3" ]; then
   deadline=$((SECONDS + 60))
@@ -263,6 +290,7 @@ dc exec -T app bin/converger rpc \
 TENANT_ID=$(sed -E 's/.*"tenant_id":"([^"]+)".*/\1/' "$OUT/setup.json")
 INGRESS_ID=$(sed -E 's/.*"ingress":\{"id":"([^"]+)".*/\1/' "$OUT/setup.json")
 FANOUT_ID=$(sed -E 's/.*"fanout_channel_id":"([^"]+)".*/\1/' "$OUT/setup.json")
+BACKBONE_SUB_ID=$(sed -E 's/.*"backbone_subscription_id":"([^"]+)".*/\1/' "$OUT/setup.json")
 log "fixtures created (tenant $TENANT_ID)"
 
 # --- warm-up -------------------------------------------------------------------
@@ -338,6 +366,12 @@ done
 # --- drain + collect -----------------------------------------------------------
 log "waiting for the delivery queues to drain"
 wait_deliveries || true
+log "waiting for the backbone subscriber ($BACKBONE) to catch up"
+t0=$(now_ms)
+echo "backbone;deliveries_drained;$t0" >>"$OUT/marks.csv"
+wait_backbone || true
+echo "backbone;caught_up;$(now_ms)" >>"$OUT/marks.csv"
+log "backbone subscriber caught up $(($(now_ms) - t0)) ms after the deliveries drained"
 touch "$RUN_DIR/stop-sampler"
 wait "$SAMPLER_PID" 2>/dev/null || true
 
@@ -348,6 +382,11 @@ cat >"$OUT/db.json" <<EOF
   "burst_activities": $(psql_q "SELECT count(*) FROM activities a JOIN conversations c ON c.id = a.conversation_id WHERE c.channel_id = '$INGRESS_ID' AND a.text LIKE 'load %'"),
   "open_delivery_jobs": $(psql_q "SELECT count(*) FROM oban_jobs WHERE queue LIKE 'deliveries%' AND state IN ('available','scheduled','executing','retryable')"),
   "failed_deliveries": $(psql_q "SELECT count(*) FROM deliveries d JOIN activities a ON a.id = d.activity_id WHERE a.tenant_id = '$TENANT_ID' AND d.status NOT IN ('delivered','sent')"),
+  "tenant_activities": $(psql_q "SELECT count(*) FROM activities WHERE tenant_id = '$TENANT_ID'"),
+  "backbone_webhook_events": $(psql_q "SELECT count(*) FROM webhook_events WHERE subscription_id = '$BACKBONE_SUB_ID'"),
+  "backbone_webhook_events_distinct": $(psql_q "SELECT count(DISTINCT event_id) FROM webhook_events WHERE subscription_id = '$BACKBONE_SUB_ID'"),
+  "backbone_webhook_events_delivered": $(psql_q "SELECT count(*) FROM webhook_events WHERE subscription_id = '$BACKBONE_SUB_ID' AND status = 'delivered'"),
+  "backbone_parked_jobs": $(psql_q "SELECT count(*) FROM oban_jobs WHERE queue = 'backbone'"),
   "database_size_bytes": $(psql_q "SELECT pg_database_size('converger_prod')"),
   "postgres_version": "$(psql_q "SHOW server_version")"
 }

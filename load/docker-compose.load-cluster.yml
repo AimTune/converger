@@ -14,7 +14,7 @@ x-cluster-env: &cluster_env
   OBAN_LIFELINE_INTERVAL_SECONDS: ${LOAD_LIFELINE_INTERVAL_SECONDS:-10}
 
 x-load-node: &load_node
-  image: converger-load:local
+  image: ${LOAD_IMAGE:-converger-load:local}
   ulimits:
     nofile: { soft: 1048576, hard: 1048576 }
   volumes:

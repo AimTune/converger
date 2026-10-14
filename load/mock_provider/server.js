@@ -116,7 +116,10 @@ const server = http.createServer((req, res) => {
         s.duplicates += 1;
       } else if (id) {
         s.seen.add(id);
-        const m = /^load (\d+) /.exec(body.text || "");
+        // Channel deliveries carry the text; platform event webhooks (the
+        // backbone check of #66) carry the activity under `data`.
+        const text = body.text || (body.data && body.data.text) || "";
+        const m = /^load (\d+) /.exec(text);
         if (m) s.latencies.push(Date.now() - Number(m[1]));
       }
       json(res, 200, {});
