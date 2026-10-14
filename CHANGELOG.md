@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Agent SDKs for Go, .NET and Elixir (#67)
+
+- `packages/agent-go` (`github.com/AimTune/converger/packages/agent-go`), `packages/agent-dotnet` (`Converger.Agent`)
+  and `packages/agent-elixir` (`converger_agent`): a bot backend serves every conversation of a `websocket` channel
+  over one channel-scoped Protocol v1 connection. `onTurn` handlers get the turn (text, typed message, participant,
+  meta, tapped action) and reply with text (with chips), rich messages, `tool_call` traces, typing and `ask`
+  (an `interrupt` answered by `resume` or a tapped button, then `interrupt_resolved`). Runs are framed by
+  `run started`/`finished`/`error`; turns of one conversation are serialised; message sends are acked and
+  re-sent with their `clientId` after a reconnect; reconnects use jittered backoff and per-conversation
+  `hello.watermarks`. Not published yet.
+- `packages/conformance/agent.json`: the shared agent wire-exchange fixture (text turn, duplicates and bot frames,
+  ask with a queued turn, rich replies, refused send, reconnect with watermarks), run by each SDK against a fake
+  server with every agent frame validated against `frames/channel/client-envelope.schema.json`.
+- CI: `.github/workflows/agent-sdks.yml`. Docs: [Go](docs/sdk/agent-go.md), [.NET](docs/sdk/agent-dotnet.md),
+  [Elixir](docs/sdk/agent-elixir.md).
+
 ### Agent sockets and the bot relay: channel-scoped Protocol v1 connections (#64)
 
 - A `scope: "channel"` token of a `websocket` channel opens a channel-scoped connection on the native endpoint:

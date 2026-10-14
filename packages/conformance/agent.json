@@ -1,0 +1,136 @@
+{
+  "description": "Converger agent SDK conformance: the wire exchange of an agent on a channel-scoped Protocol v1 connection (docs/protocol/v1.md sections 9 and 10). Each SDK runs every scenario against an in-process fake server that plays `steps` in order: `expect` reads the next frame the agent sent (skipping `ping`) and matches it against the pattern; `send` writes a frame to the agent; `close` closes the connection with that WebSocket close code, after which the next `expect` waits for the agent's next connection. Every connection must carry `Authorization: Bearer <token>`. The agent under test is built with `agent` (group, initial watermarks) and a turn handler that runs the ops of `handlers[turn.text]` (or `handlers[\"*\"]`). Pattern and op rules are in packages/conformance/README.md.",
+  "token": "agent-token",
+  "handlers": {
+    "hi": [{ "op": "text", "text": "Hello!" }],
+    "refund": [
+      { "op": "ask", "payload": { "title": "Refund 249.90 TRY?" }, "actions": [{ "label": "Yes", "value": "yes" }, { "label": "No", "value": "no" }] },
+      { "op": "text", "text": "answer: {answer}" }
+    ],
+    "track": [
+      { "op": "typing", "on": true },
+      { "op": "toolCall", "id": "t1", "name": "lookup_order", "status": "running", "params": { "order": "ORD-42" } },
+      { "op": "toolCall", "id": "t1", "name": "lookup_order", "status": "completed", "result": { "status": "shipped" } },
+      { "op": "message", "type": "buttons", "data": { "text": "Shipped. Anything else?", "buttons": [{ "label": "Return it", "value": "/return" }] } }
+    ],
+    "menu": [{ "op": "text", "text": "Pick one", "actions": [{ "label": "Track", "value": "/track" }, { "label": "Refund", "value": "/refund" }] }],
+    "*": [{ "op": "text", "text": "echo: {text}" }]
+  },
+  "scenarios": [
+    {
+      "name": "a user text turn: run started, text reply with clientId, ack, run finished",
+      "agent": {},
+      "steps": [
+        { "expect": { "type": "hello", "protocol": "converger/1" } },
+        { "send": { "type": "welcome", "data": { "protocol": "converger/1", "compat": ["mekik/1"], "scope": "channel", "channelId": "ch-bot", "connectionId": "conn-1", "expiresAt": 1750001800000, "capabilities": { "acks": true }, "limits": { "maxConversations": 5000, "heartbeatIntervalMs": 30000, "idleTimeoutMs": 60000 } } } },
+        { "send": { "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "frame": { "type": "text", "id": "m-1", "seq": 1, "from": "user", "sender": { "id": "alice", "role": "user" }, "data": { "text": "hi" }, "meta": { "locale": "tr-TR" }, "timestamp": 1750000000000 } } },
+        { "expect": { "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "frame": { "type": "run", "data": { "status": "started" } } } },
+        { "expect": { "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "frame": { "type": "text", "clientId": "$capture:c1", "data": { "text": "Hello!" } } } },
+        { "send": { "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "frame": { "type": "ack", "clientId": "{{c1}}", "id": "m-2", "seq": 2, "timestamp": 1750000001000 } } },
+        { "expect": { "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "frame": { "type": "run", "data": { "status": "finished" } } } }
+      ]
+    },
+    {
+      "name": "bot frames and duplicates are not turns",
+      "agent": {},
+      "steps": [
+        { "expect": { "type": "hello", "protocol": "converger/1" } },
+        { "send": { "type": "welcome", "data": { "protocol": "converger/1", "scope": "channel", "channelId": "ch-bot", "connectionId": "conn-1", "limits": {} } } },
+        { "send": { "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "frame": { "type": "text", "id": "m-1", "seq": 1, "from": "bot", "sender": { "id": "agent-2", "role": "agent" }, "data": { "text": "a human agent wrote this" }, "timestamp": 1750000000000 } } },
+        { "send": { "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "frame": { "type": "typing", "isTyping": true, "from": "user", "sender": { "id": "alice", "role": "user" } } } },
+        { "send": { "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "frame": { "type": "text", "id": "m-2", "seq": 2, "from": "user", "data": { "text": "first" }, "timestamp": 1750000001000 } } },
+        { "send": { "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "frame": { "type": "text", "id": "m-2", "seq": 2, "from": "user", "data": { "text": "first" }, "timestamp": 1750000001000 } } },
+        { "expect": { "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "frame": { "type": "run", "data": { "status": "started" } } } },
+        { "expect": { "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "frame": { "type": "text", "clientId": "$capture:c1", "data": { "text": "echo: first" } } } },
+        { "send": { "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "frame": { "type": "ack", "clientId": "{{c1}}", "id": "m-3", "seq": 3, "timestamp": 1750000002000 } } },
+        { "expect": { "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "frame": { "type": "run", "data": { "status": "finished" } } } },
+        { "send": { "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "frame": { "type": "text", "id": "m-4", "seq": 4, "from": "user", "data": { "text": "second" }, "timestamp": 1750000003000 } } },
+        { "expect": { "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "frame": { "type": "run", "data": { "status": "started" } } } },
+        { "expect": { "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "frame": { "type": "text", "clientId": "$capture:c2", "data": { "text": "echo: second" } } } },
+        { "send": { "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "frame": { "type": "ack", "clientId": "{{c2}}", "id": "m-5", "seq": 5, "timestamp": 1750000004000 } } },
+        { "expect": { "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "frame": { "type": "run", "data": { "status": "finished" } } } }
+      ]
+    },
+    {
+      "name": "ask: interrupt, resume, interrupt_resolved, reply; the next turn of the conversation waits",
+      "agent": { "group": "workers" },
+      "steps": [
+        { "expect": { "type": "hello", "protocol": "converger/1", "group": "workers" } },
+        { "send": { "type": "welcome", "data": { "protocol": "converger/1", "scope": "channel", "channelId": "ch-bot", "connectionId": "conn-1", "limits": {} } } },
+        { "send": { "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "frame": { "type": "text", "id": "m-1", "seq": 1, "from": "user", "data": { "text": "refund" }, "timestamp": 1750000000000 } } },
+        { "expect": { "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "frame": { "type": "run", "data": { "status": "started" } } } },
+        { "expect": { "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "frame": { "type": "interrupt", "id": "$capture:i1", "data": { "payload": { "title": "Refund 249.90 TRY?" }, "actions": [{ "label": "Yes", "value": "yes" }, { "label": "No", "value": "no" }] } } } },
+        { "send": { "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "frame": { "type": "text", "id": "m-3", "seq": 3, "from": "user", "data": { "text": "hi" }, "timestamp": 1750000001000 } } },
+        { "send": { "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "frame": { "type": "resume", "answers": { "{{i1}}": "yes" } } } },
+        { "expect": { "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "frame": { "type": "interrupt_resolved", "id": "{{i1}}", "data": { "answer": "yes" } } } },
+        { "expect": { "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "frame": { "type": "text", "clientId": "$capture:c1", "data": { "text": "answer: yes" } } } },
+        { "send": { "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "frame": { "type": "ack", "clientId": "{{c1}}", "id": "m-5", "seq": 5, "timestamp": 1750000002000 } } },
+        { "expect": { "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "frame": { "type": "run", "data": { "status": "finished" } } } },
+        { "expect": { "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "frame": { "type": "run", "data": { "status": "started" } } } },
+        { "expect": { "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "frame": { "type": "text", "clientId": "$capture:c2", "data": { "text": "Hello!" } } } },
+        { "send": { "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "frame": { "type": "ack", "clientId": "{{c2}}", "id": "m-6", "seq": 6, "timestamp": 1750000003000 } } },
+        { "expect": { "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "frame": { "type": "run", "data": { "status": "finished" } } } }
+      ]
+    },
+    {
+      "name": "rich replies: typing, tool calls, a buttons message, text with actions",
+      "agent": {},
+      "steps": [
+        { "expect": { "type": "hello", "protocol": "converger/1" } },
+        { "send": { "type": "welcome", "data": { "protocol": "converger/1", "scope": "channel", "channelId": "ch-bot", "connectionId": "conn-1", "limits": {} } } },
+        { "send": { "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "frame": { "type": "text", "id": "m-1", "seq": 1, "from": "user", "data": { "text": "track" }, "timestamp": 1750000000000 } } },
+        { "expect": { "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "frame": { "type": "run", "data": { "status": "started" } } } },
+        { "expect": { "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "frame": { "type": "typing", "isTyping": true } } },
+        { "expect": { "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "frame": { "type": "tool_call", "data": { "id": "t1", "name": "lookup_order", "status": "running", "params": { "order": "ORD-42" } } } } },
+        { "expect": { "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "frame": { "type": "tool_call", "data": { "id": "t1", "name": "lookup_order", "status": "completed", "result": { "status": "shipped" } } } } },
+        { "expect": { "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "frame": { "type": "buttons", "clientId": "$capture:c1", "data": { "text": "Shipped. Anything else?", "buttons": [{ "label": "Return it", "value": "/return" }] } } } },
+        { "send": { "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "frame": { "type": "ack", "clientId": "{{c1}}", "id": "m-4", "seq": 4, "timestamp": 1750000001000 } } },
+        { "expect": { "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "frame": { "type": "run", "data": { "status": "finished" } } } },
+        { "send": { "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "frame": { "type": "text", "id": "m-5", "seq": 5, "from": "user", "data": { "text": "menu" }, "timestamp": 1750000002000 } } },
+        { "expect": { "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "frame": { "type": "run", "data": { "status": "started" } } } },
+        { "expect": { "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "frame": { "type": "text", "clientId": "$capture:c2", "data": { "text": "Pick one" }, "actions": [{ "label": "Track", "value": "/track" }, { "label": "Refund", "value": "/refund" }] } } },
+        { "send": { "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "frame": { "type": "ack", "clientId": "{{c2}}", "id": "m-6", "seq": 6, "timestamp": 1750000003000 } } },
+        { "expect": { "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "frame": { "type": "run", "data": { "status": "finished" } } } }
+      ]
+    },
+    {
+      "name": "a refused send fails the handler: run error",
+      "agent": {},
+      "steps": [
+        { "expect": { "type": "hello", "protocol": "converger/1" } },
+        { "send": { "type": "welcome", "data": { "protocol": "converger/1", "scope": "channel", "channelId": "ch-bot", "connectionId": "conn-1", "limits": {} } } },
+        { "send": { "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "frame": { "type": "text", "id": "m-1", "seq": 1, "from": "user", "data": { "text": "hi" }, "timestamp": 1750000000000 } } },
+        { "expect": { "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "frame": { "type": "run", "data": { "status": "started" } } } },
+        { "expect": { "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "frame": { "type": "text", "clientId": "$capture:c1", "data": { "text": "Hello!" } } } },
+        { "send": { "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "frame": { "type": "error", "data": { "code": "conversation_closed", "message": "the conversation is closed", "number": 4000, "retryable": false, "clientId": "{{c1}}", "frameType": "text" } } } },
+        { "expect": { "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "frame": { "type": "run", "data": { "status": "error" } } } }
+      ]
+    },
+    {
+      "name": "reconnect: hello carries per-conversation watermarks, replay is deduplicated, an unacked send is re-sent with its clientId",
+      "agent": { "watermarks": { "5b1d7c2a-0e4f-4a6b-9c8d-7e6f5a4b3c2d": 7 } },
+      "steps": [
+        { "expect": { "type": "hello", "protocol": "converger/1", "watermarks": { "5b1d7c2a-0e4f-4a6b-9c8d-7e6f5a4b3c2d": 7 } } },
+        { "send": { "type": "welcome", "data": { "protocol": "converger/1", "scope": "channel", "channelId": "ch-bot", "connectionId": "conn-1", "limits": {} } } },
+        { "send": { "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "frame": { "type": "text", "id": "m-1", "seq": 1, "from": "user", "data": { "text": "hi" }, "timestamp": 1750000000000 } } },
+        { "expect": { "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "frame": { "type": "run", "data": { "status": "started" } } } },
+        { "expect": { "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "frame": { "type": "text", "clientId": "$capture:c1", "data": { "text": "Hello!" } } } },
+        { "close": 1012 },
+        { "expect": { "type": "hello", "protocol": "converger/1", "watermarks": { "5b1d7c2a-0e4f-4a6b-9c8d-7e6f5a4b3c2d": 7, "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70": 1 } } },
+        { "send": { "type": "welcome", "data": { "protocol": "converger/1", "scope": "channel", "channelId": "ch-bot", "connectionId": "conn-2", "limits": {} } } },
+        { "expect": { "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "frame": { "type": "text", "clientId": "{{c1}}", "data": { "text": "Hello!" } } } },
+        { "send": { "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "frame": { "type": "ack", "clientId": "{{c1}}", "id": "m-2", "seq": 2, "timestamp": 1750000001000 } } },
+        { "expect": { "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "frame": { "type": "run", "data": { "status": "finished" } } } },
+        { "send": { "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "frame": { "type": "text", "id": "m-1", "seq": 1, "from": "user", "data": { "text": "hi" }, "timestamp": 1750000000000 } } },
+        { "send": { "conversationId": "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70", "frame": { "type": "text", "id": "m-2", "seq": 2, "from": "bot", "data": { "text": "Hello!" }, "timestamp": 1750000001000 } } },
+        { "send": { "conversationId": "5b1d7c2a-0e4f-4a6b-9c8d-7e6f5a4b3c2d", "frame": { "type": "text", "id": "n-8", "seq": 8, "from": "user", "data": { "text": "still there?" }, "timestamp": 1750000002000 } } },
+        { "expect": { "conversationId": "5b1d7c2a-0e4f-4a6b-9c8d-7e6f5a4b3c2d", "frame": { "type": "run", "data": { "status": "started" } } } },
+        { "expect": { "conversationId": "5b1d7c2a-0e4f-4a6b-9c8d-7e6f5a4b3c2d", "frame": { "type": "text", "clientId": "$capture:c2", "data": { "text": "echo: still there?" } } } },
+        { "send": { "conversationId": "5b1d7c2a-0e4f-4a6b-9c8d-7e6f5a4b3c2d", "frame": { "type": "ack", "clientId": "{{c2}}", "id": "n-9", "seq": 9, "timestamp": 1750000003000 } } },
+        { "expect": { "conversationId": "5b1d7c2a-0e4f-4a6b-9c8d-7e6f5a4b3c2d", "frame": { "type": "run", "data": { "status": "finished" } } } },
+        { "close": 1012 },
+        { "expect": { "type": "hello", "protocol": "converger/1", "watermarks": { "5b1d7c2a-0e4f-4a6b-9c8d-7e6f5a4b3c2d": 8, "c0a8012e-7d3b-4c5e-9f1a-2b3c4d5e6f70": 2 } } }
+      ]
+    }
+  ]
+}

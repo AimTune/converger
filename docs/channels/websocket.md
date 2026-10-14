@@ -114,6 +114,7 @@ The same channel-scoped token can also join `converger:conversation:<id>` for on
 - The end user's bot-only frames (`resume`, `genui_event`, `abort`, ...) are forwarded to the agent; a tapped button that answers an open `interrupt` arrives as `resume`. The agent's `run`, `genui_components`, `skills` and `error` frames are relayed to the end user's connections. While no agent is connected, those frames draw `bot_unavailable` ([section 9](../protocol/v1.md#9-the-bot-channel-and-mekik-relay-implemented-64)).
 - Several agent processes can share a channel with the same `hello.group`: each conversation is served by exactly one of them.
 - A connection follows at most `maxConversations` conversations (default 5 000, `config :converger, ConvergerWeb.Protocol, max_conversations:`).
+- Agent SDKs that speak this for you (turns, replies, `ask`, reconnect with watermarks): [Go](../sdk/agent-go.md), [.NET](../sdk/agent-dotnet.md), [Elixir](../sdk/agent-elixir.md) (#67).
 
 ## Related
 
