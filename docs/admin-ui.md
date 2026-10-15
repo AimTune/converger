@@ -20,7 +20,7 @@ components and [heroicons](https://heroicons.com), the Phoenix 1.8 default stack
 | --- | --- | --- |
 | `/admin` | `/portal` | Dashboard: counts, delivery status totals, channel health (live); every tile links to its filtered list |
 | `/admin/tenants` | | Tenants, API key reveal-once and rotation, status, delivery tier; **Edit** for retention, tier, alert webhook and rate limit overrides |
-| `/admin/channels` | `/portal/channels` | Channels, per-type configuration, health sparkline, circuit breaker pause/resume, **Send test**, **Rotate secret** |
+| `/admin/channels` | `/portal/channels` | Channels, per-type configuration, health sparkline, circuit breaker pause/resume, **Send test**, **Rotate secret**, **Client access** (test token, publishable key) |
 | `/admin/conversations` | `/portal/conversations` | Conversations; transcript with live tail, delivery badges, participant panel, close/reopen |
 | `/admin/routing_rules` | `/portal/routing_rules` | Routing rules and the dry run (`/admin/routing_rules/dry_run`) |
 | `/admin/deliveries` | `/portal/deliveries` | Dead letters and replay, CSV export ([Deliveries page](delivery.md#deliveries-page)) |
@@ -68,6 +68,25 @@ The CSV export and **Retry all failed** on the Deliveries page use the same filt
   ([channel health](concepts/channels.md)) as a sparkline, with a text summary for screen readers.
 - **Pause / Resume** holds and releases the channel's deliveries ([circuit breaker](delivery.md)).
 
+### Client access
+
+**Client access** on a channel row opens a panel with what a chat client needs
+([#194](https://github.com/AimTune/converger/issues/194), [#195](https://github.com/AimTune/converger/issues/195)).
+Admin roles `super_admin` and `admin`; portal roles `owner` and `admin`.
+
+- **Base URL** and **WebSocket** (`/socket/converger/v1`), as the browser reaches this server, with copy buttons.
+- **Issue test token** mints the token `POST /api/v1/converger/tokens/generate` would return with the channel
+  secret, for the end user id you enter (default `test-user`; blank for none), so you can try the channel from a chat
+  client (for example chativa's sandbox, **Token** mode) without handling the secret. It expires in 30 minutes.
+  Inactive channels cannot issue one. Audited as `test_token` with the user id and the token's `jti`, never the
+  token.
+- **Publishable key**: enter the **allowed origins** (one per line, `https://shop.example.com` or
+  `https://*.example.com`) and **Save and enable key**; the key (`cvg_pk_...`) is shown with a copy button and can be
+  shown again any time (it is not a secret). **Save origins** updates the list, **Rotate key** issues a new key (the
+  old one stops at once) and **Disable key** turns it off. Audited as `enable_publishable_key`,
+  `update_allowed_origins`, `rotate_publishable_key` and `disable_publishable_key`. See
+  [publishable keys](security/publishable-keys.md).
+
 ## Conversations
 
 The transcript is live: new activities and delivery status changes appear without reloading (the page subscribes
@@ -108,7 +127,7 @@ instead.
 | Action | Admin panel | Tenant portal |
 | --- | --- | --- |
 | Browse every page | all roles | all roles (own tenant) |
-| Create, edit, delete tenants, channels, routing rules; rotate secrets; send tests; pause/resume | `super_admin`, `admin` | channels: `owner`, `admin` (enable/disable also `member`); routing rules: enable/disable for `owner`, `admin`, `member` |
+| Create, edit, delete tenants, channels, routing rules; rotate secrets; send tests; pause/resume; client access (test tokens, publishable keys) | `super_admin`, `admin` | channels: `owner`, `admin` (enable/disable also `member`); routing rules: enable/disable for `owner`, `admin`, `member` |
 | Close / reopen conversations | `super_admin`, `admin` | `owner`, `admin`, `member` |
 | Manage users | admin users: `super_admin`; tenant users: `super_admin`, `admin` | `owner`, `admin` |
 

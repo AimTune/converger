@@ -33,6 +33,11 @@ defmodule Converger.Channels.Channel do
     field :circuit_state, :string, default: "closed"
     field :circuit_changed_at, :utc_datetime_usec
     field :consecutive_failures, :integer, default: 0
+    # Browser-safe client credential and the origins allowed to use it
+    # (issue #195, ADR-0074), managed by Converger.Channels (never cast by
+    # changeset/2).
+    field :publishable_key, :string
+    field :allowed_origins, {:array, :string}, default: []
     belongs_to :tenant, Converger.Tenants.Tenant
 
     timestamps(type: :utc_datetime_usec)
@@ -200,6 +205,61 @@ defmodule Converger.Channels.Channel do
       _ ->
         changeset
     end
+  end
+
+  @publishable_key_prefix "cvg_pk_"
+
+  @doc "The prefix of every publishable key."
+  def publishable_key_prefix, do: @publishable_key_prefix
+
+  @doc """
+  A changeset for the channel's publishable key settings (ADR-0074):
+  `allowed_origins` (a list, or text with one origin per line, see
+  `Converger.Channels.Origins`). `:publishable_key` is `:keep` (default),
+  `:new` (generate or rotate) or `:none` (disable). A key needs at least one
+  allowed origin.
+  """
+  def client_access_changeset(channel, attrs, key \\ :keep) do
+    changeset =
+      case Map.fetch(attrs, "allowed_origins") do
+        {:ok, value} ->
+          case Converger.Channels.Origins.cast_list(value) do
+            {:ok, origins} -> change(channel, allowed_origins: origins)
+            {:error, message} -> channel |> change() |> add_error(:allowed_origins, message)
+          end
+
+        :error ->
+          change(channel)
+      end
+
+    changeset
+    |> put_publishable_key(key)
+    |> validate_key_has_origins()
+    |> unique_constraint(:publishable_key, name: :channels_publishable_key_index)
+  end
+
+  defp put_publishable_key(changeset, :keep), do: changeset
+  defp put_publishable_key(changeset, :none), do: put_change(changeset, :publishable_key, nil)
+
+  defp put_publishable_key(changeset, :new),
+    do: put_change(changeset, :publishable_key, generate_publishable_key())
+
+  # Skipped when the origins themselves are invalid, so that error is shown.
+  defp validate_key_has_origins(changeset) do
+    if get_field(changeset, :publishable_key) && get_field(changeset, :allowed_origins) == [] &&
+         not Keyword.has_key?(changeset.errors, :allowed_origins),
+       do:
+         add_error(
+           changeset,
+           :allowed_origins,
+           "add at least one origin to use a publishable key"
+         ),
+       else: changeset
+  end
+
+  @doc "A new random publishable key (`cvg_pk_` and 32 random bytes, base64url)."
+  def generate_publishable_key do
+    @publishable_key_prefix <> Base.url_encode64(:crypto.strong_rand_bytes(32), padding: false)
   end
 
   @doc "A new random channel secret."

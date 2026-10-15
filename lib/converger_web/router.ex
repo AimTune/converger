@@ -179,6 +179,14 @@ defmodule ConvergerWeb.Router do
     post "/tokens/revoke", TokenController, :revoke
   end
 
+  # Publishable keys (ADR-0074): browsers without a backend. The controller
+  # authenticates the key and checks the Origin itself.
+  scope "/api/v1/converger", ConvergerWeb.ConvergerAPI do
+    pipe_through [:api]
+
+    post "/tokens/publishable", PublishableTokenController, :create
+  end
+
   scope "/api/v1/converger", ConvergerWeb.ConvergerAPI do
     pipe_through [:api, :converger_refresh_auth]
 

@@ -2,7 +2,7 @@
   "name": "@converger/client",
   "version": "0.1.0",
   "description": "Headless TypeScript client for Converger Protocol v1: reconnect, watermark resume, persistent outbox, token refresh, REST helpers.",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "author": "AimTune",
   "homepage": "https://converger.aimtune.dev/sdk/typescript",
   "repository": {

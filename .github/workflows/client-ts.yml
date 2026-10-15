@@ -110,6 +110,10 @@ jobs:
 
       - run: mix deps.get
       - run: mix compile
+      # The dev server's watchers download tailwind and esbuild on first start.
+      # The test kills that server mid-session, which can leave a half-written
+      # binary that the restarted server then fails to execute (:eacces).
+      - run: mix assets.setup
 
       - uses: pnpm/action-setup@v6
 

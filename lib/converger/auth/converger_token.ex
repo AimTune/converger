@@ -14,6 +14,8 @@ defmodule Converger.Auth.ConvergerToken do
       channel (agent console);
     * `perms` (optional): what the token may do, a subset of `permissions/0`.
       Without the claim the token may do everything.
+    * `src: "publishable"` (optional): minted through a publishable key
+      (ADR-0074); carried through refreshes and derived tokens.
 
   Tokens are signed with the dedicated keys of `Converger.Auth.Signer`
   (`kid` header) and checked against the revocation cache on every
@@ -40,10 +42,10 @@ defmodule Converger.Auth.ConvergerToken do
   Issues a token for `channel`.
 
   Options: `:conversation_id`, `:user_id`, `:scope` (`"channel"`),
-  `:permissions` (a list, see `permissions/0`; nil for all), `:expires_in`
-  (seconds), `:family` (the family id; a new family when nil) and
-  `:not_after` (a unix time the token must not outlive: a token derived from
-  another never expires after it).
+  `:source` (`"publishable"`, the `src` claim), `:permissions` (a list, see
+  `permissions/0`; nil for all), `:expires_in` (seconds), `:family` (the
+  family id; a new family when nil) and `:not_after` (a unix time the token
+  must not outlive: a token derived from another never expires after it).
   """
   def generate_token(channel, opts \\ []) do
     jti = Joken.generate_jti()
@@ -85,6 +87,9 @@ defmodule Converger.Auth.ConvergerToken do
     # with a conversation restriction.
     |> put_if("scope", Keyword.get(opts, :scope), &(&1 == "channel" and is_nil(conversation_id)))
     |> put_if("perms", Keyword.get(opts, :permissions), &is_list/1)
+    # `src: "publishable"`: minted through a publishable key (ADR-0074), so
+    # refreshes count against the publishable buckets.
+    |> put_if("src", Keyword.get(opts, :source), &(&1 == "publishable"))
   end
 
   defp put_if(claims, key, value, keep?) do
@@ -128,6 +133,7 @@ defmodule Converger.Auth.ConvergerToken do
     [
       user_id: claims["user_id"],
       permissions: claims["perms"],
+      source: claims["src"],
       family: Revocations.family(claims),
       not_after: claims["exp"]
     ]
@@ -189,6 +195,7 @@ defmodule Converger.Auth.ConvergerToken do
         user_id: claims["user_id"],
         scope: claims["scope"],
         permissions: claims["perms"],
+        source: claims["src"],
         family: Revocations.family(claims),
         expires_in: @default_expiry
       )

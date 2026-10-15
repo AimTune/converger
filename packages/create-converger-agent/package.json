@@ -2,7 +2,7 @@
   "name": "create-converger-agent",
   "version": "0.1.0",
   "description": "Scaffold a TypeScript agent for Converger: npx create-converger-agent my-agent",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "author": "AimTune",
   "homepage": "https://converger.aimtune.dev/sdk/agent",
   "repository": {

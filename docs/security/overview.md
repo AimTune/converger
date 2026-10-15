@@ -18,6 +18,7 @@ in depth in [Security: client IPs, proxies and admin access](../security.md); th
 | Tenant backend (server to server) | `x-api-key: cvg_live_...`: the primary key (every scope) or a scoped key (`read`, `write`, `manage`) | `ConvergerWeb.Plugs.TenantAuth` (authentication and scope) | `tenants.api_key_hash`, `api_keys.key_hash` (SHA-256) |
 | Platform automation (admin API `/api/v1/admin`) | `ADMIN_API_TOKEN` as `Authorization: Bearer ...` | `ConvergerWeb.Plugs.AdminAuth` (IP whitelist), `ConvergerWeb.Plugs.AdminApiAuth` | Environment variable only |
 | Channel integration | Channel secret as `Authorization: Bearer ...` on `POST /api/v1/converger/tokens/generate` | `ConvergerWeb.Plugs.ConvergerAuth` (`mode: :secret`) | `channels.secret` (AES-GCM encrypted) + `channels.secret_hash` (SHA-256, for lookup) |
+| Browser without a backend | Publishable key `cvg_pk_...` as `Authorization: Bearer ...` on `POST /api/v1/converger/tokens/publishable`, from an allowed `Origin`; mints anonymous, conversation-bound tokens only | `ConvergerWeb.ConvergerAPI.PublishableTokenController` | `channels.publishable_key` (public, plain text) + `channels.allowed_origins` ([publishable keys](publishable-keys.md)) |
 | End-user client (widget, SDK) | Converger token (JWT) as Bearer or socket `token` param | `ConvergerWeb.Plugs.ConvergerAuth` (`mode: :token`), `ConvergerWeb.ConvergerSocket` | Not stored (JWT); revocations and rotations in `revoked_tokens` ([client tokens](client-tokens.md)) |
 | Backend client on the gRPC transport | Converger token (JWT) as `authorization: Bearer` metadata or `Hello.token` | `ConvergerWeb.Protocol.Session` on `hello` ([Protocol v1 over gRPC](../protocol/grpc.md)) | Not stored (JWT); revocations in `revoked_tokens` |
 | Legacy client (deprecated, see [migrating](../api/migrating-from-legacy.md)) | Channel token in `x-channel-token`, conversation token on `/socket` | `ConvergerWeb.Plugs.TenantAuth`, `ConvergerWeb.UserSocket` | Not stored (stateless JWT) |
@@ -435,8 +436,16 @@ on every pull request:
   `# sobelow_skip [...]` with a justification.
 - **`mix deps.audit`** (known vulnerabilities) and **`mix hex.audit`** (retired packages). Advisories that do
   not affect Converger are acknowledged in `mix.exs` under `hex: [ignore_advisories: ...]`, each with the reason
-  (currently two `cloak` / `cloak_ecto` CVEs in
-  ciphers and types Converger does not use, enforced by `test/converger/vault_test.exs`).
+  and a test that keeps the affected code path unreachable. None of them has a fixed release yet:
+
+  | Advisory | Package | Why Converger is not affected | Enforced by |
+  | --- | --- | --- | --- |
+  | EEF-CVE-2026-95105 | `cloak` 1.1.4 | AES-CTR is unused; the vault only configures AES-GCM | `test/converger/vault_test.exs` |
+  | EEF-CVE-2026-94206 | `cloak_ecto` 1.3.0 | `Cloak.Ecto.PBKDF2` is unused | `test/converger/vault_test.exs` |
+  | EEF-CVE-2026-105659 | `bandit` 1.12.5 | HTTP/2 flow control; HTTP/2 is disabled on the endpoint (`http_2_options: [enabled: false]`) | `test/converger_web/http_advisories_test.exs` |
+  | EEF-CVE-2026-43966 | `cowlib` 2.21.0 | CR/LF in structured-field headers; nothing builds them, and cowboy 2.20 (gRPC server) rejects CR/LF in response headers | `test/converger_web/http_advisories_test.exs` |
+
+  Remove an entry when a fixed version ships; `mix hex.audit` warns once an entry no longer matches.
 - **Credo** (`--strict`), **Dialyzer**, and compile with warnings as errors.
 
 The Docker workflow builds the image on every pull request and scans it with Trivy (report-only for now, SARIF
@@ -452,10 +461,17 @@ uploaded to code scanning). Dependabot opens dependency updates. See
 
 ## Reporting a vulnerability
 
-Do not open a public issue for security problems. Open a private security advisory on GitHub
-(**Security** tab, **Report a vulnerability**) at
-[github.com/AimTune/converger/security/advisories/new](https://github.com/AimTune/converger/security/advisories/new),
-with the affected version or commit, reproduction steps and impact. There is no `SECURITY.md` yet.
+Do not open a public issue for security problems. The process is in
+[`SECURITY.md`](https://github.com/AimTune/converger/blob/main/SECURITY.md):
+
+- Preferred: a private security advisory on GitHub (**Security** tab, **Report a vulnerability**) at
+  [github.com/AimTune/converger/security/advisories/new](https://github.com/AimTune/converger/security/advisories/new).
+- Fallback: email `hamzaagareng@gmail.com` with the subject `[converger security]`.
+
+Include the affected version or commit, the deployment type, reproduction steps and impact. Reports are
+acknowledged within 3 business days and assessed within 10. Disclosure is agreed with the reporter (90 days by
+default) and published as a GitHub security advisory. Until releases are tagged, only the latest `main` receives
+fixes.
 
 ## Related ADRs
 

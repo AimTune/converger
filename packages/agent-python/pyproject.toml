@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling>=1.25"]
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [project]
@@ -7,6 +7,7 @@ name = "converger-agent"
 dynamic = ["version"]
 description = "Agent SDK for Converger: serve every conversation of a channel over one Protocol v1 socket (turns, streaming, tool traces, GenUI, interrupts), with a LangChain / LangGraph adapter."
 readme = "README.md"
+license = "MIT"
 requires-python = ">=3.10"
 authors = [{ name = "AimTune" }]
 keywords = ["converger", "agent", "chatbot", "websocket", "langchain", "langgraph"]

@@ -299,6 +299,8 @@ curl -s -X POST http://localhost:4000/api/v1/converger/tokens/generate \
 }
 ```
 
+Without curl: **Client access** on the channel row (admin panel, or the tenant portal for owners and admins) has **Issue test token**, which returns the same token and shows the base and WebSocket URLs to paste into a chat client such as chativa's sandbox ([admin UI](admin-ui.md#client-access)). A site without a backend uses a [publishable key](security/publishable-keys.md) instead of the secret.
+
 ```bash
 export TOKEN='eyJ...'
 ```

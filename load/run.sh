@@ -10,6 +10,9 @@
 #   LOAD_NODES       1 | 3                                     (1)
 #   LOAD_BACKBONE    native | kafka (event backbone, #66)       (native)
 #   LOAD_PROFILE     full | smoke                              (full)
+#   LOAD_RESTART_DELAY_S / LOAD_RESTART_CONNECT_RATE   restart scenarios:
+#                    traffic before the first restart (20), socket connect
+#                    rate (0 = all at once)
 #   LOAD_SCENARIOS   space-separated subset of
 #                    "e2e webhook_burst idle reconnect_storm rolling_restart node_kill"
 #                    plus the opt-in "dead_channel" (not in the default list)
@@ -91,6 +94,11 @@ IDLE_HOLD_S="${LOAD_IDLE_HOLD_S:-$d_idle_hold}"
 IDLE_CONVERSATIONS="${LOAD_IDLE_CONVERSATIONS:-$d_idle_conversations}"
 CONNECT_RATE="${LOAD_CONNECT_RATE:-100}"
 RESTART_GAP_S="${LOAD_RESTART_GAP_S:-10}"
+# Restart scenarios: seconds of traffic before the first restart, and the rate
+# at which their sockets connect (0: all at once). For the 10 000-socket run
+# (#190), connect at 100/s and wait for the ramp: e.g. 130 s.
+RESTART_DELAY_S="${LOAD_RESTART_DELAY_S:-20}"
+RESTART_CONNECT_RATE="${LOAD_RESTART_CONNECT_RATE:-0}"
 DELIVERY_TIMEOUT_S="${LOAD_DELIVERY_TIMEOUT_S:-300}"
 # dead_channel: healthy tenant conversations x LOAD_DEAD_RATE msgs/s each for
 # LOAD_DEAD_DURATION_S per phase; LOAD_DEAD_BACKLOG deliveries for the dead
@@ -448,11 +456,11 @@ for scenario in $SCENARIOS; do
     rolling_restart | node_kill)
       if [ "$scenario" = "rolling_restart" ]; then targets="$SERVICES"; else targets="app"; fi
       n=$(echo "$targets" | wc -w)
-      duration=$((20 + n * (RESTART_GAP_S + 40)))
+      duration=$((RESTART_DELAY_S + n * (RESTART_GAP_S + 40)))
       # shellcheck disable=SC2046
-      k6_run "$scenario" reconnect.js MODE=restart "SCENARIO=$scenario" $(common_env) "DURATION_S=$duration" &
+      k6_run "$scenario" reconnect.js MODE=restart "SCENARIO=$scenario" "CONNECT_RATE=$RESTART_CONNECT_RATE" $(common_env) "DURATION_S=$duration" &
       K6_PID=$!
-      sleep 20
+      sleep "$RESTART_DELAY_S"
       for svc in $targets; do
         t0=$(now_ms)
         if [ "$scenario" = "rolling_restart" ]; then

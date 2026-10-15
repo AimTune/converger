@@ -73,7 +73,8 @@ python faq_agent.py
 | `CONVERGER_AGENT_GROUP` | `faq` | Agent group: run several processes with the same group and each conversation is served by one of them |
 | `ANTHROPIC_API_KEY` | | For `ChatAnthropic(model="claude-sonnet-5-5")`; `FAQ_AGENT_MODEL` picks another model |
 | `FAQ_AGENT_FAKE_MODEL` | | `1` uses a canned fake model instead of Claude (no key, no network) |
-| `CONVERGER_TEXT_FALLBACK` | | `1` also sends each streamed answer as one `text` message, see below |
+| `FAQ_AGENT_FAKE_DELAY` | `0.05` | Seconds between the fake model's streamed tokens |
+| `CONVERGER_TEXT_FALLBACK` | | `1` also sends each streamed answer as one `text` message (only for clients that render neither GenUI nor the joined text) |
 
 ## 3. What each channel shows
 
@@ -83,18 +84,16 @@ Write "When does my order ship?" and then "I want to talk to a human" from both 
 | --- | --- | --- |
 | `run` started / finished | relayed live (a client can show a busy state) | nothing (transient frames are not delivered to WhatsApp) |
 | `search_faq` tool trace | a tool-call card (`tool_call` running, then completed) | nothing, unless the channel enables `show_tool_traces` (one line `search_faq: completed`) |
-| Claude's answer | streamed token by token (`genui` text chunks of one `streamId`) | one text message with the joined answer (planned server rendering; today with `CONVERGER_TEXT_FALLBACK=1`, see below) |
-| "talk to a human" | the interrupt as two chips, *Yes, connect me* / *No, thanks* | the title with the two actions as reply buttons (planned server rendering; today the title as text, answered by typing) |
+| Claude's answer | streamed token by token (`genui` text chunks of one `streamId`, one growing bubble) | one text message with the joined answer, when the stream is done |
+| "talk to a human" | the interrupt as two chips, *Yes, connect me* / *No, thanks* | the title with the two actions as reply buttons |
 | the user's answer | the tapped chip is sent as `resume` | the tapped button reaches the agent as `resume` (Protocol v1 section 9); a typed "yes" also answers it |
 
-Notes on the current server:
+Notes:
 
-- Joining a `genui` stream into one message and rendering an `interrupt`'s actions as WhatsApp reply buttons are the
-  native renderings of [messages.md, section 5](../../../docs/protocol/messages.md) and are **planned**. Until they
-  ship, a WhatsApp user gets the interrupt's title as text (without buttons) and no text for a streamed answer. Set
-  `CONVERGER_TEXT_FALLBACK=1` to also send each streamed answer as a `text` message (the widget then shows it twice:
-  the stream and the message), and answer the interrupt by typing: the SDK takes the next user message of the
-  conversation as the answer of an open question (`free_text_answers`).
+- WhatsApp gets the streamed answer as one message and the interrupt as reply buttons because Converger renders
+  typed messages per channel ([messages.md, section 5](../../../docs/protocol/messages.md)). A user who types
+  "yes" instead of tapping also answers the open interrupt: the SDK takes the next user message of the conversation
+  as the answer of an open question (`free_text_answers`).
 - `InMemorySaver` keeps LangGraph state in the process. Use a persistent checkpointer (Postgres, SQLite) so a
   conversation paused on an interrupt survives a restart: the SDK passes an answer for an interrupt it is not
   waiting for to the graph as `Command(resume=...)`.
@@ -109,3 +108,28 @@ python -m pytest
 `tests/test_faq_agent.py` runs the graph with the fake model through the SDK against its in-process fake server
 (`converger_agent.testing.FakeServer`): streamed answer with the tool trace, the interrupt answered by a tapped
 button and by a typed answer.
+
+### Live check against a real server
+
+`test/acceptance/langchain_faq_live_test.exs` in the repository root runs this agent, unmodified, against a real
+Converger endpoint (#67, first acceptance criterion). It needs Docker and the Elixir toolchain, not Python:
+
+```bash
+# from the repository root, with the test database up (docker compose up -d db)
+mix test --only langchain_faq
+```
+
+The test starts the endpoint on a random port, creates the channels and routing rules of section 1 (a
+`whatsapp_meta` channel whose Graph API calls go to a stub, a `websocket` widget channel, the `websocket` bot
+channel) and runs `python faq_agent.py` in `python:3.12-slim` with `FAQ_AGENT_FAKE_MODEL=1`, connected to the bot
+channel through `host.docker.internal`. Then, from a native Protocol v1 widget socket and from signed WhatsApp
+webhooks, it checks section 3:
+
+- the widget gets the `search_faq` trace and the answer as several `genui` text chunks of one stream and one text
+  run, closed by `stream_done`; WhatsApp gets the same answer as one text message;
+- "I want to talk to a human" pauses the graph: the widget gets the interrupt with its two actions, WhatsApp gets
+  two reply buttons;
+- the widget's `resume` and the WhatsApp button tap both resume the graph, and each channel gets the final reply.
+
+The dependencies are installed once into the Docker volume `converger-langchain-faq-venv` (`LANGCHAIN_FAQ_VENV`);
+`docker volume rm converger-langchain-faq-venv` removes it. `LANGCHAIN_FAQ_IMAGE` picks another Python image.

@@ -24,7 +24,16 @@ defmodule Converger.MixProject do
           "CVE-2026-95105",
           # EEF-CVE-2026-94206: Cloak.Ecto.PBKDF2 ignores the iteration count;
           # we only use Cloak.Ecto.Binary / Cloak.Ecto.Map fields.
-          "CVE-2026-94206"
+          "CVE-2026-94206",
+          # bandit 1.12.5 / cowlib 2.21.0, no fixed releases yet (enforced by
+          # test/converger_web/http_advisories_test.exs):
+          # EEF-CVE-2026-105659: Bandit HTTP/2 flow-control deadlines; HTTP/2 is
+          # disabled on the endpoint (config/config.exs), so it is unreachable.
+          "CVE-2026-105659",
+          # EEF-CVE-2026-43966: cow_http_struct_hd:escape_string/2 lets CR/LF
+          # through; nothing builds structured headers with it, and cowboy
+          # 2.20 (gRPC server) rejects CR/LF in response headers.
+          "CVE-2026-43966"
         ]
       ],
       dialyzer: [
@@ -101,7 +110,7 @@ defmodule Converger.MixProject do
        depth: 1},
       {:daisyui,
        github: "saadeghi/daisyui",
-       tag: "v5.5.20",
+       tag: "v5.7.47",
        sparse: "packages/bundle",
        app: false,
        compile: false,

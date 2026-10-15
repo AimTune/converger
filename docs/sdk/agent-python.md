@@ -87,6 +87,8 @@ Other options:
 | `free_text_answers` | `True` | a user message while an `ask` is open answers it (see [Interrupts](#interrupts)) |
 | `auto_read` | `True` | send `read {watermark}` for each turn (acknowledges deliveries on a `require_ack` channel, shows the turn as read) |
 | `text_fallback` | `False` | also send each stream's joined text as one `text` message (see [Streams](#streams)) |
+| `stream_flush` | 0.15 s | deltas written within this interval go out as one `genui` chunk (see [Streams](#streams)); `0` sends one chunk per delta |
+| `max_frames_per_second` | 12 | outbound pacing: a token bucket (burst of a third of the rate) keeps the socket below the server's 20 frames per second per connection ([Protocol v1, section 11](../protocol/v1.md)); `0` turns it off |
 | `history_size`, `history_timeout` | 200, 3 s | transcript cache per conversation and the wait of the first `history()` |
 
 | method | does |
@@ -144,11 +146,19 @@ refusals are retried with the same `clientId` first.
 
 ### Streams
 
-`write(delta)` sends `genui {streamId, done: false, chunk: {type: "text", content: delta}}`; `end()` sends the closing
-`done: true` chunk. A web client renders the tokens as they arrive. A channel that does not render GenUI (WhatsApp,
-Telegram, email, SMS) is meant to get the joined text as one message when the stream is done; that downgrade is
-**planned** ([messages.md, section 5](../protocol/messages.md)). Until it ships, `text_fallback=True` (on the agent or
-per stream) also sends the joined text as a `text` message with `metadata.genuiStreamId`; web clients then show both.
+`write(delta)` sends `genui {streamId, done: false, chunk: {type: "text", content, id}}`. Consecutive deltas are one
+**text run**: they share one chunk id, and clients concatenate them into one growing bubble (as for a mekik
+`emitToken`, mekik PROTOCOL.md 4.1); `ui(component, props)` closes the run and the next delta opens a new one. Deltas
+written within `stream_flush` seconds (default 0.15) are coalesced into one chunk, so a model emitting 50 tokens a
+second does not exceed the server's frame rate; any other frame of the reply (a tool trace, a message, an interrupt)
+first flushes the pending deltas, so the conversation keeps the order the handler wrote in. `end()` sends the closing
+`done: true` chunk `{type: "event", name: "stream_done"}`.
+
+A web client renders the chunks as they arrive. A channel that does not render GenUI (WhatsApp, Telegram, email, SMS)
+gets the stream's text runs joined into one message when the stream is done
+([messages.md, section 5](../protocol/messages.md), [ADR-0072](../adr/0072-genui-text-runs-concatenate-when-joined.md)).
+`text_fallback=True` (on the agent or per stream) also sends the joined text as a `text` message with
+`metadata.genuiStreamId`; that is only useful for clients that render neither (web clients then show both).
 
 ### Interrupts
 
@@ -190,7 +200,7 @@ To survive a process restart, persist `agent.watermarks` and pass them back as `
 | a turn | `text` (or another message type) with `from: "user"` |
 | around a turn | `run {data: {status}}` (transient) |
 | `reply.text`, `reply.message` | message frame with `clientId` -> `ack` |
-| `reply.stream()` | `genui {streamId, done, chunk: {type: "text", content}}` |
+| `reply.stream()` | `genui {streamId, done: false, chunk: {type: "text", content, id}}` (one id per text run), closed by `genui {done: true, chunk: {type: "event", name: "stream_done"}}` |
 | `reply.ui` | `genui {streamId, done: true, chunk: {type: "ui", component, props}}` |
 | `reply.tool_call` | `tool_call {data: {id, name, status, params?, result?, error?}}` |
 | `reply.ask` | `interrupt {id, data: {payload, actions?, ui?}}`, then `interrupt_resolved {id, data: {answer}}` |
@@ -278,6 +288,31 @@ the end-to-end job). The end-to-end test against a real server runs with
 `packages/conformance/integration/run.sh agent-python`: an end user on
 a widget channel talks to the agent on the bot channel through the server (turn, tool trace, stream, text, interrupt
 and resume).
+
+### Live check of the LangChain FAQ example
+
+`test/acceptance/langchain_faq_live_test.exs` (tag `:langchain_faq`, excluded by default because it needs Docker)
+runs the unmodified [`examples/agents/langchain-faq`](https://github.com/AimTune/converger/tree/main/examples/agents/langchain-faq)
+agent (`python faq_agent.py` in `python:3.12-slim`, fake model) against a real endpoint, as #67's first acceptance
+criterion describes:
+
+```bash
+mix test --only langchain_faq
+```
+
+One tenant, a `websocket` widget channel and a `whatsapp_meta` channel routed to the `websocket` bot channel the agent
+serves (one socket, token minted from the channel secret). The WhatsApp edge is the public one: signed Meta webhooks
+in, the Graph API answered by a stub. It verifies, on the same bot channel:
+
+| | web widget (native socket) | WhatsApp |
+| --- | --- | --- |
+| "When does my order ship?" | `search_faq` tool trace, then the answer streamed as several `genui` text chunks of one `streamId` and one text run, closed by `stream_done`; no extra `text` message | the joined answer as **one** text message; no tool trace, no chunks |
+| "I want to talk to a human" (LangGraph `interrupt()`) | `interrupt` with *Yes, connect me* / *No, thanks* (chips) | interactive reply buttons with the same titles, ids `a:<activity id>:<index>` |
+| the answer | `resume {answers}`: `interrupt_resolved`, the graph resumes, its reply arrives | the `button_reply` tap: the graph resumes, its reply arrives as text |
+
+The example's dependencies are installed once into the Docker volume `converger-langchain-faq-venv`
+(`LANGCHAIN_FAQ_VENV`; remove it with `docker volume rm converger-langchain-faq-venv`); `LANGCHAIN_FAQ_IMAGE` picks
+another Python image. The container reaches the endpoint through `host.docker.internal`.
 
 ## Related
 

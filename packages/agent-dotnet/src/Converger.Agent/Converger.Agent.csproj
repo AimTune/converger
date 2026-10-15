@@ -17,6 +17,7 @@
     <PackageProjectUrl>https://converger.aimtune.dev/sdk/agent-dotnet</PackageProjectUrl>
     <RepositoryUrl>https://github.com/AimTune/converger</RepositoryUrl>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
   </PropertyGroup>
 
   <ItemGroup>

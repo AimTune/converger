@@ -2,7 +2,7 @@
   "name": "@converger/agent",
   "version": "0.1.0",
   "description": "Agent SDK for Converger: serve every conversation of a channel from one WebSocket with onTurn/reply, streaming, tool traces, GenUI and interrupts.",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "author": "AimTune",
   "homepage": "https://converger.aimtune.dev/sdk/agent",
   "repository": {

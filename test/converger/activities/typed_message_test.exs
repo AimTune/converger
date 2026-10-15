@@ -403,7 +403,7 @@ defmodule Converger.Activities.TypedMessageTest do
                Downgrade.plan(ask, %{type: "sms_vonage"})
     end
 
-    test "a GenUI stream reaches end-user channels as its joined text when done", ctx do
+    test "a GenUI stream reaches end-user channels as its joined text runs when done", ctx do
       channel = %{type: "telegram", config: %{}}
 
       chunk = fn chunk, done ->
@@ -412,9 +412,11 @@ defmodule Converger.Activities.TypedMessageTest do
 
       for payload <- [
             chunk.(%{"type" => "ui", "component" => "order-card", "id" => 1}, false),
+            # A text run: deltas sharing a chunk id are concatenated.
             chunk.(%{"type" => "text", "content" => "Process", "id" => 2}, false),
-            chunk.(%{"type" => "text", "content" => "Processing done", "id" => 2}, false),
-            chunk.(%{"type" => "text", "content" => "Anything else?", "id" => 3}, false)
+            chunk.(%{"type" => "text", "content" => "ing ", "id" => 2}, false),
+            chunk.(%{"type" => "text", "content" => "done", "id" => 2}, false),
+            chunk.(%{"type" => "text", "content" => "Anything", "id" => 3}, false)
           ] do
         {:ok, activity} = create(ctx, %{"message_type" => "genui", "payload" => payload})
         assert :skip == Downgrade.plan(activity, channel)
@@ -423,7 +425,8 @@ defmodule Converger.Activities.TypedMessageTest do
       {:ok, done} =
         create(ctx, %{
           "message_type" => "genui",
-          "payload" => chunk.(%{"type" => "event", "name" => "stream_done", "id" => 4}, true)
+          # The run's last delta may come with `done`: counted once.
+          "payload" => chunk.(%{"type" => "text", "content" => " else?", "id" => 3}, true)
         })
 
       assert {:downgrade, %Activity{text: "Processing done\n\nAnything else?", message_type: nil}} =

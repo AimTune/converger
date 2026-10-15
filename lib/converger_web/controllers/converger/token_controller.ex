@@ -6,11 +6,17 @@ defmodule ConvergerWeb.ConvergerAPI.TokenController do
 
   alias Converger.Auth.{ConvergerToken, Revocations}
   alias ConvergerWeb.{APIError, Sockets}
+  alias ConvergerWeb.Plugs.RateLimit
 
   # Limited per channel (the secret's channel for generate, the token's channel
   # for refresh) rather than per IP, so tenants behind a shared NAT do not
-  # share a bucket.
-  plug ConvergerWeb.Plugs.RateLimit, bucket: :token_generate, scope: :channel
+  # share a bucket. Tokens minted through a publishable key refresh against
+  # the larger `publishable_token` bucket (ADR-0074): a public widget has many
+  # visitors, each refreshing every half hour.
+  plug ConvergerWeb.Plugs.RateLimit,
+       [bucket: :token_generate, scope: :channel] when action != :refresh
+
+  plug :rate_limit_refresh when action == :refresh
 
   action_fallback ConvergerWeb.FallbackController
 
@@ -152,6 +158,19 @@ defmodule ConvergerWeb.ConvergerAPI.TokenController do
       {:error, :not_revocable} ->
         {:error, "Token has no jti and cannot be revoked; it expires on its own"}
     end
+  end
+
+  defp rate_limit_refresh(conn, _opts) do
+    bucket =
+      case conn.assigns[:converger_claims] do
+        %{"src" => "publishable"} -> :publishable_token
+        _ -> :token_generate
+      end
+
+    RateLimit.call(
+      conn,
+      RateLimit.init(bucket: bucket, scope: :channel)
+    )
   end
 
   defp validate_scope(nil), do: :ok

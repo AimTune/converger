@@ -48,7 +48,7 @@ jobs:
         working-directory: packages/agent-go
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           go-version: ${{ matrix.go }}
           cache-dependency-path: packages/agent-go/go.sum
@@ -65,7 +65,7 @@ jobs:
         working-directory: packages/agent-dotnet
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-dotnet@v5
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: |
             8.0.x

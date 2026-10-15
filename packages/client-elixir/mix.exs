@@ -44,6 +44,7 @@ defmodule ConvergerClient.MixProject do
   defp package do
     [
       name: "converger_client",
+      licenses: ["MIT"],
       files: ~w(lib mix.exs README.md CHANGELOG.md),
       links: %{
         "Source" => @source_url,
