@@ -1,6 +1,7 @@
 defmodule ConvergerWeb.HTTPAdvisoriesTest do
-  # Guards the `ignore_advisories` entries for bandit / cowlib in mix.exs:
-  # they are only safe while the affected code paths stay unreachable.
+  # Guards the `ignore_advisories` entry for cowlib in mix.exs (it is only
+  # safe while the affected code path stays unreachable), and that the endpoint
+  # keeps HTTP/2 off: it only needs HTTP/1.1.
   use ExUnit.Case, async: true
 
   @h2_preface "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
@@ -17,7 +18,7 @@ defmodule ConvergerWeb.HTTPAdvisoriesTest do
     |> Keyword.fetch!(:http)
   end
 
-  test "the endpoint does not serve HTTP/2 (EEF-CVE-2026-105659)" do
+  test "the endpoint does not serve HTTP/2" do
     assert http_options() |> Keyword.fetch!(:http_2_options) |> Keyword.fetch!(:enabled) == false
 
     bandit_options = Keyword.take(http_options(), [:http_2_options])

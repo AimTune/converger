@@ -2,9 +2,12 @@
 ARG ELIXIR_VERSION=1.19.5
 ARG OTP_VERSION=28.5.0.5
 ARG DEBIAN_VERSION=bookworm-20260824-slim
+# The runtime image can be newer than the builder's (same Debian release, so the
+# same glibc): it is what ships, and what Trivy scans.
+ARG RUNNER_DEBIAN_VERSION=bookworm-20261005-slim
 
 ARG BUILDER_IMAGE="docker.io/hexpm/elixir:${ELIXIR_VERSION}-erlang-${OTP_VERSION}-debian-${DEBIAN_VERSION}"
-ARG RUNNER_IMAGE="docker.io/debian:${DEBIAN_VERSION}"
+ARG RUNNER_IMAGE="docker.io/debian:${RUNNER_DEBIAN_VERSION}"
 
 # --- Build Stage ---
 FROM ${BUILDER_IMAGE} AS builder
@@ -49,7 +52,10 @@ RUN mix release
 # --- Runtime Stage ---
 FROM ${RUNNER_IMAGE} AS final
 
+# `upgrade` pulls the Debian security updates released after the base image was
+# built (Trivy reports fixable CVEs in base packages such as perl and pcre2).
 RUN apt-get update \
+  && apt-get upgrade -y --no-install-recommends \
   && apt-get install -y --no-install-recommends libstdc++6 openssl libncurses6 locales ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 

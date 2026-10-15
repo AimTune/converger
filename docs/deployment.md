@@ -639,3 +639,7 @@ are in [Benchmarks](benchmarks/index.md):
 `.tool-versions` (asdf / mise) pins the Elixir and Erlang/OTP versions used for
 development; the `Dockerfile` build args (`ELIXIR_VERSION`, `OTP_VERSION`,
 `DEBIAN_VERSION`) use the same versions. Bump them together.
+
+`RUNNER_DEBIAN_VERSION` is the Debian snapshot of the runtime image, which can be newer than the builder's (the same
+Debian release, so the same glibc). The runtime stage also runs `apt-get upgrade`, so Debian security updates published
+after the base image land in every build. Trivy scans the published image for fixable CRITICAL and HIGH findings.
