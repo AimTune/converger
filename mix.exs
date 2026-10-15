@@ -25,11 +25,8 @@ defmodule Converger.MixProject do
           # EEF-CVE-2026-94206: Cloak.Ecto.PBKDF2 ignores the iteration count;
           # we only use Cloak.Ecto.Binary / Cloak.Ecto.Map fields.
           "CVE-2026-94206",
-          # bandit 1.12.5 / cowlib 2.21.0, no fixed releases yet (enforced by
+          # cowlib 2.21.0, no fixed release yet (enforced by
           # test/converger_web/http_advisories_test.exs):
-          # EEF-CVE-2026-105659: Bandit HTTP/2 flow-control deadlines; HTTP/2 is
-          # disabled on the endpoint (config/config.exs), so it is unreachable.
-          "CVE-2026-105659",
           # EEF-CVE-2026-43966: cow_http_struct_hd:escape_string/2 lets CR/LF
           # through; nothing builds structured headers with it, and cowboy
           # 2.20 (gRPC server) rejects CR/LF in response headers.

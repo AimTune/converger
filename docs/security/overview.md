@@ -442,10 +442,11 @@ on every pull request:
   | --- | --- | --- | --- |
   | EEF-CVE-2026-95105 | `cloak` 1.1.4 | AES-CTR is unused; the vault only configures AES-GCM | `test/converger/vault_test.exs` |
   | EEF-CVE-2026-94206 | `cloak_ecto` 1.3.0 | `Cloak.Ecto.PBKDF2` is unused | `test/converger/vault_test.exs` |
-  | EEF-CVE-2026-105659 | `bandit` 1.12.5 | HTTP/2 flow control; HTTP/2 is disabled on the endpoint (`http_2_options: [enabled: false]`) | `test/converger_web/http_advisories_test.exs` |
   | EEF-CVE-2026-43966 | `cowlib` 2.21.0 | CR/LF in structured-field headers; nothing builds them, and cowboy 2.20 (gRPC server) rejects CR/LF in response headers | `test/converger_web/http_advisories_test.exs` |
 
-  Remove an entry when a fixed version ships; `mix hex.audit` warns once an entry no longer matches.
+  Remove an entry when a fixed version ships; `mix hex.audit` warns once an entry no longer matches. Bandit
+  1.13.0 fixed EEF-CVE-2026-105659 and EEF-CVE-2026-105660, so Bandit has no entry; the endpoint still keeps HTTP/2
+  off (`http_2_options: [enabled: false]`) because it only needs HTTP/1.1.
 - **Credo** (`--strict`), **Dialyzer**, and compile with warnings as errors.
 
 The Docker workflow builds the image on every pull request and scans it with Trivy (report-only for now, SARIF

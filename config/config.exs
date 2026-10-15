@@ -148,9 +148,9 @@ config :converger, ConvergerWeb.Endpoint,
   live_view: [signing_salt: "a84R5GFm"],
   # An oversize WebSocket frame is answered with close code 1009 by Bandit and
   # reported by ConvergerWeb.SocketGuard; don't log it as a crash.
-  # HTTP/2 is off: the endpoint only needs HTTP/1.1 (REST, SSE, WebSocket), and
-  # Bandit's HTTP/2 stack is affected by EEF-CVE-2026-105659 (see mix.exs). The
-  # gRPC transport has its own server and port.
+  # HTTP/2 is off: the endpoint only needs HTTP/1.1 (REST, SSE, WebSocket), so
+  # Bandit's HTTP/2 stack is attack surface without a use. The gRPC transport
+  # has its own server and port.
   http: [
     websocket_options: [log_protocol_errors: false],
     http_2_options: [enabled: false]
