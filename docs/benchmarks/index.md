@@ -159,6 +159,8 @@ scenario's k6 log and summary JSON, `samples.csv`, `mock_stats.json`, the node l
 | `LOAD_IDLE_CONVERSATIONS` | `1000` | `50` | Conversations the idle sockets share. |
 | `LOAD_CONNECT_RATE` | `100` | | New idle connections per second. Every handshake reads the database, so at much higher rates the pool, not memory, is what is measured. |
 | `LOAD_RESTART_GAP_S` | `10` | | Pause between node restarts. |
+| `LOAD_RESTART_DELAY_S` | `20` | | Seconds of traffic in `rolling_restart` and `node_kill` before the first restart. |
+| `LOAD_RESTART_CONNECT_RATE` | `0` | | Sockets per second at which the restart scenarios connect; `0` opens them all at once. The 10 000-socket rolling restart ([#190](https://github.com/AimTune/converger/issues/190)) uses `100` with a 130 s delay, so every socket is in before the first restart. |
 | `LOAD_APP_CPUS` / `LOAD_APP_MEMORY` | unlimited | | Per-node limits (`2`, `2g`) for capacity runs. |
 | `LOAD_POOL_SIZE` / `LOAD_BACKGROUND_POOL_SIZE` | `20` / `10` | | `POOL_SIZE` and `BACKGROUND_POOL_SIZE` of each node ([Database pools](../operations/database.md)). |
 | `MOCK_LATENCY_MS` / `MOCK_JITTER_MS` / `MOCK_ERROR_RATE` | `20` / `10` / `0` | | Mock provider answer time and the fraction of requests it fails with 500. |

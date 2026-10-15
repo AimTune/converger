@@ -16,8 +16,15 @@
 // (lost_acked_messages, seq_duplicates); ws_reconnect_ms is the
 // close -> welcome time.
 //
-// Environment: MODE (storm), STORM_AT_S (15), STORM_EVERY_S (15), plus the
-// e2e.js variables (DURATION_S defaults to 60, DRAIN_S to 10).
+// CONNECT_RATE > 0 opens the sockets gradually: socket k (over the whole run)
+// connects k / CONNECT_RATE seconds after the scenario starts, so 10 000
+// sockets can join without turning the start into a handshake storm (#190).
+// 0, the default, opens every socket at once.
+//
+// Environment: MODE (storm), STORM_AT_S (15), STORM_EVERY_S (15),
+// CONNECT_RATE (0), plus the e2e.js variables (DURATION_S defaults to 60,
+// DRAIN_S to 10).
+import exec from "k6/execution";
 import { RUN_ID, TREND_STATS, fixtures, num, postActivity, sleepMs, Subscriber, WS_URLS } from "./lib/converger.js";
 import { summary } from "./lib/summary.js";
 
@@ -29,6 +36,8 @@ const DURATION_S = num("DURATION_S", 60);
 const DRAIN_S = num("DRAIN_S", 10);
 const STORM_AT_S = num("STORM_AT_S", 15);
 const STORM_EVERY_S = num("STORM_EVERY_S", 15);
+const CONNECT_RATE = num("CONNECT_RATE", 0);
+const RAMP_S = CONNECT_RATE > 0 ? (CONVERSATIONS * SUBSCRIBERS) / CONNECT_RATE : 0;
 const SCENARIO = __ENV.SCENARIO || (MODE === "storm" ? "reconnect_storm" : "rolling_restart");
 
 export const options = {
@@ -38,7 +47,7 @@ export const options = {
       executor: "per-vu-iterations",
       vus: CONVERSATIONS,
       iterations: 1,
-      maxDuration: `${DURATION_S + DRAIN_S + 300}s`,
+      maxDuration: `${Math.ceil(RAMP_S + DURATION_S + DRAIN_S) + 300}s`,
     },
   },
   thresholds: {
@@ -56,7 +65,11 @@ export default async function () {
   const subscribers = conversation.tokens
     .slice(0, SUBSCRIBERS)
     .map((token, j) => new Subscriber({ urls: WS_URLS, start: index * SUBSCRIBERS + j, token, label: `${index}-${j}` }));
-  subscribers.forEach((s) => s.start());
+  const t0 = exec.scenario.startTime;
+  for (const [j, s] of subscribers.entries()) {
+    if (CONNECT_RATE > 0) await sleepMs(Math.max(0, t0 + ((index * SUBSCRIBERS + j) * 1000) / CONNECT_RATE - Date.now()));
+    s.start();
+  }
 
   const joinDeadline = Date.now() + 15_000;
   while (Date.now() < joinDeadline && subscribers.some((s) => !s.welcomed)) await sleepMs(50);
@@ -101,6 +114,7 @@ export const handleSummary = summary(SCENARIO, () => ({
   conversations: CONVERSATIONS,
   subscribers_per_conversation: SUBSCRIBERS,
   sockets: CONVERSATIONS * SUBSCRIBERS,
+  connect_rate: CONNECT_RATE || null,
   rate_per_conversation: RATE,
   duration_s: DURATION_S,
   storm_at_s: MODE === "storm" ? STORM_AT_S : null,
