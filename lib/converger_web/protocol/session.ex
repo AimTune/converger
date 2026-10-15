@@ -481,7 +481,7 @@ defmodule ConvergerWeb.Protocol.Session do
   # The handshake's database reads (channel, conversation, head, interrupts,
   # replay) wait for an admission slot and share one pool checkout, so a
   # reconnect burst queues on this node instead of failing in the pool's
-  # queue (ADR-0076, issue #198).
+  # queue (ADR-0077, issue #198).
   defp handshake(hello, state) do
     case Admission.run(fn -> Repo.checkout(fn -> open_session(hello, state) end) end) do
       {:ok, result} ->

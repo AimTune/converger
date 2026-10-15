@@ -196,7 +196,7 @@ config :converger, :websocket,
   drain_batch_interval_ms: 1_000,
   drain_shutdown_ms: 30_000,
   # Protocol v1 handshakes and `sync` replays read the database through a
-  # per-node admission queue (ConvergerWeb.Protocol.Admission, ADR-0076):
+  # per-node admission queue (ConvergerWeb.Protocol.Admission, ADR-0077):
   # at most handshake_concurrency at a time (0: half the interactive pool),
   # the rest wait in arrival order. A caller that waits longer than
   # handshake_queue_ms, or finds handshake_queue_max callers waiting, is

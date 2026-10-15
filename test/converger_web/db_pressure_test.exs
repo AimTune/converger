@@ -215,7 +215,7 @@ defmodule ConvergerWeb.DbPressureTest do
       on_exit(fn -> Application.put_env(:converger, :websocket, previous) end)
     end
 
-    # Takes the only admission slot (ADR-0076) until sent :finish.
+    # Takes the only admission slot (ADR-0077) until sent :finish.
     defp hold_admission do
       test = self()
 

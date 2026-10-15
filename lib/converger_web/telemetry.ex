@@ -124,7 +124,7 @@ defmodule ConvergerWeb.Telemetry do
         description:
           "Requests, joins and frames answered as retryable because the database was unavailable"
       ),
-      # Admission queue of v1 handshakes and replays (ADR-0076, issue #198)
+      # Admission queue of v1 handshakes and replays (ADR-0077, issue #198)
       distribution("converger.protocol.admission.wait_ms",
         tags: [:result],
         description: "How long v1 handshakes and syncs waited for an admission slot",

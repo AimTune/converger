@@ -107,7 +107,7 @@ key to another node. That is why a rolling restart loses no acknowledged message
 A drained node's clients all reconnect to the other nodes within a few seconds. On the native v1 endpoint (WebSocket
 and gRPC), the database work of every `hello` and `sync` goes through a per-node admission queue
 ([`ConvergerWeb.Protocol.Admission`](https://github.com/AimTune/converger/blob/main/lib/converger_web/protocol/admission.ex),
-[ADR-0076](../adr/0076-admission-queue-for-reconnect-bursts.md)). At most `handshake_concurrency` handshakes read the
+[ADR-0077](../adr/0077-admission-queue-for-reconnect-bursts.md)). At most `handshake_concurrency` handshakes read the
 database at once, by default half of the interactive pool (`POOL_SIZE`). Each reads through a single pool checkout:
 the channel, the conversation and its head, the open interrupts, and the replay. A client whose watermark is already
 the head skips the replay. Further handshakes wait in arrival order, so a burst becomes a short queue instead of a

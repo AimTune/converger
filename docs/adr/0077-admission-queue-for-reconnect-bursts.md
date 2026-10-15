@@ -1,6 +1,6 @@
 ---
-title: "ADR-0076: Reconnect bursts wait in a per-node admission queue"
-sidebar_label: "0076 Admission queue for reconnect bursts"
+title: "ADR-0077: Reconnect bursts wait in a per-node admission queue"
+sidebar_label: "0077 Admission queue for reconnect bursts"
 description: Protocol v1 handshakes and sync replays wait for one of a bounded number of slots and read the database through one pool checkout, so a drained node's clients queue on the survivors instead of failing in the pool; clients honour retryAfterMs and cap their backoff lower.
 ---
 

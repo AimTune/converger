@@ -1,7 +1,7 @@
 defmodule ConvergerWeb.Protocol.Admission do
   @moduledoc """
   Per-node admission queue for the database work of Protocol v1 handshakes
-  and replays (issue #198, ADR-0076).
+  and replays (issue #198, ADR-0077).
 
   When a node drains, its clients reconnect to the other nodes within a few
   seconds. Each `hello` reads the channel, the conversation, its head, the

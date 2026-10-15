@@ -1,6 +1,6 @@
 defmodule ConvergerWeb.Protocol.AdmissionTest do
   @moduledoc """
-  The admission queue of v1 handshakes and replays (issue #198, ADR-0076).
+  The admission queue of v1 handshakes and replays (issue #198, ADR-0077).
   """
 
   # Not async: the admission server and its config are node-global.
