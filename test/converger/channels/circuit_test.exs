@@ -69,6 +69,14 @@ defmodule Converger.Channels.CircuitTest do
     )
   end
 
+  # Open the breaker without its transition (no backlog parking), so a job
+  # finds it open when it runs: the path a job enqueued before the breaker
+  # opened on another node takes.
+  defp force_state(channel, state) do
+    from(c in Channel, where: c.id == ^channel.id)
+    |> Repo.update_all(set: [circuit_state: state, circuit_changed_at: DateTime.utc_now()])
+  end
+
   # Pretend the breaker opened long enough ago for a probe.
   defp age_breaker(channel) do
     past = DateTime.add(DateTime.utc_now(), -60, :second)
@@ -137,15 +145,15 @@ defmodule Converger.Channels.CircuitTest do
   end
 
   describe "parking" do
-    test "an open breaker parks deliveries with a low priority", %{
+    test "a job that finds the breaker open parks itself with a low priority", %{
       tenant: tenant,
       channel: channel
     } do
       attach_telemetry([[:converger, :deliveries, :parked]])
-      Circuit.trip(channel, :unhealthy)
 
       Oban.Testing.with_testing_mode(:manual, fn ->
         activity = create_activity(tenant, channel)
+        force_state(channel, "open")
         before = DateTime.utc_now()
 
         assert %{snoozed: 1} = Oban.drain_queue(queue: :deliveries)
@@ -163,11 +171,154 @@ defmodule Converger.Channels.CircuitTest do
 
     test "parking never calls the adapter", %{tenant: tenant, channel: channel} do
       Req.Test.stub(__MODULE__, fn _ -> flunk("adapter called while breaker open") end)
-      Circuit.trip(channel, :unhealthy)
 
       Oban.Testing.with_testing_mode(:manual, fn ->
         for _ <- 1..5, do: create_activity(tenant, channel)
+        force_state(channel, "open")
         assert %{snoozed: 5} = Oban.drain_queue(queue: :deliveries)
+      end)
+    end
+
+    test "opening the breaker parks the channel's whole backlog at once", %{
+      tenant: tenant,
+      channel: channel
+    } do
+      other = webhook_channel_fixture(tenant)
+
+      Oban.Testing.with_testing_mode(:manual, fn ->
+        backlog = for _ <- 1..4, do: create_activity(tenant, channel)
+        healthy = create_activity(tenant, other)
+        before = DateTime.utc_now()
+
+        Circuit.trip(channel, :unhealthy)
+
+        # Parked without being fetched: priority 3, asleep for park_seconds.
+        for activity <- backlog do
+          job = job_for(activity)
+          assert job.state == "scheduled"
+          assert job.priority == Circuit.parked_priority()
+          assert DateTime.diff(job.scheduled_at, before, :second) in 599..661
+        end
+
+        assert Circuit.parked_count(channel.id) == 4
+
+        # Another channel's job is untouched and runs first.
+        assert %{state: "available", priority: 1} = job_for(healthy)
+        stub_status(200)
+        assert %{success: 1, snoozed: 0} = Oban.drain_queue(queue: :deliveries)
+      end)
+    end
+
+    test "deliveries enqueued while the breaker is open are inserted parked", %{
+      tenant: tenant,
+      channel: channel
+    } do
+      Circuit.trip(channel, :unhealthy)
+      channel = reload(channel)
+
+      assert [priority: 3, schedule_in: wake] = Circuit.insert_opts(channel)
+      assert wake in 601..660
+
+      Oban.Testing.with_testing_mode(:manual, fn ->
+        activity = create_activity(tenant, channel)
+        job = job_for(activity)
+        assert job.state == "scheduled"
+        assert job.priority == Circuit.parked_priority()
+        assert %{snoozed: 0, success: 0} = Oban.drain_queue(queue: :deliveries)
+      end)
+
+      assert Circuit.insert_opts(%{channel | circuit_state: "closed"}) == []
+    end
+
+    test "a job inserted parked as the breaker closes is released by the follow-up", %{
+      tenant: tenant,
+      channel: channel
+    } do
+      Circuit.trip(channel, :unhealthy)
+
+      Oban.Testing.with_testing_mode(:manual, fn ->
+        # Enqueued by a node that still saw the breaker open...
+        activity = create_activity(tenant, channel)
+        assert job_for(activity).priority == Circuit.parked_priority()
+
+        # ...while another node closed it (no release has run since).
+        force_state(channel, "closed")
+
+        assert :ok = perform_job(ChannelCircuitProbeWorker, %{"channel_id" => channel.id})
+        assert %{state: "available", priority: 1} = job_for(activity)
+      end)
+    end
+  end
+
+  describe "in-flight cap" do
+    test "the cap is half of the queue's workers by default" do
+      assert Circuit.in_flight_cap("deliveries") == 10
+      assert Circuit.in_flight_cap("deliveries_bulk") == 2
+      assert Circuit.in_flight_cap("unknown_queue") == nil
+    end
+
+    test "a job over the cap is snoozed without calling the adapter and defers the backlog", %{
+      tenant: tenant,
+      channel: channel
+    } do
+      Application.put_env(
+        :converger,
+        :circuit_breaker,
+        Keyword.merge(Application.get_env(:converger, :circuit_breaker), max_in_flight: 1)
+      )
+
+      Req.Test.stub(__MODULE__, fn _ -> flunk("adapter called over the in-flight cap") end)
+
+      # Another delivery of the channel holds its only slot on this node.
+      test = self()
+
+      holder =
+        spawn(fn ->
+          send(test, {:slot, Converger.Channels.InFlight.acquire(channel.id, 1)})
+          receive do: (:stop -> :ok)
+        end)
+
+      assert_receive {:slot, {:ok, _}}
+
+      Oban.Testing.with_testing_mode(:manual, fn ->
+        [first, second] = for _ <- 1..2, do: create_activity(tenant, channel)
+
+        # Both are over the cap: snoozed, never attempted.
+        assert %{snoozed: 2, success: 0} = Oban.drain_queue(queue: :deliveries)
+        assert %{state: "scheduled", priority: 1} = job_for(first)
+        assert %{state: "scheduled", priority: 1} = job_for(second)
+        assert delivery(first, channel) == nil
+
+        # Once the slot is free the deliveries run.
+        ref = Process.monitor(holder)
+        send(holder, :stop)
+        assert_receive {:DOWN, ^ref, :process, _, _}
+        stub_status(200)
+
+        assert %{success: 2} = Oban.drain_queue(queue: :deliveries, with_scheduled: true)
+      end)
+    end
+  end
+
+  describe "defer_backlog/2" do
+    test "pushes back the channel's available jobs only", %{tenant: tenant, channel: channel} do
+      other = webhook_channel_fixture(tenant)
+
+      Oban.Testing.with_testing_mode(:manual, fn ->
+        backlog = for _ <- 1..3, do: create_activity(tenant, channel)
+        healthy = create_activity(tenant, other)
+        before = DateTime.utc_now()
+
+        assert Circuit.defer_backlog(channel.id, 5_000) == 3
+
+        for activity <- backlog do
+          job = job_for(activity)
+          assert job.state == "scheduled"
+          assert job.priority == 2
+          assert DateTime.diff(job.scheduled_at, before, :millisecond) in 4_000..6_000
+        end
+
+        assert %{state: "available"} = job_for(healthy)
       end)
     end
   end
@@ -181,8 +332,9 @@ defmodule Converger.Channels.CircuitTest do
       Circuit.trip(channel, :unhealthy)
 
       Oban.Testing.with_testing_mode(:manual, fn ->
+        # Enqueued while open: inserted parked.
         parked = for _ <- 1..3, do: create_activity(tenant, channel)
-        assert %{snoozed: 3} = Oban.drain_queue(queue: :deliveries)
+        assert Circuit.parked_count(channel.id) == 3
 
         age_breaker(channel)
         stub_status(200)
@@ -199,7 +351,6 @@ defmodule Converger.Channels.CircuitTest do
           job = job_for(activity)
           assert job.state == "available"
           assert job.priority == 1
-          assert %{status: "pending"} = delivery(activity, channel)
         end
 
         assert %{success: 2} = Oban.drain_queue(queue: :deliveries)
@@ -344,8 +495,8 @@ defmodule Converger.Channels.CircuitTest do
 
       Oban.Testing.with_testing_mode(:manual, fn ->
         activity = create_activity(tenant, channel)
-        assert %{snoozed: 1} = Oban.drain_queue(queue: :deliveries)
-        assert %{status: "paused"} = delivery(activity, channel)
+        assert Circuit.parked_count(channel.id) == 1
+        assert %{snoozed: 0} = Oban.drain_queue(queue: :deliveries)
 
         # A paused channel is never probed.
         age_breaker(channel)

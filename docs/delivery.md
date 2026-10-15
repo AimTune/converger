@@ -334,9 +334,13 @@ stateDiagram-v2
 
 **Parking.** A parked job is snoozed for `park_seconds` (plus up to 10% jitter) and its Oban priority drops from 1 to 3. A snooze never uses up an Oban attempt or a delivery attempt. The delivery row becomes `paused`. Because Oban fetches jobs by priority, a fresh delivery of a healthy channel in the same queue is always picked before a parked one. With 10,000 jobs parked for a dead channel, the queue still serves everyone else first.
 
+**Parking a backlog at once** ([ADR-0076](adr/0076-bulk-parking-and-per-channel-in-flight-cap.md)). When the breaker opens or the channel is paused, its whole waiting backlog is parked in one statement: every `available`, `scheduled` or `retryable` delivery job of the channel that is not parked yet moves to priority 3 and sleeps `park_seconds`, and its `pending` deliveries become `paused`. Deliveries enqueued while the breaker stays open or the channel stays paused are inserted parked. So a dead channel's backlog never sits ahead of other channels waiting for each of its jobs to run once and park itself.
+
+**In-flight cap** (ADR-0076). At most `max_in_flight` deliveries of one channel run at the same time on a node (`Converger.Channels.InFlight`). The default, `:auto`, is half of the job's queue workers: 10 of the 20 `deliveries` workers, 5 of `deliveries_high`, 2 of `deliveries_bulk`. This bounds what a dead channel can hold while its first attempts wait out the adapter timeout, before its breaker opens. A job over the cap is snoozed for one to two `busy_defer_ms` (default 2 s) without a database query. The first one per `busy_defer_ms` also pushes the channel's other waiting jobs back by `busy_defer_ms` at priority 2 in one statement, so they run after other channels' fresh deliveries. A channel that needs more concurrency than the cap sets `max_in_flight` higher (it is global) or its tenant moves to a tier with more workers. The cap is per node, not cluster-wide.
+
 **Probing.** When the breaker opens, `Converger.Workers.ChannelCircuitProbeWorker` (queue `default`, unique per channel) is scheduled `cooldown_ms` later. While the breaker stays open, it wakes one parked job every cooldown. That job claims `half_open` and is the probe. The loop stops once the breaker is closed or paused, or when nothing is parked; in that case the next delivery to the channel probes itself.
 
-**Closing.** When a probe succeeds, the breaker closes, `consecutive_failures` is reset, and **every** parked job of the channel is released at once: it becomes `available` now with priority 1, and its `paused` delivery goes back to `pending`. Recovery therefore does not wait for `park_seconds`.
+**Closing.** When a probe succeeds, the breaker closes, `consecutive_failures` is reset, and **every** parked job of the channel is released at once: it becomes `available` now with priority 1, and its `paused` delivery goes back to `pending`. Recovery therefore does not wait for `park_seconds`. The close also schedules the probe worker 5 s later, which releases the channel's parked jobs once more: a delivery that another node enqueued parked while the breaker was closing is released then.
 
 Configuration (defaults shown):
 
@@ -345,6 +349,8 @@ config :converger, :circuit_breaker,
   failure_threshold: 5,   # consecutive transient failures before opening
   cooldown_ms: 30_000,    # time open before a probe
   park_seconds: 600,      # sleep of a parked job before it re-checks on its own
+  max_in_flight: :auto,   # deliveries of one channel running at once per node (:auto = half the queue, nil = no cap)
+  busy_defer_ms: 2_000,   # how long a channel at its cap defers its waiting jobs
   replay_dead_letters_on_close: false,  # opt-in, see below
   replay_window_ms: 3_600_000          # how far back dead letters are replayed
 ```

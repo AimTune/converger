@@ -6,7 +6,7 @@ description: Each channel has a database-backed delivery circuit breaker whose p
 
 | | |
 | --- | --- |
-| **Status** | Accepted |
+| **Status** | Accepted (parking amended by [ADR-0076](0076-bulk-parking-and-per-channel-in-flight-cap.md): a backlog is parked in bulk when the breaker opens, and one channel's running deliveries are capped per node) |
 | **Date** | 2026-10-10 |
 | **Issue** | [#31](https://github.com/AimTune/converger/issues/31) |
 | **Pull request** | [#120](https://github.com/AimTune/converger/pull/120) |
