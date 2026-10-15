@@ -176,9 +176,10 @@ limit, the 1012 drain close and the 503 refusal. The cluster-scale check is the 
 ([Benchmarks](../benchmarks/index.md), [#190](https://github.com/AimTune/converger/issues/190)). On a 3-node cluster it lost
 no acknowledged message, but reconnects took p95 93.6 s instead of the 30 s this design aims for, because the
 surviving nodes' database pools saturated on handshakes and replays
-([2026-10-15 run](../benchmarks/2026-10-15-a8dd704-rolling-restart-10k.md)). The
-[admission queue](#reconnect-bursts) addresses that ([#198](https://github.com/AimTune/converger/issues/198)); re-run
-the same command to check a cluster:
+([2026-10-15 run](../benchmarks/2026-10-15-a8dd704-rolling-restart-10k.md)). With the
+[admission queue](#reconnect-bursts) ([#198](https://github.com/AimTune/converger/issues/198)) the same run reconnects
+with p95 6.0 s and max 7.4 s, still with no acknowledged message lost
+([after #198](../benchmarks/2026-10-15-rolling-restart-10k-after-198.md)). Re-run the same command to check a cluster:
 
 ```bash
 LOAD_NODES=3 LOAD_SCENARIOS=rolling_restart LOAD_CONVERSATIONS=1000 LOAD_SUBSCRIBERS=10 LOAD_RATE=0.1 \

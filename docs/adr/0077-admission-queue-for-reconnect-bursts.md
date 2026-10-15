@@ -169,6 +169,14 @@ The drain pacing and the #35 fail-fast behaviour of the pool stay as they are.
   release on raise and on exit. `test/converger_web/db_pressure_test.exs` covers a `hello` and a `sync` without a slot,
   a burst that waits instead of failing, and a `hello` at the head that skips the replay.
 
+## Validation
+
+The 10 000-socket rolling restart on 3 nodes, the same command and machine as the run that found the problem:
+reconnect p95 fell from 93.6 s to **6.0 s** (max 175.5 s to 7.4 s), REST send retries from 42 307 to 679,
+`replay_unavailable` answers from 3 449 to 0, and the pool queue wait peaked at 87 ms instead of 1.7 s. No acknowledged
+message was lost in either run. Part of the gain is the harness reconnecting to a random node
+([after #198](../benchmarks/2026-10-15-rolling-restart-10k-after-198.md)).
+
 ## Links
 
 - [WebSocket limits and draining](../operations/websocket-limits.md#reconnect-bursts)
