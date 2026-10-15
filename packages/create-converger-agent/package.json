@@ -1,6 +1,6 @@
 {
   "name": "create-converger-agent",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Scaffold a TypeScript agent for Converger: npx create-converger-agent my-agent",
   "license": "MIT",
   "author": "AimTune",
@@ -14,7 +14,7 @@
   "keywords": ["converger", "agent", "create", "scaffold", "template"],
   "type": "module",
   "bin": {
-    "create-converger-agent": "./bin/create-converger-agent.mjs"
+    "create-converger-agent": "bin/create-converger-agent.mjs"
   },
   "exports": {
     ".": "./src/scaffold.mjs"

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.1 (2026-10-16)
+
+- First release from CI with npm trusted publishing and provenance ([#188](https://github.com/AimTune/converger/issues/188)); no API changes.
+
 ## 0.1.0 (2026-10-15)
 
 - First release: `ConvergerClient` / `Conversation` for Converger Protocol v1 with jittered reconnects honouring

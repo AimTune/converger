@@ -23,7 +23,7 @@ namespace Converger.Agent;
 public sealed class ConvergerAgent
 {
     /// <summary>Version of this SDK, sent in the User-Agent header.</summary>
-    public const string Version = "0.1.0";
+    public const string Version = "0.1.1";
 
     /// <summary>The protocol version sent in hello.</summary>
     public const string Protocol = "converger/1";
