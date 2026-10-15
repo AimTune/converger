@@ -8,3 +8,7 @@ packages:
 # Dependencies allowed to run install scripts.
 allowBuilds:
   esbuild: true
+
+# Security overrides for transitive dependencies (Dependabot alerts).
+overrides:
+  esbuild: ">=0.28.1"

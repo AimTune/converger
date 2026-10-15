@@ -173,6 +173,24 @@ AZURITE_ENDPOINT=http://127.0.0.1:10000/devstoreaccount1 \
   mix test test/converger/uploads/storage_integration_test.exs --only minio --only azurite
 ```
 
+### Dependency security alerts
+
+Dependabot (configured in [`.github/dependabot.yml`](https://github.com/AimTune/converger/blob/main/.github/dependabot.yml))
+opens security alerts for the Mix deps, the pnpm workspace (`pnpm-lock.yaml`) and the documentation site
+(`website/package-lock.json`). Prefer upgrading the direct dependency. When the vulnerable package is transitive and no
+release of the direct dependency fixes it yet (Docusaurus pins several), raise its floor with an override and
+regenerate the lockfile:
+
+| Lockfile | Where the override goes | Current overrides |
+| --- | --- | --- |
+| `pnpm-lock.yaml` | `overrides:` in `pnpm-workspace.yaml`, then `pnpm install` | `esbuild >=0.28.1` |
+| `website/package-lock.json` | `"overrides"` in `website/package.json`, then `npm install` | `postcss-selector-parser ^7.1.6`, `serialize-javascript ^7.0.5`, `tinypool ^2.1.2`, `uuid ^11.1.1` (under `sockjs` only) |
+
+Overrides can cross a major version, so check the result before merging: `cd website && npm run build` (also with
+`DOCUSAURUS_SSG_WORKER_THREAD_COUNT=2`, which exercises `tinypool`) and `pnpm -r test`. Remove an override once the
+direct dependency ships the fixed version. An alert with no patched release (for example `braces <=3.0.3`, which only
+reaches the docs build tooling) is dismissed in GitHub with the reason stated.
+
 ### Asynchronous assertions
 
 `test/test_helper.exs` raises ExUnit's `assert_receive_timeout` to 1 s, so `assert_receive`,
