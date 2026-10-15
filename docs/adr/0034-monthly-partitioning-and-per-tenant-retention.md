@@ -141,7 +141,7 @@ Details:
   | 200,000 | 45 ms | 149 ms | 56 ms | 1,010 ms |
   | 1,000,000 | 31 ms | 400 ms | 18 ms | 2,911 ms |
 
-  Writers were never blocked (the slowest insert during the drop was below the writers' normal p99 of 62 ms in the larger run). `DELETE` grows linearly with the month and leaves dead tuples and WAL behind; detach is constant and the drop only unlinks files. The 100M-row run from the issue was not done on this machine.
+  Writers were never blocked (the slowest insert during the drop was below the writers' normal p99 of 62 ms in the larger run). `DELETE` grows linearly with the month and leaves dead tuples and WAL behind; detach is constant and the drop only unlinks files. The 100M-row run from the issue was not done on this machine at the time; it was done later ([2026-10-15, 100M rows](../benchmarks/2026-10-15-partition-100m.md), #192): detach 205 ms, drop 14 ms, writers not blocked (p99 124 ms during the run against 144 ms before), and the 16.7M-row month archived and verified in 530 s.
 - Recent data and its indexes live in small partitions; old months stop costing cache and vacuum.
 - Every guarantee of ADR-0006, ADR-0015 and ADR-0017 is kept; idempotency is now also correct across month boundaries.
 - Per-tenant retention with an exact, verified archive, and a re-import path.

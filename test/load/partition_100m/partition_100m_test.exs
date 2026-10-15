@@ -37,6 +37,9 @@ defmodule Converger.Partition100MTest do
 
   @moduletag :partition_100m
   @moduletag timeout: :infinity
+  # The seed and the archive hold their connections for far longer than the
+  # sandbox default of 120 s at 100M rows.
+  @ownership_timeout :timer.hours(24)
 
   # The newest seeded month. Seeded months must not exist yet: the test
   # helper creates partitions from 2024-01 on.
@@ -92,7 +95,7 @@ defmodule Converger.Partition100MTest do
       do:
         flunk("run this through test/load/partition_100m/run.sh (it seeds a throwaway database)")
 
-    :ok = Sandbox.checkout(Repo, sandbox: false)
+    :ok = Sandbox.checkout(Repo, sandbox: false, ownership_timeout: @ownership_timeout)
     s = settings()
     File.mkdir_p!(s.out)
 
@@ -273,7 +276,7 @@ defmodule Converger.Partition100MTest do
     jobs
     |> Task.async_stream(
       fn job ->
-        :ok = Sandbox.checkout(Repo, sandbox: false)
+        :ok = Sandbox.checkout(Repo, sandbox: false, ownership_timeout: @ownership_timeout)
         seed_partition(job, ctx)
       end,
       max_concurrency: max(s.seed_jobs, 1),
@@ -793,7 +796,7 @@ defmodule Converger.Partition100MTest do
   # and returns [{started_ms_since_t0, latency_us, :ok | :error}].
   defp start_writer(ctx, i, rate, t0, parent) do
     Task.async(fn ->
-      :ok = Sandbox.checkout(Repo, sandbox: false)
+      :ok = Sandbox.checkout(Repo, sandbox: false, ownership_timeout: @ownership_timeout)
 
       {:ok, conversation} =
         Converger.Conversations.create_conversation(%{
