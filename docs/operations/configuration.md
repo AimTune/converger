@@ -43,7 +43,7 @@ Conventions used in the tables below:
 | --- | --- | --- | --- |
 | `PHX_SERVER` | unset | yes, for releases | When set to **any** value (even `false`), starts the HTTP endpoint. `bin/server` sets `PHX_SERVER=true`. Read in every environment. |
 | `PHX_HOST` | `example.com` | effectively yes | Public host name. URLs are generated as `https://PHX_HOST:443`, `ForceSSL` redirects to it, and the default WebSocket origin check accepts only this host. Prod only. |
-| `PORT` | `4000` | no | HTTP listen port. Prod binds all interfaces (`::`); dev binds `127.0.0.1`. Read in prod and dev. |
+| `PORT` | `4000` | no | HTTP listen port. Prod binds all interfaces (`::`); dev binds `127.0.0.1`. Read in prod and dev. The port speaks HTTP/1.1 only (REST, SSE, WebSocket): HTTP/2 is disabled in `config/config.exs`. gRPC has its own port ([gRPC transport](#grpc-transport)). |
 | `CHECK_ORIGIN` | host of `PHX_HOST` | no | Comma-separated origins allowed to open browser WebSockets (LiveView, `/socket`, `/socket/converger`), Phoenix syntax such as `//*.example.com`. Set but empty raises at boot. Prod only. |
 | `CORS_ORIGINS` | `http://127.0.0.1:5500,http://localhost:5500` | no | Comma-separated CORS origins (`*` for any). Read per request by `ConvergerWeb.Endpoint.cors_origins/0`. All environments. |
 
