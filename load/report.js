@@ -47,9 +47,28 @@ const METRICS = [
   ["backbone", "send→backbone subscriber p95 (ms)", "publish_to_subscriber_ms.p95", "lower", 10, false],
   ["backbone", "send→backbone subscriber p99 (ms)", "publish_to_subscriber_ms.p99", "lower", 10, false],
   ["backbone", "caught up after the delivery queues drained (s)", "caught_up_after_drain_s", "lower", 2, false],
+  ["dead_channel", "healthy tenant p50, baseline (ms)", "baseline.latency_ms.p50", "lower", 10, false],
+  ["dead_channel", "healthy tenant p95, baseline (ms)", "baseline.latency_ms.p95", "lower", 10, false],
+  ["dead_channel", "healthy tenant p99, baseline (ms)", "baseline.latency_ms.p99", "lower", 10, false],
+  ["dead_channel", "healthy tenant deliveries/s, baseline", "baseline.deliveries_per_s", "higher", 2, false],
+  ["dead_channel", "healthy tenant p50, dead channel (ms)", "dead.latency_ms.p50", "lower", 10, false],
+  ["dead_channel", "healthy tenant p95, dead channel (ms)", "dead.latency_ms.p95", "lower", 10, true],
+  ["dead_channel", "healthy tenant p99, dead channel (ms)", "dead.latency_ms.p99", "lower", 10, false],
+  ["dead_channel", "healthy tenant max, dead channel (ms)", "dead.latency_ms.max", "lower", 10, false],
+  ["dead_channel", "healthy tenant deliveries/s, dead channel", "dead.deliveries_per_s", "higher", 2, false],
+  ["dead_channel", "p95 limit (ms)", "p95_limit_ms", null, 0, false],
+  ["dead_channel", "p95 sent while the backlog was parked (ms)", "dead.transient_latency_ms.p95", "lower", 10, false],
+  ["dead_channel", "p95 sent after the backlog was parked (ms)", "dead.steady_latency_ms.p95", "lower", 10, false],
+  ["dead_channel", "healthy messages over the p95 limit", "dead.over_limit_messages", null, 0, false],
+  ["dead_channel", "over the limit: first message sent at (s)", "dead.degraded_from_s", null, 0, false],
+  ["dead_channel", "over the limit: last message sent at (s)", "dead.degraded_until_s", "lower", 2, false],
+  ["dead_channel", "breaker opened after (s)", "breaker.opened_after_s", "lower", 2, false],
+  ["dead_channel", "backlog parked after (s)", "breaker.backlog_parked_after_s", "lower", 2, false],
+  ["dead_channel", "dead channel deliveries in flight, max", "breaker.max_dead_executing", null, 0, false],
+  ["dead_channel", "requests that reached the dead provider", "breaker.dead_provider_requests", null, 0, false],
 ];
 
-const LOSS = ["e2e", "webhook_burst", "reconnect_storm", "rolling_restart", "node_kill", "backbone"];
+const LOSS = ["e2e", "webhook_burst", "reconnect_storm", "rolling_restart", "node_kill", "backbone", "dead_channel"];
 
 const get = (obj, path) => path.split(".").reduce((o, k) => (o === null || o === undefined ? undefined : o[k]), obj);
 const fmt = (v) => (v === null || v === undefined ? "–" : typeof v === "number" ? String(Number(v.toFixed(1))) : String(v));

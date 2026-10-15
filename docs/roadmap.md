@@ -113,6 +113,12 @@ Run Converger as a cluster that meets the PRD targets (10M messages per day, 1k+
 
 Exit criteria: a nightly load test publishes p95 latency and connection counts with enforced thresholds; one dead channel does not degrade other tenants; partition drop and archive are verified on a 100M-row dataset.
 
+| Exit criterion | Status |
+| --- | --- |
+| Nightly load test with p95 and connection counts, thresholds enforced | See [Benchmarks](benchmarks/index.md) (nightly `Load` workflow) |
+| One dead channel does not degrade other tenants | **Measured, not met for tenants on the same tier**: the breaker parks the backlog, but the shared queue is blocked for about 35 s first (p95 12.3 s against 0.6 s). Met in steady state and close with separate tiers (p95 217 ms against 73 ms). See [Dead-channel isolation](benchmarks/dead-channel-isolation.md) for the cause and the proposed fix. |
+| Partition drop and archive verified on 100M rows | **Scaled evidence**: measured and verified at 10M and 30M rows per table (detach constant, archive linear, every row archived and checksummed before the drop, writers never blocked); 100M **extrapolated, not measured** (about 57 min). See [Partition retention at scale](benchmarks/partition-retention-scaling.md). |
+
 ## v3.2 Channel Expansion (#60)
 
 Turn the adapter layer into a real plugin system and ship the channels integrators ask for most. Conditional routing with reply-back makes multi-channel conversations usable.
