@@ -395,6 +395,8 @@ Each queue has its own workers, so a bulk tenant sending a million messages cann
 
 Trade-off: tiers isolate classes of tenants, not individual tenants. Two tenants in the same tier still share that queue's workers. Within a queue, the circuit breaker and parking priority keep a dead channel from blocking the queue, and rate limits keep one provider from taking all of it. True per-tenant partitioning, with one queue partition and a global limit per tenant, would need Oban Pro's partitioned queues (`Smart` engine). We chose not to require that.
 
+Measured ([Dead-channel isolation](benchmarks/dead-channel-isolation.md), epic #59): with a dead webhook channel and a 10,000-delivery backlog in the **same** tier, the breaker opened after one adapter timeout and only 23 requests reached the dead provider, but the other tenant's deliveries waited up to about 13 s for the first ~37 s. All of the queue's workers were stuck in the dead provider until the breaker opened, and the backlog's jobs, enqueued at priority 1 before the other tenant's, are parked only one at a time as each one runs. With the dead tenant on another tier, the other tenant's p95 went from 73 ms to 217 ms. Until the whole backlog is parked when the breaker opens, put tenants with unreliable endpoints or bulk traffic on a different tier from interactive ones.
+
 ## Related
 
 - [Delivery pipeline](architecture/delivery-pipeline.md) and [Activity flow](architecture/activity-flow.md)

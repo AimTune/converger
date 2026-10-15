@@ -54,7 +54,7 @@ flowchart TD
     B -- yes --> C["DETACH PARTITION ... CONCURRENTLY (activities_pM, deliveries_pM)"]
     C --> D["Export each tenant's rows to archive/<tenant>/<YYYY-MM>/"]
     D --> E["Download every part again: size + SHA-256; archived rows = partition rows?"]
-    E -- yes --> F["DROP TABLE (milliseconds)"]
+    E -- yes --> F["DROP TABLE (does not block writers)"]
     E -- no --> G["Stop. Detached table kept, job fails and retries"]
     B -- no --> H["For each expired tenant: per part of 50,000 rows, in one transaction:"]
     H --> I["SELECT ... FOR UPDATE, upload, download + verify, record, DELETE"]
@@ -75,6 +75,8 @@ stops with an error, Oban retries it with backoff (up to about a day between att
 run continues where it stopped: a detached month whose archive has not finished is processed first, and parts
 already uploaded and recorded are not exported again. While a month is detached its rows are not visible to the
 API, exactly as after the drop, but they are still in the database.
+
+**How long it takes.** Measured on a developer machine with 8 writers inserting the whole time ([Partition retention at scale](../benchmarks/partition-retention-scaling.md)): a month of 30M activities and 30M deliveries (23 GB of partitions) was detached in 24 ms, archived and verified in 17 minutes (about 59,000 rows/s, 2.8 GB of archive) and dropped in 6 s, the time Postgres needs to unlink the files at commit. Detach does not grow with the month; the archive grows linearly with the rows (a 100M-row month: roughly an hour, extrapolated). No step blocked the writers. The worker has no job timeout, so a long run is not cut off; plan the archive storage at about 12 % of the partition size (gzipped JSON Lines of the benchmark's narrow rows; wider rows compress differently).
 
 Run it now instead of waiting for the 1st (on a running node; the job is unique, so it never runs twice at once):
 

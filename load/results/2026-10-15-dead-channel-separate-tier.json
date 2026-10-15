@@ -1,0 +1,268 @@
+{
+  "run": {
+    "commit": "772e42e104e9",
+    "date": "2026-10-15T01:22:15Z",
+    "nodes": 1,
+    "backbone": "native",
+    "profile": "full",
+    "scenarios": "dead_channel"
+  },
+  "hardware": {
+    "host": "DESKTOP-Q8TVMOL",
+    "runner": "local",
+    "runner_os": "MINGW64_NT-10.0-26200",
+    "docker_cpus": 12,
+    "docker_memory_bytes": 33062854656,
+    "docker_version": "29.8.2",
+    "kernel": "6.6.87.2-microsoft-standard-WSL2",
+    "app_cpus_limit": "unlimited",
+    "app_memory_limit": "unlimited",
+    "pool_size": 20,
+    "background_pool_size": 10,
+    "postgres_version": "17.11",
+    "database_size_bytes": 76961459
+  },
+  "mock": {
+    "latencyMs": 20,
+    "jitterMs": 10,
+    "errorRate": 0
+  },
+  "scenarios": {
+    "backbone": {
+      "params": {
+        "backbone": "native",
+        "subscriber": "platform webhook (activity.created)"
+      },
+      "backbone": "native",
+      "events_expected": 1500,
+      "events_observed": 1500,
+      "webhook_event_rows": 1500,
+      "duplicate_events": 0,
+      "http_redeliveries": 0,
+      "parked_jobs": 1500,
+      "publish_to_subscriber_ms": {
+        "p50": 88,
+        "p95": 1399,
+        "p99": 1495,
+        "max": 1520
+      },
+      "caught_up_after_drain_s": 0.8,
+      "lost_acked_messages": 0
+    },
+    "dead_channel": {
+      "params": {
+        "phase": "dead",
+        "conversations": 50,
+        "rate_per_conversation": 1,
+        "duration_s": 90,
+        "backlog": 10000,
+        "healthy_tier": "default",
+        "dead_tier": "bulk",
+        "tolerance": "20 % or 50 ms"
+      },
+      "baseline": {
+        "params": {
+          "phase": "baseline",
+          "conversations": 50,
+          "rate_per_conversation": 1,
+          "duration_s": 90
+        },
+        "duration_s": 91,
+        "targets_missed": [],
+        "resources": {
+          "nodes": {
+            "app": {
+              "cpu_avg_pct": 124.9,
+              "cpu_max_pct": 169.3,
+              "rss_max_mib": 577.2
+            },
+            "db": {
+              "cpu_avg_pct": 50.2,
+              "cpu_max_pct": 63.8,
+              "rss_max_mib": 257.8
+            }
+          },
+          "oban_depth_max": 8,
+          "db_pool_wait_max_ms": 0.04,
+          "db_background_pool_wait_max_ms": 0.24
+        },
+        "messages_acked": 4500,
+        "delivered": 4500,
+        "duplicates": 0,
+        "latency_ms": {
+          "count": 4500,
+          "p50": 57,
+          "p95": 73,
+          "p99": 133,
+          "max": 334
+        },
+        "deliveries_per_s": 49.2,
+        "drained_after_send_s": 1.1,
+        "lost_acked_messages": 0,
+        "never_acked": 0,
+        "dead_provider": null
+      },
+      "dead": {
+        "params": {
+          "phase": "dead",
+          "conversations": 50,
+          "rate_per_conversation": 1,
+          "duration_s": 90
+        },
+        "duration_s": 91.1,
+        "targets_missed": [],
+        "resources": {
+          "nodes": {
+            "app": {
+              "cpu_avg_pct": 298.2,
+              "cpu_max_pct": 435.8,
+              "rss_max_mib": 599.6
+            },
+            "db": {
+              "cpu_avg_pct": 169.2,
+              "cpu_max_pct": 313.8,
+              "rss_max_mib": 303.9
+            }
+          },
+          "oban_depth_max": 10007,
+          "db_pool_wait_max_ms": 5.24,
+          "db_background_pool_wait_max_ms": 0.08
+        },
+        "messages_acked": 4500,
+        "delivered": 4500,
+        "duplicates": 0,
+        "latency_ms": {
+          "count": 4500,
+          "p50": 93,
+          "p95": 217,
+          "p99": 339,
+          "max": 472
+        },
+        "deliveries_per_s": 49.1,
+        "drained_after_send_s": 1.2,
+        "lost_acked_messages": 0,
+        "never_acked": 0,
+        "dead_provider": {
+          "requests": 7,
+          "failed": 0,
+          "delivered": 0,
+          "duplicates": 0,
+          "hanging": 0,
+          "latency_ms": {
+            "count": 0,
+            "p50": null,
+            "p95": null,
+            "p99": null,
+            "max": null
+          }
+        },
+        "transient_latency_ms": {
+          "count": 4336,
+          "p50": 95,
+          "p95": 219,
+          "p99": 339,
+          "max": 472
+        },
+        "steady_latency_ms": {
+          "count": 164,
+          "p50": 59,
+          "p95": 71,
+          "p99": 99,
+          "max": 112
+        },
+        "over_limit_messages": 1078,
+        "degraded_from_s": 5,
+        "degraded_until_s": 70.3
+      },
+      "backlog": {
+        "deliveries": 10000,
+        "created_in_s": 55.1
+      },
+      "breaker": {
+        "opened_after_s": 11.1,
+        "backlog_parked_after_s": 88.4,
+        "max_dead_executing": 5,
+        "max_parked": 9999,
+        "states": [
+          "closed",
+          "open",
+          "half_open"
+        ],
+        "final": "open|7|10000|9999",
+        "dead_provider_requests": 7
+      },
+      "p95_limit_ms": 123,
+      "p95_change_pct": 197.3,
+      "lost_acked_messages": 0,
+      "never_acked": 0,
+      "resources": {
+        "nodes": {
+          "app": {
+            "cpu_avg_pct": 298.2,
+            "cpu_max_pct": 435.8,
+            "rss_max_mib": 599.6
+          },
+          "db": {
+            "cpu_avg_pct": 169.2,
+            "cpu_max_pct": 313.8,
+            "rss_max_mib": 303.9
+          }
+        },
+        "oban_depth_max": 10007,
+        "db_pool_wait_max_ms": 5.24,
+        "db_background_pool_wait_max_ms": 0.08
+      }
+    }
+  },
+  "checks": [
+    {
+      "name": "backbone (native): every activity observed by the subscriber exactly once",
+      "ok": true,
+      "detail": "1500/1500 observed, 1500 webhook events (0 duplicates), 0 HTTP redeliveries",
+      "warning": false
+    },
+    {
+      "name": "dead_channel_baseline: k6 ran and correctness thresholds passed",
+      "ok": true,
+      "detail": "k6 exit 0",
+      "warning": false
+    },
+    {
+      "name": "dead_channel_dead: k6 ran and correctness thresholds passed",
+      "ok": true,
+      "detail": "k6 exit 0",
+      "warning": false
+    },
+    {
+      "name": "dead_channel: healthy tenant p95 with a dead channel within tolerance of the baseline",
+      "ok": false,
+      "detail": "baseline p95 73 ms, dead p95 217 ms, limit 123 ms",
+      "warning": false
+    },
+    {
+      "name": "dead_channel: every healthy-tenant message delivered once",
+      "ok": true,
+      "detail": "baseline 4500/4500, dead 4500/4500",
+      "warning": false
+    },
+    {
+      "name": "dead_channel: the dead channel's breaker opened",
+      "ok": true,
+      "detail": "open 11.1 s after the backlog started",
+      "warning": false
+    },
+    {
+      "name": "dead_channel: zero lost acked messages",
+      "ok": true,
+      "detail": "lost 0, never acked 0",
+      "warning": false
+    },
+    {
+      "name": "fan-out channel: every activity delivered to the outbound webhook",
+      "ok": true,
+      "detail": "1500/1500 delivered, 0 jobs still open",
+      "warning": false
+    }
+  ],
+  "ok": false
+}

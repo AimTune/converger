@@ -15,6 +15,7 @@
 #                    rate (0 = all at once)
 #   LOAD_SCENARIOS   space-separated subset of
 #                    "e2e webhook_burst idle reconnect_storm rolling_restart node_kill"
+#                    plus the opt-in "dead_channel" (not in the default list)
 #   LOAD_SKIP_BUILD  1 reuses the image (LOAD_IMAGE)           (0)
 #   LOAD_IMAGE       image tag to build and run   (converger-load:local)
 #   LOAD_KEEP        1 leaves the stack running                (0)
@@ -75,9 +76,11 @@ esac
 if [ "$PROFILE" = "smoke" ]; then
   d_conversations=10 d_subscribers=3 d_rate=2 d_duration=20
   d_burst_rate=50 d_burst_s=10 d_idle_sockets=500 d_idle_hold=15 d_idle_conversations=50
+  d_dead_conversations=10 d_dead_duration=30 d_dead_backlog=1000
 else
   d_conversations=100 d_subscribers=10 d_rate=1 d_duration=60
   d_burst_rate=500 d_burst_s=30 d_idle_sockets=10000 d_idle_hold=60 d_idle_conversations=1000
+  d_dead_conversations=50 d_dead_duration=90 d_dead_backlog=10000
 fi
 CONVERSATIONS="${LOAD_CONVERSATIONS:-$d_conversations}"
 SUBSCRIBERS="${LOAD_SUBSCRIBERS:-$d_subscribers}"
@@ -97,6 +100,17 @@ RESTART_GAP_S="${LOAD_RESTART_GAP_S:-10}"
 RESTART_DELAY_S="${LOAD_RESTART_DELAY_S:-20}"
 RESTART_CONNECT_RATE="${LOAD_RESTART_CONNECT_RATE:-0}"
 DELIVERY_TIMEOUT_S="${LOAD_DELIVERY_TIMEOUT_S:-300}"
+# dead_channel: healthy tenant conversations x LOAD_DEAD_RATE msgs/s each for
+# LOAD_DEAD_DURATION_S per phase; LOAD_DEAD_BACKLOG deliveries for the dead
+# channel, created by LOAD_DEAD_BACKLOG_CONCURRENCY processes.
+DEAD_CONVERSATIONS="${LOAD_DEAD_CONVERSATIONS:-$d_dead_conversations}"
+DEAD_RATE="${LOAD_DEAD_RATE:-1}"
+DEAD_DURATION_S="${LOAD_DEAD_DURATION_S:-$d_dead_duration}"
+DEAD_BACKLOG="${LOAD_DEAD_BACKLOG:-$d_dead_backlog}"
+DEAD_BACKLOG_CONCURRENCY="${LOAD_DEAD_BACKLOG_CONCURRENCY:-10}"
+# Tier of the dead tenant: default (shares the healthy tenant's queue) or bulk
+# / high (its own queue).
+DEAD_TIER="${LOAD_DEAD_TIER:-default}"
 
 COMPOSE_FILES=(-f docker-compose.yml -f load/docker-compose.load.yml)
 if [ "$NODES" = "3" ]; then
@@ -253,6 +267,106 @@ common_env() {
   echo "CONVERSATIONS=$CONVERSATIONS SUBSCRIBERS=$SUBSCRIBERS RATE=$RATE"
 }
 
+# --- dead_channel (epic #59) -----------------------------------------------------
+# A healthy tenant's delivery latency without (baseline) and with (dead)
+# another tenant's dead channel and its backlog, back to back. Both tenants
+# are on the default tier, so they share the `deliveries` queue. See
+# docs/benchmarks/dead-channel-isolation.md.
+
+# Open delivery jobs of one channel.
+channel_open_jobs() {
+  psql_q "SELECT count(*) FROM oban_jobs WHERE args->>'channel_id' = '$1' AND worker = 'Converger.Workers.ActivityDeliveryWorker' AND state IN ('available','scheduled','executing','retryable')"
+}
+
+wait_channel_drained() {
+  local deadline=$((SECONDS + DELIVERY_TIMEOUT_S))
+  until [ "$(channel_open_jobs "$1")" = "0" ]; do
+    if [ "$SECONDS" -ge "$deadline" ]; then
+      log "channel $1 still has open delivery jobs after ${DELIVERY_TIMEOUT_S}s"
+      return 1
+    fi
+    sleep 1
+  done
+}
+
+# Every second: the dead channel's breaker state and failure counter, its
+# jobs (executing, available at normal priority, parked = priority 3 and
+# snoozed, retryable), the executing jobs of the shared queue and the healthy
+# channel's open jobs.
+isolation_sampler() {
+  local dead=$1 healthy=$2 queue=$3
+  while [ ! -f "$RUN_DIR/stop-isolation-sampler" ]; do
+    echo "$(now_ms);$(docker exec "${PROJECT}-db-1" psql -U postgres -d converger_prod -At -F';' -c "
+      SELECT c.circuit_state, c.consecutive_failures,
+             count(j.id) FILTER (WHERE j.state = 'executing'),
+             count(j.id) FILTER (WHERE j.state = 'available' AND j.priority < 3),
+             count(j.id) FILTER (WHERE j.priority = 3 AND j.state IN ('scheduled', 'available')),
+             count(j.id) FILTER (WHERE j.state = 'retryable'),
+             (SELECT count(*) FROM oban_jobs WHERE queue = '$queue' AND state = 'executing'),
+             (SELECT count(*) FROM oban_jobs WHERE args->>'channel_id' = '$healthy'
+                AND state IN ('available', 'scheduled', 'executing', 'retryable'))
+      FROM channels c
+      LEFT JOIN oban_jobs j ON j.args->>'channel_id' = c.id::text
+        AND j.worker = 'Converger.Workers.ActivityDeliveryWorker'
+        AND j.state IN ('available', 'scheduled', 'executing', 'retryable')
+      WHERE c.id = '$dead'
+      GROUP BY 1, 2" 2>/dev/null || true)"
+    sleep 1
+  done
+}
+
+mock_get() { dc exec -T mock wget -qO- "http://127.0.0.1:8080$1"; }
+
+dead_channel_scenario() {
+  dc exec -T app bin/converger rpc \
+    "Code.eval_string(File.read!(\"/load/isolation_setup.exs\"), conversations: $DEAD_CONVERSATIONS, dead_tier: \"$DEAD_TIER\", mock_url: \"http://mock:8080\")" |
+    grep '^{' | tail -n 1 >"$OUT/isolation.json"
+  local dead healthy queue
+  dead=$(sed -E 's/.*"dead_channel_id":"([^"]+)".*/\1/' "$OUT/isolation.json")
+  healthy=$(sed -E 's/.*"healthy_channel_id":"([^"]+)".*/\1/' "$OUT/isolation.json")
+  queue=$(psql_q "SELECT CASE tier WHEN 'high' THEN 'deliveries_high' WHEN 'bulk' THEN 'deliveries_bulk' ELSE 'deliveries' END FROM tenants t JOIN channels c ON c.tenant_id = t.id WHERE c.id = '$healthy'")
+  log "isolation fixtures: dead channel $dead, healthy channel $healthy, queue $queue"
+
+  for phase in baseline dead; do
+    local sampler_pid="" backlog_pid=""
+    if [ "$phase" = "dead" ]; then
+      rm -f "$RUN_DIR/stop-isolation-sampler"
+      isolation_sampler "$dead" "$healthy" "$queue" >"$OUT/dead_channel_circuit.csv" &
+      sampler_pid=$!
+      # The backlog is created while the healthy tenant sends: the breaker
+      # has to open (and the backlog to sink) under traffic, the worst case.
+      log "dead_channel: backlog of $DEAD_BACKLOG deliveries for the dead channel"
+      echo "dead_channel;backlog_start;$(now_ms)" >>"$OUT/marks.csv"
+      (
+        dc exec -T app bin/converger rpc \
+          "Code.eval_string(File.read!(\"/load/isolation_backlog.exs\"), fixtures: Jason.decode!(File.read!(\"/load/.run/out/isolation.json\")), count: $DEAD_BACKLOG, concurrency: $DEAD_BACKLOG_CONCURRENCY)" |
+          grep '^{' | tail -n 1 >"$OUT/dead_channel_backlog.json"
+        echo "dead_channel;backlog_created;$(now_ms)" >>"$OUT/marks.csv"
+      ) &
+      backlog_pid=$!
+    fi
+
+    k6_run "dead_channel_$phase" dead_channel.js "SETUP_JSON=/out/isolation.json" "PHASE=$phase" \
+      "CONVERSATIONS=$DEAD_CONVERSATIONS" "RATE=$DEAD_RATE" "DURATION_S=$DEAD_DURATION_S"
+    wait_channel_drained "$healthy" || true
+    echo "dead_channel_$phase;drained;$(now_ms)" >>"$OUT/marks.csv"
+    mock_get /samples/healthy >"$OUT/dead_channel_$phase.samples.json"
+    mock_get /stats >"$OUT/dead_channel_$phase.mock.json"
+
+    if [ "$phase" = "dead" ]; then
+      wait "$backlog_pid" || true
+      touch "$RUN_DIR/stop-isolation-sampler"
+      wait "$sampler_pid" 2>/dev/null || true
+      psql_q "SELECT circuit_state, consecutive_failures, (SELECT count(*) FROM deliveries WHERE channel_id = '$dead'), (SELECT count(*) FROM deliveries WHERE channel_id = '$dead' AND status = 'paused') FROM channels WHERE id = '$dead'" >"$OUT/dead_channel_final.txt"
+      # The dead channel never recovers: cancel its parked backlog so the
+      # end-of-run drain check is about the other scenarios.
+      psql_q "UPDATE oban_jobs SET state = 'cancelled', cancelled_at = now() WHERE args->>'channel_id' = '$dead' AND state IN ('available','scheduled','executing','retryable') RETURNING 1" | wc -l |
+        xargs -I{} echo "dead_channel: cancelled {} parked jobs of the dead channel" >&2
+    fi
+    log "dead_channel: $phase phase done"
+  done
+}
+
 # --- throwaway secrets (never committed: load/.run is gitignored) --------------
 rm -rf "$OUT" "$RUN_DIR/stop-sampler"
 mkdir -p "$OUT"
@@ -363,6 +477,9 @@ for scenario in $SCENARIOS; do
         sleep "$RESTART_GAP_S"
       done
       wait "$K6_PID" || true
+      ;;
+    dead_channel)
+      dead_channel_scenario
       ;;
     *)
       log "unknown scenario $scenario"

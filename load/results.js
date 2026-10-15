@@ -17,7 +17,9 @@ const read = (name, fallback) => {
   const file = path.join(dir, name);
   if (!fs.existsSync(file)) return fallback;
   const text = fs.readFileSync(file, "utf8");
-  return name.endsWith(".json") ? JSON.parse(text) : text;
+  if (!name.endsWith(".json")) return text;
+  // An empty file: the step that writes it failed (its log says why).
+  return text.trim() === "" ? fallback : JSON.parse(text);
 };
 const lines = (name) =>
   read(name, "")
@@ -309,6 +311,150 @@ if (db.tenant_activities !== undefined && db.backbone_webhook_events !== undefin
   );
   scenarios.backbone = s;
 }
+// Dead-channel isolation (epic #59): the healthy tenant's send -> provider
+// latency without (baseline) and with another tenant's dead channel and its
+// backlog in the same queue (dead), run back to back by load/run.sh.
+// Pass: the dead-phase p95 is within ISOLATION_TOLERANCE (relative) or
+// ISOLATION_TOLERANCE_MS (absolute, whichever is larger) of the baseline p95.
+// The absolute floor keeps a 30 ms -> 38 ms change on a 20-30 ms mock
+// provider from failing the run; anything a dead channel really causes (an
+// adapter timeout is 10 s) is far above both.
+const ISOLATION_TOLERANCE = 0.2;
+const ISOLATION_TOLERANCE_MS = 50;
+
+const pctOf = (sorted, p) =>
+  sorted.length ? sorted[Math.min(sorted.length - 1, Math.max(0, Math.ceil((p / 100) * sorted.length) - 1))] : null;
+const latencyOf = (values) => {
+  const sorted = Float64Array.from(values).sort();
+  return {
+    count: sorted.length,
+    p50: round(pctOf(sorted, 50)),
+    p95: round(pctOf(sorted, 95)),
+    p99: round(pctOf(sorted, 99)),
+    max: sorted.length ? round(sorted[sorted.length - 1]) : null,
+  };
+};
+
+function isolationPhase(phase) {
+  const name = `dead_channel_${phase}`;
+  const k6 = read(`${name}.json`);
+  if (!k6) return null;
+  const s = base(name, k6);
+  const m = marks[name] || {};
+  // The mock provider keeps every sample of the run (it is not reset between
+  // phases, the warm-up and backbone checks need theirs): a phase owns the
+  // deliveries of the messages sent after the previous phase drained (the
+  // host clock of the marks and the Docker VM clock of the samples agree to
+  // well under a second; the gap between the phases is several seconds).
+  const from = phase === "baseline" ? 0 : (marks.dead_channel_baseline || {}).drained || m.start || 0;
+  const samples = read(`${name}.samples.json`, []).filter(([arrived, latency]) => arrived - latency >= from);
+  const mockStats = read(`${name}.mock.json`, { paths: {} });
+  const healthy = mockStats.paths.healthy || { delivered: 0, duplicates: 0 };
+  const lastArrival = samples.length ? samples[samples.length - 1][0] : null;
+  s.messages_acked = count(k6, "messages_acked");
+  s.delivered = samples.length;
+  // Cumulative over both phases (the mock counts per path).
+  s.duplicates = healthy.duplicates;
+  s.latency_ms = latencyOf(samples.map((x) => x[1]));
+  s.deliveries_per_s = lastArrival && m.start ? round(samples.length / ((lastArrival - m.start) / 1000)) : null;
+  s.drained_after_send_s = m.drained && m.end ? round((m.drained - m.end) / 1000) : null;
+  s.lost_acked_messages = Math.max(0, s.messages_acked - s.delivered);
+  s.never_acked = count(k6, "messages_never_acked");
+  s.samples = samples;
+  s.dead_provider = mockStats.paths["hang-dead"] || null;
+  return s;
+}
+
+const isoBaseline = isolationPhase("baseline");
+const isoDead = isolationPhase("dead");
+if (isoBaseline && isoDead) {
+  const fixturesIso = read("isolation.json", {});
+  const backlog = read("dead_channel_backlog.json", {});
+  const s = {
+    params: {
+      ...isoDead.params,
+      backlog: backlog.created,
+      healthy_tier: fixturesIso.tier,
+      dead_tier: fixturesIso.dead_tier,
+      tolerance: `${ISOLATION_TOLERANCE * 100} % or ${ISOLATION_TOLERANCE_MS} ms`,
+    },
+  };
+  const iso = marks.dead_channel || {};
+  // dead_channel_circuit.csv: ts;state;failures;executing;available;parked;retryable;queue_executing;healthy_open
+  const circuit = lines("dead_channel_circuit.csv")
+    .filter((r) => r.length >= 9)
+    .map((r) => ({
+      ts: Number(r[0]),
+      state: r[1],
+      failures: Number(r[2]),
+      executing: Number(r[3]),
+      available: Number(r[4]),
+      parked: Number(r[5]),
+      retryable: Number(r[6]),
+      queueExecuting: Number(r[7]),
+      healthyOpen: Number(r[8]),
+    }));
+  const t0 = iso.backlog_start;
+  const opened = circuit.find((c) => c.state === "open" || c.state === "half_open");
+  // Every backlog job has been fetched once and parked (or is retrying):
+  // nothing of the dead channel is waiting at normal priority any more.
+  const parkedAt = circuit.find((c) => iso.backlog_created && c.ts >= iso.backlog_created && c.available === 0);
+  const sinceStart = (c) => (c && t0 ? round((c.ts - t0) / 1000) : null);
+
+  s.baseline = { ...isoBaseline };
+  s.dead = { ...isoDead };
+  delete s.baseline.samples;
+  delete s.dead.samples;
+  s.backlog = { deliveries: backlog.created || null, created_in_s: backlog.ms ? round(backlog.ms / 1000) : null };
+  s.breaker = {
+    opened_after_s: sinceStart(opened),
+    backlog_parked_after_s: sinceStart(parkedAt),
+    max_dead_executing: circuit.length ? Math.max(...circuit.map((c) => c.executing)) : null,
+    max_parked: circuit.length ? Math.max(...circuit.map((c) => c.parked)) : null,
+    states: [...new Set(circuit.map((c) => c.state))],
+    final: (read("dead_channel_final.txt", "") || "").trim(),
+    dead_provider_requests: isoDead.dead_provider ? isoDead.dead_provider.requests : null,
+  };
+
+  // The healthy tenant's messages sent before the backlog was parked (the
+  // breaker opening under traffic) and after (breaker open, backlog parked).
+  const sentAt = ([arrived, latency]) => arrived - latency;
+  if (parkedAt) {
+    s.dead.transient_latency_ms = latencyOf(isoDead.samples.filter((x) => sentAt(x) < parkedAt.ts).map((x) => x[1]));
+    s.dead.steady_latency_ms = latencyOf(isoDead.samples.filter((x) => sentAt(x) >= parkedAt.ts).map((x) => x[1]));
+  }
+
+  const b95 = isoBaseline.latency_ms.p95;
+  const d95 = isoDead.latency_ms.p95;
+  s.p95_limit_ms = b95 === null ? null : round(Math.max(b95 * (1 + ISOLATION_TOLERANCE), b95 + ISOLATION_TOLERANCE_MS));
+  s.p95_change_pct = b95 ? round(((d95 - b95) / b95) * 100) : null;
+  // How long the healthy tenant was degraded: from the first to the last of
+  // its messages (by send time) whose latency exceeded the p95 limit.
+  const over = isoDead.samples.filter((x) => s.p95_limit_ms !== null && x[1] > s.p95_limit_ms).map(sentAt);
+  s.dead.over_limit_messages = over.length;
+  s.dead.degraded_from_s = over.length && t0 ? round((Math.min(...over) - t0) / 1000) : null;
+  s.dead.degraded_until_s = over.length && t0 ? round((Math.max(...over) - t0) / 1000) : null;
+  s.lost_acked_messages = isoBaseline.lost_acked_messages + isoDead.lost_acked_messages;
+  s.never_acked = isoBaseline.never_acked + isoDead.never_acked;
+  s.resources = isoDead.resources;
+  check(
+    "dead_channel: healthy tenant p95 with a dead channel within tolerance of the baseline",
+    d95 !== null && s.p95_limit_ms !== null && d95 <= s.p95_limit_ms,
+    `baseline p95 ${b95} ms, dead p95 ${d95} ms, limit ${s.p95_limit_ms} ms`,
+  );
+  check(
+    "dead_channel: every healthy-tenant message delivered once",
+    s.lost_acked_messages === 0 && isoBaseline.duplicates === 0 && isoDead.duplicates === 0,
+    `baseline ${isoBaseline.delivered}/${isoBaseline.messages_acked}, dead ${isoDead.delivered}/${isoDead.messages_acked}`,
+  );
+  check(
+    "dead_channel: the dead channel's breaker opened",
+    opened !== undefined,
+    opened ? `open ${s.breaker.opened_after_s} s after the backlog started` : "breaker never opened",
+  );
+  scenarios.dead_channel = s;
+}
+
 for (const [name, s] of Object.entries(scenarios)) {
   if (s.lost_acked_messages !== undefined && name !== "webhook_burst" && name !== "backbone") {
     check(`${name}: zero lost acked messages`, s.lost_acked_messages === 0 && !s.never_acked, `lost ${s.lost_acked_messages}, never acked ${s.never_acked || 0}`);
