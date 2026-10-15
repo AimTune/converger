@@ -16,9 +16,9 @@ Converger connects communication channels to each other. Every channel is inboun
 | 2 | [#58 v3.0 WebSocket-first & Converger Protocol v1](https://github.com/AimTune/converger/issues/58) | Duplex WS adapter, acks, receipts, spec, one socket stack | Done; the 10k-socket rolling-restart measurement is [#190](https://github.com/AimTune/converger/issues/190) |
 | 3 | [#59 v3.1 Scale & Reliability](https://github.com/AimTune/converger/issues/59) | Clustering, partitioning, breakers, DLQ, SLO telemetry | Done |
 | 4 | [#60 v3.2 Channel Expansion](https://github.com/AimTune/converger/issues/60) | Adapter v2, conditional routing, new channels | Done |
-| 5 | [#61 v3.3 Developer Experience](https://github.com/AimTune/converger/issues/61) | OpenAPI, SDKs, docs, management API, UI | Open: the SDK release (#187, #188) |
+| 5 | [#61 v3.3 Developer Experience](https://github.com/AimTune/converger/issues/61) | OpenAPI, SDKs, docs, management API, UI | Done |
 
-Phases 1 to 4 are done. What remains is three measurements that need a quiet or larger machine (#190, #191, #192) and, last of all, the first release of the SDK packages (#187) and publishing them from CI (#188).
+All five phases are done, and the roadmap ([#62](https://github.com/AimTune/converger/issues/62)) is closed. The exit-criteria measurements were made ([#190](https://github.com/AimTune/converger/issues/190), [#191](https://github.com/AimTune/converger/issues/191), [#192](https://github.com/AimTune/converger/issues/192)) and the follow-ups they found fixed ([#198](https://github.com/AimTune/converger/issues/198), ADR-0076, ADR-0077). The SDKs are on npm, PyPI, NuGet, Hex and the Go module proxy, released from CI ([Releasing the SDKs](sdk/releasing.md)).
 
 ## Done: v2.5 Production Hardening (#57)
 
@@ -93,7 +93,7 @@ WebSocket becomes the primary channel, with a documented wire protocol that any 
 | [#64](https://github.com/AimTune/converger/issues/64) | mekik integration: agent-side multiplexed socket, `mekik` channel adapter, and seq authority between Converger and mekik | Done ([mekik channel](channels/mekik.md), [ADR-0063](adr/0063-channel-scoped-agent-sockets-and-the-bot-relay.md), [ADR-0066](adr/0066-mekik-channel-adapter-mode-a.md)) |
 | [#65](https://github.com/AimTune/converger/issues/65) | Chativa as the reference WebSocket client: verify `connector-mekik` against Converger, add hub extras (delivery status, upload, history, multi-conversation) | Done (Converger side, [ADR-0065](adr/0065-chativa-as-reference-client-and-history-cursor.md); the client side is open in [chativa#86](https://github.com/AimTune/chativa/issues/86)) |
 | [#67](https://github.com/AimTune/converger/issues/67) | Agent SDK and bot-side adapters: channel-scoped agent sockets, `@converger/agent` SDKs in several languages, first-party LangServe/LangChain and mekik adapters | Done ([Agent SDKs](sdk/agent.md), [ADR-0067](adr/0067-agent-sdk-api-and-wire-mapping.md), [ADR-0069](adr/0069-agent-group-eligibility-and-takeover.md)); the first npm and PyPI release is [#187](https://github.com/AimTune/converger/issues/187) |
-| [#190](https://github.com/AimTune/converger/issues/190) | Measure a rolling restart with 10 000 WebSocket connections (zero acked loss) | Open (exit criterion; measured so far with 1 000 sockets) |
+| [#190](https://github.com/AimTune/converger/issues/190) | Measure a rolling restart with 10 000 WebSocket connections (zero acked loss) | Done ([2026-10-15 run](benchmarks/2026-10-15-a8dd704-rolling-restart-10k.md); reconnect fixed in [#198](https://github.com/AimTune/converger/issues/198), [after #198](benchmarks/2026-10-15-rolling-restart-10k-after-198.md)) |
 
 Suggested order: #63 and #68 feed the spec, then #21, then #22 with #23, #24, #25, #27, #28, and finally #26. Exit criteria: a WhatsApp to WebSocket agent console bridge works end to end with receipts; a Python client written only from the spec passes the conformance suite; a rolling restart under 10k connections loses no acknowledged message.
 
@@ -140,7 +140,7 @@ Turn the adapter layer into a real plugin system and ship the channels integrato
 
 Exit criteria: adding an adapter touches only the adapter module and one config line, and at least three new duplex channels reach production quality with fixture-based tests. Adapter requests go to [#44](https://github.com/AimTune/converger/issues/44).
 
-## v3.3 Developer Experience (#61)
+## Done: v3.3 Developer Experience (#61)
 
 Make Converger adoptable by someone who has never read its source: a license, a five-minute getting-started, an OpenAPI spec with a playground, typed SDKs with reconnect built in, a management API, event webhooks, and a modern admin and portal UI.
 
@@ -155,8 +155,8 @@ Make Converger adoptable by someone who has never read its source: a license, a 
 | [#49](https://github.com/AimTune/converger/issues/49) | Platform event webhooks: tenant-level subscriptions for activity, delivery, conversation and channel events (signed, retried) | Done ([Platform event webhooks](platform-webhooks.md), [ADR-0053](adr/0053-platform-event-webhooks.md)) |
 | [#50](https://github.com/AimTune/converger/issues/50) | Admin panel and tenant portal modernization: Tailwind/daisyUI, pagination and search, channel test-send, key rotation, deliveries view, live tail | Done ([Admin panel and tenant portal](admin-ui.md), [ADR-0060](adr/0060-tailwind-daisyui-admin-ui-without-node.md)) |
 | [#53](https://github.com/AimTune/converger/issues/53) | Windows developer setup: `bcrypt_elixir` requires MSVC `nmake`; document or offer a pure-Elixir hashing option | Done ([Getting started](getting-started.md#per-os-notes), [dev container](contributing.md#dev-container), [ADR-0057](adr/0057-pluggable-password-hasher-and-dev-container.md)) |
-| [#187](https://github.com/AimTune/converger/issues/187) | First release of the SDK packages to npm and PyPI (manual, last on the roadmap) | Open |
-| [#188](https://github.com/AimTune/converger/issues/188) | Publish SDK releases from CI: npm token/OIDC and PyPI trusted publisher | Open (after #187) |
+| [#187](https://github.com/AimTune/converger/issues/187) | First release of the SDK packages to npm and PyPI (manual, last on the roadmap) | Done: 0.1.0 of every SDK published by hand |
+| [#188](https://github.com/AimTune/converger/issues/188) | Publish SDK releases from CI: npm token/OIDC and PyPI trusted publisher | Done: every SDK released 0.1.1 from CI ([Releasing the SDKs](sdk/releasing.md)) |
 
 Exit criteria: a new integrator provisions a tenant and a channel through the API, embeds the TypeScript SDK and exchanges messages using only the docs; the docs site is published from CI; the GitHub community profile is complete.
 

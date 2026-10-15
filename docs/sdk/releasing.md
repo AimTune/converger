@@ -6,8 +6,8 @@ sidebar_position: 10
 
 Every SDK package is released from GitHub Actions. Most registries use **trusted publishing**: the job's GitHub OIDC
 token is exchanged for a short-lived publish credential, so no registry token is stored in the repository. Version
-0.1.0 of every package was published by hand ([#187](https://github.com/AimTune/converger/issues/187)); the workflows
-below release every version after that ([#188](https://github.com/AimTune/converger/issues/188)).
+0.1.0 was published by hand ([#187](https://github.com/AimTune/converger/issues/187)); 0.1.1 of every package was
+released by the workflows below ([#188](https://github.com/AimTune/converger/issues/188)), and so are later versions.
 
 ## Packages
 
@@ -25,7 +25,8 @@ below release every version after that ([#188](https://github.com/AimTune/conver
 Every workflow first checks that the version it is asked to release equals the version in the package
 (`package.json`, `_version.py`, `<Version>` in the `.csproj`, `@version` in `mix.exs`, `const Version` in Go), then
 runs the package's tests, and only then publishes. Each publishing job runs in a GitHub environment (`npm`, `pypi`,
-`nuget`, `hex`); give those environments required reviewers so that every release waits for a maintainer's approval.
+`nuget`, `hex`), created on its first run; give those environments required reviewers if every release should wait
+for a maintainer's approval.
 
 ## One-time setup
 
@@ -59,7 +60,8 @@ license file in each module directory lets pkg.go.dev show the documentation.
 2. Merge the pull request.
 3. Start the release from `main`:
    - **Tags:** `git tag -a <tag> -m "<package> <version>" && git push origin <tag>`, for example
-     `client-python/v0.2.0` or `packages/agent-go/v0.2.0`.
+     `client-python/v0.2.0` or `packages/agent-go/v0.2.0`. Push tags one at a time: GitHub creates no workflow run
+     for any of them when more than three tags are pushed at once.
    - **Manual workflows:** Actions → the workflow → Run workflow, with the version; run it once as a dry run, then
      again with the dry run unchecked.
 4. Approve the job in its environment when GitHub asks.
