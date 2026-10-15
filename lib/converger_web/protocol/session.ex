@@ -48,11 +48,11 @@ defmodule ConvergerWeb.Protocol.Session do
 
   require Logger
 
-  alias Converger.{Activities, Channels, Conversations, Inbound, RateLimit}
+  alias Converger.{Activities, Channels, Conversations, Inbound, RateLimit, Repo}
   alias Converger.Auth.ConvergerToken
   alias Converger.Repo.Pressure
   alias ConvergerWeb.{ClientConnections, ConversationSignals, Protocol, SocketGuard}
-  alias ConvergerWeb.Protocol.{BotRelay, ChannelSession, Feed, Frames, Send}
+  alias ConvergerWeb.Protocol.{Admission, BotRelay, ChannelSession, Feed, Frames, Send}
 
   # Frames a client sends that need a bot channel (mekik relay, #64).
   @bot_frames BotRelay.forwarded_types()
@@ -322,6 +322,11 @@ defmodule ConvergerWeb.Protocol.Session do
       reply([replay_unavailable(state.feed.last_seq)], state)
   end
 
+  # A client already at the head (read after subscribing) has nothing to
+  # replay: anything committed later arrives live, so the read is skipped.
+  defp replay(feed, {:seq, seq}, head) when seq == head, do: {[], Feed.seek(feed, head)}
+  defp replay(feed, nil, 0), do: {[], feed}
+
   # A replay that cannot read the database: the session continues live after
   # `head` and the client `sync`s from its watermark later.
   defp replay(feed, position, head) do
@@ -473,15 +478,34 @@ defmodule ConvergerWeb.Protocol.Session do
 
   ## Handshake
 
+  # The handshake's database reads (channel, conversation, head, interrupts,
+  # replay) wait for an admission slot and share one pool checkout, so a
+  # reconnect burst queues on this node instead of failing in the pool's
+  # queue (ADR-0077, issue #198).
   defp handshake(hello, state) do
+    case Admission.run(fn -> Repo.checkout(fn -> open_session(hello, state) end) end) do
+      {:ok, result} ->
+        result
+
+      {:error, :overloaded} ->
+        opts = [frame_type: "hello", retry_after_ms: Pressure.retry_after_ms()]
+        frame = error("unavailable", "the server is busy, retry", opts)
+        close(1013, "try again later", [frame], state)
+    end
+  end
+
+  defp open_session(hello, state) do
     with :ok <- check_protocol(hello["protocol"]),
          {:ok, claims} <- authenticate(state.token || string(hello["token"])),
          :ok <- permit(claims, "read"),
          {:ok, channel} <- active_channel(claims),
          {:ok, scope} <- scope(claims, hello) do
       case scope do
-        :channel -> start_channel_session(hello, claims, channel, state)
-        {:conversation, conversation} -> start_session(hello, claims, conversation, state)
+        :channel ->
+          start_channel_session(hello, claims, channel, state)
+
+        {:conversation, conversation} ->
+          start_session(hello, claims, {channel, conversation}, state)
       end
     else
       {:error, :unsupported_protocol} ->
@@ -633,7 +657,7 @@ defmodule ConvergerWeb.Protocol.Session do
     end
   end
 
-  defp start_session(hello, claims, conversation, state) do
+  defp start_session(hello, claims, {channel, conversation}, state) do
     conversation_id = conversation.id
     user_id = user_id(claims, hello)
 
@@ -643,7 +667,7 @@ defmodule ConvergerWeb.Protocol.Session do
     track(claims, conversation_id)
 
     participant = ConversationSignals.participant(claims)
-    presence? = ConversationSignals.presence?(claims)
+    presence? = ConversationSignals.presence?(channel, claims)
     ConversationSignals.subscribe(conversation_id, presence?)
     if presence?, do: ConversationSignals.track_presence(conversation_id, participant)
 
@@ -860,7 +884,26 @@ defmodule ConvergerWeb.Protocol.Session do
 
   ## sync, auth
 
+  # Like the handshake, a sync's reads wait for an admission slot; a sync that
+  # gets none in time is answered `replay_unavailable` (retry later).
   defp sync(frame, state) do
+    case Admission.run(fn -> Repo.checkout(fn -> sync_replay(frame, state) end) end) do
+      {:ok, result} ->
+        result
+
+      {:error, :overloaded} ->
+        watermark =
+          case Protocol.parse_watermark(frame["watermark"], deprecation: [api: :protocol]) do
+            {:ok, {:seq, seq}} -> seq
+            {:ok, nil} -> 0
+            _other -> nil
+          end
+
+        reply([replay_unavailable(watermark)], state)
+    end
+  end
+
+  defp sync_replay(frame, state) do
     head = Conversations.get_conversation(state.conversation_id).last_seq
 
     case Protocol.parse_watermark(frame["watermark"], deprecation: [api: :protocol]) do

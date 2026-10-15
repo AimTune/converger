@@ -77,7 +77,7 @@ error into a retryable answer on every interactive path:
 | Phoenix binding join (`converger:conversation:*`, `converger:channel:*`) | Join error `{"reason": "unavailable", "retry_after_ms": N}`. |
 | Phoenix binding replay on join, gap fill | Still joined; event `error` `{"code": "replay_unavailable", "watermark": ..., "retry_after_ms": N}`. Live activities keep flowing. |
 | Phoenix binding events (`postActivity`, `ack`, `read`, ...) | Reply `{"reason": "unavailable", "retry_after_ms": N}`; v1 `frame` sends get the `error` frame `unavailable` with the `clientId`. |
-| Native v1 WebSocket `hello` | `error` `unavailable`, then close **1013** (try again later). |
+| Native v1 WebSocket `hello` | `error` `unavailable`, then close **1013** (try again later). A burst of handshakes first waits in the per-node admission queue and gets this answer only after `handshake_queue_ms` ([reconnect bursts](websocket-limits.md#reconnect-bursts)). |
 | Native v1 replay, `sync`, gap fill | `welcome` and live frames as usual, plus `error` `replay_unavailable` with `details.watermark`; the client `sync`s later. |
 | Native v1 frames (sends, `read`, ...) | `error` `unavailable` with `retryAfterMs` (and the `clientId` of a send). |
 | Server-Sent Events stream | Before the stream starts: `503`. During it (replay, gap fill): an `error` `unavailable` event, then the stream ends and `EventSource` reconnects with `Last-Event-ID`. |

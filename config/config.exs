@@ -194,7 +194,16 @@ config :converger, :websocket,
   drain_delay_ms: 5_000,
   drain_batch_size: 500,
   drain_batch_interval_ms: 1_000,
-  drain_shutdown_ms: 30_000
+  drain_shutdown_ms: 30_000,
+  # Protocol v1 handshakes and `sync` replays read the database through a
+  # per-node admission queue (ConvergerWeb.Protocol.Admission, ADR-0077):
+  # at most handshake_concurrency at a time (0: half the interactive pool),
+  # the rest wait in arrival order. A caller that waits longer than
+  # handshake_queue_ms, or finds handshake_queue_max callers waiting, is
+  # answered `unavailable` / `replay_unavailable` with `retryAfterMs`.
+  handshake_concurrency: 0,
+  handshake_queue_ms: 10_000,
+  handshake_queue_max: 10_000
 
 # Converger client tokens (ADR-0059, docs/security/client-tokens.md); TOKEN_*
 # env vars in config/runtime.exs. Signing keys (`:token_signing_keys`, a list
