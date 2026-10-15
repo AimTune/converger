@@ -93,7 +93,9 @@ run by default:
 
 1. The `version` input must equal `<Version>` in `src/Converger.Agent/Converger.Agent.csproj`.
 2. It builds with warnings as errors, runs the tests, packs in Release and uploads the `.nupkg` as an artifact.
-3. With `dry_run` unchecked it pushes the package with the `NUGET_API_KEY` secret of the `nuget` environment: a
-   nuget.org API key with push scope for `Converger.Agent`.
+3. With `dry_run` unchecked it publishes with nuget.org **trusted publishing**: `NuGet/login` exchanges the job's
+   GitHub OIDC token for a short-lived API key, so no key is stored. It needs a trusted publishing policy on nuget.org
+   for `AimTune/converger` and the workflow file `agent-dotnet-publish.yml`, and the `NUGET_USER` variable (the
+   nuget.org profile name that owns the policy).
 
 The first version (0.1.0) is published by hand ([#187](https://github.com/AimTune/converger/issues/187)).

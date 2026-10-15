@@ -3,10 +3,14 @@ name: agent-dotnet publish
 # Publishes Converger.Agent (packages/agent-dotnet) to nuget.org. Manual only
 # (workflow_dispatch), a dry run by default: nothing is published
 # automatically. The version input must equal <Version> in
-# src/Converger.Agent/Converger.Agent.csproj. Needs the NUGET_API_KEY secret of
-# the "nuget" environment: a nuget.org API key with push scope for
-# Converger.Agent. With dry_run it builds, tests, packs and uploads the .nupkg
-# as an artifact only.
+# src/Converger.Agent/Converger.Agent.csproj. With dry_run it builds, tests,
+# packs and uploads the .nupkg as an artifact only.
+#
+# Publishing uses nuget.org trusted publishing (OIDC): no API key is stored.
+# NuGet/login exchanges the job's GitHub OIDC token for a short-lived API key.
+# Needs a trusted publishing policy on nuget.org for this repository and this
+# workflow file (agent-dotnet-publish.yml), and the NUGET_USER repository or
+# environment variable: the nuget.org profile name that owns the policy.
 
 on:
   workflow_dispatch:
@@ -27,6 +31,9 @@ jobs:
     name: Publish Converger.Agent
     runs-on: ubuntu-latest
     environment: nuget
+    permissions:
+      contents: read
+      id-token: write # nuget.org trusted publishing
     defaults:
       run:
         working-directory: packages/agent-dotnet
@@ -59,16 +66,30 @@ jobs:
           name: Converger.Agent-${{ inputs.version }}
           path: ${{ runner.temp }}/nupkg/*.nupkg
 
+      - name: NuGet user is set
+        if: ${{ !inputs.dry_run }}
+        shell: bash
+        env:
+          NUGET_USER: ${{ vars.NUGET_USER }}
+        run: |
+          if [ -z "${NUGET_USER}" ]; then
+            echo "::error::Set the NUGET_USER variable (nuget.org profile name of the trusted publishing policy)"
+            exit 1
+          fi
+
+      - name: Get a short-lived NuGet API key (trusted publishing)
+        if: ${{ !inputs.dry_run }}
+        id: nuget-login
+        uses: NuGet/login@v1
+        with:
+          user: ${{ vars.NUGET_USER }}
+
       - name: Publish
         if: ${{ !inputs.dry_run }}
         shell: bash
         env:
-          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+          NUGET_API_KEY: ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
         run: |
-          if [ -z "${NUGET_API_KEY}" ]; then
-            echo "::error::The nuget environment has no NUGET_API_KEY secret"
-            exit 1
-          fi
           dotnet nuget push "${{ runner.temp }}/nupkg/Converger.Agent.${{ inputs.version }}.nupkg" \
             --api-key "${NUGET_API_KEY}" \
             --source https://api.nuget.org/v3/index.json
