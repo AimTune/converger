@@ -3933,7 +3933,7 @@
   "info": {
     "description": "Converger's HTTP API. Four families share the `/api/v1` prefix:\n\n* **Tenant API** (`/api/v1/...`): server to server, authenticated with a tenant API key (`x-api-key`) whose\n  scopes (`read`, `write`, `manage`) gate each operation; `/api/v1/manage/...` holds the tenant's configuration.\n* **Admin API** (`/api/v1/admin/...`): platform operators, authenticated with `ADMIN_API_TOKEN`.\n* **Client API** (`/api/v1/converger/...`): end-user clients, authenticated with a Converger token\n  (`Authorization: Bearer`), issued from a channel secret.\n* **Inbound webhooks** (`/api/v1/channels/{channel_id}/inbound|status`): called by providers, verified by signature.\n\nEvery error response uses one envelope:\n`{\"error\": {\"code\", \"message\", \"details\", \"request_id\"}}` (schema `ErrorResponse`). See\n[errors](https://converger.aimtune.dev/api/errors) and the\n[versioning policy](https://converger.aimtune.dev/api/versioning).\n",
     "title": "Converger API",
-    "version": "0.1.0"
+    "version": "0.2.0"
   },
   "openapi": "3.1.0",
   "paths": {

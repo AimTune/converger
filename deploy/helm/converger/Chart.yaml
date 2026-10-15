@@ -5,8 +5,8 @@ type: application
 # Released together with the application: the release workflow
 # (.github/workflows/deploy.yml) packages the chart with version and
 # appVersion set from the v* tag and pushes it to oci://ghcr.io/aimtune/charts.
-version: 0.1.0
-appVersion: "0.1.0"
+version: 0.2.0
+appVersion: "0.2.0"
 kubeVersion: ">=1.27.0-0"
 home: https://converger.aimtune.dev
 icon: https://converger.aimtune.dev/img/logo.svg
