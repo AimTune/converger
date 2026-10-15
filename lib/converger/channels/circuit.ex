@@ -21,8 +21,12 @@ defmodule Converger.Channels.Circuit do
 
   Parking (`park/3`) snoozes the Oban job for `park_seconds` and drops it to
   priority 3 (fresh jobs use 1), so fresh deliveries of healthy channels in the same queue are
-  always fetched first. Closing or resuming releases every parked job at once
-  (`release_parked/1`). `Converger.Workers.ChannelCircuitProbeWorker` wakes
+  always fetched first. When the breaker opens or the channel is paused, the
+  channel's whole waiting backlog is parked in one statement
+  (`park_backlog/1`), and deliveries enqueued while it stays open or paused
+  are inserted parked (`insert_opts/1`), so a backlog never sits ahead of
+  healthy channels waiting to be parked one job at a time (ADR-0076). Closing
+  or resuming releases every parked job at once (`release_parked/1`). `Converger.Workers.ChannelCircuitProbeWorker` wakes
   one parked job every `cooldown_ms` while the breaker is open; it becomes the
   half-open probe.
 
@@ -32,6 +36,13 @@ defmodule Converger.Channels.Circuit do
     * `cooldown_ms` (default `30_000`) - time open before a probe
     * `park_seconds` (default `600`) - how long a parked job sleeps before it
       re-checks on its own (it is released earlier on close/resume)
+    * `max_in_flight` (default `:auto`) - deliveries of one channel that may
+      run at the same time on a node (`Converger.Channels.InFlight`, ADR-0076):
+      an integer, `:auto` for half of the job's queue workers (at least 1),
+      or `nil` for no cap
+    * `busy_snooze_ms` (default `1_000`) - how long a job over the cap is
+      snoozed, and how often a channel at its cap has its waiting backlog
+      demoted (`demote_backlog/1`)
     * `replay_dead_letters_on_close` (default `false`) - when a probe closes
       the breaker, replay the channel's dead letters that failed within the
       last `replay_window_ms` (default 1 hour), see
@@ -56,6 +67,8 @@ defmodule Converger.Channels.Circuit do
   }
 
   @parked_priority 3
+  @demoted_priority 2
+  @release_follow_up_ms 5_000
   @default_priority 1
   @breaker_states ~w(open half_open)
 
@@ -63,6 +76,8 @@ defmodule Converger.Channels.Circuit do
     failure_threshold: 5,
     cooldown_ms: 30_000,
     park_seconds: 600,
+    max_in_flight: :auto,
+    busy_snooze_ms: 1_000,
     replay_dead_letters_on_close: false,
     replay_window_ms: :timer.hours(1)
   ]
@@ -74,6 +89,28 @@ defmodule Converger.Channels.Circuit do
 
   @doc "Oban priority given to parked delivery jobs."
   def parked_priority, do: @parked_priority
+
+  @doc """
+  Per-node cap on the running deliveries of one channel for a job of `queue`
+  (`max_in_flight`, `Converger.Channels.InFlight`): `:auto` is half of the
+  queue's workers, at least 1. `nil` when there is no cap (or the queue's size
+  is unknown with `:auto`).
+  """
+  def in_flight_cap(queue), do: cap(config()[:max_in_flight], queue_limit(queue))
+
+  defp cap(:auto, limit) when is_integer(limit) and limit > 0, do: max(div(limit, 2), 1)
+  defp cap(value, _limit) when is_integer(value) and value > 0, do: value
+  defp cap(_value, _limit), do: nil
+
+  defp queue_limit(queue) do
+    queues = Application.get_env(:converger, Oban, [])[:queues] || []
+
+    Enum.find_value(queues, fn
+      {name, limit} when is_integer(limit) -> if to_string(name) == to_string(queue), do: limit
+      {name, opts} when is_list(opts) -> if to_string(name) == to_string(queue), do: opts[:limit]
+      _ -> nil
+    end)
+  end
 
   # --- Admission (called by the delivery worker before an attempt) ---
 
@@ -317,10 +354,21 @@ defmodule Converger.Channels.Circuit do
     })
   end
 
-  defp schedule_follow_up(channel, "open"),
-    do: ChannelCircuitProbeWorker.schedule(channel.id, config()[:cooldown_ms])
+  defp schedule_follow_up(channel, "open") do
+    park_backlog(channel.id)
+    ChannelCircuitProbeWorker.schedule(channel.id, config()[:cooldown_ms])
+  end
 
-  defp schedule_follow_up(channel, "closed"), do: release_parked(channel.id)
+  defp schedule_follow_up(channel, "paused"), do: park_backlog(channel.id)
+
+  # Release now, and once more shortly after: a job enqueued parked by a node
+  # that still saw the breaker open is released by the probe worker's
+  # follow-up (it runs `release_parked/1` when it finds the breaker closed).
+  defp schedule_follow_up(channel, "closed") do
+    release_parked(channel.id)
+    ChannelCircuitProbeWorker.schedule(channel.id, @release_follow_up_ms)
+  end
+
   defp schedule_follow_up(_channel, _state), do: :ok
 
   # Opt-in: once a probe proved the endpoint is back, replay what died while
@@ -367,6 +415,87 @@ defmodule Converger.Channels.Circuit do
   end
 
   @doc """
+  Park every waiting delivery job of a channel at once (breaker opened or
+  channel paused): jobs that are `available`, `scheduled` or `retryable`
+  and not parked yet get priority 3 and sleep `park_seconds` (with jitter),
+  and the channel's `pending` deliveries become `paused`. Jobs that are
+  executing finish their attempt. Returns the number of parked jobs.
+  """
+  def park_backlog(channel_id) do
+    now = now()
+    park_seconds = config()[:park_seconds]
+    jitter = max(div(park_seconds, 10), 1)
+
+    {count, _} =
+      from(j in waiting_jobs_query(channel_id),
+        where: j.state in ["available", "scheduled", "retryable"],
+        update: [
+          set: [
+            state: "scheduled",
+            priority: ^@parked_priority,
+            scheduled_at:
+              fragment(
+                "?::timestamp + make_interval(secs => ? + random() * ?)",
+                ^now,
+                ^park_seconds,
+                ^jitter
+              )
+          ]
+        ]
+      )
+      |> Repo.update_all([])
+
+    from(d in Delivery, where: d.channel_id == ^channel_id and d.status == "pending")
+    |> Repo.update_all(set: [status: "paused", updated_at: now])
+
+    if count > 0 do
+      :telemetry.execute([:converger, :deliveries, :parked], %{count: count}, %{
+        channel_id: channel_id,
+        reason: :backlog
+      })
+    end
+
+    count
+  end
+
+  @doc """
+  Demote the `available` priority-1 delivery jobs of a channel at its in-flight
+  cap to priority 2 (one statement, `Converger.Channels.InFlight` says when).
+  They stay available, so the channel keeps all the throughput its cap allows,
+  but other channels' fresh deliveries (priority 1) are fetched first, and its
+  backlog is not fetched and snoozed ahead of them. Parked jobs (3) are left
+  alone. Returns the number of demoted jobs.
+  """
+  def demote_backlog(channel_id) do
+    {count, _} =
+      from(j in waiting_jobs_query(channel_id),
+        where: j.state == "available" and j.priority < ^@demoted_priority
+      )
+      |> Repo.update_all(set: [priority: @demoted_priority])
+
+    count
+  end
+
+  @doc """
+  Extra `Oban.Job` options for a delivery job enqueued to `channel`: when its
+  breaker is open (or half-open) or it is paused, the job is inserted parked,
+  asleep for `park_seconds` like a job parked by `park/3`. Closing or resuming
+  releases it; a job inserted while the breaker was closing is released by the
+  follow-up `release_parked/1` the close schedules
+  (`Converger.Workers.ChannelCircuitProbeWorker`).
+  """
+  def insert_opts(%Channel{circuit_state: state}) when state in ["open", "half_open", "paused"] do
+    park_seconds = config()[:park_seconds]
+
+    [
+      priority: @parked_priority,
+      schedule_in: park_seconds + :rand.uniform(max(div(park_seconds, 10), 1))
+    ]
+  end
+
+  def insert_opts(_channel), do: []
+
+  @doc """
   Make every parked delivery job of a channel available now (breaker closed or
   channel resumed) and move its `paused` deliveries back to `pending`.
   Returns the number of released jobs.
@@ -408,6 +537,15 @@ defmodule Converger.Channels.Circuit do
   @doc "Number of parked delivery jobs of a channel."
   def parked_count(channel_id) do
     channel_id |> parked_jobs_query() |> Repo.aggregate(:count)
+  end
+
+  # Delivery jobs of a channel that are not parked yet.
+  defp waiting_jobs_query(channel_id) do
+    from(j in Oban.Job,
+      where: j.worker == ^inspect(ActivityDeliveryWorker),
+      where: j.priority != ^@parked_priority,
+      where: fragment("?->>'channel_id' = ?", j.args, ^to_string(channel_id))
+    )
   end
 
   defp parked_jobs_query(channel_id) do

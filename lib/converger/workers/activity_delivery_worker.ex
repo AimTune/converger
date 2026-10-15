@@ -18,11 +18,36 @@ defmodule Converger.Workers.ActivityDeliveryWorker do
   require Logger
 
   alias Converger.{Activities, Channels, Pipeline}
-  alias Converger.Channels.{Circuit, DeliveryError}
+  alias Converger.Channels.{Circuit, DeliveryError, InFlight}
   alias Converger.Pipeline.RetryPolicy
 
   @impl Oban.Worker
-  def perform(%Oban.Job{args: %{"activity_id" => activity_id, "channel_id" => channel_id}} = job) do
+  def perform(%Oban.Job{args: %{"channel_id" => channel_id}} = job) do
+    # A channel runs at most `max_in_flight` deliveries at once on this node,
+    # so a dead channel cannot take every worker of the queue before its
+    # breaker opens (ADR-0076). Checked first: a job over the cap is snoozed
+    # without a database query, and one of them per `busy_snooze_ms` demotes
+    # the channel's waiting backlog behind other channels' fresh deliveries.
+    busy_ms = Circuit.config()[:busy_snooze_ms]
+
+    case InFlight.acquire(channel_id, Circuit.in_flight_cap(job.queue), demote_ms: busy_ms) do
+      {:ok, slot} ->
+        try do
+          admit_and_deliver(job)
+        after
+          InFlight.release(slot)
+        end
+
+      {:full, demote?} ->
+        if demote?, do: Circuit.demote_backlog(channel_id)
+        # Oban snoozes in whole seconds.
+        {:snooze, max(div(busy_ms, 1000), 1)}
+    end
+  end
+
+  defp admit_and_deliver(
+         %Oban.Job{args: %{"activity_id" => activity_id, "channel_id" => channel_id}} = job
+       ) do
     channel = Channels.get_channel!(channel_id)
 
     # Circuit breaker, manual pause and rate limit are checked before the

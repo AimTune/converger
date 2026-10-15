@@ -1,7 +1,7 @@
 ---
 title: Dead-channel isolation
 sidebar_label: Dead-channel isolation
-description: Measured effect of one tenant's dead webhook channel with a 10,000-delivery backlog on another tenant's delivery latency, with both tenants on the same tier and on different tiers. The breaker opens and parks the backlog, but the shared queue is blocked for about 35 seconds first.
+description: Measured effect of one tenant's dead webhook channel with a 10,000-delivery backlog on another tenant's delivery latency, on the same tier and on different tiers. Before ADR-0076 the shared queue was blocked for about 35 s; with bulk parking and the per-channel in-flight cap the healthy tenant's p95 stays within the gate.
 sidebar_position: 3
 ---
 
@@ -12,7 +12,13 @@ other tenants (measured)*. The mechanisms under test are the per-channel circuit
 priority and tier queues of [ADR-0031](../adr/0031-per-channel-circuit-breaker-rate-limit-and-tier-queues.md)
 (see [Delivery: flow control](../delivery.md#flow-control-circuit-breaker-rate-limits-and-tenant-fairness)).
 
-**Result: not met when the two tenants share a tier.** The breaker does its job: of 10,000 deliveries to the dead
+:::note Fixed by ADR-0076
+Since [ADR-0076](../adr/0076-bulk-parking-and-per-channel-in-flight-cap.md) (#191) the shared-tier run can pass: the
+healthy tenant's p95 was **104 ms** against a 67 ms baseline (gate 117 ms), p99 142 ms, max 321 ms, no message lost (a second, noisier run measured p95 535 ms).
+See [After ADR-0076](#after-adr-0076). The results below are the original measurement, before the fix.
+:::
+
+**Result before the fix: not met when the two tenants share a tier.** The breaker does its job: of 10,000 deliveries to the dead
 channel only 23 requests ever reached the provider, and once the backlog is parked the healthy tenant's latency is
 back to its baseline. But while the dead channel's backlog is still ahead of the healthy tenant's jobs in the shared
 queue, about 35 seconds after the backlog appears, the healthy tenant's deliveries wait up to 13-17 s. With the
@@ -131,19 +137,45 @@ in 55 s and their parking ran on the same application node and Postgres (Postgre
 cores during the phase), and messages over the limit are spread over the whole time the backlog was being created
 and parked, not concentrated in one stall.
 
-## What would fix it
+## After ADR-0076
 
-Not changed here; these are follow-ups for the shared-tier case:
+[ADR-0076](../adr/0076-bulk-parking-and-per-channel-in-flight-cap.md) (#191) removes both causes:
 
-- **Park the whole backlog when the breaker opens**: one `UPDATE oban_jobs SET priority = 3, scheduled_at = ...`
-  for the channel's waiting priority-1 jobs, in the transition that opens the breaker (and for jobs enqueued while it
-  is open, at insert time). That removes cause 2, the larger one at this backlog size.
-- **Bound a channel's share of a queue's workers** (for example at most N deliveries in flight per channel, the rest
-  snoozed), or a shorter first-attempt timeout, to bound cause 1 below one adapter timeout.
+- **Cause 2:** when the breaker opens, the channel's whole waiting backlog is parked in one statement, and deliveries
+  enqueued while it stays open are inserted parked.
+- **Cause 1:** one channel runs at most half of a queue's workers on a node (10 of 20 here). Jobs over the cap are
+  snoozed for 1 s without a database query, and the channel's waiting jobs are demoted to priority 2 in one statement,
+  behind other channels' fresh deliveries.
 
-Until then, the mitigation that exists today is the tier: put tenants whose endpoints are unreliable, or that send
-bulk traffic, on a different tier from interactive tenants (`tenants.tier`, see
-[Tenant tiers](../delivery.md#tenant-tiers-fair-queueing)).
+Same scenario, shared tier, 1 node, on the same developer machine (`LOAD_SCENARIOS=dead_channel load/run.sh`):
+
+| Healthy tenant, send → provider | Before | After |
+| --- | --- | --- |
+| Baseline p95 | 596 ms | 67 ms |
+| Dead phase p95 / p99 | **12,269** / 13,133 ms | **104** / 142 ms |
+| Dead phase max | | 321 ms |
+| p95 of messages sent while / after the backlog was parked | – / 77 ms | 129 / 67 ms |
+| Deliveries/s, dead phase | | 49.1 (baseline 49.3) |
+| Breaker opened after | 11.4 s | 11.2 s |
+| Requests that reached the dead provider | 23 | 15 |
+| Lost acked messages | 0 | 0 |
+| Gate (p95 ≤ max(baseline × 1.2, baseline + 50 ms)) | ❌ | ✅ (limit 117 ms) |
+
+The before run's baseline was noisier (another stack shared the machine). The remaining messages over the gate are
+sent in the ~10 s before the breaker opens, while the dead channel holds 10 of the 20 workers for one adapter timeout;
+they wait up to about 300 ms rather than 13 s. ADR-0076 lists the variants that were measured on the way, including one
+that passed here but starved a busy healthy channel in the 1-node `webhook_burst` run. The chosen version keeps that
+run's delivery rate (126/s, burst drained in 56 s).
+
+The gate is strict (50 ms over the baseline) and a developer machine is noisy: a second run of the same build, with a
+noisier baseline (p99 142 ms against 78 ms), measured p95 535 ms, p99 961 ms and max 7.7 s, the slow messages again
+in the ~10 s before the breaker opened. Both runs are far below the 12.3 s before the fix and around ADR-0031's 1 s
+target, but only a quiet, repeated run (nightly CI) can say whether the gate holds reliably. Raw results:
+`load/results/2026-10-15-dead-channel-shared-tier-after-0076.json`.
+
+Tiers remain the stronger isolation: tenants with unreliable endpoints or bulk traffic on a different tier from
+interactive tenants (`tenants.tier`, see [Tenant tiers](../delivery.md#tenant-tiers-fair-queueing)) do not share
+workers at all.
 
 ## Related
 

@@ -62,8 +62,12 @@ defmodule Converger.Pipeline.Oban do
     queue = if channels != [], do: queue_for_tenant(activity.tenant_id)
 
     Enum.reduce_while(channels, :ok, fn channel, :ok ->
+      # A channel whose breaker is open, or that is paused, gets the job parked
+      # right away rather than ahead of healthy channels (ADR-0076).
       %{activity_id: activity.id, channel_id: channel.id}
-      |> ActivityDeliveryWorker.new(queue: queue)
+      |> ActivityDeliveryWorker.new(
+        [queue: queue] ++ Converger.Channels.Circuit.insert_opts(channel)
+      )
       |> Oban.insert()
       |> case do
         {:ok, _job} ->

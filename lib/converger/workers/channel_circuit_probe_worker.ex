@@ -7,6 +7,11 @@ defmodule Converger.Workers.ChannelCircuitProbeWorker do
   open it wakes one parked delivery job per cooldown; that job claims the
   half-open state and is the probe. It stops once the breaker is closed or
   paused, or when nothing is parked (the next delivery then probes itself).
+
+  When it finds the breaker closed it releases the channel's parked jobs once
+  more (`Circuit.release_parked/1` is idempotent): closing schedules it a few
+  seconds later, so a delivery that was inserted parked while the breaker was
+  closing does not sleep for `park_seconds` (ADR-0076).
   """
 
   use Oban.Worker,
@@ -38,6 +43,10 @@ defmodule Converger.Workers.ChannelCircuitProbeWorker do
           Circuit.wake_probe(channel.id) == 1 -> {:snooze, max(div(cooldown_ms, 1000), 1)}
           true -> :ok
         end
+
+      %Channel{circuit_state: "closed"} ->
+        Circuit.release_parked(channel_id)
+        :ok
 
       _ ->
         :ok

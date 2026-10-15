@@ -65,6 +65,9 @@ defmodule Converger.Application do
           # Per-node cache of provider tokens and signing keys (Bot Framework).
           Converger.Channels.TokenCache,
           Converger.RateLimit.Supervisor,
+          # Per-node cap on the running deliveries of one channel (ADR-0076),
+          # before Oban runs delivery jobs.
+          Converger.Channels.InFlight,
           # Broker channels (kafka, rabbitmq, nats, redis_streams, mqtt): per-channel publishers, started
           # on first delivery, so before Oban runs delivery jobs.
           {Registry, keys: :unique, name: Converger.Channels.Broker.Registry},

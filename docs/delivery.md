@@ -334,9 +334,13 @@ stateDiagram-v2
 
 **Parking.** A parked job is snoozed for `park_seconds` (plus up to 10% jitter) and its Oban priority drops from 1 to 3. A snooze never uses up an Oban attempt or a delivery attempt. The delivery row becomes `paused`. Because Oban fetches jobs by priority, a fresh delivery of a healthy channel in the same queue is always picked before a parked one. With 10,000 jobs parked for a dead channel, the queue still serves everyone else first.
 
+**Parking a backlog at once** ([ADR-0076](adr/0076-bulk-parking-and-per-channel-in-flight-cap.md)). When the breaker opens or the channel is paused, its whole waiting backlog is parked in one statement: every `available`, `scheduled` or `retryable` delivery job of the channel that is not parked yet moves to priority 3 and sleeps `park_seconds`, and its `pending` deliveries become `paused`. Deliveries enqueued while the breaker stays open or the channel stays paused are inserted parked. So a dead channel's backlog never sits ahead of other channels waiting for each of its jobs to run once and park itself.
+
+**In-flight cap** (ADR-0076). At most `max_in_flight` deliveries of one channel run at the same time on a node (`Converger.Channels.InFlight`). The default, `:auto`, is half of the job's queue workers: 10 of the 20 `deliveries` workers, 5 of `deliveries_high`, 2 of `deliveries_bulk`. This bounds what a dead channel can hold while its first attempts wait out the adapter timeout, before its breaker opens. A job over the cap is snoozed for `busy_snooze_ms` (default 1 s, Oban's smallest snooze) without a database query. The first one per `busy_snooze_ms` also demotes the channel's other waiting jobs to priority 2 in one statement: they stay available, so the channel keeps the throughput its cap allows, but other channels' fresh deliveries are fetched first. A channel that needs more concurrency sets `max_in_flight` higher (it is global) or its tenant moves to a tier with more workers; `max_in_flight: nil` turns the cap off. The cap is per node, not cluster-wide.
+
 **Probing.** When the breaker opens, `Converger.Workers.ChannelCircuitProbeWorker` (queue `default`, unique per channel) is scheduled `cooldown_ms` later. While the breaker stays open, it wakes one parked job every cooldown. That job claims `half_open` and is the probe. The loop stops once the breaker is closed or paused, or when nothing is parked; in that case the next delivery to the channel probes itself.
 
-**Closing.** When a probe succeeds, the breaker closes, `consecutive_failures` is reset, and **every** parked job of the channel is released at once: it becomes `available` now with priority 1, and its `paused` delivery goes back to `pending`. Recovery therefore does not wait for `park_seconds`.
+**Closing.** When a probe succeeds, the breaker closes, `consecutive_failures` is reset, and **every** parked job of the channel is released at once: it becomes `available` now with priority 1, and its `paused` delivery goes back to `pending`. Recovery therefore does not wait for `park_seconds`. The close also schedules the probe worker 5 s later, which releases the channel's parked jobs once more: a delivery that another node enqueued parked while the breaker was closing is released then.
 
 Configuration (defaults shown):
 
@@ -345,6 +349,8 @@ config :converger, :circuit_breaker,
   failure_threshold: 5,   # consecutive transient failures before opening
   cooldown_ms: 30_000,    # time open before a probe
   park_seconds: 600,      # sleep of a parked job before it re-checks on its own
+  max_in_flight: :auto,   # deliveries of one channel running at once per node (:auto = half the queue, nil = no cap)
+  busy_snooze_ms: 1_000,  # snooze of a job over the cap; a channel at its cap has its backlog demoted at most this often
   replay_dead_letters_on_close: false,  # opt-in, see below
   replay_window_ms: 3_600_000          # how far back dead letters are replayed
 ```
@@ -395,7 +401,7 @@ Each queue has its own workers, so a bulk tenant sending a million messages cann
 
 Trade-off: tiers isolate classes of tenants, not individual tenants. Two tenants in the same tier still share that queue's workers. Within a queue, the circuit breaker and parking priority keep a dead channel from blocking the queue, and rate limits keep one provider from taking all of it. True per-tenant partitioning, with one queue partition and a global limit per tenant, would need Oban Pro's partitioned queues (`Smart` engine). We chose not to require that.
 
-Measured ([Dead-channel isolation](benchmarks/dead-channel-isolation.md), epic #59): with a dead webhook channel and a 10,000-delivery backlog in the **same** tier, the breaker opened after one adapter timeout and only 23 requests reached the dead provider, but the other tenant's deliveries waited up to about 13 s for the first ~37 s. All of the queue's workers were stuck in the dead provider until the breaker opened, and the backlog's jobs, enqueued at priority 1 before the other tenant's, are parked only one at a time as each one runs. With the dead tenant on another tier, the other tenant's p95 went from 73 ms to 217 ms. Until the whole backlog is parked when the breaker opens, put tenants with unreliable endpoints or bulk traffic on a different tier from interactive ones.
+Measured ([Dead-channel isolation](benchmarks/dead-channel-isolation.md), epic #59): with a dead webhook channel and a 10,000-delivery backlog in the **same** tier, the breaker opened after one adapter timeout and only 23 requests reached the dead provider, but the other tenant's deliveries waited up to about 13 s for the first ~37 s. All of the queue's workers were stuck in the dead provider until the breaker opened, and the backlog's jobs, enqueued at priority 1 before the other tenant's, are parked only one at a time as each one runs. With the dead tenant on another tier, the other tenant's p95 went from 73 ms to 217 ms. [ADR-0076](adr/0076-bulk-parking-and-per-channel-in-flight-cap.md) fixed both causes: the same shared-tier run now keeps the other tenant's p95 at 104 ms against a 67 ms baseline (p99 142 ms). Tiers still give the strongest isolation for tenants with unreliable endpoints or bulk traffic.
 
 ## Related
 

@@ -14,7 +14,7 @@ Converger connects communication channels to each other. Every channel is inboun
 | --- | --- | --- | --- |
 | 1 | [#57 v2.5 Production Hardening](https://github.com/AimTune/converger/issues/57) | No data loss, security baseline, CI | Done |
 | 2 | [#58 v3.0 WebSocket-first & Converger Protocol v1](https://github.com/AimTune/converger/issues/58) | Duplex WS adapter, acks, receipts, spec, one socket stack | Done; the 10k-socket rolling-restart measurement is [#190](https://github.com/AimTune/converger/issues/190) |
-| 3 | [#59 v3.1 Scale & Reliability](https://github.com/AimTune/converger/issues/59) | Clustering, partitioning, breakers, DLQ, SLO telemetry | Done; two measurements remain: [#191](https://github.com/AimTune/converger/issues/191) and [#192](https://github.com/AimTune/converger/issues/192) |
+| 3 | [#59 v3.1 Scale & Reliability](https://github.com/AimTune/converger/issues/59) | Clustering, partitioning, breakers, DLQ, SLO telemetry | Done |
 | 4 | [#60 v3.2 Channel Expansion](https://github.com/AimTune/converger/issues/60) | Adapter v2, conditional routing, new channels | Done |
 | 5 | [#61 v3.3 Developer Experience](https://github.com/AimTune/converger/issues/61) | OpenAPI, SDKs, docs, management API, UI | Open: the SDK release (#187, #188) |
 
@@ -111,7 +111,7 @@ Run Converger as a cluster that meets the PRD targets (10M messages per day, 1k+
 | [#35](https://github.com/AimTune/converger/issues/35) | Graceful degradation under database pressure: pool sizing, timeouts, bulkheads, readiness flip | Done ([ADR-0044](adr/0044-bulkheaded-pools-and-graceful-degradation-under-database-pressure.md)) |
 | [#66](https://github.com/AimTune/converger/issues/66) | Pluggable event backbone: Elixir-native (PubSub + Oban) by default, Kafka/NATS/RabbitMQ selectable, with a published benchmark matrix | Done, see [Event backbone](architecture/event-backbone.md) and [Backbone matrix](benchmarks/backbone-matrix.md) |
 | [#34](https://github.com/AimTune/converger/issues/34) | Load testing harness (k6 WebSocket + REST scenarios) with nightly CI run and published baselines | Done (Kafka column with #66; full re-run after #35), see [Benchmarks](benchmarks/index.md) |
-| [#191](https://github.com/AimTune/converger/issues/191) | Measure dead-channel isolation: one dead channel must not degrade other tenants | Open (exit criterion) |
+| [#191](https://github.com/AimTune/converger/issues/191) | Measure dead-channel isolation: one dead channel must not degrade other tenants | Done ([ADR-0076](adr/0076-bulk-parking-and-per-channel-in-flight-cap.md), [Dead-channel isolation](benchmarks/dead-channel-isolation.md#after-adr-0076)) |
 | [#192](https://github.com/AimTune/converger/issues/192) | Verify partition archive and drop on a 100M-row dataset | Done ([2026-10-15 run](benchmarks/2026-10-15-partition-100m.md)) |
 
 Exit criteria: a nightly load test publishes p95 latency and connection counts with enforced thresholds; one dead channel does not degrade other tenants; partition drop and archive are verified on a 100M-row dataset.
@@ -119,7 +119,7 @@ Exit criteria: a nightly load test publishes p95 latency and connection counts w
 | Exit criterion | Status |
 | --- | --- |
 | Nightly load test with p95 and connection counts, thresholds enforced | See [Benchmarks](benchmarks/index.md) (nightly `Load` workflow) |
-| One dead channel does not degrade other tenants | **Measured, not met for tenants on the same tier**: the breaker parks the backlog, but the shared queue is blocked for about 35 s first (p95 12.3 s against 0.6 s). Met in steady state and close with separate tiers (p95 217 ms against 73 ms). See [Dead-channel isolation](benchmarks/dead-channel-isolation.md) for the cause and the proposed fix. |
+| One dead channel does not degrade other tenants | **Mostly met** since [ADR-0076](adr/0076-bulk-parking-and-per-channel-in-flight-cap.md) (#191): with a 10,000-delivery backlog on a dead channel in the same tier, the other tenant's p95 is 104 ms against a 67 ms baseline (it was 12.3 s before); a second, noisier run measured 535 ms, so the strict gate is not yet reliably met. See [Dead-channel isolation](benchmarks/dead-channel-isolation.md#after-adr-0076). |
 | Partition drop and archive verified on 100M rows | **Met**: measured on a 100M-row dataset ([2026-10-15 run](benchmarks/2026-10-15-partition-100m.md), [#192](https://github.com/AimTune/converger/issues/192)): detach 205 ms, drop 14 ms, writers not blocked, the 16.7M-row month archived and verified in 530 s. The 10M and 30M runs per table and the per-table 100M extrapolation are in [Partition retention at scale](benchmarks/partition-retention-scaling.md). |
 
 ## Done: v3.2 Channel Expansion (#60)
