@@ -29,7 +29,7 @@ import (
 )
 
 // Version of this SDK, sent in the User-Agent header.
-const Version = "0.1.0"
+const Version = "0.1.1"
 
 // Protocol is the protocol version sent in hello.
 const Protocol = "converger/1"

@@ -10,7 +10,7 @@
     <RootNamespace>Converger.Agent</RootNamespace>
 
     <PackageId>Converger.Agent</PackageId>
-    <Version>0.1.0</Version>
+    <Version>0.1.1</Version>
     <Authors>Converger contributors</Authors>
     <Description>Converger agent SDK for .NET: a bot backend that answers the conversations of a Converger channel over one channel-scoped Protocol v1 WebSocket.</Description>
     <PackageTags>converger;chat;agent;bot;websocket</PackageTags>

@@ -1,6 +1,6 @@
 {
   "name": "@converger/client",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Headless TypeScript client for Converger Protocol v1: reconnect, watermark resume, persistent outbox, token refresh, REST helpers.",
   "license": "MIT",
   "author": "AimTune",
