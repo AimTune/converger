@@ -48,7 +48,7 @@ defmodule ConvergerAgent.MixProject do
     [
       name: "converger_agent",
       licenses: ["MIT"],
-      files: ~w(lib mix.exs README.md CHANGELOG.md),
+      files: ~w(lib mix.exs README.md CHANGELOG.md LICENSE),
       links: %{
         "Source" => @source_url,
         "Docs" => "https://converger.aimtune.dev/sdk/agent-elixir"

@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0 (unreleased)
+## 0.1.0 (2026-10-15)
 
 - First release: `createAgent` serves every conversation of a Converger channel from one channel-scoped Protocol v1
   socket with `onTurn(async (turn, reply) => ...)`. `reply.text`, `stream` (genui text chunks), `message`,
