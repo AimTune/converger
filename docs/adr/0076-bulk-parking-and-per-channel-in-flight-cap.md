@@ -62,7 +62,7 @@ Chosen option: **"Bulk parking plus a per-node in-flight cap per channel"**.
   latency spikes for the other tenant 30 s after the breaker opened.
 - **Cap a channel's running deliveries per node** (`Converger.Channels.InFlight`, `max_in_flight`, default `:auto` =
   half of the job's queue workers, at least 1): the delivery worker takes a slot before anything else. A job over the
-  cap is snoozed for one to two `busy_defer_ms` without a database query, and the first such job per `busy_defer_ms`
+  cap is snoozed for `busy_defer_ms` (1 s) without a database query, and the first such job per `busy_defer_ms`
   pushes the channel's other `available` jobs back by `busy_defer_ms` in one statement, at priority 2, so once due they
   still run after other channels' fresh deliveries (priority 1) and before parked ones (3). Slots are released after the
   attempt, or by a process monitor if the job is killed.
@@ -82,7 +82,7 @@ Chosen option: **"Bulk parking plus a per-node in-flight cap per channel"**.
 - A single healthy channel can no longer use every worker of its queue on a node: with the defaults it gets 10 of the
   20 `deliveries` workers, 5 of `deliveries_high` and 2 of `deliveries_bulk`. A channel that needs more sets
   `max_in_flight` (globally) or its tenant moves to a tier with more workers. When it is at its cap, its waiting
-  deliveries are deferred by `busy_defer_ms` (2 s).
+  deliveries are deferred by `busy_defer_ms` (1 s).
 - The cap is per node, not cluster-wide: on N nodes a channel can run N × cap deliveries at once.
 - `park_backlog/1` marks every `pending` delivery of the channel `paused`, including the few whose attempt is running;
   their outcome overwrites it when the attempt ends.

@@ -40,7 +40,7 @@ defmodule Converger.Channels.Circuit do
       run at the same time on a node (`Converger.Channels.InFlight`, ADR-0076):
       an integer, `:auto` for half of the job's queue workers (at least 1),
       or `nil` for no cap
-    * `busy_defer_ms` (default `2_000`) - how long a channel's waiting
+    * `busy_defer_ms` (default `1_000`) - how long a channel's waiting
       backlog is deferred when it is at its cap
     * `replay_dead_letters_on_close` (default `false`) - when a probe closes
       the breaker, replay the channel's dead letters that failed within the
@@ -76,7 +76,7 @@ defmodule Converger.Channels.Circuit do
     cooldown_ms: 30_000,
     park_seconds: 600,
     max_in_flight: :auto,
-    busy_defer_ms: 2_000,
+    busy_defer_ms: 1_000,
     replay_dead_letters_on_close: false,
     replay_window_ms: :timer.hours(1)
   ]

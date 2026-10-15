@@ -63,10 +63,9 @@ defmodule Converger.Workers.ActivityDeliveryWorker do
     end
   end
 
-  defp busy_snooze_seconds do
-    seconds = max(div(Circuit.config()[:busy_defer_ms], 1000), 1)
-    seconds + :rand.uniform(seconds)
-  end
+  # Oban snoozes in whole seconds; a busy (not dead) channel at its cap should
+  # wait as little as possible.
+  defp busy_snooze_seconds, do: max(div(Circuit.config()[:busy_defer_ms], 1000), 1)
 
   defp deliver(activity, channel) do
     case Pipeline.deliver(activity, channel) do

@@ -20,7 +20,7 @@ defmodule Converger.Channels.InFlight do
 
   use GenServer
 
-  @default_defer_ms 2_000
+  @default_defer_ms 1_000
 
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
