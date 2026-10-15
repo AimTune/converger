@@ -234,6 +234,7 @@ releases.
 | `DB_USERNAME` | `postgres` | Postgres user. |
 | `DB_PASSWORD` | `postgres` | Postgres password. When developing against the compose `db` service, set it to the `POSTGRES_PASSWORD` from your `.env`. |
 | `DB_HOSTNAME` | `localhost` | Postgres host. |
+| `DB_PORT` | `5432` | Postgres port (test environment only). |
 | `DB_NAME` | `converger_dev` / `converger_test` | Database name. In test, `MIX_TEST_PARTITION` is appended to the default. |
 | `MIX_TEST_PARTITION` | unset | Suffix for the test database name, for running partitioned or concurrent test suites. |
 

@@ -32,7 +32,10 @@ ExUnit.start(
     :mekik_converger,
     # the Python LangChain FAQ example in Docker, see
     # test/acceptance/langchain_faq_live_test.exs
-    :langchain_faq
+    :langchain_faq,
+    # the 100M-row partition archive and drop run (issue #192), only through
+    # test/load/partition_100m/run.sh: it seeds and drops data
+    :partition_100m
   ],
   assert_receive_timeout: 1_000
 )

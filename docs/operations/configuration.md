@@ -81,6 +81,7 @@ All prod only. Boolean values accept `true`, `1`, `yes`, `on` (case-insensitive)
 | `DB_USERNAME` | `postgres` | dev, test | Postgres user. |
 | `DB_PASSWORD` | `postgres` | dev, test | Postgres password. |
 | `DB_HOSTNAME` | `localhost` | dev, test | Postgres host. |
+| `DB_PORT` | `5432` | test | Postgres port (used by the [100M-row partition run](../benchmarks/index.md#partition-archive-and-drop-at-100m-rows), which starts its own Postgres on 15432). |
 | `DB_NAME` | `converger_dev` / `converger_test` + `MIX_TEST_PARTITION` | dev, test | Database name. |
 | `MIX_TEST_PARTITION` | unset | test | Suffix for the test database and the test upload directory, so several suites can run on one machine. |
 

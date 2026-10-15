@@ -1,6 +1,6 @@
 ---
 title: Benchmarks and load testing
-description: The k6 load harness (REST to WebSocket fan-out, inbound webhook burst, idle sockets, reconnect storm, rolling restart, node kill) on the Native and Kafka event backbones, how to run it, what it measures, the zero-loss checks, the nightly regression gate, the backbone matrix and the published results.
+description: The k6 load harness (REST to WebSocket fan-out, inbound webhook burst, idle sockets, reconnect storm, rolling restart, node kill) on the Native and Kafka event backbones, how to run it, what it measures, the zero-loss checks, the nightly regression gate, the backbone matrix, the published results, and the 100M-row partition archive and drop run.
 sidebar_position: 1
 ---
 
@@ -286,3 +286,98 @@ mix converger.loadtest --conversations 50 --messages 200 --concurrency 50
 It creates a throwaway tenant on an inbound-only channel and deletes it afterwards (`--keep` keeps it). Run it
 against a development or scratch database (for example `DB_NAME=converger_bench`). In the `dev` environment every
 query is logged, which slows it down noticeably.
+
+## Partition archive and drop at 100M rows
+
+`test/load/partition_100m/run.sh` checks the retention path of
+[ADR-0034](../adr/0034-monthly-partitioning-and-per-tenant-retention.md) on a large dataset
+([#192](https://github.com/AimTune/converger/issues/192)). It archives the oldest month of about 100M rows to object
+storage and drops it while writers keep inserting. It runs the production code (`Converger.Retention.run/1`,
+`Converger.Archive`) against its own Postgres and MinIO.
+
+:::note Status
+The script is ready, but the 100M-row run has not been done yet. It needs a quiet machine with enough disk (see
+below). Only smoke runs (2M rows) have been made so far, so ADR-0034 still says the 100M-row run was not done. The
+results go on a page here once the full run is done.
+:::
+
+What it does:
+
+1. Starts Postgres 17 (the version in `docker-compose.yml`, tuned for a bulk load: `shared_buffers=2GB`,
+   `max_wal_size=16GB`, `synchronous_commit` left on) and MinIO (the image the CI storage job uses) as the compose
+   project `converger-p100m`, on `127.0.0.1:15432` and `127.0.0.1:19000`, with named volumes. It never touches
+   the development database or another harness.
+2. Checks the free space on the Docker disk against an estimate (`P100M_BYTES_PER_ROW`, about 600 bytes per row
+   for tables and indexes, plus one `max_wal_size` and the archive, plus 20%). If there is not enough space it
+   stops before seeding (`P100M_FORCE=1` overrides).
+3. Migrates the schema (`MIX_ENV=test mix ecto.migrate`). Then it seeds `P100M_ROWS` rows (60% `activities`,
+   40% `deliveries`) over 6 monthly partitions (2023-07 to 2023-12) and 8 tenants with 2,000 conversations each.
+   It uses `INSERT ... SELECT generate_series` in batches of 1M rows, and 4 partitions load in parallel. The rows
+   meet the real constraints: the per-conversation `seq` is unique, every delivery has an activity in the same
+   month, and `idempotency_key` and `provider_message_id` are filled for some rows so the partial indexes have
+   entries. Each month is loaded into a plain table and given the per-partition unique indexes and every index of
+   the parent. Then it is vacuumed, analyzed and attached. The seeded partitions have exactly the production
+   indexes, but freshly built, so they are more compact than indexes grown by live traffic.
+4. Starts `P100M_WRITERS` writers (default 8, 25 inserts per second each). They call
+   `Converger.Activities.create_activity/2` on the current month and record every latency. After a baseline
+   (`P100M_BASELINE_S`, 30 s), it runs `Converger.Retention.run/1` for the oldest month with the production
+   settings. That means `DETACH PARTITION ... CONCURRENTLY`, export to MinIO in parts of 50,000 rows, download and
+   SHA-256 check, a row count check, and `DROP TABLE`. The repo's query telemetry times each step.
+5. Downloads every archived object again and counts its lines per tenant and table, and compares the counts with
+   the rows counted in the partition before the detach. It then re-imports one tenant's month with
+   `Converger.Archive.import_tenant_month/2`, the documented path in
+   [Re-importing an archive](../operations/retention.md#re-importing-an-archive).
+6. Writes `results.json`, `report.md`, `writers.csv` (every insert) and the Postgres log to
+   `test/load/partition_100m/.run/out/` (gitignored). The report includes the hardware (host CPU, Docker CPUs and
+   memory, Docker disk, Postgres version and settings) and a linear projection to 100M rows. Then it removes the
+   containers and volumes.
+
+It measures:
+
+- seed time and WAL
+- table and index sizes, and bytes per row
+- detach, export and verify (per table), and drop durations
+- archive object count and size
+- WAL generated during the operation (`pg_current_wal_lsn()` before and after; this includes the writers)
+- writer p50, p99 and max before, during the run, during the detach, during the drop, and after
+- archive read-back and re-import counts
+
+The test fails if the month is not dropped, if a checksum or row count differs, or if the writers made no progress
+during the operation.
+
+```bash
+# the full run: quiet machine, ~90 GB free on the Docker disk
+test/load/partition_100m/run.sh
+
+# smoke run (about 2 minutes)
+P100M_ROWS=2000000 P100M_BASELINE_S=20 P100M_AFTER_S=10 test/load/partition_100m/run.sh
+
+# keep the seeded database; the next run with the same seed settings reuses it and archives the next month
+P100M_KEEP=1 test/load/partition_100m/run.sh
+```
+
+The other settings are listed at the top of the script: months, tenants, conversations, seed batch and parallelism,
+writers, archive part size, ports and Postgres memory. Run it on a quiet machine. Other containers doing I/O on the
+same Docker disk show up directly in the writer percentiles (see
+[Publishing a run](#publishing-a-run)).
+
+Smoke run, 2M rows, on a developer machine (Ryzen 5 7600X, Docker Desktop on Windows, 12 CPUs, 31 GiB, Postgres
+17.11). Another load run shared the machine, so the latencies are only indicative:
+
+| | 2M rows (smoke) |
+| --- | --- |
+| Seed | 20 s (99k rows/s), 1.1 GiB WAL |
+| Size | 1.09 GiB tables and indexes, 587 bytes per row |
+| Oldest month | 200,000 activities + 133,334 deliveries |
+| `DETACH ... CONCURRENTLY` (both tables) | 63 ms |
+| Export, read back and verify | 12.3 s (activities 7.9 s, deliveries 4.2 s) |
+| `DROP TABLE` (both tables) | 26 ms |
+| Archive | 16 objects, 28.4 MiB, 89 bytes per row; read back and row counts match |
+| WAL during the run (writers included) | 4.4 MiB |
+| Writer p50 / p99 / max, baseline | 38 / 119 / 768 ms |
+| Writer p50 / p99 / max, during the run | 67 / 227 / 477 ms |
+| Re-import of one tenant (41,666 rows) | 6.3 s, counts match |
+
+Linear projection to 100M rows: about 87 GiB of disk (55 GiB of data, 16 GiB of WAL, 1.4 GiB of archive, plus 20%),
+about 17 minutes of seeding, and about 10 minutes to archive and verify the oldest month (16.7M rows). Index builds
+and I/O do not scale linearly once the data no longer fits in RAM, so expect longer.

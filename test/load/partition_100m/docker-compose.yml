@@ -1,0 +1,71 @@
+# Postgres and MinIO for the 100M-row partition archive and drop run (issue
+# #192). Started by run.sh under its own project name (converger-p100m) on
+# its own ports, so it never touches the development database
+# (converger-db-1) or another harness. See docs/benchmarks/index.md.
+services:
+  db:
+    # Same major version as the root docker-compose.yml.
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    # Tuned for a bulk load on a workstation, otherwise ordinary settings:
+    # synchronous_commit stays on (the seed turns it off for its own session
+    # only), so the writers measure real commit latency.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=${P100M_SHARED_BUFFERS:-2GB}
+      - -c
+      - effective_cache_size=${P100M_EFFECTIVE_CACHE_SIZE:-6GB}
+      - -c
+      - maintenance_work_mem=${P100M_MAINTENANCE_WORK_MEM:-1GB}
+      - -c
+      - work_mem=64MB
+      - -c
+      - max_wal_size=${P100M_MAX_WAL_SIZE:-16GB}
+      - -c
+      - min_wal_size=1GB
+      - -c
+      - checkpoint_timeout=15min
+      - -c
+      - checkpoint_completion_target=0.9
+      - -c
+      - wal_buffers=64MB
+      - -c
+      - max_parallel_maintenance_workers=4
+      - -c
+      - max_connections=200
+      - -c
+      - track_io_timing=on
+    shm_size: 2gb
+    ports:
+      - "127.0.0.1:${P100M_DB_PORT:-15432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  minio:
+    # The image the CI "Storage integration" job uses.
+    image: ${P100M_MINIO_IMAGE:-bitnamilegacy/minio:latest}
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "127.0.0.1:${P100M_MINIO_PORT:-19000}:9000"
+    volumes:
+      - miniodata:/bitnami/minio/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:9000/minio/health/live || exit 1"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+volumes:
+  pgdata:
+  miniodata:
