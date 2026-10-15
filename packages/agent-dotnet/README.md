@@ -13,7 +13,7 @@ Full documentation: [converger.aimtune.dev/sdk/agent-dotnet](https://converger.a
 dotnet add package Converger.Agent
 ```
 
-Not yet published to NuGet; until then reference `src/Converger.Agent/Converger.Agent.csproj`. Targets `net8.0`
+Published on NuGet as `Converger.Agent` (from 0.1.1). Targets `net8.0`
 and later, no dependencies beyond the BCL (`ClientWebSocket`, `System.Text.Json`).
 
 ## Quick start

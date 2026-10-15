@@ -6,7 +6,7 @@ sidebar_position: 8
 
 # Agent SDK for .NET
 
-**Implemented (#67)**, not yet published. `packages/agent-dotnet` is the `Converger.Agent` package (net8.0, no
+**Implemented (#67)**, published on [NuGet](https://www.nuget.org/packages/Converger.Agent) from 0.1.1. `packages/agent-dotnet` is the `Converger.Agent` package (net8.0, no
 dependencies beyond the BCL: `ClientWebSocket` and `System.Text.Json`). It has the same model and wire behaviour
 as the [Go agent SDK](agent-go.md): one channel-scoped Protocol v1 connection
 ([section 10](../protocol/v1.md#10-channel-scoped-sockets-implemented-64-on-the-native-endpoint)) serves every
@@ -15,7 +15,7 @@ conversation routed to the agent's `websocket` channel.
 ## Install
 
 ```bash
-dotnet add package Converger.Agent   # once published; until then reference packages/agent-dotnet/src/Converger.Agent
+dotnet add package Converger.Agent
 ```
 
 ## Usage
@@ -98,4 +98,4 @@ run by default:
    for `AimTune/converger` and the workflow file `agent-dotnet-publish.yml`, and the `NUGET_USER` variable (the
    nuget.org profile name that owns the policy).
 
-The first version (0.1.0) is published by hand ([#187](https://github.com/AimTune/converger/issues/187)).
+0.1.1, the first version on NuGet, was released by this workflow.
