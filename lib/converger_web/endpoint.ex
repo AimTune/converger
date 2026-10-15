@@ -85,11 +85,12 @@ defmodule ConvergerWeb.Endpoint do
   plug Plug.RequestId
   plug Plug.Telemetry, event_prefix: [:phoenix, :endpoint]
 
-  # Origins are resolved on every request (see `cors_origins/0`) so that
+  # Origins are resolved on every request (see `cors_origins/1`) so that
   # `CORS_ORIGINS` set in config/runtime.exs takes effect on releases
-  # without recompiling.
+  # without recompiling, and the client API also allows the origins of
+  # publishable keys (ADR-0074).
   plug CORSPlug,
-    origin: &__MODULE__.cors_origins/0,
+    origin: &__MODULE__.cors_origins/1,
     headers: ["x-channel-token", "x-api-key", "authorization"] ++ CORSPlug.defaults()[:headers]
 
   plug Plug.Parsers,
@@ -125,4 +126,26 @@ defmodule ConvergerWeb.Endpoint do
   """
   @spec cors_origins() :: [String.t()]
   def cors_origins, do: Application.get_env(:converger, :cors_origins, [])
+
+  @doc """
+  The allowed CORS origins for `conn`: `cors_origins/0`, plus, on the client
+  API (`/api/v1/converger/*`), the request's origin when an active
+  publishable key allows it (`Converger.Channels.PublishableOrigins`,
+  ADR-0074). Other paths (admin, portal, tenant API) never gain origins
+  from publishable keys.
+  """
+  @spec cors_origins(Plug.Conn.t()) :: [String.t()]
+  def cors_origins(conn) do
+    configured = cors_origins()
+
+    with "/api/v1/converger/" <> _ <- conn.request_path,
+         false <- "*" in configured,
+         [origin | _] <- Plug.Conn.get_req_header(conn, "origin"),
+         false <- origin in configured,
+         true <- Converger.Channels.PublishableOrigins.allowed?(origin) do
+      [origin | configured]
+    else
+      _ -> configured
+    end
+  end
 end

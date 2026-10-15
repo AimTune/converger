@@ -67,7 +67,9 @@ kept for the next one.
 | `activity_create` | 100 per 1 s | tenant | `activity_create:tenant:<tenant_id>` | `POST /api/v1/conversations/:id/activities`, `POST /api/v1/converger/conversations/:id/activities` | yes |
 | `upload` | 10 per 1 s | tenant | `upload:tenant:<tenant_id>` | `POST /api/v1/converger/conversations/:id/upload` | yes |
 | `inbound` | 500 per 1 s | channel | `inbound:channel:<channel_id>` | `POST /api/v1/channels/:channel_id/inbound`, `POST /api/v1/channels/:channel_id/status` | yes |
-| `token_generate` | 10 per 60 s | channel | `token_generate:channel:<channel_id>` | `POST /api/v1/converger/tokens/generate`, `POST /api/v1/converger/tokens/refresh` | yes |
+| `token_generate` | 10 per 60 s | channel | `token_generate:channel:<channel_id>` | `POST /api/v1/converger/tokens/generate`, `POST /api/v1/converger/tokens/refresh` (except tokens with `src: "publishable"`) | yes |
+| `publishable_token_ip` | 10 per 60 s | client IP | `publishable_token_ip:ip:<ip>` | `POST /api/v1/converger/tokens/publishable`, checked before the key is looked up ([publishable keys](../security/publishable-keys.md)) | no |
+| `publishable_token` | 300 per 60 s | channel | `publishable_token:channel:<channel_id>` | `POST /api/v1/converger/tokens/publishable`, `POST /api/v1/converger/tokens/refresh` of tokens with `src: "publishable"` | yes |
 | `token_create` | 10 per 60 s | client IP | `token_create:ip:<ip>` | `POST /api/v1/tokens` (legacy) | no |
 | `login_ip` | 5 failures per 60 s | client IP | `login_ip:<ip>` | `POST /admin/login`, `POST /portal/login`, wrong 2FA codes on `POST /admin/login/totp`, `POST /portal/login/totp` | no |
 | `login_account` | 5 failures per 60 s | account | `login_account:admin:<email>` or `login_account:tenant:<tenant name>:<email>` (trimmed, lowercased), `login_account:admin-2fa:<user id>` or `login_account:tenant-2fa:<user id>` for 2FA codes | `POST /admin/login`, `POST /portal/login`, `POST /admin/login/totp`, `POST /portal/login/totp` | no |
@@ -98,7 +100,7 @@ change form.
 
 For each check the `{limit, window_ms}` is taken from the first source that has one:
 
-1. the tenant override in `tenants.limits` (only for `activity_create`, `upload`, `inbound`, `token_generate`);
+1. the tenant override in `tenants.limits` (only for `activity_create`, `upload`, `inbound`, `token_generate`, `publishable_token`);
 2. `config :converger, Converger.RateLimit, limits: %{bucket => {limit, window_ms}}`;
 3. the `:limit` / `:scale_ms` passed to the plug (ad-hoc limits);
 4. the built-in defaults above.

@@ -2369,6 +2369,7 @@
           "not_acceptable",
           "not_failed",
           "not_found",
+          "origin_not_allowed",
           "payload_too_large",
           "precondition_failed",
           "rate_limited",
@@ -2726,6 +2727,54 @@
           "opted_out_at"
         ],
         "title": "Participant",
+        "type": "object"
+      },
+      "PublishableToken": {
+        "description": "A token bound to the visitor's conversation, for an anonymous end user.",
+        "properties": {
+          "conversationId": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "expires_in": {
+            "description": "Seconds",
+            "type": "integer"
+          },
+          "resume": {
+            "description": "Keep it (e.g. in localStorage) and send it on the next call to continue this conversation",
+            "type": "string"
+          },
+          "resumed": {
+            "description": "Whether `resume` was accepted; false means a new conversation",
+            "type": "boolean"
+          },
+          "token": {
+            "type": "string"
+          },
+          "userId": {
+            "description": "The anonymous end user (`anon_...`)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "conversationId",
+          "token",
+          "expires_in",
+          "userId",
+          "resume",
+          "resumed"
+        ],
+        "title": "PublishableToken",
+        "type": "object"
+      },
+      "PublishableTokenRequest": {
+        "description": "Optional: the `resume` credential of an earlier response, to continue that conversation as the same end user.",
+        "properties": {
+          "resume": {
+            "type": "string"
+          }
+        },
+        "title": "PublishableTokenRequest",
         "type": "object"
       },
       "ResourceResponse": {
@@ -3873,6 +3922,11 @@
         "in": "header",
         "name": "x-converger-signature",
         "type": "apiKey"
+      },
+      "publishableKey": {
+        "description": "Publishable key (`cvg_pk_...`, safe in page source); only for `POST /api/v1/converger/tokens/publishable` from an allowed origin",
+        "scheme": "bearer",
+        "type": "http"
       }
     }
   },
@@ -5972,6 +6026,61 @@
           }
         ],
         "summary": "Generate a Converger token",
+        "tags": [
+          "Client: Tokens"
+        ]
+      }
+    },
+    "/api/v1/converger/tokens/publishable": {
+      "post": {
+        "callbacks": {},
+        "description": "For browsers without a backend: exchanges the channel's publishable key (`cvg_pk_...`) for a token bound to a new conversation of an anonymous end user, or, with `resume`, to the conversation of an earlier call. The request must come from one of the key's allowed origins (`Origin` header). An invalid or expired `resume` starts a new conversation (`resumed: false`).",
+        "operationId": "createPublishableToken",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublishableTokenRequest"
+              }
+            }
+          },
+          "description": "Options",
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublishableToken"
+                }
+              }
+            },
+            "description": "The token"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "publishableKey": []
+          }
+        ],
+        "summary": "Get a token with a publishable key",
         "tags": [
           "Client: Tokens"
         ]

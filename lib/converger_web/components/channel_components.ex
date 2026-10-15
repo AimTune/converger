@@ -2,8 +2,9 @@ defmodule ConvergerWeb.ChannelComponents do
   @moduledoc """
   Pieces shared by the admin (`/admin/channels`) and portal
   (`/portal/channels`) channel lists: the filter form, the health history
-  sparkline, the revealed-secret alert and the "Send test message" panel.
-  See `ConvergerWeb.Live.ChannelList` for the state behind them.
+  sparkline, the revealed-secret alert, the "Send test message" panel and
+  the Client access panel. See `ConvergerWeb.Live.ChannelList` and
+  `ConvergerWeb.Live.ChannelAccess` for the state behind them.
   """
   use Phoenix.Component
 
@@ -233,6 +234,185 @@ defmodule ConvergerWeb.ChannelComponents do
         </span>
       </div>
     </.panel>
+    """
+  end
+
+  attr :channel, :map, required: true
+  attr :base_url, :string, default: nil
+  attr :user_id, :string, required: true
+  attr :test_token, :map, default: nil
+  attr :origins_error, :string, default: nil
+
+  def client_access_panel(assigns) do
+    base = assigns.base_url || ""
+
+    assigns =
+      assign(assigns,
+        socket_url: String.replace_prefix(base, "http", "ws") <> "/socket/converger/v1",
+        origins_text: Enum.join(assigns.channel.allowed_origins || [], "\n"),
+        active?: assigns.channel.status == "active"
+      )
+
+    ~H"""
+    <.panel id="client-access-panel" title={"Client access: #{@channel.name}"}>
+      <:actions>
+        <.button
+          type="button"
+          phx-click="close_access"
+          size="xs"
+          variant="ghost"
+          aria-label="Close client access panel"
+        >
+          <.icon name="hero-x-mark" />
+        </.button>
+      </:actions>
+
+      <div :if={@base_url} class="grid gap-2 text-sm sm:grid-cols-2">
+        <.copy_field id="access-base-url" label="Base URL" value={@base_url} />
+        <.copy_field id="access-socket-url" label="WebSocket" value={@socket_url} />
+      </div>
+
+      <section class="space-y-2 rounded-box border border-base-300 bg-base-200 p-4">
+        <h3 class="text-sm font-semibold">Test token</h3>
+        <p class="text-sm text-base-content/70">
+          A client token for this channel, as <code>POST /api/v1/converger/tokens/generate</code>
+          would return with the channel secret. Paste it into a chat client to try the channel. It
+          expires in 30 minutes; issuing it is audit-logged.
+        </p>
+        <form id="test-token-form" phx-submit="issue_test_token" class="flex flex-wrap items-end gap-2">
+          <input type="hidden" name="access[channel_id]" value={@channel.id} />
+          <div class="w-56">
+            <.input
+              id="test-token-user-id"
+              name="access[user_id]"
+              value={@user_id}
+              label="End user id"
+              maxlength="128"
+            />
+          </div>
+          <div class="pb-2">
+            <.button
+              type="submit"
+              size="sm"
+              variant="primary"
+              disabled={not @active?}
+              title={if @active?, do: nil, else: "Enable the channel first"}
+            >
+              <.icon name="hero-key" /> Issue test token
+            </.button>
+          </div>
+        </form>
+        <div :if={@test_token} id="test-token-result" class="space-y-1 text-sm">
+          <.copy_field id="test-token-value" label="Token" value={@test_token.token} />
+          <p class="text-base-content/60">
+            End user <code>{@test_token.user_id || "(none)"}</code>, expires {Calendar.strftime(
+              @test_token.expires_at,
+              "%Y-%m-%d %H:%M:%S UTC"
+            )}
+          </p>
+        </div>
+      </section>
+
+      <section class="space-y-2 rounded-box border border-base-300 bg-base-200 p-4">
+        <div class="flex items-center gap-2">
+          <h3 class="text-sm font-semibold">Publishable key</h3>
+          <.badge
+            id="publishable-key-status"
+            value={if @channel.publishable_key, do: "active", else: "inactive"}
+          >
+            {if @channel.publishable_key, do: "Enabled", else: "Disabled"}
+          </.badge>
+        </div>
+        <p class="text-sm text-base-content/70">
+          A key that is safe in page source, for sites without a backend. It only works from the
+          allowed origins, only creates anonymous visitors and gives each one a token for its own
+          conversation (<code>POST /api/v1/converger/tokens/publishable</code>).
+        </p>
+        <.copy_field
+          :if={@channel.publishable_key}
+          id="publishable-key-value"
+          label="Key"
+          value={@channel.publishable_key}
+        />
+        <form id="allowed-origins-form" phx-submit="save_origins" class="space-y-2">
+          <input type="hidden" name="access[channel_id]" value={@channel.id} />
+          <.input
+            type="textarea"
+            id="allowed-origins"
+            name="access[allowed_origins]"
+            value={@origins_text}
+            label="Allowed origins (one per line, e.g. https://shop.example.com or https://*.example.com)"
+            rows="3"
+          />
+          <p :if={@origins_error} id="allowed-origins-error" role="alert" class="text-sm text-error">
+            {@origins_error}
+          </p>
+          <div class="flex flex-wrap gap-2">
+            <.button type="submit" size="sm" variant="neutral">Save origins</.button>
+            <.button
+              :if={is_nil(@channel.publishable_key)}
+              id="enable-publishable-key"
+              type="submit"
+              name="key"
+              value="new"
+              size="sm"
+              variant="primary"
+            >
+              Save and enable key
+            </.button>
+            <.button
+              :if={@channel.publishable_key}
+              id="rotate-publishable-key"
+              type="button"
+              phx-click="rotate_publishable_key"
+              phx-value-id={@channel.id}
+              data-confirm="Rotate the publishable key? The current key stops working immediately; update it on your site."
+              size="sm"
+              variant="neutral"
+            >
+              Rotate key
+            </.button>
+            <.button
+              :if={@channel.publishable_key}
+              id="disable-publishable-key"
+              type="button"
+              phx-click="disable_publishable_key"
+              phx-value-id={@channel.id}
+              data-confirm="Disable the publishable key? Widgets using it stop getting tokens."
+              size="sm"
+              variant="error"
+            >
+              Disable key
+            </.button>
+          </div>
+        </form>
+      </section>
+    </.panel>
+    """
+  end
+
+  attr :id, :string, required: true
+  attr :label, :string, required: true
+  attr :value, :string, required: true
+
+  # The value travels in data-copy, never inside the handler's JavaScript.
+  defp copy_field(assigns) do
+    ~H"""
+    <div class="min-w-0">
+      <span class="text-xs text-base-content/60">{@label}</span>
+      <div class="flex items-center gap-1">
+        <code id={@id} class="block min-w-0 flex-1 truncate rounded bg-base-100 p-1 font-mono text-xs" title={@value}>{@value}</code>
+        <button
+          type="button"
+          data-copy={@value}
+          onclick="navigator.clipboard.writeText(this.dataset.copy)"
+          class="btn btn-ghost btn-xs"
+          title={"Copy #{String.downcase(@label)}"}
+        >
+          Copy
+        </button>
+      </div>
+    </div>
     """
   end
 end

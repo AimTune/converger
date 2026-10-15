@@ -7,7 +7,7 @@ defmodule ConvergerWeb.Admin.ChannelLive do
   alias Converger.Channels.TestMessage
   alias Converger.Tenants
   alias Converger.Auth.Token
-  alias ConvergerWeb.Live.ChannelList
+  alias ConvergerWeb.Live.{ChannelAccess, ChannelList}
 
   import ConvergerWeb.ChannelComponents
 
@@ -37,6 +37,7 @@ defmodule ConvergerWeb.Admin.ChannelLive do
     {:ok,
      socket
      |> ChannelList.init(base_path: "/admin/channels")
+     |> ChannelAccess.init()
      |> assign(
        tenants: Tenants.list_tenants(),
        form: to_form(Channels.change_channel(%Channel{})),
@@ -50,8 +51,8 @@ defmodule ConvergerWeb.Admin.ChannelLive do
      )}
   end
 
-  def handle_params(params, _url, socket) do
-    {:noreply, ChannelList.apply_params(socket, params)}
+  def handle_params(params, url, socket) do
+    {:noreply, socket |> ChannelAccess.put_base_url(url) |> ChannelList.apply_params(params)}
   end
 
   def handle_info(%{event: "health_changed", payload: payload}, socket) do
@@ -142,6 +143,45 @@ defmodule ConvergerWeb.Admin.ChannelLive do
       channel ->
         {:noreply, ChannelList.send_test(socket, channel, test["text"], socket.assigns.actor)}
     end
+  end
+
+  def handle_event("open_access", %{"id" => id}, socket) do
+    {:noreply, ChannelAccess.open(socket, Channels.get_channel!(id))}
+  end
+
+  def handle_event("close_access", _params, socket) do
+    {:noreply, ChannelAccess.close(socket)}
+  end
+
+  def handle_event("issue_test_token", %{"access" => %{"channel_id" => id} = access}, socket) do
+    channel = Channels.get_channel!(id)
+
+    {:noreply,
+     ChannelAccess.issue_test_token(socket, channel, access["user_id"], socket.assigns.actor)}
+  end
+
+  def handle_event("save_origins", %{"access" => %{"channel_id" => id} = access} = params, socket) do
+    key = if params["key"] == "new", do: :new, else: :keep
+    attrs = %{"allowed_origins" => access["allowed_origins"] || ""}
+
+    {:noreply,
+     ChannelAccess.update_key(
+       socket,
+       Channels.get_channel!(id),
+       attrs,
+       key,
+       socket.assigns.actor
+     )}
+  end
+
+  def handle_event("rotate_publishable_key", %{"id" => id}, socket) do
+    channel = Channels.get_channel!(id)
+    {:noreply, ChannelAccess.update_key(socket, channel, %{}, :new, socket.assigns.actor)}
+  end
+
+  def handle_event("disable_publishable_key", %{"id" => id}, socket) do
+    channel = Channels.get_channel!(id)
+    {:noreply, ChannelAccess.update_key(socket, channel, %{}, :none, socket.assigns.actor)}
   end
 
   def handle_event("save", %{"channel" => params}, socket) do
@@ -272,6 +312,12 @@ defmodule ConvergerWeb.Admin.ChannelLive do
         socket =
           case socket.assigns.test_channel do
             %{id: ^id} -> ChannelList.close_test(socket)
+            _ -> socket
+          end
+
+        socket =
+          case socket.assigns.access_channel do
+            %{id: ^id} -> ChannelAccess.close(socket)
             _ -> socket
           end
 
@@ -771,6 +817,15 @@ defmodule ConvergerWeb.Admin.ChannelLive do
         error={@test_error}
       />
 
+      <.client_access_panel
+        :if={@access_channel}
+        channel={@access_channel}
+        base_url={@access_base_url}
+        user_id={@access_user_id}
+        test_token={@test_token}
+        origins_error={@origins_error}
+      />
+
       <.panel>
         <.channel_filters filters={@filters} tenants={@tenants} reset_path={~p"/admin/channels"} />
 
@@ -882,6 +937,16 @@ defmodule ConvergerWeb.Admin.ChannelLive do
                   {if channel.require_signature,
                     do: "Signature: required",
                     else: "Signature: optional"}
+                </.button>
+                <.button
+                  id={"client-access-#{channel.id}"}
+                  phx-click="open_access"
+                  phx-value-id={channel.id}
+                  size="xs"
+                  variant="neutral"
+                  title="Endpoints, a test token and the publishable key for chat clients"
+                >
+                  Client access
                 </.button>
                 <.button
                   :if={Adapter.supports?(channel.type, :register_webhook, 2)}

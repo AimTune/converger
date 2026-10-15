@@ -54,6 +54,7 @@ says so. Codes that also exist in [Converger Protocol v1](../protocol/v1.md#122-
 | `insufficient_permission` | 403 | 2004 | The Converger token's `perms` claim lacks the permission (`read`, `write`, `typing`) the operation needs; `details.required` names it |
 | `insufficient_scope` | 403 | - | The tenant API key lacks the scope (`read`, `write`, `manage`) the operation needs, or tries to issue a key with a scope it lacks; `details.required` names it ([management API](management-api.md#api-keys-and-scopes)) |
 | `forbidden` | 403 | 2002 | Authenticated but not allowed: a conversation-bound token used for another conversation, a channel token where the tenant API key is required, an IP outside the admin allowlist, a failed webhook verification |
+| `origin_not_allowed` | 403 | - | `POST /api/v1/converger/tokens/publishable` from an origin that is not among the channel's allowed origins, or without an `Origin` header ([publishable keys](../security/publishable-keys.md)) |
 | `not_found` | 404 | - | Unknown route or resource, or a resource of another tenant or channel: existence is never revealed. Protocol v1 uses `conversation_not_found` (4001) for conversations |
 | `method_not_allowed` | 405 | - | The route does not accept this method |
 | `not_acceptable` | 406 | - | The `Accept` header excludes JSON |

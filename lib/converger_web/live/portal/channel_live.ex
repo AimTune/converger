@@ -3,12 +3,13 @@ defmodule ConvergerWeb.Portal.ChannelLive do
 
   alias Converger.Channels
   alias Converger.Channels.TestMessage
-  alias ConvergerWeb.Live.ChannelList
+  alias ConvergerWeb.Live.{ChannelAccess, ChannelList}
 
   import ConvergerWeb.ChannelComponents
 
   # Members may enable/disable channels; owners and admins also manage
-  # deliveries (pause/resume), send test messages and rotate secrets.
+  # deliveries (pause/resume), send test messages, rotate secrets and manage
+  # client access (test tokens, the publishable key).
   def mount(_params, _session, socket) do
     role = socket.assigns.tenant_role
     tenant_id = socket.assigns.current_tenant.id
@@ -20,6 +21,7 @@ defmodule ConvergerWeb.Portal.ChannelLive do
     {:ok,
      socket
      |> ChannelList.init(base_path: "/portal/channels", tenant_id: tenant_id)
+     |> ChannelAccess.init()
      |> assign(
        page_title: "Channels",
        can_edit: role in ~w(owner admin member),
@@ -27,8 +29,8 @@ defmodule ConvergerWeb.Portal.ChannelLive do
      )}
   end
 
-  def handle_params(params, _url, socket) do
-    {:noreply, ChannelList.apply_params(socket, params)}
+  def handle_params(params, url, socket) do
+    {:noreply, socket |> ChannelAccess.put_base_url(url) |> ChannelList.apply_params(params)}
   end
 
   def handle_info(%{event: "health_changed", payload: payload}, socket) do
@@ -120,6 +122,44 @@ defmodule ConvergerWeb.Portal.ChannelLive do
     end)
   end
 
+  def handle_event("open_access", %{"id" => id}, socket) do
+    with_channel(socket, :can_manage, id, fn channel, socket ->
+      {:noreply, ChannelAccess.open(socket, channel)}
+    end)
+  end
+
+  def handle_event("close_access", _params, socket) do
+    {:noreply, ChannelAccess.close(socket)}
+  end
+
+  def handle_event("issue_test_token", %{"access" => %{"channel_id" => id} = access}, socket) do
+    with_channel(socket, :can_manage, id, fn channel, socket ->
+      {:noreply,
+       ChannelAccess.issue_test_token(socket, channel, access["user_id"], build_actor(socket))}
+    end)
+  end
+
+  def handle_event("save_origins", %{"access" => %{"channel_id" => id} = access} = params, socket) do
+    key = if params["key"] == "new", do: :new, else: :keep
+    attrs = %{"allowed_origins" => access["allowed_origins"] || ""}
+
+    with_channel(socket, :can_manage, id, fn channel, socket ->
+      {:noreply, ChannelAccess.update_key(socket, channel, attrs, key, build_actor(socket))}
+    end)
+  end
+
+  def handle_event("rotate_publishable_key", %{"id" => id}, socket) do
+    with_channel(socket, :can_manage, id, fn channel, socket ->
+      {:noreply, ChannelAccess.update_key(socket, channel, %{}, :new, build_actor(socket))}
+    end)
+  end
+
+  def handle_event("disable_publishable_key", %{"id" => id}, socket) do
+    with_channel(socket, :can_manage, id, fn channel, socket ->
+      {:noreply, ChannelAccess.update_key(socket, channel, %{}, :none, build_actor(socket))}
+    end)
+  end
+
   # Re-checks the permission and the tenant scope of every event: the
   # channel is looked up within the current tenant only.
   defp with_channel(socket, permission, id, fun) do
@@ -193,6 +233,15 @@ defmodule ConvergerWeb.Portal.ChannelLive do
         error={@test_error}
       />
 
+      <.client_access_panel
+        :if={@access_channel}
+        channel={@access_channel}
+        base_url={@access_base_url}
+        user_id={@access_user_id}
+        test_token={@test_token}
+        origins_error={@origins_error}
+      />
+
       <.panel>
         <.channel_filters filters={@filters} reset_path={~p"/portal/channels"} />
 
@@ -259,6 +308,17 @@ defmodule ConvergerWeb.Portal.ChannelLive do
                   title={test_blocked_reason(channel) || "Send a test message through the pipeline"}
                 >
                   Send test
+                </.button>
+                <.button
+                  :if={@can_manage}
+                  id={"client-access-#{channel.id}"}
+                  phx-click="open_access"
+                  phx-value-id={channel.id}
+                  size="xs"
+                  variant="neutral"
+                  title="Endpoints, a test token and the publishable key for chat clients"
+                >
+                  Client access
                 </.button>
                 <.button
                   :if={@can_manage}

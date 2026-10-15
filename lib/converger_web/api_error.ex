@@ -54,6 +54,8 @@ defmodule ConvergerWeb.APIError do
      "The Converger token lacks the permission (read, write, typing) the operation needs; details.required names it"},
     {"insufficient_scope", 403, "Insufficient scope",
      "The API key lacks the scope (read, write, manage) the operation needs; details.required names it"},
+    {"origin_not_allowed", 403, "Origin not allowed",
+     "The request's Origin is not among the allowed origins of the publishable key (or is missing)"},
     {"not_found", 404, "Not found",
      "Unknown route or resource, or a resource of another tenant or channel (existence is never revealed)"},
     {"method_not_allowed", 405, "Method not allowed", "The route does not accept this method"},
