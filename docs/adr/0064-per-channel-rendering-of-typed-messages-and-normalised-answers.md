@@ -6,7 +6,7 @@ description: End-user adapters render typed messages natively where their provid
 
 | | |
 | --- | --- |
-| **Status** | Accepted |
+| **Status** | Accepted; the `genui` joining rule (a chunk id seen again replaces its element) is superseded by [ADR-0072](0072-genui-text-runs-concatenate-when-joined.md) |
 | **Date** | 2026-10-14 |
 | **Issue** | [#68](https://github.com/AimTune/converger/issues/68) |
 | **Pull request** | (this PR) |

@@ -138,13 +138,76 @@ async def test_reply_helpers_produce_valid_frames(server, run_agent):
     assert len(streams) == 2  # the stream and the standalone ui
     first = genui[0]["streamId"]
     assert genui_text(frames, first) == "Hello"
-    assert [f["done"] for f in genui if f["streamId"] == first] == [False, False, False, True]
+    assert [f["done"] for f in genui if f["streamId"] == first] == [False, False, True]
+    # The deltas are one text run (coalesced into one chunk here: the ui chunk
+    # flushes them), the ui chunk takes the next id and stream_done closes it.
+    assert [f["chunk"] for f in genui if f["streamId"] == first] == [
+        {"type": "text", "content": "Hello", "id": 1},
+        {"type": "ui", "component": "order-card", "props": {"id": "ORD-42"}, "id": 2},
+        {"type": "event", "name": "stream_done", "id": 3},
+    ]
     tools = server.frames(CONV, "tool_call")
     assert [t["data"]["status"] for t in tools] == ["running", "completed", "error"]
     assert tools[1]["data"]["name"] == "get_order"  # remembered from the first call
     typing = server.frames(CONV, "typing")
     assert typing == [{"type": "typing", "isTyping": True}, {"type": "typing", "isTyping": False}]
     assert [f["type"] for f in frames if "clientId" in f] == ["buttons", "card"]
+
+
+async def test_stream_deltas_are_one_text_run_coalesced_per_flush_interval(server, run_agent):
+    agent = make_agent(server, stream_flush=0.05)
+    unbuffered = make_agent(server, stream_flush=0)
+
+    async def handle(turn, reply):
+        async with reply.stream() as s:
+            for delta in ("Orders", " ", "ship", " ", "today."):
+                await s.write(delta)
+            await asyncio.sleep(0.15)  # past the flush interval: a second chunk
+            await s.write(" Bye")
+
+    agent.on_turn(handle)
+    run_agent(agent)
+    await server.wait_connected()
+    await server.user_text(CONV, "hi")
+    await server.wait_frame("run", CONV, data__status="finished")
+    chunks = [f["chunk"] for f in server.frames(CONV, "genui")]
+    assert chunks == [
+        {"type": "text", "content": "Orders ship today.", "id": 1},
+        {"type": "text", "content": " Bye", "id": 1},
+        {"type": "event", "name": "stream_done", "id": 2},
+    ]
+    await agent.stop()
+
+    # stream_flush=0: one chunk per delta, still one text run.
+    unbuffered.on_turn(handle)
+    run_agent(unbuffered)
+    await server.wait_connected(2)
+    await server.user_text(CONV2, "hi")
+    await server.wait_frame("run", CONV2, data__status="finished")
+    chunks = [f["chunk"] for f in server.frames(CONV2, "genui")]
+    assert [c.get("content") for c in chunks] == ["Orders", " ", "ship", " ", "today.", " Bye", None]
+    assert {c["id"] for c in chunks[:-1]} == {1}
+
+
+async def test_outbound_frames_are_paced_below_the_server_rate(server, run_agent):
+    agent = make_agent(server, max_frames_per_second=20)
+    elapsed = []
+
+    @agent.on_turn
+    async def handle(turn, reply):
+        loop = asyncio.get_running_loop()
+        start = loop.time()
+        for i in range(16):
+            await reply.tool_call(f"t{i}", "running", name="lookup")
+        elapsed.append(loop.time() - start)
+
+    run_agent(agent)
+    await server.wait_connected()
+    await server.user_text(CONV, "hi")
+    await server.wait_frame("run", CONV, data__status="finished", timeout=10)
+    assert len(server.frames(CONV, "tool_call")) == 16
+    # A burst of 20 / 3 frames, then 20 per second: at least (16 - 6.7) / 20 s.
+    assert elapsed[0] >= 0.4
 
 
 async def test_text_fallback_sends_the_joined_text(server, run_agent):

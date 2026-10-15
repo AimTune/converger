@@ -29,7 +29,10 @@ ExUnit.start(
     :mekik,
     # the real refund demo behind Converger (MEKIK_DIR), see
     # test/protocol/mekik_converger_live_test.exs
-    :mekik_converger
+    :mekik_converger,
+    # the Python LangChain FAQ example in Docker, see
+    # test/acceptance/langchain_faq_live_test.exs
+    :langchain_faq
   ],
   assert_receive_timeout: 1_000
 )

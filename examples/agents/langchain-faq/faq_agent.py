@@ -68,19 +68,29 @@ def search_faq(question: str) -> list[dict[str, str]]:
 def make_model() -> BaseChatModel:
     """Claude by default; FAQ_AGENT_FAKE_MODEL=1 for a canned model (tests, demos without a key)."""
     if os.environ.get("FAQ_AGENT_FAKE_MODEL"):
-        return fake_model()
+        return fake_model(delay=float(os.environ.get("FAQ_AGENT_FAKE_DELAY", "0.05")))
     from langchain_anthropic import ChatAnthropic
 
     return ChatAnthropic(model=os.environ.get("FAQ_AGENT_MODEL", "claude-sonnet-5-5"), max_tokens=512, streaming=True)
 
 
-def fake_model(replies: list[str] | None = None) -> BaseChatModel:
+def fake_model(replies: list[str] | None = None, delay: float = 0.0) -> BaseChatModel:
+    """Canned replies, streamed word by word with `delay` seconds between tokens (like a real model)."""
     from itertools import cycle
 
     from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 
+    class PacedFakeChatModel(GenericFakeChatModel):
+        delay: float = 0.0
+
+        async def _astream(self, *args: Any, **kwargs: Any):  # type: ignore[override]
+            async for chunk in super()._astream(*args, **kwargs):
+                yield chunk
+                if self.delay:
+                    await asyncio.sleep(self.delay)
+
     canned = replies or ["Orders ship within 1 business day and arrive in 2-4 business days."]
-    return GenericFakeChatModel(messages=cycle(AIMessage(content=r) for r in canned))
+    return PacedFakeChatModel(messages=cycle(AIMessage(content=r) for r in canned), delay=delay)
 
 
 def build_graph(model: BaseChatModel, checkpointer: Any = None):
