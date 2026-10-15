@@ -109,7 +109,7 @@ jobs:
         working-directory: packages/client-go
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           go-version: ${{ matrix.go }}
           cache-dependency-path: packages/client-go/go.sum
@@ -164,7 +164,7 @@ jobs:
         with:
           elixir-version: ${{ env.ELIXIR_VERSION }}
           otp-version: ${{ env.OTP_VERSION }}
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           go-version: stable
           cache-dependency-path: packages/client-go/go.sum
