@@ -147,7 +147,9 @@ error; the guard logs it at `info` and counts it as `frame_too_large` instead.
 ## Verifying a rolling restart
 
 `test/converger_web/channels/socket_guard_test.exs` opens real WebSockets against a Bandit listener and covers each
-limit, the 1012 drain close and the 503 refusal. The cluster-scale check (10 000 sockets, a rolling restart of a
-2-node cluster, every client reconnected within 30 s and no acknowledged message lost) belongs to the load-testing
-work ([#57](https://github.com/AimTune/converger/issues/57) chaos harness; the two-node suite of [#29](https://github.com/AimTune/converger/issues/29),
-[Clustering](clustering.md#the-two-node-test-suite), covers cross-node delivery but not this scale).
+limit, the 1012 drain close and the 503 refusal. The cluster-scale check is the load harness's `rolling_restart` scenario with 10 000 sockets
+([Benchmarks](../benchmarks/index.md), [#190](https://github.com/AimTune/converger/issues/190)). On a 3-node cluster it lost
+no acknowledged message, but reconnects took p95 93.6 s instead of the 30 s this design aims for, because the
+surviving nodes' database pools saturate on handshakes and replays
+([2026-10-15 run](../benchmarks/2026-10-15-a8dd704-rolling-restart-10k.md), tracked in
+[#198](https://github.com/AimTune/converger/issues/198)).

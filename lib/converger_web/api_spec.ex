@@ -150,6 +150,12 @@ defmodule ConvergerWeb.ApiSpec do
         description:
           "Channel secret (server side only); only for `POST /api/v1/converger/tokens/generate`"
       },
+      "publishableKey" => %SecurityScheme{
+        type: "http",
+        scheme: "bearer",
+        description:
+          "Publishable key (`cvg_pk_...`, safe in page source); only for `POST /api/v1/converger/tokens/publishable` from an allowed origin"
+      },
       "convergerToken" => %SecurityScheme{
         type: "http",
         scheme: "bearer",

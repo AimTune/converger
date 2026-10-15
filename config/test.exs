@@ -141,3 +141,7 @@ config :converger, Converger.Channels.Adapters.Mekik,
   max_backoff_ms: 200,
   auth_retry_ms: 200,
   relay_scan_interval_ms: nil
+
+# Publishable-key origins are read on every CORS check in tests, so a test
+# never sees another test's channels (ADR-0074).
+config :converger, Converger.Channels.PublishableOrigins, ttl_ms: 0

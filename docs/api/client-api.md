@@ -19,6 +19,7 @@ unlike the snake_case tenant API.
 | Method | Path | Auth | Purpose |
 | --- | --- | --- | --- |
 | `POST` | `/api/v1/converger/tokens/generate` | Bearer channel secret | Issue an unscoped or channel-scoped converger token (backend only) |
+| `POST` | `/api/v1/converger/tokens/publishable` | Bearer publishable key, from an allowed origin | Browsers without a backend: a token bound to a new (or resumed) conversation of an anonymous end user ([publishable keys](#publishable-keys)) |
 | `POST` | `/api/v1/converger/tokens/refresh` | Bearer converger token | Exchange a valid token for a fresh one (the old one is rotated) |
 | `POST` | `/api/v1/converger/tokens/revoke` | Bearer converger token, or channel secret | Revoke a token and its family (logout), or every token of an end user (backend) |
 | `POST` | `/api/v1/converger/conversations` | Bearer converger token | Start a conversation; returns a conversation-bound token and `streamUrl` |
@@ -143,6 +144,9 @@ curl -s -X POST "$CONVERGER/api/v1/converger/tokens/generate" \
 | `401` | `unauthorized: Invalid or expired token` | Unknown secret, or the channel is inactive |
 | `429` | `rate_limited` | Channel's `token_generate` limit exceeded |
 
+To try a channel without the secret, an operator can issue the same token from the channel page's **Client access**
+panel ([admin UI](../admin-ui.md#client-access)).
+
 ### Refresh a token
 
 `POST /api/v1/converger/tokens/refresh`
@@ -169,7 +173,8 @@ curl -s -X POST "$CONVERGER/api/v1/converger/tokens/refresh" \
 ```
 
 `conversationId` is `null` for an unscoped token. Errors: `401` (invalid or expired token, `token_revoked`), `403`
-(channel inactive), `429` (`token_generate` limit, per channel).
+(channel inactive), `429` (`token_generate` limit, per channel; tokens from a publishable key, claim
+`src: "publishable"`, count against `publishable_token` instead).
 
 ### Revoke tokens
 
@@ -186,11 +191,69 @@ conversation) are disconnected; holders of other valid tokens of that subject re
 | Channel secret (backend) | `{"user": {"id": "user-42"}}` | Every token of that end user on the channel issued until now (a banned user). Tokens generated afterwards are valid. |
 
 ```bash
-curl -s -X POST "$CONVERGER/api/v1/converger/tokens/revoke" \n  -H "authorization: Bearer $CHANNEL_SECRET" \n  -H "content-type: application/json" \n  -d '{"user": {"id": "user-42"}}'
+curl -s -X POST "$CONVERGER/api/v1/converger/tokens/revoke" \
+  -H "authorization: Bearer $CHANNEL_SECRET" \
+  -H "content-type: application/json" \
+  -d '{"user": {"id": "user-42"}}'
 ```
 
 `200 OK`: `{"revoked": "user"}` (or `"token"`). Errors: `400` (neither `token` nor `user.id` with the secret), `401`,
 `403`, `429` (`token_generate` limit, per channel).
+
+### Publishable keys
+
+`POST /api/v1/converger/tokens/publishable`
+
+For **browsers without a backend**. The channel's publishable key (`cvg_pk_...`, safe in page source) gets a token
+bound to one conversation of an **anonymous** end user. The server creates the conversation and the user id
+(`anon_...`); the caller chooses neither. See [publishable keys](../security/publishable-keys.md) for what the key can
+and cannot do, and [ADR-0074](../adr/0074-publishable-keys-for-browser-clients.md) for why.
+**Implemented (#195).**
+
+The request must come from one of the key's **allowed origins** (`Origin` header). Browsers send it on their own.
+
+**Rate limits:** `publishable_token_ip`, 10 per minute per client IP (checked first), then `publishable_token`, 300 per
+minute per channel (tenant override).
+
+| Body field | Type | Notes |
+| --- | --- | --- |
+| `resume` | string | Optional. The `resume` of an earlier response: continue that conversation as the same end user. |
+
+```bash
+curl -s -X POST "$CONVERGER/api/v1/converger/tokens/publishable" \
+  -H "authorization: Bearer $PUBLISHABLE_KEY" \
+  -H "origin: https://shop.example.com" \
+  -H "content-type: application/json" \
+  -d '{}'
+```
+
+`200 OK`:
+
+```json
+{
+  "conversationId": "5b0c8f2e-3c1d-4a8e-9f3a-1d2e3f4a5b6c",
+  "token": "eyJhbGciOi...",
+  "expires_in": 1800,
+  "userId": "anon_q3Jt0m7oCw0b0FzQ1v2Y8A",
+  "resume": "SFMyNTY...",
+  "resumed": false
+}
+```
+
+Keep `resume` (for example in `localStorage`) and send it on the next call, after a reload or when the token was
+rejected: the answer is a fresh token for the same conversation and user (`resumed: true`). An invalid or expired
+`resume`, one of another channel, or one whose conversation is closed starts a new conversation instead
+(`resumed: false`): replace what you stored. `resume` is valid for 7 days (`PUBLISHABLE_RESUME_MAX_AGE`).
+
+The token carries `conversation_id`, `user_id` and `src: "publishable"`. Use it like any conversation-bound token
+(activities, history, upload, the WebSocket) and refresh it with `POST /tokens/refresh`; other conversations of the
+channel answer `403`.
+
+| Status | Error | Cause |
+| --- | --- | --- |
+| `401` | `unauthorized: Unknown or disabled publishable key` | No `Bearer` header, unknown or rotated key, key disabled, or channel inactive |
+| `403` | `origin_not_allowed` | No `Origin` header, or an origin the key does not allow |
+| `429` | `rate_limited` | `publishable_token_ip` (per client IP) or `publishable_token` (per channel) exceeded; wait `Retry-After` |
 
 ## Conversations
 

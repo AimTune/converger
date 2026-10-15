@@ -6,7 +6,7 @@ defmodule Converger.Channels do
   import Ecto.Query, warn: false
   alias Ecto.Multi
   alias Converger.Repo
-  alias Converger.Channels.{Adapter, Channel, Circuit}
+  alias Converger.Channels.{Adapter, Channel, Circuit, PublishableOrigins}
   alias Converger.AuditLogs
   alias Converger.AuditLogs.Changes
 
@@ -280,6 +280,113 @@ defmodule Converger.Channels do
   end
 
   @doc """
+  Updates the channel's publishable key settings (issue #195, ADR-0074):
+  `attrs` may carry `"allowed_origins"`; `key` is `:keep`, `:new` (enable or
+  rotate: the old key stops working at once) or `:none` (disable). See
+  `Channel.client_access_changeset/3`.
+
+  Audited when an actor is given (action `enable_publishable_key`,
+  `rotate_publishable_key`, `disable_publishable_key` or
+  `update_allowed_origins`; keys are masked). The origins CORS allows for
+  the client API are refreshed on this node at once and on the others
+  within `Converger.Channels.PublishableOrigins`' TTL.
+  """
+  def update_client_access(%Channel{} = channel, attrs, key \\ :keep, actor \\ nil) do
+    changeset = Channel.client_access_changeset(channel, attrs, key)
+
+    result =
+      if actor do
+        Multi.new()
+        |> Multi.update(:channel, changeset)
+        |> Multi.insert(:audit_log, fn %{channel: updated} ->
+          AuditLogs.build_audit_log_entry(%{
+            tenant_id: channel.tenant_id,
+            actor_type: actor.type,
+            actor_id: actor.id,
+            action: client_access_action(channel, key),
+            resource_type: "channel",
+            resource_id: channel.id,
+            changes: %{
+              "before" => client_access_summary(channel),
+              "after" => client_access_summary(updated)
+            }
+          })
+        end)
+        |> Repo.transaction()
+        |> case do
+          {:ok, %{channel: updated}} -> {:ok, updated}
+          {:error, :channel, changeset, _} -> {:error, changeset}
+        end
+      else
+        Repo.update(changeset)
+      end
+
+    with {:ok, _} <- result, do: PublishableOrigins.invalidate()
+    result
+  end
+
+  defp client_access_action(%Channel{publishable_key: nil}, :new), do: "enable_publishable_key"
+  defp client_access_action(_channel, :new), do: "rotate_publishable_key"
+  defp client_access_action(_channel, :none), do: "disable_publishable_key"
+  defp client_access_action(_channel, :keep), do: "update_allowed_origins"
+
+  defp client_access_summary(channel) do
+    %{
+      "publishable_key" =>
+        channel.publishable_key && Converger.Secrets.mask(channel.publishable_key),
+      "allowed_origins" => channel.allowed_origins
+    }
+  end
+
+  @doc """
+  The active channel with publishable key `key`, or nil. The key is public
+  (it ships in page source), so a plain indexed lookup is enough.
+  """
+  def get_channel_by_publishable_key(key) when is_binary(key) and key != "" do
+    if String.starts_with?(key, Channel.publishable_key_prefix()) do
+      Repo.one(from c in Channel, where: c.publishable_key == ^key and c.status == "active")
+    end
+  end
+
+  def get_channel_by_publishable_key(_key), do: nil
+
+  @doc """
+  Mints a client token for trying `channel` from a chat client (the channel
+  page's Test token action, issue #194): an unscoped Converger token for end
+  user `user_id`, exactly like `POST /api/v1/converger/tokens/generate` with
+  the channel secret, so the operator never handles the secret.
+
+  Only for active channels. Audited when an actor is given (action
+  `test_token`, the user id and the token's `jti`; never the token).
+  Returns `{:ok, token, claims}` or `{:error, :inactive}`.
+  """
+  def issue_test_token(%Channel{} = channel, user_id, actor \\ nil) do
+    if channel.status == "active" do
+      user_id = if is_binary(user_id), do: String.trim(user_id), else: nil
+      user_id = if user_id in [nil, ""], do: nil, else: String.slice(user_id, 0, 128)
+
+      {:ok, token, claims} =
+        Converger.Auth.ConvergerToken.generate_token(channel, user_id: user_id)
+
+      if actor do
+        AuditLogs.create_audit_log(%{
+          tenant_id: channel.tenant_id,
+          actor_type: actor.type,
+          actor_id: actor.id,
+          action: "test_token",
+          resource_type: "channel",
+          resource_id: channel.id,
+          changes: %{"after" => %{"user_id" => user_id, "jti" => claims["jti"]}}
+        })
+      end
+
+      {:ok, token, claims}
+    else
+      {:error, :inactive}
+    end
+  end
+
+  @doc """
   Send a test message to `channel` through the normal pipeline, see
   `Converger.Channels.TestMessage.send_test_message/3`.
   """
@@ -452,6 +559,8 @@ defmodule Converger.Channels do
   # consumer manager reconciles the channel after a change.
   defp notify_consumers({:ok, %Channel{id: id}} = result) do
     Converger.Channels.Consumers.notify_changed(id)
+    # A channel disabled or deleted no longer contributes CORS origins.
+    PublishableOrigins.invalidate()
     result
   end
 

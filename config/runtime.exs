@@ -224,6 +224,19 @@ if admin_ips = System.get_env("ADMIN_IP_WHITELIST") do
     admin_ip_whitelist: admin_ips |> String.split(",", trim: true) |> Enum.map(&String.trim/1)
 end
 
+# Publishable keys (issue #195, ADR-0074): how long the `resume` credential
+# of POST /api/v1/converger/tokens/publishable stays valid, in seconds
+# (default 7 days).
+if max_age = System.get_env("PUBLISHABLE_RESUME_MAX_AGE") do
+  case Integer.parse(max_age) do
+    {seconds, ""} when seconds > 0 ->
+      config :converger, Converger.Auth.PublishableResume, max_age: seconds
+
+    _ ->
+      raise "PUBLISHABLE_RESUME_MAX_AGE must be a positive number of seconds"
+  end
+end
+
 # Platform admin API (/api/v1/admin, issue #51, ADR-0061): a bearer token of
 # at least 32 characters. Unset, the admin API answers 401 to everything.
 case System.get_env("ADMIN_API_TOKEN") do
