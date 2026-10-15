@@ -116,6 +116,7 @@ against a Postgres service.
 | Go | `packages/client-go/vX.Y.Z` | `sdk-go-release.yml` | Nothing to upload: the tag is the release. The workflow tests the commit, warms `proxy.golang.org` and creates a GitHub release |
 | Elixir | `client-elixir/vX.Y.Z` | `sdk-elixir-release.yml` | Hex, with the `HEX_API_KEY` secret (`hex` environment) |
 | Python agent | none: run manually (`workflow_dispatch`, `publish` checked) | `agent-sdk-python-release.yml` | PyPI (`converger-agent`), trusted publishing as above. Unchecked, it only builds and tests |
+| .NET agent | none: run manually (`workflow_dispatch`, `dry_run` unchecked) | `agent-dotnet-publish.yml` | nuget.org (`Converger.Agent`), with the `NUGET_API_KEY` secret (`nuget` environment). With `dry_run` it only builds, tests and packs |
 
 Each release workflow first checks that the tag matches the version in the package (`_version.py`, `Version` in
 `client.go`, `@version` in `mix.exs`). Before the first Hex release a license must be chosen and added to the
