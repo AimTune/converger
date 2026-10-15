@@ -2,13 +2,111 @@
 
 This file is written when a release is cut, from the merged pull requests (see
 [Contributing](https://converger.aimtune.dev/contributing#changelog-and-releases)); pull requests do not edit it.
-The **Unreleased** section below collects what was merged before this rule and goes into the first tagged release.
+The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the server follows
+[Semantic Versioning](https://semver.org/). The SDKs are versioned separately; see each package's own changelog.
 
-## Unreleased
+## [0.2.0] - 2026-10-16
 
-Grouped by roadmap epic ([#62](https://github.com/AimTune/converger/issues/62)), newest work first within each.
+First tagged release of the Converger server (`mix.exs` said 0.1.0 before, but it was never tagged). It contains
+the pull requests merged after the changelog rule changed ([#175](https://github.com/AimTune/converger/pull/175)),
+listed first, and the earlier work, grouped by roadmap epic, under
+[By roadmap epic](#by-roadmap-epic). The SDKs were released separately as 0.1.1 ([#213](https://github.com/AimTune/converger/pull/213)).
+### Added
 
-### Security fixes
+- Pluggable event backbone: Native (default), Kafka, NATS JetStream and RabbitMQ, with a dual-publish
+  migration window (`BACKBONE_MIRROR`) and delivery receipts
+  ([#181](https://github.com/AimTune/converger/pull/181), [#66](https://github.com/AimTune/converger/issues/66), ADR-0070).
+- Publishable keys (`cvg_pk_...`) for browser-only chat clients: `POST /api/v1/converger/tokens/publishable`,
+  per-channel allowed origins, anonymous visitors and a `resume` credential; **Client access** panel with
+  test tokens on the channel pages of the admin panel and the tenant portal
+  ([#197](https://github.com/AimTune/converger/pull/197), [#194](https://github.com/AimTune/converger/issues/194), [#195](https://github.com/AimTune/converger/issues/195), ADR-0074).
+- Agent groups: takeover without duplicate replies (`group_settle_ms`), and `@converger/agent` frame types
+  generated from the protocol schemas ([#179](https://github.com/AimTune/converger/pull/179)).
+- Integer `seq` watermarks on every surface (REST, tenant API, SDKs) ([#178](https://github.com/AimTune/converger/pull/178)).
+- `welcome.data.pending` re-announces a conversation's open interrupts, so a reloaded chativa page keeps
+  its interrupt chips ([#180](https://github.com/AimTune/converger/pull/180)).
+- Handshake admission queue for reconnect bursts (`WS_HANDSHAKE_*`); 10 000-socket rolling restart
+  reconnect p95 93.6 s → 6.0 s ([#207](https://github.com/AimTune/converger/pull/207), [#198](https://github.com/AimTune/converger/issues/198), ADR-0077).
+- Live acceptance tests against real mekik code and the LangChain FAQ example, cross-channel acceptance
+  tests, and published load results (rolling restart, dead-channel isolation, partition archive at 100M rows)
+  ([#177](https://github.com/AimTune/converger/pull/177), [#184](https://github.com/AimTune/converger/pull/184), [#185](https://github.com/AimTune/converger/pull/185), [#196](https://github.com/AimTune/converger/pull/196), [#199](https://github.com/AimTune/converger/pull/199), [#200](https://github.com/AimTune/converger/pull/200)).
+- MIT license, security policy, code of conduct and issue forms ([#126](https://github.com/AimTune/converger/pull/126), [#48](https://github.com/AimTune/converger/issues/48), ADR-0073).
+
+### Changed
+
+- Delivery: a dead channel no longer stalls its tier. Backlogs are parked in bulk when the breaker opens,
+  and a per-channel in-flight cap applies (`max_in_flight: :auto`, `busy_snooze_ms: 1_000`)
+  ([#206](https://github.com/AimTune/converger/pull/206), [#191](https://github.com/AimTune/converger/issues/191), ADR-0076).
+- The endpoint speaks HTTP/1.1 only (HTTP/2 disabled); gRPC keeps its own server and port
+  ([#186](https://github.com/AimTune/converger/pull/186)).
+- Runtime image: `debian:bookworm-20261005-slim` (`RUNNER_DEBIAN_VERSION`) with `apt-get upgrade` at build
+  time ([#211](https://github.com/AimTune/converger/pull/211)).
+
+### Deprecated
+
+- Opaque base64url watermarks (`seq:<n>` and legacy activity ids) are still accepted for this release
+  and reported as `opaque_watermark`; they will be removed in a later release announced one release ahead
+  ([#178](https://github.com/AimTune/converger/pull/178)).
+
+### Fixed
+
+- `activity.created` is published in the activity's transaction (transactional outbox), so a node killed
+  between commit and publish no longer loses the event ([#183](https://github.com/AimTune/converger/pull/183), ADR-0071).
+- Streamed text chunks that share an id are concatenated, so WhatsApp, Telegram, email and SMS get the
+  whole answer instead of the last token ([#185](https://github.com/AimTune/converger/pull/185), ADR-0072).
+- A reused interrupt id on a second run in the same conversation now resumes correctly
+  ([#184](https://github.com/AimTune/converger/pull/184)).
+- Flaky agent-group join and expiration-index tests ([#182](https://github.com/AimTune/converger/pull/182)).
+
+### Security
+
+- Bandit 1.13.0 (EEF-CVE-2026-105660, EEF-CVE-2026-105659); cowlib advisory acknowledged with a guarding test
+  ([#186](https://github.com/AimTune/converger/pull/186), [#211](https://github.com/AimTune/converger/pull/211)).
+- Patched runtime base image: 0 critical/high Trivy findings ([#211](https://github.com/AimTune/converger/pull/211)).
+- Docs site and JS workspace: overrides for vulnerable transitive dependencies (tinypool,
+  serialize-javascript, postcss-selector-parser, uuid, esbuild) ([#217](https://github.com/AimTune/converger/pull/217)).
+- Plus the tenant API, client token and SSRF fixes listed under **Security fixes** in [By roadmap epic](#by-roadmap-epic).
+
+### Breaking changes
+
+- `watermark` in the Converger REST activity list and `meta.watermark` in the tenant API activity list
+  are numbers instead of strings. Clients that pass the value back unchanged keep working. Go SDK:
+  `*converger.Watermark`; TS: `number | string | null`; Python: `int | str | None` ([#178](https://github.com/AimTune/converger/pull/178)).
+- TypeScript agent frame types are the generated, schema-exact shapes (`AckFrame.timestamp` and
+  `GenuiEventFrame.streamId`/`eventType` required, `HelloFrame.protocol` optional, `Sender.role` a closed union)
+  ([#179](https://github.com/AimTune/converger/pull/179)).
+- The legacy socket and legacy tokens are deprecated, and the tenant API accepts only channel tokens. See
+  [By roadmap epic](#by-roadmap-epic) (#23, #52).
+
+### Deployment notes
+
+- **Migrations:**
+  - `20261015100000_add_interrupt_index_to_activities` builds a partial index on the partitioned `activities`
+    table without `CONCURRENTLY`. It blocks writes to `activities` while it scans each partition, so plan a
+    quiet window on large installs ([#180](https://github.com/AimTune/converger/pull/180)).
+  - `20261015120000_create_backbone_receipts` is safe online ([#181](https://github.com/AimTune/converger/pull/181)).
+  - The publishable key columns and their concurrent index are rolling-deploy safe ([#197](https://github.com/AimTune/converger/pull/197)).
+- **Oban:** a new `backbone` queue (concurrency 10) runs on every node, whichever backbone is selected.
+- **New defaults on upgrade:**
+  - Handshake admission queue on (`WS_HANDSHAKE_*`).
+  - `max_in_flight: :auto`; set `config :converger, :circuit_breaker, max_in_flight: nil` for the old behaviour.
+  - `group_settle_ms: 1000`.
+- **New optional env vars:**
+  - `BACKBONE_*`. For production Kafka, set `BACKBONE_KAFKA_REPLICATION_FACTOR=3`; the Kafka backbone needs
+    Linux or macOS.
+  - `PUBLISHABLE_RESUME_MAX_AGE`. Rotating `SECRET_KEY_BASE` invalidates resume credentials.
+- **HTTP/2:** clients or proxies that spoke HTTP/2 to `PORT` must use HTTP/1.1.
+- **Watch:** `[:converger, :deprecated, :use]` with `surface: :opaque_watermark`.
+- The `v0.2.0` tag publishes the Docker image to GHCR (`0.2.0`, `0.2`) and the Helm chart `0.2.0` to
+  `oci://ghcr.io/aimtune/charts`.
+- See also the deployment notes in [By roadmap epic](#by-roadmap-epic) (database partitioning #30, clustering #29,
+  dependency upgrades #56).
+
+### By roadmap epic
+
+Work merged before #175, grouped by roadmap epic ([#62](https://github.com/AimTune/converger/issues/62)), newest work first within each.
+
+#### Security fixes
 
 - Tenant API (`x-channel-token`) accepts only channel tokens (`typ: "channel"`, or the legacy
   channel-token shape). Conversation tokens and Converger client tokens, which share the signing
@@ -26,9 +124,9 @@ Grouped by roadmap epic ([#62](https://github.com/AimTune/converger/issues/62)),
   channel under any user id. The legacy socket accepts only conversation tokens, and legacy
   verifiers reject Converger client tokens.
 
-### v3.3 Developer experience: OpenAPI, SDKs, docs site, management API, UI ([epic #61](https://github.com/AimTune/converger/issues/61))
+#### v3.3 Developer experience: OpenAPI, SDKs, docs site, management API, UI ([epic #61](https://github.com/AimTune/converger/issues/61))
 
-#### Admin panel and tenant portal: search, test-send, secret rotation, live tail (#50, part 2)
+##### Admin panel and tenant portal: search, test-send, secret rotation, live tail (#50, part 2)
 
 - Every list page (tenants, channels, conversations, routing rules, deliveries, audit logs, admin/tenant/portal
   users, webhook subscriptions) has a search box, filters, *Newest/Oldest first* sort and keyset **Load more**;
@@ -52,7 +150,7 @@ Grouped by roadmap epic ([#62](https://github.com/AimTune/converger/issues/62)),
 - Docs: [Admin panel and tenant portal](docs/admin-ui.md) (lists, channels, conversations, permissions),
   deliveries, platform webhooks, tenants, channels.
 
-#### Management API and scoped API keys (#51)
+##### Management API and scoped API keys (#51)
 
 - **Scoped tenant API keys** (`api_keys`): a name, any of the scopes `read`, `write` and `manage`, an optional
   expiry, revocation, and `last_used_at`. A `read` key cannot post activities (`403 insufficient_scope`); changing
@@ -69,7 +167,7 @@ Grouped by roadmap epic ([#62](https://github.com/AimTune/converger/issues/62)),
 - New error codes `insufficient_scope` (403) and `precondition_failed` (412).
 - Docs: management API, authentication, errors, security, configuration, tenants; ADR-0061.
 
-#### Admin panel and tenant portal on Tailwind and daisyUI (#50, part 1)
+##### Admin panel and tenant portal on Tailwind and daisyUI (#50, part 1)
 
 - The admin panel and tenant portal use the Phoenix 1.8 stack: Tailwind CSS v4, daisyUI 5 and heroicons, built by
   the standalone `tailwind` and `esbuild` binaries (`mix assets.build`, `mix assets.deploy`; no Node.js). The
@@ -83,7 +181,7 @@ Grouped by roadmap epic ([#62](https://github.com/AimTune/converger/issues/62)),
 - `mix setup` also installs and builds the assets. Docs: [Admin panel and tenant portal](docs/admin-ui.md),
   security overview, contributing, deployment; ADR-0060.
 
-#### Admin and portal auth hardening (#52, part 2)
+##### Admin and portal auth hardening (#52, part 2)
 
 - Admin and tenant portal logins are **server-side sessions** (`user_sessions`; only a SHA-256 of the cookie's
   token is stored). They end after `SESSION_MAX_AGE_SECONDS` (12 h, also the cookie `max_age`) or
@@ -103,7 +201,7 @@ Grouped by roadmap epic ([#62](https://github.com/AimTune/converger/issues/62)),
 - Audit log actions `enable_2fa`, `disable_2fa`, `reset_2fa`, `reset_password`, `revoke_sessions`.
 - Docs: security model, configuration, rate limiting, upgrades, tenants; ADR-0058.
 
-#### Client token hardening (#52, part 1)
+##### Client token hardening (#52, part 1)
 
 - Converger tokens are signed with dedicated keys (`TOKEN_SIGNING_KEYS`, `kid:secret` pairs, the first signs, all
   verify) and carry the key's `kid`: keys rotate without downtime, and rotating `SECRET_KEY_BASE` no longer
@@ -122,7 +220,7 @@ Grouped by roadmap epic ([#62](https://github.com/AimTune/converger/issues/62)),
   session. New error codes `insufficient_permission` (403, protocol 2004) and `token_revoked` (401, protocol 2005).
 - Docs: [client tokens](docs/security/client-tokens.md), client API, protocol, errors, configuration; ADR-0059.
 
-#### Windows developer setup: pure-Elixir password hashing and a dev container (#53)
+##### Windows developer setup: pure-Elixir password hashing and a dev container (#53)
 
 - Password hashing goes through `Converger.Accounts.PasswordHasher` (`config :converger, :password_hasher`, any
   `Comeonin` module). bcrypt stays the default; stored hashes are verified by their prefix, so bcrypt and PBKDF2
@@ -134,7 +232,7 @@ Grouped by roadmap epic ([#62](https://github.com/AimTune/converger/issues/62)),
   tools and a Postgres 17 service; `deps/` and the build root live in volumes.
 - Docs: getting started (Windows), contributing (dev container), configuration, security; ADR-0057.
 
-#### Platform event webhooks (#49)
+##### Platform event webhooks (#49)
 
 - Tenant-level webhook subscriptions (`webhook_subscriptions`: url, events, signing secret and headers encrypted at
   rest, enabled) for `activity.created`, `delivery.sent|delivered|read|failed`,
@@ -157,7 +255,7 @@ Grouped by roadmap epic ([#62](https://github.com/AimTune/converger/issues/62)),
   webhook adapter.
 - Docs: [Platform event webhooks](docs/platform-webhooks.md), tenant API reference; ADR-0053.
 
-#### Server-side SDKs: Python, Go, Elixir (#47)
+##### Server-side SDKs: Python, Go, Elixir (#47)
 
 - `packages/client-python` (PyPI `converger`): `httpx` REST client (sync and async) for the client and tenant APIs,
   Pydantic v2 models, an async Protocol v1 socket client with resume, `verify_signature` for webhooks.
@@ -175,7 +273,7 @@ Grouped by roadmap epic ([#62](https://github.com/AimTune/converger/issues/62)),
 - Docs: [Client SDKs](docs/sdk/server-sdks.md) with pages per language, signature verification details and test
   vectors in [webhooks](docs/webhooks.md); ADR-0052.
 
-#### OpenAPI 3.1, Swagger UI, one error envelope, versioning policy (#45)
+##### OpenAPI 3.1, Swagger UI, one error envelope, versioning policy (#45)
 
 - **Breaking for error bodies (statuses unchanged):** every HTTP API error is now
   `{"error": {"code", "message", "details", "request_id"}}`, from controllers, auth and rate-limit plugs, the
@@ -189,7 +287,7 @@ Grouped by roadmap epic ([#62](https://github.com/AimTune/converger/issues/62)),
   (`ConvergerWeb.Plugs.Deprecated`), 12-month support window ([versioning](docs/api/versioning.md)).
 - New dependency: `open_api_spex`. ADR-0050.
 
-#### TypeScript SDK `@converger/client` (#46)
+##### TypeScript SDK `@converger/client` (#46)
 
 - New pnpm workspace (`pnpm-workspace.yaml`) with `packages/client-ts`: a headless, dependency-free TypeScript client
   for Protocol v1 (ESM + CJS, strict types). `ConvergerClient.connect({tokenProvider})`, `conversation.start()` /
@@ -205,9 +303,9 @@ Grouped by roadmap epic ([#62](https://github.com/AimTune/converger/issues/62)),
 - `converger_js/` is removed; Dependabot watches the pnpm workspace instead.
 - Docs: [TypeScript SDK](docs/sdk/typescript.md), ADR-0051.
 
-### v3.2 Channel expansion: adapter v2 and new channels ([epic #60](https://github.com/AimTune/converger/issues/60))
+#### v3.2 Channel expansion: adapter v2 and new channels ([epic #60](https://github.com/AimTune/converger/issues/60))
 
-#### MQTT channel and Discord Gateway inbound (#44)
+##### MQTT channel and Discord Gateway inbound (#44)
 
 - New channel type `mqtt` (MQTT 3.1.1 over TCP or TLS, QoS 0 and 1): a subscriber per channel in the cluster on the
   topic filter `topic_in` in a persistent session, so QoS 1 messages published while it is down or moving are
@@ -230,7 +328,7 @@ Grouped by roadmap epic ([#62](https://github.com/AimTune/converger/issues/62)),
 - Docs: [MQTT](docs/channels/mqtt.md), [Discord Gateway mode](docs/channels/discord.md#gateway-mode), broker channels,
   channels overview, configuration; ADR-0055.
 
-#### Protocol v1 over gRPC (#44)
+##### Protocol v1 over gRPC (#44)
 
 - New transport for backend clients: the gRPC service `converger.v1.ChannelStream`,
   `rpc Connect(stream ClientFrame) returns (stream ServerFrame)`, one stream per Protocol v1 connection to one
@@ -248,7 +346,7 @@ Grouped by roadmap epic ([#62](https://github.com/AimTune/converger/issues/62)),
 - New dependencies: `grpc_server` and `grpc` 1.0.5, `protobuf` 0.17.1 (patch-level pins).
 - Docs: [Protocol v1 over gRPC](docs/protocol/grpc.md); ADR-0056.
 
-#### Broker channels: NATS JetStream and Redis Streams (#42)
+##### Broker channels: NATS JetStream and Redis Streams (#42)
 
 - New channel types `nats` and `redis_streams` on the broker channel machinery of the Kafka and RabbitMQ channels
   (one consumer per channel in the cluster, `Converger.Inbound`, idempotency, dead letters, retries, echo
@@ -267,7 +365,7 @@ Grouped by roadmap epic ([#62](https://github.com/AimTune/converger/issues/62)),
 - Docs: [NATS JetStream](docs/channels/nats.md), [Redis Streams](docs/channels/redis-streams.md), broker channels
   overview; ADR-0054.
 
-#### Broker channels: Kafka and RabbitMQ (#42)
+##### Broker channels: Kafka and RabbitMQ (#42)
 
 - New channel types `kafka` and `rabbitmq`: a broker as a first-class channel. Outbound, the pipeline produces the
   canonical activity JSON plus `channel_id` (Kafka: to `topic_out`, keyed by `conversation_id`; RabbitMQ: to
@@ -289,7 +387,7 @@ Grouped by roadmap epic ([#62](https://github.com/AimTune/converger/issues/62)),
 - Docs: [Broker channels](docs/channels/brokers.md) (pipeline transport versus broker channel), Kafka and RabbitMQ
   pages; ADR-0047. NATS JetStream and Redis Streams channels followed (see above).
 
-#### Conditional routing rules, reply-back routing and dry-run (#43)
+##### Conditional routing rules, reply-back routing and dry-run (#43)
 
 - Routing rules have `conditions` (JSON predicates over `type`, `sender`, `text`, `metadata.*`,
   `conversation.metadata.*`, `participant.*` and `time.*` with `eq`, `neq`, `in`, `contains`, `regex`, `exists`,
@@ -309,7 +407,7 @@ Grouped by roadmap epic ([#62](https://github.com/AimTune/converger/issues/62)),
 - Migrations `20261012200000`, `20261012200100` (metadata-only) and `20261012200200` (new table, batched backfill);
   all safe for a rolling deploy. Docs: [Routing rules](docs/concepts/routing-rules.md). ADR-0046.
 
-#### Adapter behaviour v2: capabilities, config schemas, registry (#36)
+##### Adapter behaviour v2: capabilities, config schemas, registry (#36)
 
 - Adapters `use Converger.Channels.Adapter, type: "..."` and declare `capabilities/0` and `config_schema/0`.
   New capabilities: `:external_delivery`, `:receipts`, `:typing`, `:lifecycle_events`, `:provider_ack`
@@ -330,9 +428,9 @@ Grouped by roadmap epic ([#62](https://github.com/AimTune/converger/issues/62)),
   as `{:error, %DeliveryError{}}`.
 - `docs/channels/writing-an-adapter.md` rewritten around the new behaviour. ADR-0038.
 
-### v3.1 Scale and reliability: multi-node, partitioning, breakers, DLQ, SLOs ([epic #59](https://github.com/AimTune/converger/issues/59))
+#### v3.1 Scale and reliability: multi-node, partitioning, breakers, DLQ, SLOs ([epic #59](https://github.com/AimTune/converger/issues/59))
 
-#### Load testing harness and published benchmarks (#34)
+##### Load testing harness and published benchmarks (#34)
 
 - `load/`: k6 scenarios against the release image in Docker Compose, on 1 or 3 nodes: REST → WebSocket fan-out
   (`e2e.js`), inbound webhook burst routed to three channels (`webhook_burst.js`), 10 000 idle sockets
@@ -346,7 +444,7 @@ Grouped by roadmap epic ([#62](https://github.com/AimTune/converger/issues/62)),
 - `mix converger.loadtest` replaces `test/load/performance_test.exs` (in-process write-path benchmark). The README's
   hardcoded throughput figures are replaced by the published results in `docs/benchmarks/`. ADR-0049.
 
-#### Graceful degradation under database pressure (#35)
+##### Graceful degradation under database pressure (#35)
 
 - **Two pools.** Oban (its own queries and every job) runs on a background pool of the same repo
   (`Converger.Repo.Background`, `BACKGROUND_POOL_SIZE`, default 10), so background work cannot starve requests.
@@ -368,7 +466,7 @@ Grouped by roadmap epic ([#62](https://github.com/AimTune/converger/issues/62)),
 - Chaos harness: `CHAOS_MODE=db_pause` pauses Postgres for 10 s under load (nightly next to the kill mode).
 - Docs: [Database pools and pressure](docs/operations/database.md). ADR-0044.
 
-#### Delivery SLO telemetry, dashboards and alert rules (#33)
+##### Delivery SLO telemetry, dashboards and alert rules (#33)
 
 - New telemetry (`Converger.Telemetry`): `[:converger, :delivery, :attempt | :stop | :exception]` around the
   adapter call of every delivery attempt (`status`: `sent`, `pending`, `failed`, `dead`), `[:converger, :pipeline,
@@ -386,7 +484,7 @@ Grouped by roadmap epic ([#62](https://github.com/AimTune/converger/issues/62)),
   `histogram_quantile`. `phoenix.http.request_count` is now actually counted by `status`. The Grafana Prometheus
   data source has the fixed uid `Prometheus`.
 
-#### Partitioning, retention and archive for activities and deliveries (#30)
+##### Partitioning, retention and archive for activities and deliveries (#30)
 
 **Maintenance window** on existing installations (migration `20261010300100`); see
 `docs/operations/migrations.md`. Design: `docs/adr/0034-monthly-partitioning-and-per-tenant-retention.md`.
@@ -408,7 +506,7 @@ Grouped by roadmap epic ([#62](https://github.com/AimTune/converger/issues/62)),
 - Idempotency keys are now also honoured when the first copy is in an older month.
 - Benchmark `test/load/partition_drop_benchmark_test.exs` (`--include benchmark`).
 
-#### Multi-node clustering, health endpoints, metrics on the main port (#29)
+##### Multi-node clustering, health endpoints, metrics on the main port (#29)
 
 - Clustering with `libcluster` (replaces `dns_cluster`): `CLUSTER_STRATEGY` =
   `kubernetes_dns` | `dns` | `gossip` | `epmd` | `none`. `rel/env.sh.eex` names
@@ -433,9 +531,9 @@ Grouped by roadmap epic ([#62](https://github.com/AimTune/converger/issues/62)),
 - `CLUSTER_DIST_PORT` pins the server's Erlang distribution port (start only,
   so `bin/converger rpc` still works). ADR-0037.
 
-### v3.0 WebSocket-first and Converger Protocol v1 ([epic #58](https://github.com/AimTune/converger/issues/58))
+#### v3.0 WebSocket-first and Converger Protocol v1 ([epic #58](https://github.com/AimTune/converger/issues/58))
 
-#### Agent SDK for TypeScript: `@converger/agent`, `create-converger-agent` and a Claude tool-loop example (#67)
+##### Agent SDK for TypeScript: `@converger/agent`, `create-converger-agent` and a Claude tool-loop example (#67)
 
 - `@converger/agent` (`packages/agent-ts`, no runtime dependencies, Node 20+): `createAgent({url, token | getToken,
   group})` and `onTurn(turn, reply)` over the channel-scoped socket. `reply.text`, `message`, `stream()` (GenUI text
@@ -447,7 +545,7 @@ Grouped by roadmap epic ([#62](https://github.com/AimTune/converger/issues/62)),
   Anthropic tool loop that streams tokens, shows a tool call and asks for approval.
 - CI: `agent-ts.yml` (Node 22 and 24, e2e against the server); publishing is manual and defaults to a dry run.
 
-#### Python agent SDK `converger-agent` and the LangChain / LangGraph adapter (#67)
+##### Python agent SDK `converger-agent` and the LangChain / LangGraph adapter (#67)
 
 - `converger-agent` (`packages/agent-python`, only `websockets` at runtime): `Agent(...)` with `@agent.on_turn`, and
   the same `reply` helpers as the TypeScript SDK, plus `converger_agent.testing.FakeServer`
@@ -458,7 +556,7 @@ Grouped by roadmap epic ([#62](https://github.com/AimTune/converger/issues/62)),
 - `examples/agents/langchain-faq/`: an FAQ graph with a tool and an approval interrupt, served to a WhatsApp and a
   web widget channel through one bot channel.
 
-#### Agent SDKs for Go, .NET and Elixir (#67)
+##### Agent SDKs for Go, .NET and Elixir (#67)
 
 - `packages/agent-go` (`github.com/AimTune/converger/packages/agent-go`), `packages/agent-dotnet` (`Converger.Agent`)
   and `packages/agent-elixir` (`converger_agent`): a bot backend serves every conversation of a `websocket` channel
@@ -474,7 +572,7 @@ Grouped by roadmap epic ([#62](https://github.com/AimTune/converger/issues/62)),
 - CI: `.github/workflows/agent-sdks.yml`. Docs: [Go](docs/sdk/agent-go.md), [.NET](docs/sdk/agent-dotnet.md),
   [Elixir](docs/sdk/agent-elixir.md).
 
-#### chativa is the reference WebSocket client: mekik/1 profile, history cursor, conversation list (#65)
+##### chativa is the reference WebSocket client: mekik/1 profile, history cursor, conversation list (#65)
 
 - **mekik/1 profile on the native endpoint.** A connection that offers no WebSocket subprotocol and sends no
   `hello.protocol` (an unmodified mekik/1 client such as `@chativa/connector-mekik`) no longer receives `ack`,
@@ -502,7 +600,7 @@ Grouped by roadmap epic ([#62](https://github.com/AimTune/converger/issues/62)),
   [client API](docs/api/client-api.md) (conversation list, history paging backwards, upload), [Protocol v1](docs/protocol/v1.md)
   sections 2.1, 5.4, 8.5, 14.1 and 15.
 
-#### mekik channel adapter: Converger dials a mekik/1 server per conversation (#64, Mode A)
+##### mekik channel adapter: Converger dials a mekik/1 server per conversation (#64, Mode A)
 
 - New channel type `mekik` (mode `duplex`): a routing rule from any end-user channel (WhatsApp, Telegram, the
   web widget, ...) to it makes a stock mekik/1 server the conversation's bot. Config `url` (ws/wss), `token`
@@ -520,7 +618,7 @@ Grouped by roadmap epic ([#62](https://github.com/AimTune/converger/issues/62)),
   4401) dead-letters the waiting deliveries.
 - New adapter capability `:bot_relay`.
 
-#### Agent sockets and the bot relay: channel-scoped Protocol v1 connections (#64)
+##### Agent sockets and the bot relay: channel-scoped Protocol v1 connections (#64)
 
 - A `scope: "channel"` token of a `websocket` channel opens a channel-scoped connection on the native endpoint:
   a channel `welcome`, then every conversation-level frame as `{conversationId, frame}`. Conversations are
@@ -541,7 +639,7 @@ Grouped by roadmap epic ([#62](https://github.com/AimTune/converger/issues/62)),
 - Docs: [Protocol v1](docs/protocol/v1.md) sections 5, 9, 10, 11; [WebSocket channel type](docs/channels/websocket.md);
   [activities](docs/concepts/activities.md).
 
-#### Typed messages rendered per channel, answers normalised to one shape (#68)
+##### Typed messages rendered per channel, answers normalised to one shape (#68)
 
 - End-user adapters declare what they render natively with `message_types:`
   ([ADR-0064](docs/adr/0064-per-channel-rendering-of-typed-messages-and-normalised-answers.md),
@@ -572,7 +670,7 @@ Grouped by roadmap epic ([#62](https://github.com/AimTune/converger/issues/62)),
   channel pages (WhatsApp, Telegram, Slack, email, SMS, Messenger, Instagram, Viber, Discord, Teams, overview,
   writing an adapter).
 
-#### Admin panel and tenant portal render rich messages (#68)
+##### Admin panel and tenant portal render rich messages (#68)
 
 - The conversation transcripts (`/admin/conversations/:id`, `/portal/conversations/:id`) render typed messages
   natively with daisyUI: actions as chips, cards, carousels, media links with metadata, locations (OpenStreetMap
@@ -584,7 +682,7 @@ Grouped by roadmap epic ([#62](https://github.com/AimTune/converger/issues/62)),
 - Docs: [admin UI](docs/admin-ui.md#rich-messages-implemented-68), [rich message vocabulary](docs/protocol/messages.md)
   section 5.
 
-#### Typed message payloads: buttons, cards, media, tool traces, GenUI and interrupts are stored (#68, #63)
+##### Typed message payloads: buttons, cards, media, tool traces, GenUI and interrupts are stored (#68, #63)
 
 - A `message` activity can carry a typed message of Converger Protocol v1: new columns `message_type` and
   `payload` (migration `20261014100000`, nullable, metadata-only on the partitioned table). Rich message frames
@@ -608,7 +706,7 @@ Grouped by roadmap epic ([#62](https://github.com/AimTune/converger/issues/62)),
   sections 5, 11, 14 and 15, [activities](docs/concepts/activities.md#typed-messages), client and tenant API,
   channels, writing an adapter, observability.
 
-#### Rich activity model (#28)
+##### Rich activity model (#28)
 
 - Activity types are a closed, documented vocabulary: `message`, `event`, `typing`,
   `messageReaction`, `messageUpdate`, `messageDelete`, `conversationUpdate`, `endOfConversation`
@@ -632,7 +730,7 @@ Grouped by roadmap epic ([#62](https://github.com/AimTune/converger/issues/62)),
   to WhatsApp or echo channels as empty messages.
 - JSON Schema `priv/protocol/v1/activity.schema.json`; ADR-0036.
 
-#### Protocol v1 sends with acks on the Phoenix binding (#24)
+##### Protocol v1 sends with acks on the Phoenix binding (#24)
 
 - `converger:conversation:*` accepts Converger Protocol v1 `text` frames with the event
   `frame`. A send is stored like `postActivity` (same Inbound path, rate limit and
@@ -647,7 +745,7 @@ Grouped by roadmap epic ([#62](https://github.com/AimTune/converger/issues/62)),
   channels.
 - Send parsing is shared by both bindings (`ConvergerWeb.Protocol.Send`). ADR-0029.
 
-#### Receipts, typing, presence, limits and draining on the native transports (#26 follow-up, #25, #27)
+##### Receipts, typing, presence, limits and draining on the native transports (#26 follow-up, #25, #27)
 
 - The native endpoint (`/socket/converger/v1`) accepts `typing` and `read` and pushes `deliveryStatus`,
   `typing` and `presence`, as the Phoenix binding does; `welcome.data.capabilities` now reports `receipts`,
@@ -664,7 +762,7 @@ Grouped by roadmap epic ([#62](https://github.com/AimTune/converger/issues/62)),
   `unavailable` error event on SSE. The `ConvergerWeb.Drain` shutdown timeout grows by `drain_shutdown_ms`.
 - ADR-0035.
 
-#### `websocket` is a first-class duplex channel adapter (#22)
+##### `websocket` is a first-class duplex channel adapter (#22)
 
 - The `websocket` adapter delivers: it broadcasts each activity (after the channel's
   middleware) to the channel's sockets and records a delivery. With no connected client,
@@ -688,7 +786,7 @@ Grouped by roadmap epic ([#62](https://github.com/AimTune/converger/issues/62)),
   rule does not apply to them.
 - `docs/adr/0033-websocket-channel-adapter-delivery.md` records the design.
 
-#### Native Protocol v1 WebSocket, MessagePack, SSE and long-poll fallbacks (#26)
+##### Native Protocol v1 WebSocket, MessagePack, SSE and long-poll fallbacks (#26)
 
 - `GET /socket/converger/v1`: the native Converger Protocol v1 endpoint (`ConvergerWeb.ProtocolSocket`, a
   `WebSock` handler). Raw frames, no Phoenix framing: `hello`/`welcome`, replay after an integer `seq`
@@ -708,7 +806,7 @@ Grouped by roadmap epic ([#62](https://github.com/AimTune/converger/issues/62)),
 - ADR-0030; `docs/protocol/v1.md` statuses updated; `docs/websocket.md`, `docs/api/client-api.md`,
   `docs/architecture/realtime.md` and `docs/operations/configuration.md` document the new transports.
 
-#### One client socket stack; legacy socket and tokens deprecated (#23)
+##### One client socket stack; legacy socket and tokens deprecated (#23)
 
 - The Converger API socket (`/socket/converger`, topic
   `converger:conversation:<id>`) now accepts sends: push `postActivity` with an
@@ -728,7 +826,7 @@ Grouped by roadmap epic ([#62](https://github.com/AimTune/converger/issues/62)),
   `docs/api/migrating-from-legacy.md`; decision: ADR-0026.
 - `converger_js` and the chaos harness use the Converger API socket.
 
-#### Receipts, typing indicators and presence on the WebSocket (#25)
+##### Receipts, typing indicators and presence on the WebSocket (#25)
 
 - The Converger API socket (`converger:conversation:<id>`) pushes `deliveryStatus` frames for
   every delivery status change, including WhatsApp `delivered` / `read` receipts, which it used
@@ -746,7 +844,7 @@ Grouped by roadmap epic ([#62](https://github.com/AimTune/converger/issues/62)),
   `attempts`, `last_error` and `updated_at`.
 - Migration: `20261010100000_create_conversation_reads`. ADR-0032.
 
-#### Converger Protocol v1 specification (#21, refs #63 #68)
+##### Converger Protocol v1 specification (#21, refs #63 #68)
 
 Documentation and schemas only; no server behaviour changes.
 
@@ -767,9 +865,9 @@ Documentation and schemas only; no server behaviour changes.
   and in the REST `activitySet`; the opaque base64url watermarks stay accepted for one
   more release (`docs/protocol/v1.md`, section 6.5).
 
-### v2.5 Production hardening: no data loss, security baseline, correctness fixes ([epic #57](https://github.com/AimTune/converger/issues/57))
+#### v2.5 Production hardening: no data loss, security baseline, correctness fixes ([epic #57](https://github.com/AimTune/converger/issues/57))
 
-#### Dependency and platform upgrades (#56)
+##### Dependency and platform upgrades (#56)
 
 Toolchain:
 
@@ -819,7 +917,7 @@ Already handled elsewhere:
 - WhatsApp Graph API version (`v18.0`) is made configurable in #82.
 
 
-#### Chaos test: kill the node during load (#57)
+##### Chaos test: kill the node during load (#57)
 
 - New chaos harness (`test/chaos/run.sh`, docs/chaos.md, manual/nightly
   `Chaos` workflow): SIGKILLs the app container while REST and WebSocket
@@ -832,3 +930,5 @@ Already handled elsewhere:
 - Added `OBAN_LIFELINE_RESCUE_AFTER_SECONDS` / `OBAN_LIFELINE_INTERVAL_SECONDS`
   to re-deliver jobs orphaned by a crashed node sooner than the 30 minute
   default (unchanged).
+
+[0.2.0]: https://github.com/AimTune/converger/releases/tag/v0.2.0

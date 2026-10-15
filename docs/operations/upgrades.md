@@ -30,19 +30,23 @@ Rollback: redeploy the previous image when the migrations were expand-only; for 
 
 | Source | What it tells you |
 | --- | --- |
-| [`CHANGELOG.md`](https://github.com/AimTune/converger/blob/main/CHANGELOG.md) | Toolchain and dependency upgrades with notes, currently all under **Unreleased**. |
+| [`CHANGELOG.md`](https://github.com/AimTune/converger/blob/main/CHANGELOG.md) | One section per tagged release, with **Breaking changes** and **Deployment notes**. Read every section between your version and the target before upgrading. |
+| [GitHub releases](https://github.com/AimTune/converger/releases) | The same notes per `vX.Y.Z` tag. |
 | [`VERSIONS.md`](https://github.com/AimTune/converger/blob/main/VERSIONS.md) | Feature roadmap grouped into milestones (v1.0 MVP to v3.0 Enterprise). These are planning milestones, not git tags or package versions, and some checkboxes lag behind the code (for example channel config encryption at rest is implemented). |
 | Pull request descriptions | Each merged PR has a "Deployment notes" or "Breaking changes" section when operators must act. |
-| `mix.exs` | Application version, currently `0.1.0`. |
+| `mix.exs` | Application version, currently `0.2.0` (the first tagged release, `v0.2.0`). |
 
-No release has been tagged yet, so installations build their image from a commit on `main` (`docker build .`).
-Record the commit SHA you deployed and tag your image with it rather than `latest`, so a rollback knows exactly
-what to return to. The Docker workflow builds and scans the image on every pull request and push to `main`, but
-publishes only for tags: pushing `vX.Y.Z` publishes `ghcr.io/aimtune/converger` with the tags `X.Y.Z`, `X.Y` and
-`sha-<commit>`, plus an SBOM and provenance attestation.
+Releases are tagged `vX.Y.Z` and follow SemVer; while the major version is 0, a minor release may contain
+breaking changes, always listed under **Breaking changes**. Pushing a tag publishes:
 
-Until tagged releases exist, treat every merge to `main` that adds a migration or a required variable as a
-potential breaking change and read its PR.
+- the image `ghcr.io/aimtune/converger` with the tags `X.Y.Z`, `X.Y` and `sha-<commit>`, plus an SBOM and
+  provenance attestation (the Docker workflow also builds and scans the image on every pull request and push to
+  `main`, without publishing);
+- the Helm chart `X.Y.Z` to `oci://ghcr.io/aimtune/charts`.
+
+Deploy a release tag rather than `latest`, so a rollback knows exactly what to return to. If you run a commit from
+`main` between releases, record its SHA and treat every merge that adds a migration or a required variable as a
+potential breaking change: read its PR.
 
 ## Toolchain
 
