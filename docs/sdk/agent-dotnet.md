@@ -84,3 +84,18 @@ The xUnit suite runs every scenario of `packages/conformance/agent.json` against
 server and validates every agent frame against the Protocol v1 schemas with `JsonSchema.Net`.
 `examples/EchoAgent` (`CONVERGER_URL`, `CONVERGER_TOKEN`) was also run against a local server: a widget user's
 turn and an `AskAsync` answered with `resume` round-tripped.
+
+## Releases
+
+`.github/workflows/agent-dotnet-publish.yml` publishes `Converger.Agent` to nuget.org
+([#188](https://github.com/AimTune/converger/issues/188)). It runs only by hand (`workflow_dispatch`) and is a dry
+run by default:
+
+1. The `version` input must equal `<Version>` in `src/Converger.Agent/Converger.Agent.csproj`.
+2. It builds with warnings as errors, runs the tests, packs in Release and uploads the `.nupkg` as an artifact.
+3. With `dry_run` unchecked it publishes with nuget.org **trusted publishing**: `NuGet/login` exchanges the job's
+   GitHub OIDC token for a short-lived API key, so no key is stored. It needs a trusted publishing policy on nuget.org
+   for `AimTune/converger` and the workflow file `agent-dotnet-publish.yml`, and the `NUGET_USER` variable (the
+   nuget.org profile name that owns the policy).
+
+The first version (0.1.0) is published by hand ([#187](https://github.com/AimTune/converger/issues/187)).

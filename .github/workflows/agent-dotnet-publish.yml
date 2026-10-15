@@ -1,0 +1,95 @@
+name: agent-dotnet publish
+
+# Publishes Converger.Agent (packages/agent-dotnet) to nuget.org. Manual only
+# (workflow_dispatch), a dry run by default: nothing is published
+# automatically. The version input must equal <Version> in
+# src/Converger.Agent/Converger.Agent.csproj. With dry_run it builds, tests,
+# packs and uploads the .nupkg as an artifact only.
+#
+# Publishing uses nuget.org trusted publishing (OIDC): no API key is stored.
+# NuGet/login exchanges the job's GitHub OIDC token for a short-lived API key.
+# Needs a trusted publishing policy on nuget.org for this repository and this
+# workflow file (agent-dotnet-publish.yml), and the NUGET_USER repository or
+# environment variable: the nuget.org profile name that owns the policy.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish (must equal <Version> in Converger.Agent.csproj)"
+        required: true
+      dry_run:
+        description: "Build, test and pack only, do not publish"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publish Converger.Agent
+    runs-on: ubuntu-latest
+    environment: nuget
+    permissions:
+      contents: read
+      id-token: write # nuget.org trusted publishing
+    defaults:
+      run:
+        working-directory: packages/agent-dotnet
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+
+      - name: Version matches the package
+        shell: bash
+        env:
+          EXPECTED: ${{ inputs.version }}
+        run: |
+          version=$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' src/Converger.Agent/Converger.Agent.csproj)
+          if [ "${version}" != "${EXPECTED}" ]; then
+            echo "::error::Converger.Agent.csproj is ${version}, not ${EXPECTED}"
+            exit 1
+          fi
+
+      - run: dotnet build -warnaserror
+      - run: dotnet test --no-build
+      - run: dotnet pack src/Converger.Agent/Converger.Agent.csproj -c Release -o "${{ runner.temp }}/nupkg"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Converger.Agent-${{ inputs.version }}
+          path: ${{ runner.temp }}/nupkg/*.nupkg
+
+      - name: NuGet user is set
+        if: ${{ !inputs.dry_run }}
+        shell: bash
+        env:
+          NUGET_USER: ${{ vars.NUGET_USER }}
+        run: |
+          if [ -z "${NUGET_USER}" ]; then
+            echo "::error::Set the NUGET_USER variable (nuget.org profile name of the trusted publishing policy)"
+            exit 1
+          fi
+
+      - name: Get a short-lived NuGet API key (trusted publishing)
+        if: ${{ !inputs.dry_run }}
+        id: nuget-login
+        uses: NuGet/login@v1
+        with:
+          user: ${{ vars.NUGET_USER }}
+
+      - name: Publish
+        if: ${{ !inputs.dry_run }}
+        shell: bash
+        env:
+          NUGET_API_KEY: ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
+        run: |
+          dotnet nuget push "${{ runner.temp }}/nupkg/Converger.Agent.${{ inputs.version }}.nupkg" \
+            --api-key "${NUGET_API_KEY}" \
+            --source https://api.nuget.org/v3/index.json
