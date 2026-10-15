@@ -49,6 +49,9 @@ defmodule Converger.Application do
           },
           # Native v1 WebSockets and SSE streams, drained by ConvergerWeb.Drain.
           ConvergerWeb.ProtocolConnections,
+          # Admission queue for the database work of v1 handshakes and
+          # replays (ADR-0076).
+          ConvergerWeb.Protocol.Admission,
           # Open client connections, for the connection gauge (ConvergerWeb.Telemetry).
           ConvergerWeb.ClientConnections,
           # Per-node cache of revoked Converger tokens (ADR-0059), before the

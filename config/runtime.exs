@@ -365,7 +365,10 @@ websocket_env = [
   drain_delay_ms: "WS_DRAIN_DELAY_MS",
   drain_batch_size: "WS_DRAIN_BATCH_SIZE",
   drain_batch_interval_ms: "WS_DRAIN_BATCH_INTERVAL_MS",
-  drain_shutdown_ms: "WS_DRAIN_SHUTDOWN_MS"
+  drain_shutdown_ms: "WS_DRAIN_SHUTDOWN_MS",
+  handshake_concurrency: "WS_HANDSHAKE_CONCURRENCY",
+  handshake_queue_ms: "WS_HANDSHAKE_QUEUE_MS",
+  handshake_queue_max: "WS_HANDSHAKE_QUEUE_MAX"
 ]
 
 websocket_overrides =

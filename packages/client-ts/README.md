@@ -117,7 +117,7 @@ standard error envelope `{"error": {"code", "message", "details", "request_id"}}
 | `tokenProvider` | (required) | `({reason, previous}) => token \| {token, expiresAt?, expiresIn?}` |
 | `transport` | `["native", "sse"]` | `"native"`, `"phoenix"`, `"sse"`, a `TransportFactory`, or a fallback list |
 | `fallbackAfterAttempts` | `2` | failed connects (never opened) before the next transport |
-| `reconnect` | `{initialDelayMs: 1000, maxDelayMs: 30000, factor: 2, jitter: 0.5}` | or `false` |
+| `reconnect` | `{initialDelayMs: 1000, maxDelayMs: 10000, factor: 2, jitter: 0.5}` | or `false` |
 | `storage` | `localStorage` in browsers, memory elsewhere | any `KeyValueStorage` (sync or async, e.g. AsyncStorage) |
 | `storageKey` | `"converger"` | key prefix |
 | `refreshSkewMs` | `60000` | refresh this long before expiry (at most half the lifetime) |

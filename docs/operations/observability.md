@@ -145,6 +145,7 @@ a node-local registry. Labels: `socket` is `user` (legacy `/socket`), `converger
 | --- | --- | --- | --- |
 | `converger.ws.connections.count` | gauge, polled | `socket`, `transport` | Open client connections on this node. A process is dropped from the registry when it exits, however it exits, so the gauge cannot drift. Sum it across nodes. |
 | `converger.ws.connected.count`, `converger.ws.disconnected.count` | counter | `socket`, `transport` | Connections opened and closed. A connection killed without running its callbacks is not counted as disconnected, but it does leave the gauge. |
+| `converger.protocol.admission.wait_ms` | histogram (ms) | `result` | How long a native v1 `hello` or `sync` waited for an admission slot; `result="overloaded"` when it got none and was answered `unavailable` / `replay_unavailable` ([reconnect bursts](websocket-limits.md#reconnect-bursts)). |
 | `converger.ws.frame.count` | counter (sum) | `socket`, `transport`, `direction` | WebSocket frames: `in` is every frame a client sends (including heartbeats and frames refused by a limit), `out` every frame pushed to it. Phoenix replies to a client's own messages are not counted as `out`. |
 
 #### Platform metrics

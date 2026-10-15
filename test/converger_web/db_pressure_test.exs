@@ -209,6 +209,32 @@ defmodule ConvergerWeb.DbPressureTest do
       client
     end
 
+    defp put_websocket(limits) do
+      previous = Application.fetch_env!(:converger, :websocket)
+      Application.put_env(:converger, :websocket, Keyword.merge(previous, limits))
+      on_exit(fn -> Application.put_env(:converger, :websocket, previous) end)
+    end
+
+    # Takes the only admission slot (ADR-0076) until sent :finish.
+    defp hold_admission do
+      test = self()
+
+      pid =
+        spawn(fn ->
+          ConvergerWeb.Protocol.Admission.run(fn ->
+            send(test, :holding)
+
+            receive do
+              :finish -> :ok
+            end
+          end)
+        end)
+
+      assert_receive :holding
+      on_exit(fn -> send(pid, :finish) end)
+      pid
+    end
+
     test "the session starts when the replay fails; sync recovers it", ctx do
       first = activity!(ctx.conversation, "one")
       _second = activity!(ctx.conversation, "two")
@@ -231,6 +257,82 @@ defmodule ConvergerWeb.DbPressureTest do
              } = error
 
       RepoFaults.clear()
+      client = Client.push(client, %{"type" => "sync", "watermark" => first.seq})
+      assert {%{"type" => "text", "seq" => 2}, client} = Client.recv(client)
+      Client.close(client)
+    end
+
+    test "a hello at the head does not read the replay", ctx do
+      last = activity!(ctx.conversation, "one")
+      RepoFaults.fail(["activities"], pids: :any)
+
+      client =
+        ctx.port
+        |> connect_v1(ctx.token)
+        |> Client.push(%{"type" => "hello", "watermark" => last.seq})
+
+      assert {%{"type" => "welcome"}, client} = Client.recv(client)
+      # No replay read, so no replay_unavailable.
+      client = Client.push(client, %{"type" => "ping", "nonce" => "n"})
+      assert {%{"type" => "heartbeat", "headSeq" => 1}, client} = Client.recv(client)
+      Client.close(client)
+    end
+
+    test "a hello that gets no admission slot closes with 1013 and retryAfterMs", ctx do
+      put_websocket(handshake_concurrency: 1, handshake_queue_ms: 50)
+      holder = hold_admission()
+
+      client = ctx.port |> connect_v1(ctx.token) |> Client.push(%{"type" => "hello"})
+
+      assert {%{"type" => "error", "data" => data}, client} = Client.recv(client)
+      assert %{"code" => "unavailable", "retryable" => true, "retryAfterMs" => ms} = data
+      assert ms > 0
+      assert {{:close, 1013}, _client} = Client.recv(client)
+
+      # Once the slot is free the same hello succeeds.
+      send(holder, :finish)
+      client = ctx.port |> connect_v1(ctx.token) |> Client.push(%{"type" => "hello"})
+      assert {%{"type" => "welcome"}, client} = Client.recv(client)
+      Client.close(client)
+    end
+
+    test "a burst of hellos beyond the admission limit waits instead of failing", ctx do
+      put_websocket(handshake_concurrency: 1, handshake_queue_ms: 5_000)
+      holder = hold_admission()
+
+      clients =
+        for _ <- 1..5,
+            do: ctx.port |> connect_v1(ctx.token) |> Client.push(%{"type" => "hello"})
+
+      Process.sleep(100)
+      send(holder, :finish)
+
+      for client <- clients do
+        assert {%{"type" => "welcome"}, client} = Client.recv(client, 5_000)
+        Client.close(client)
+      end
+    end
+
+    test "a sync that gets no admission slot is answered replay_unavailable", ctx do
+      first = activity!(ctx.conversation, "one")
+      _second = activity!(ctx.conversation, "two")
+
+      client =
+        ctx.port
+        |> connect_v1(ctx.token)
+        |> Client.push(%{"type" => "hello", "watermark" => 2})
+
+      assert {%{"type" => "welcome"}, client} = Client.recv(client)
+
+      put_websocket(handshake_concurrency: 1, handshake_queue_ms: 50)
+      holder = hold_admission()
+      client = Client.push(client, %{"type" => "sync", "watermark" => first.seq})
+
+      assert {%{"type" => "error", "data" => error}, client} = Client.recv(client)
+
+      assert %{"code" => "replay_unavailable", "details" => %{"watermark" => 1}} = error
+
+      send(holder, :finish)
       client = Client.push(client, %{"type" => "sync", "watermark" => first.seq})
       assert {%{"type" => "text", "seq" => 2}, client} = Client.recv(client)
       Client.close(client)
