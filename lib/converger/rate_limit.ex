@@ -43,6 +43,9 @@ defmodule Converger.RateLimit do
     inbound: {500, 1_000},
     # per channel secret / channel token
     token_generate: {10, 60_000},
+    # publishable keys (ADR-0074): per client IP, then per channel
+    publishable_token_ip: {10, 60_000},
+    publishable_token: {300, 60_000},
     # legacy /api/v1/tokens, per client IP (unauthenticated)
     token_create: {10, 60_000},
     # failed logins, per client IP and per account
@@ -53,7 +56,7 @@ defmodule Converger.RateLimit do
     password_reset_account: {3, 3_600_000}
   }
 
-  @tenant_buckets ~w(activity_create upload inbound token_generate)
+  @tenant_buckets ~w(activity_create upload inbound token_generate publishable_token)
 
   @type bucket :: atom() | String.t()
   @type limit_spec :: {pos_integer(), pos_integer()}

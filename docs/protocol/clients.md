@@ -60,6 +60,35 @@ consoles) are served over REST and the full protocol, for `@chativa/connector-co
    - The `userId` that `welcome` returns is the token's `user_id` when it has one; a client-asserted `userId` never
      overrides it.
 
+## Publishable keys
+
+Step 1 needs a backend to hold the channel secret. A site without one (static site, CMS) uses the channel's
+[publishable key](../security/publishable-keys.md) instead: **Implemented on the hub (#195,
+[ADR-0074](../adr/0074-publishable-keys-for-browser-clients.md))**; the chativa side is `PublishableKeyAuth` in
+`@chativa/connector-converger` ([AimTune/chativa#91](https://github.com/AimTune/chativa/issues/91), **Planned** until
+that pull request is released).
+
+```ts
+import { ConvergerConnector, PublishableKeyAuth } from "@chativa/connector-converger";
+
+const connector = new ConvergerConnector({
+  url: "wss://chat.example.com/socket/converger/v1",
+  auth: new PublishableKeyAuth({
+    baseUrl: "https://chat.example.com",
+    publishableKey: "cvg_pk_...",
+  }),
+});
+```
+
+`PublishableKeyAuth` calls `POST /api/v1/converger/tokens/publishable`, keeps the `resume` credential in
+`localStorage` (per key) and gives the connector the conversation-bound token and its conversation id, so a reload
+continues the same conversation. When the socket rejects an expired token it calls the endpoint again with `resume`.
+The page's origin must be in the key's allowed origins. `MekikConnector` accepts the same `auth`: the server names
+the conversation in `welcome`.
+
+To try a channel without a key or a backend, paste a token from the channel page's **Test token** action
+([admin UI](../admin-ui.md#client-access)) into chativa's sandbox (**Token** credential mode).
+
 ## What works
 
 | chativa / mekik/1 | over Converger | status |

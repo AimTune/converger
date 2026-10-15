@@ -22,7 +22,8 @@ defmodule Converger.AuditLogs.AuditLog do
     create update delete toggle_status toggle_enabled rotate_api_key retry
     pause_deliveries resume_deliveries register_webhook redeliver
     enable_2fa disable_2fa reset_2fa reset_password revoke_sessions close reopen
-    revoke rotate_secret send_test_message
+    revoke rotate_secret send_test_message test_token enable_publishable_key
+    rotate_publishable_key disable_publishable_key update_allowed_origins
   )
   @valid_resource_types ~w(
     tenant channel routing_rule admin_user tenant_user delivery webhook_subscription webhook_event

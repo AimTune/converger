@@ -94,7 +94,8 @@ Queue targets, timeouts and the readiness threshold (`DB_*`, `BACKGROUND_DB_*`, 
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `CORS_ORIGINS` | `http://127.0.0.1:5500,http://localhost:5500` | Comma-separated list of origins allowed by CORS, e.g. `https://app.example.com,https://admin.example.com`. Use `*` to allow any origin. Origins are resolved per request from the application env, so changing this on a release only needs a restart, not a rebuild. |
+| `CORS_ORIGINS` | `http://127.0.0.1:5500,http://localhost:5500` | Comma-separated list of origins allowed by CORS, e.g. `https://app.example.com,https://admin.example.com`. Use `*` to allow any origin. Origins are resolved per request from the application env, so changing this on a release only needs a restart, not a rebuild. On `/api/v1/converger/*` the origins of active [publishable keys](security/publishable-keys.md) are allowed as well. |
+| `PUBLISHABLE_RESUME_MAX_AGE` | `604800` (7 days) | Seconds a publishable key's `resume` credential stays valid ([publishable keys](security/publishable-keys.md#resume)). |
 | `ADMIN_IP_WHITELIST` | `127.0.0.1,::1` | Comma-separated list of client IPs allowed to reach the `/admin` routes. |
 | `TRUSTED_PROXIES` | unset | Comma-separated IPs/CIDRs of reverse proxies whose `X-Forwarded-For` and `X-Forwarded-Proto` headers are honoured. See [docs/security.md](security.md). |
 
@@ -159,14 +160,16 @@ telemetry, exported as `converger_rate_limit_exceeded_count{bucket=...}`):
 | `upload` | 10 / s | tenant | `POST /api/v1/converger/conversations/:id/upload` |
 | `inbound` | 500 / s | channel | `POST /api/v1/channels/:id/inbound`, `POST /api/v1/channels/:id/status` |
 | `token_generate` | 10 / min | channel | `POST /api/v1/converger/tokens/generate`, `/tokens/refresh` |
+| `publishable_token_ip` | 10 / min | client IP | `POST /api/v1/converger/tokens/publishable` |
+| `publishable_token` | 300 / min | channel | `POST /api/v1/converger/tokens/publishable`, `/tokens/refresh` of publishable-key tokens |
 | `token_create` | 10 / min | client IP | `POST /api/v1/tokens` (legacy, unauthenticated) |
 | `login_ip` | 5 failures / min | client IP | `/admin/login`, `/portal/login` |
 | `login_account` | 5 failures / min | account | `/admin/login`, `/portal/login` |
 
 Defaults can be changed for the whole installation with
 `config :converger, Converger.RateLimit, limits: %{inbound: {1_000, 1_000}}`,
-and per tenant (for the `activity_create`, `upload`, `inbound` and
-`token_generate` buckets) with `Converger.Tenants.update_tenant_limits/3`,
+and per tenant (for the `activity_create`, `upload`, `inbound`, `token_generate`
+and `publishable_token` buckets) with `Converger.Tenants.update_tenant_limits/3`,
 which stores the override in `tenants.limits`, e.g.
 `%{"inbound" => %{"limit" => 2000, "scale_ms" => 1000}}`. Overrides are cached
 for 30s per node and invalidated cluster-wide when updated.

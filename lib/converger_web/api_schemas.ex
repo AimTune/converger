@@ -1311,6 +1311,34 @@ defmodule ConvergerWeb.ApiSchemas do
           },
           [:conversationId, :token, :expires_in]
         ),
+      "PublishableTokenRequest" =>
+        object(
+          "PublishableTokenRequest",
+          "Optional: the `resume` credential of an earlier response, to continue that conversation as the same end user.",
+          %{resume: %Schema{type: :string}},
+          []
+        ),
+      "PublishableToken" =>
+        object(
+          "PublishableToken",
+          "A token bound to the visitor's conversation, for an anonymous end user.",
+          %{
+            conversationId: @uuid,
+            token: %Schema{type: :string},
+            expires_in: %Schema{type: :integer, description: "Seconds"},
+            userId: %Schema{type: :string, description: "The anonymous end user (`anon_...`)"},
+            resume: %Schema{
+              type: :string,
+              description:
+                "Keep it (e.g. in localStorage) and send it on the next call to continue this conversation"
+            },
+            resumed: %Schema{
+              type: :boolean,
+              description: "Whether `resume` was accepted; false means a new conversation"
+            }
+          },
+          [:conversationId, :token, :expires_in, :userId, :resume, :resumed]
+        ),
       "ClientConversation" =>
         object(
           "ClientConversation",
