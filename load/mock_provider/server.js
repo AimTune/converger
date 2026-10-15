@@ -10,9 +10,15 @@
 //   * Measures delivery latency: the load scripts send texts of the form
 //     "load <sent at, unix ms> <key>", so the latency of the first successful
 //     delivery of an activity is (now - sent at). Both run on the same host.
+//   * Paths starting with "hang" (POST /hook/hang-...) never answer: the
+//     request is held until Converger gives up (its adapter timeout). The
+//     dead_channel scenario points a channel at one to model a provider that
+//     accepts connections and never responds.
 //
 // GET  /stats  -> {"paths": {"<path>": {requests, failed, delivered, duplicates,
 //                  latency_ms: {count, p50, p95, p99, max}}}, "totals": {...}}
+// GET  /samples/<path> -> [[arrived at (unix ms), latency ms], ...] of every
+//                  first delivery on that path, in arrival order
 // POST /reset  -> clears everything
 "use strict";
 
@@ -28,7 +34,7 @@ let paths = new Map();
 function pathStats(path) {
   let s = paths.get(path);
   if (!s) {
-    s = { requests: 0, failed: 0, duplicates: 0, seen: new Set(), latencies: [] };
+    s = { requests: 0, failed: 0, duplicates: 0, hanging: 0, seen: new Set(), latencies: [], samples: [] };
     paths.set(path, s);
   }
   return s;
@@ -47,6 +53,7 @@ function summarise(s) {
     failed: s.failed,
     delivered: s.seen.size,
     duplicates: s.duplicates,
+    hanging: s.hanging || 0,
     latency_ms: {
       count: sorted.length,
       p50: percentile(sorted, 50),
@@ -79,6 +86,8 @@ function json(res, code, body) {
 
 const server = http.createServer((req, res) => {
   if (req.method === "GET" && req.url === "/stats") return json(res, 200, stats());
+  const samples = req.method === "GET" && /^\/samples\/([A-Za-z0-9_-]+)$/.exec(req.url);
+  if (samples) return json(res, 200, (paths.get(samples[1]) || { samples: [] }).samples);
   if (req.method === "POST" && req.url === "/reset") {
     paths = new Map();
     return json(res, 200, {});
@@ -96,6 +105,14 @@ const server = http.createServer((req, res) => {
   req.on("end", () => {
     const s = pathStats(match[1]);
     s.requests += 1;
+
+    // A provider that never answers: hold the request until the client
+    // closes it.
+    if (match[1].startsWith("hang")) {
+      s.hanging += 1;
+      res.on("close", () => (s.hanging -= 1));
+      return;
+    }
 
     const fail = errorRate > 0 && Math.random() < errorRate;
     const delay = latencyMs + (jitterMs > 0 ? Math.random() * jitterMs : 0);
@@ -120,7 +137,11 @@ const server = http.createServer((req, res) => {
         // backbone check of #66) carry the activity under `data`.
         const text = body.text || (body.data && body.data.text) || "";
         const m = /^load (\d+) /.exec(text);
-        if (m) s.latencies.push(Date.now() - Number(m[1]));
+        if (m) {
+          const now = Date.now();
+          s.latencies.push(now - Number(m[1]));
+          s.samples.push([now, now - Number(m[1])]);
+        }
       }
       json(res, 200, {});
     };
