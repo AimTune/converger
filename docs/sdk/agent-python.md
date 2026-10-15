@@ -14,8 +14,8 @@ routes them back to the end user's channel. Source:
 
 > **Status:** implemented in [#67](https://github.com/AimTune/converger/issues/67) on top of the channel-scoped
 > sockets of [#64](https://github.com/AimTune/converger/issues/64)
-> ([ADR-0063](../adr/0063-channel-scoped-agent-sockets-and-the-bot-relay.md)). Built and tested in this repository;
-> not yet published to PyPI.
+> ([ADR-0063](../adr/0063-channel-scoped-agent-sockets-and-the-bot-relay.md)). Published on
+> [PyPI](https://pypi.org/project/converger-agent/) from 0.1.0.
 
 Which package to use:
 

@@ -3,8 +3,10 @@ name: agent-ts publish
 # Publishes @converger/agent and create-converger-agent to npm. Manual only
 # (workflow_dispatch), a dry run by default: nothing is published
 # automatically. The version input must equal both packages' package.json
-# "version". Needs the NPM_TOKEN repository secret; published with provenance.
-
+# "version". Publishes with npm trusted publishing (OIDC): no token is stored.
+# Each package has a trusted publisher on npmjs.com for AimTune/converger, this
+# workflow file and the "npm" environment; provenance is attached
+# automatically.
 on:
   workflow_dispatch:
     inputs:
@@ -26,7 +28,7 @@ jobs:
     environment: npm
     permissions:
       contents: read
-      id-token: write # npm provenance
+      id-token: write # npm trusted publishing and provenance
     steps:
       - uses: actions/checkout@v7
 
@@ -36,19 +38,21 @@ jobs:
         with:
           node-version: "22"
           cache: pnpm
-          registry-url: https://registry.npmjs.org
+
+      # npm trusted publishing (OIDC) needs npm 11.5.1 or newer; Node 22 ships 10.
+      - run: npm install -g npm@^11.5.1
 
       - run: pnpm install --frozen-lockfile --filter "@converger/agent..." --filter "create-converger-agent..."
 
       - name: Version matches the packages
         shell: bash
         env:
-          VERSION: ${{ inputs.version }}
+          EXPECTED: ${{ inputs.version }}
         run: |
           for dir in packages/agent-ts packages/create-converger-agent; do
             version=$(node -p "require('./${dir}/package.json').version")
-            if [ "${version}" != "${VERSION}" ]; then
-              echo "::error::${dir} is ${version}, not ${VERSION}"
+            if [ "${version}" != "${EXPECTED}" ]; then
+              echo "::error::${dir} is ${version}, not ${EXPECTED}"
               exit 1
             fi
           done
@@ -58,14 +62,16 @@ jobs:
       - run: pnpm --filter @converger/agent build
       - run: pnpm --filter create-converger-agent test
 
+      # npm publish, not pnpm publish: the npm CLI does the OIDC exchange. Neither
+      # package has workspace: dependencies, so publishing the folder is the
+      # same tarball. @converger/agent goes first: the scaffolder's template
+      # depends on it.
       - name: Publish
         shell: bash
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          NPM_CONFIG_PROVENANCE: "true"
           DRY_RUN: ${{ inputs.dry_run }}
         run: |
-          flags=(--no-git-checks --access public)
+          flags=(--access public)
           if [ "${DRY_RUN}" = "true" ]; then flags+=(--dry-run); fi
-          pnpm --filter @converger/agent publish "${flags[@]}"
-          pnpm --filter create-converger-agent publish "${flags[@]}"
+          (cd packages/agent-ts && npm publish "${flags[@]}")
+          (cd packages/create-converger-agent && npm publish "${flags[@]}")

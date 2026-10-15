@@ -1,13 +1,14 @@
-name: Release Go SDK
+name: Release Go SDKs
 
-# Go modules are released by tags alone. The module lives in a subdirectory,
-# so its tags are packages/client-go/vX.Y.Z. This workflow tests the tagged
-# commit, asks the Go module proxy to fetch the new version and creates a
-# GitHub release for it.
+# Go modules are released by tags alone. Both Go modules live in
+# subdirectories, so their tags carry the directory: packages/client-go/vX.Y.Z
+# for the client, packages/agent-go/vX.Y.Z for the agent SDK. This workflow
+# tests the tagged module, asks the Go module proxy to fetch the new version and
+# creates a GitHub release for it. Nothing is uploaded and no secret is needed.
 
 on:
   push:
-    tags: ["packages/client-go/v*"]
+    tags: ["packages/client-go/v*", "packages/agent-go/v*"]
 
 permissions:
   contents: write
@@ -18,31 +19,59 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+
+      - name: Module of the tag
+        id: module
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          dir="${TAG%/v*}"
+          echo "dir=${dir}" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#"${dir}/"}" >> "$GITHUB_OUTPUT"
+          case "$dir" in
+            packages/client-go) echo "file=client.go" >> "$GITHUB_OUTPUT"; echo "title=Go client SDK" >> "$GITHUB_OUTPUT" ;;
+            packages/agent-go) echo "file=agent.go" >> "$GITHUB_OUTPUT"; echo "title=Go agent SDK" >> "$GITHUB_OUTPUT" ;;
+            *) echo "::error::unknown Go module tag $TAG"; exit 1 ;;
+          esac
+
       - uses: actions/setup-go@v7
         with:
           go-version: stable
-          cache-dependency-path: packages/client-go/go.sum
+          cache-dependency-path: ${{ steps.module.outputs.dir }}/go.sum
+
       - name: Tag matches the SDK version
         env:
-          TAG: ${{ github.ref_name }}
+          DIR: ${{ steps.module.outputs.dir }}
+          FILE: ${{ steps.module.outputs.file }}
+          TAG_VERSION: ${{ steps.module.outputs.version }}
         run: |
-          version=$(sed -n 's/^const Version = "\(.*\)"/\1/p' packages/client-go/client.go)
-          test "packages/client-go/v${version}" = "$TAG" || { echo "tag $TAG does not match Version $version"; exit 1; }
+          version=$(sed -n 's/^const Version = "\(.*\)"/\1/p' "${DIR}/${FILE}")
+          test "v${version}" = "${TAG_VERSION}" || { echo "tag ${TAG_VERSION} does not match Version ${version}"; exit 1; }
+
       - name: Test
-        working-directory: packages/client-go
+        working-directory: ${{ steps.module.outputs.dir }}
         run: go vet ./... && go test -race -count=1 ./...
+
       - name: Warm the module proxy
         env:
-          TAG: ${{ github.ref_name }}
+          DIR: ${{ steps.module.outputs.dir }}
+          TAG_VERSION: ${{ steps.module.outputs.version }}
         run: |
           cd "$(mktemp -d)"
           go mod init warm
-          GOPROXY=https://proxy.golang.org go list -m "github.com/AimTune/converger/packages/client-go@${TAG#packages/client-go/}"
+          GOPROXY=https://proxy.golang.org go list -m "github.com/AimTune/converger/${DIR}@${TAG_VERSION}"
+
       - name: GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
+          DIR: ${{ steps.module.outputs.dir }}
+          TAG_VERSION: ${{ steps.module.outputs.version }}
+          TITLE: ${{ steps.module.outputs.title }}
         run: |
-          version="${TAG#packages/client-go/}"
-          gh release create "$TAG" --title "Go SDK ${version}" \
-            --notes "go get github.com/AimTune/converger/packages/client-go@${version}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "release $TAG already exists"
+            exit 0
+          fi
+          gh release create "$TAG" --title "${TITLE} ${TAG_VERSION}" \
+            --notes "go get github.com/AimTune/converger/${DIR}@${TAG_VERSION}"
