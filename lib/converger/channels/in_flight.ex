@@ -6,34 +6,34 @@ defmodule Converger.Channels.InFlight do
   Before its breaker opens, a dead channel's backlog would take every worker of
   its tier queue, each waiting one adapter timeout, and the queue would run
   nothing else (#191). `acquire/2` gives a delivery job a slot of its channel
-  only while fewer than `cap` are taken on this node; a job over the cap is
+  while the channel is under its cap on this node; a job over the cap is
   snoozed by the worker and does not touch the database.
 
   Slots are held by the job process and released by `release/1`, or when the
   process exits (the server monitors it), so a killed job cannot leak a slot.
 
-  `acquire/2` also tells the caller, at most once per `defer_ms` and channel,
-  that it should defer the channel's waiting backlog
-  (`Converger.Channels.Circuit.defer_backlog/2`): one statement instead of
-  every waiting job being fetched and snoozed one by one.
+  For a channel at its cap, `acquire/2` also tells the caller, at most once per
+  `demote_ms`, to demote the channel's waiting backlog
+  (`Converger.Channels.Circuit.demote_backlog/1`): one statement that puts it
+  behind other channels' fresh deliveries, instead of every waiting job being
+  fetched and snoozed ahead of them.
   """
 
   use GenServer
 
-  @default_defer_ms 1_000
+  @default_demote_ms 1_000
 
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
   end
 
   @doc """
-  Take a slot of `channel_id` for the calling process.
+  Take a slot of `channel_id` for the calling process; `cap` is a positive
+  integer, or `nil` for no cap.
 
     * `{:ok, ref}` - run the delivery, then `release(ref)`
-    * `{:full, defer?}` - the channel already has `cap` deliveries running on
-      this node; `defer?` is true for the first caller in a `defer_ms` window
-
-  A `nil` cap means no limit.
+    * `{:full, demote?}` - the channel already runs `cap` deliveries on this
+      node; `demote?` is true for the first caller in a `demote_ms` window
   """
   def acquire(channel_id, cap, opts \\ [])
 
@@ -41,8 +41,8 @@ defmodule Converger.Channels.InFlight do
 
   def acquire(channel_id, cap, opts) when is_integer(cap) and cap > 0 do
     server = Keyword.get(opts, :server, __MODULE__)
-    defer_ms = Keyword.get(opts, :defer_ms, @default_defer_ms)
-    GenServer.call(server, {:acquire, channel_id, cap, defer_ms, self()})
+    demote_ms = Keyword.get(opts, :demote_ms, @default_demote_ms)
+    GenServer.call(server, {:acquire, channel_id, cap, demote_ms, self()})
   end
 
   @doc "Release a slot taken by `acquire/2`."
@@ -60,11 +60,11 @@ defmodule Converger.Channels.InFlight do
 
   @impl true
   def init(_opts) do
-    {:ok, %{counts: %{}, slots: %{}, deferred_at: %{}}}
+    {:ok, %{counts: %{}, slots: %{}, demoted_at: %{}}}
   end
 
   @impl true
-  def handle_call({:acquire, channel_id, cap, defer_ms, pid}, _from, state) do
+  def handle_call({:acquire, channel_id, cap, demote_ms, pid}, _from, state) do
     taken = Map.get(state.counts, channel_id, 0)
 
     if taken < cap do
@@ -79,15 +79,15 @@ defmodule Converger.Channels.InFlight do
       {:reply, {:ok, ref}, state}
     else
       now = System.monotonic_time(:millisecond)
-      last = Map.get(state.deferred_at, channel_id)
-      defer? = is_nil(last) or now - last >= defer_ms
+      last = Map.get(state.demoted_at, channel_id)
+      demote? = is_nil(last) or now - last >= demote_ms
 
       state =
-        if defer?,
-          do: %{state | deferred_at: Map.put(state.deferred_at, channel_id, now)},
+        if demote?,
+          do: %{state | demoted_at: Map.put(state.demoted_at, channel_id, now)},
           else: state
 
-      {:reply, {:full, defer?}, state}
+      {:reply, {:full, demote?}, state}
     end
   end
 
@@ -118,12 +118,12 @@ defmodule Converger.Channels.InFlight do
             n -> Map.put(state.counts, channel_id, n - 1)
           end
 
-        deferred_at =
+        demoted_at =
           if Map.has_key?(counts, channel_id),
-            do: state.deferred_at,
-            else: Map.delete(state.deferred_at, channel_id)
+            do: state.demoted_at,
+            else: Map.delete(state.demoted_at, channel_id)
 
-        %{state | counts: counts, slots: slots, deferred_at: deferred_at}
+        %{state | counts: counts, slots: slots, demoted_at: demoted_at}
     end
   end
 end

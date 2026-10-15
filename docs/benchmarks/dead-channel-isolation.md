@@ -13,8 +13,8 @@ priority and tier queues of [ADR-0031](../adr/0031-per-channel-circuit-breaker-r
 (see [Delivery: flow control](../delivery.md#flow-control-circuit-breaker-rate-limits-and-tenant-fairness)).
 
 :::note Fixed by ADR-0076
-Since [ADR-0076](../adr/0076-bulk-parking-and-per-channel-in-flight-cap.md) (#191) the shared-tier run passes: the
-healthy tenant's p95 was **111 ms** against a 64 ms baseline (gate 114 ms), p99 353 ms, max 2.0 s, no message lost.
+Since [ADR-0076](../adr/0076-bulk-parking-and-per-channel-in-flight-cap.md) (#191) the shared-tier run can pass: the
+healthy tenant's p95 was **104 ms** against a 67 ms baseline (gate 117 ms), p99 142 ms, max 321 ms, no message lost (a second, noisier run measured p95 535 ms).
 See [After ADR-0076](#after-adr-0076). The results below are the original measurement, before the fix.
 :::
 
@@ -143,30 +143,34 @@ and parked, not concentrated in one stall.
 
 - **Cause 2:** when the breaker opens, the channel's whole waiting backlog is parked in one statement, and deliveries
   enqueued while it stays open are inserted parked.
-- **Cause 1:** at most half of a queue's workers on a node (10 of 20 here) run deliveries of one channel at once. Jobs
-  over the cap are snoozed for 1 s without a database query, and the channel's waiting jobs are deferred at
-  priority 2 in one statement.
+- **Cause 1:** one channel runs at most half of a queue's workers on a node (10 of 20 here). Jobs over the cap are
+  snoozed for 1 s without a database query, and the channel's waiting jobs are demoted to priority 2 in one statement,
+  behind other channels' fresh deliveries.
 
 Same scenario, shared tier, 1 node, on the same developer machine (`LOAD_SCENARIOS=dead_channel load/run.sh`):
 
 | Healthy tenant, send → provider | Before | After |
 | --- | --- | --- |
-| Baseline p95 | 596 ms | 64 ms |
-| Dead phase p50 / p95 / p99 | 136 / **12,269** / 13,133 ms | 57 / **111** / 353 ms |
-| Dead phase max | | 1,964 ms |
-| p95 of messages sent after the backlog was parked | 77 ms | 68 ms |
-| Deliveries/s, dead phase | | 49.4 (baseline 49.4) |
-| Breaker opened after | 11.4 s | 10.5 s |
-| Dead deliveries in flight, max | 20 (every worker) | 13 |
-| Requests that reached the dead provider | 23 | 16 |
+| Baseline p95 | 596 ms | 67 ms |
+| Dead phase p95 / p99 | **12,269** / 13,133 ms | **104** / 142 ms |
+| Dead phase max | | 321 ms |
+| p95 of messages sent while / after the backlog was parked | – / 77 ms | 129 / 67 ms |
+| Deliveries/s, dead phase | | 49.1 (baseline 49.3) |
+| Breaker opened after | 11.4 s | 11.2 s |
+| Requests that reached the dead provider | 23 | 15 |
 | Lost acked messages | 0 | 0 |
-| Gate (p95 ≤ max(baseline × 1.2, baseline + 50 ms)) | ❌ | ✅ (limit 114 ms) |
+| Gate (p95 ≤ max(baseline × 1.2, baseline + 50 ms)) | ❌ | ✅ (limit 117 ms) |
 
 The before run's baseline was noisier (another stack shared the machine). The remaining messages over the gate are
-sent in the ~10 s before the breaker opens, while the dead channel holds 10 of the 20 workers for one adapter timeout:
-they wait a few hundred milliseconds rather than 13 s. A run with an earlier version of the fix (2 s snooze and
-deferral) came out at 124 ms against a 115 ms limit: the healthy channel itself briefly reaches its own cap while the
-backlog is parked, and the shorter 1 s snooze is what keeps that cost small. Raw results:
+sent in the ~10 s before the breaker opens, while the dead channel holds 10 of the 20 workers for one adapter timeout;
+they wait up to about 300 ms rather than 13 s. ADR-0076 lists the variants that were measured on the way, including one
+that passed here but starved a busy healthy channel in the 1-node `webhook_burst` run. The chosen version keeps that
+run's delivery rate (126/s, burst drained in 56 s).
+
+The gate is strict (50 ms over the baseline) and a developer machine is noisy: a second run of the same build, with a
+noisier baseline (p99 142 ms against 78 ms), measured p95 535 ms, p99 961 ms and max 7.7 s, the slow messages again
+in the ~10 s before the breaker opened. Both runs are far below the 12.3 s before the fix and around ADR-0031's 1 s
+target, but only a quiet, repeated run (nightly CI) can say whether the gate holds reliably. Raw results:
 `load/results/2026-10-15-dead-channel-shared-tier-after-0076.json`.
 
 Tiers remain the stronger isolation: tenants with unreliable endpoints or bulk traffic on a different tier from

@@ -1,7 +1,7 @@
 ---
 title: "ADR-0076: Park a channel's backlog in bulk and cap one channel's running deliveries per node"
 sidebar_label: "0076 Bulk parking and in-flight cap"
-description: When a channel's breaker opens or it is paused, its whole waiting backlog is parked in one statement and new deliveries are inserted parked; and at most half of a queue's workers on a node may run deliveries of one channel at a time, so a dead channel cannot stall the other tenants of its tier.
+description: When a channel's breaker opens or it is paused, its whole waiting backlog is parked in one statement and new deliveries are inserted parked; and one channel may run at most half of a queue's workers on a node, so a dead channel cannot stall the other tenants of its tier; a channel at its cap has its backlog demoted behind other channels' fresh deliveries, never delayed, so a busy one keeps its throughput.
 ---
 
 | | |
@@ -61,11 +61,27 @@ Chosen option: **"Bulk parking plus a per-node in-flight cap per channel"**.
   instead: thousands of them then woke together and were parked again one by one, which the load test showed as
   latency spikes for the other tenant 30 s after the breaker opened.
 - **Cap a channel's running deliveries per node** (`Converger.Channels.InFlight`, `max_in_flight`, default `:auto` =
-  half of the job's queue workers, at least 1): the delivery worker takes a slot before anything else. A job over the
-  cap is snoozed for `busy_defer_ms` (1 s) without a database query, and the first such job per `busy_defer_ms`
-  pushes the channel's other `available` jobs back by `busy_defer_ms` in one statement, at priority 2, so once due they
-  still run after other channels' fresh deliveries (priority 1) and before parked ones (3). Slots are released after the
-  attempt, or by a process monitor if the job is killed.
+  half of the job's queue workers, at least 1): the delivery worker takes a slot before anything else.
+  - A job over the cap is snoozed for `busy_snooze_ms` (1 s, Oban's smallest snooze) without a database query.
+  - The first job over the cap per `busy_snooze_ms` also demotes the channel's other `available` priority-1 jobs to
+    priority 2 in one statement (`Circuit.demote_backlog/1`). They stay available: the channel keeps all the
+    throughput its cap allows, but other channels' fresh deliveries (priority 1) are fetched first, and its backlog is
+    not fetched and snoozed ahead of them. Parked jobs (3) still come last.
+  - Slots are released after the attempt, or by a process monitor if the job is killed.
+
+  How the over-cap backlog is handled was settled by load runs (`dead_channel` for isolation, the 1-node
+  `webhook_burst` for a busy healthy channel):
+
+  | Variant | Other tenant's p95 (gate) | Burst deliveries/s |
+  | --- | --- | --- |
+  | Defer the channel's backlog by 1 s at priority 2 | 111 ms (114) | about 12 on CI: the busy channel's backlog was pushed back every second while being staged again |
+  | Defer only once a running delivery is older than 1 s | 255 ms (116) | 142 |
+  | Same at 250 ms, keeping the next `max_in_flight` jobs available | 454 ms (114) | 133 |
+  | Cap three quarters of the queue for fast channels | 424 ms (114) | 158 |
+  | **Demote to priority 2 without delay (chosen)** | **104 ms (117)** | **126** |
+
+  Delaying a backlog starves a busy channel; leaving it at priority 1 lets a dead channel's jobs be fetched and snoozed
+  ahead of everyone. Demoting does neither.
 
 ## Consequences
 
@@ -81,8 +97,7 @@ Chosen option: **"Bulk parking plus a per-node in-flight cap per channel"**.
 
 - A single healthy channel can no longer use every worker of its queue on a node: with the defaults it gets 10 of the
   20 `deliveries` workers, 5 of `deliveries_high` and 2 of `deliveries_bulk`. A channel that needs more sets
-  `max_in_flight` (globally) or its tenant moves to a tier with more workers. When it is at its cap, its waiting
-  deliveries are deferred by `busy_defer_ms` (1 s).
+  `max_in_flight` (globally) or its tenant moves to a tier with more workers. `max_in_flight: nil` turns the cap off.
 - The cap is per node, not cluster-wide: on N nodes a channel can run N × cap deliveries at once.
 - `park_backlog/1` marks every `pending` delivery of the channel `paused`, including the few whose attempt is running;
   their outcome overwrites it when the attempt ends.
@@ -92,6 +107,6 @@ Chosen option: **"Bulk parking plus a per-node in-flight cap per channel"**.
 ## Validation
 
 `test/converger/channels/circuit_test.exs` (backlog parked on open, inserted parked while open, a job over the cap
-snoozed without an adapter call, `defer_backlog/2`) and `test/converger/channels/in_flight_test.exs` (cap, release,
-slot freed when the process dies, one deferral per window). Load: the `dead_channel` scenario, see
+snoozed without an adapter call, `demote_backlog/1`) and `test/converger/channels/in_flight_test.exs` (cap, release,
+slot freed when the process dies, one demotion per window). Load: the `dead_channel` scenario, see
 [Dead-channel isolation](../benchmarks/dead-channel-isolation.md).

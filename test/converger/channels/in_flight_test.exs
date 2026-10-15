@@ -6,10 +6,10 @@ defmodule Converger.Channels.InFlightTest do
   setup do
     name = :"in_flight_#{System.unique_integer([:positive])}"
     start_supervised!({InFlight, name: name})
-    %{opts: [server: name, defer_ms: 60_000]}
+    %{opts: [server: name, demote_ms: 60_000]}
   end
 
-  # A process that takes a slot and holds it until told to stop.
+  # A process that takes a slot and holds it until it exits.
   defp holder(channel_id, cap, opts) do
     test = self()
 
@@ -27,13 +27,20 @@ defmodule Converger.Channels.InFlightTest do
   end
 
   test "gives at most `cap` slots per channel", %{opts: opts} do
-    assert {_, {:ok, _}} = holder("a", 2, opts)
-    assert {_, {:ok, _}} = holder("a", 2, opts)
-    assert {:full, true} = InFlight.acquire("a", 2, opts)
+    for _ <- 1..2, do: assert({_, {:ok, _}} = holder("a", 2, opts))
+    assert {:full, _} = InFlight.acquire("a", 2, opts)
 
     # Another channel has its own slots.
     assert {:ok, _} = InFlight.acquire("b", 2, opts)
     assert InFlight.count("a", opts) == 2
+  end
+
+  test "asks for one backlog demotion per window", %{opts: opts} do
+    {_, {:ok, _}} = holder("a", 1, opts)
+
+    assert {:full, true} = InFlight.acquire("a", 1, opts)
+    assert {:full, false} = InFlight.acquire("a", 1, opts)
+    assert {:full, true} = InFlight.acquire("a", 1, Keyword.put(opts, :demote_ms, 0))
   end
 
   test "release/1 frees the slot", %{opts: opts} do
@@ -55,16 +62,6 @@ defmodule Converger.Channels.InFlightTest do
 
     assert InFlight.count("a", opts) == 0
     assert {:ok, _} = InFlight.acquire("a", 1, opts)
-  end
-
-  test "asks for one backlog deferral per window", %{opts: opts} do
-    {_, {:ok, _}} = holder("a", 1, opts)
-
-    assert {:full, true} = InFlight.acquire("a", 1, opts)
-    assert {:full, false} = InFlight.acquire("a", 1, opts)
-
-    # A new window: ask again.
-    assert {:full, true} = InFlight.acquire("a", 1, Keyword.put(opts, :defer_ms, 0))
   end
 
   test "a nil cap never limits", %{opts: opts} do

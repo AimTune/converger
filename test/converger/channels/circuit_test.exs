@@ -251,20 +251,33 @@ defmodule Converger.Channels.CircuitTest do
   end
 
   describe "in-flight cap" do
-    test "the cap is half of the queue's workers by default" do
+    test "by default a channel may use half of its queue's workers" do
       assert Circuit.in_flight_cap("deliveries") == 10
+      assert Circuit.in_flight_cap("deliveries_high") == 5
       assert Circuit.in_flight_cap("deliveries_bulk") == 2
       assert Circuit.in_flight_cap("unknown_queue") == nil
     end
 
-    test "a job over the cap is snoozed without calling the adapter and defers the backlog", %{
+    test "max_in_flight: nil turns the cap off" do
+      Application.put_env(
+        :converger,
+        :circuit_breaker,
+        Keyword.merge(Application.get_env(:converger, :circuit_breaker), max_in_flight: nil)
+      )
+
+      assert Circuit.in_flight_cap("deliveries") == nil
+    end
+
+    test "a job over the cap is snoozed without calling the adapter", %{
       tenant: tenant,
       channel: channel
     } do
       Application.put_env(
         :converger,
         :circuit_breaker,
-        Keyword.merge(Application.get_env(:converger, :circuit_breaker), max_in_flight: 1)
+        Keyword.merge(Application.get_env(:converger, :circuit_breaker),
+          max_in_flight: 1
+        )
       )
 
       Req.Test.stub(__MODULE__, fn _ -> flunk("adapter called over the in-flight cap") end)
@@ -274,7 +287,11 @@ defmodule Converger.Channels.CircuitTest do
 
       holder =
         spawn(fn ->
-          send(test, {:slot, Converger.Channels.InFlight.acquire(channel.id, 1)})
+          send(
+            test,
+            {:slot, Converger.Channels.InFlight.acquire(channel.id, 1)}
+          )
+
           receive do: (:stop -> :ok)
         end)
 
@@ -300,25 +317,26 @@ defmodule Converger.Channels.CircuitTest do
     end
   end
 
-  describe "defer_backlog/2" do
-    test "pushes back the channel's available jobs only", %{tenant: tenant, channel: channel} do
+  describe "demote_backlog/1" do
+    test "moves the channel's available jobs behind other channels' without delaying them", %{
+      tenant: tenant,
+      channel: channel
+    } do
       other = webhook_channel_fixture(tenant)
 
       Oban.Testing.with_testing_mode(:manual, fn ->
         backlog = for _ <- 1..3, do: create_activity(tenant, channel)
         healthy = create_activity(tenant, other)
-        before = DateTime.utc_now()
 
-        assert Circuit.defer_backlog(channel.id, 5_000) == 3
+        assert Circuit.demote_backlog(channel.id) == 3
 
-        for activity <- backlog do
-          job = job_for(activity)
-          assert job.state == "scheduled"
-          assert job.priority == 2
-          assert DateTime.diff(job.scheduled_at, before, :millisecond) in 4_000..6_000
-        end
+        for activity <- backlog,
+            do: assert(%{state: "available", priority: 2} = job_for(activity))
 
-        assert %{state: "available"} = job_for(healthy)
+        assert %{state: "available", priority: 1} = job_for(healthy)
+
+        # Parked jobs are left alone, and demoting twice is a no-op.
+        assert Circuit.demote_backlog(channel.id) == 0
       end)
     end
   end

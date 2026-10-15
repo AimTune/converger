@@ -40,8 +40,9 @@ defmodule Converger.Channels.Circuit do
       run at the same time on a node (`Converger.Channels.InFlight`, ADR-0076):
       an integer, `:auto` for half of the job's queue workers (at least 1),
       or `nil` for no cap
-    * `busy_defer_ms` (default `1_000`) - how long a channel's waiting
-      backlog is deferred when it is at its cap
+    * `busy_snooze_ms` (default `1_000`) - how long a job over the cap is
+      snoozed, and how often a channel at its cap has its waiting backlog
+      demoted (`demote_backlog/1`)
     * `replay_dead_letters_on_close` (default `false`) - when a probe closes
       the breaker, replay the channel's dead letters that failed within the
       last `replay_window_ms` (default 1 hour), see
@@ -66,7 +67,7 @@ defmodule Converger.Channels.Circuit do
   }
 
   @parked_priority 3
-  @deferred_priority 2
+  @demoted_priority 2
   @release_follow_up_ms 5_000
   @default_priority 1
   @breaker_states ~w(open half_open)
@@ -76,7 +77,7 @@ defmodule Converger.Channels.Circuit do
     cooldown_ms: 30_000,
     park_seconds: 600,
     max_in_flight: :auto,
-    busy_defer_ms: 1_000,
+    busy_snooze_ms: 1_000,
     replay_dead_letters_on_close: false,
     replay_window_ms: :timer.hours(1)
   ]
@@ -91,24 +92,15 @@ defmodule Converger.Channels.Circuit do
 
   @doc """
   Per-node cap on the running deliveries of one channel for a job of `queue`
-  (`max_in_flight`): `:auto` is half of the queue's workers, at least 1.
-  `nil` when there is no cap (or the queue's size is unknown).
+  (`max_in_flight`, `Converger.Channels.InFlight`): `:auto` is half of the
+  queue's workers, at least 1. `nil` when there is no cap (or the queue's size
+  is unknown with `:auto`).
   """
-  def in_flight_cap(queue) do
-    case config()[:max_in_flight] do
-      :auto ->
-        case queue_limit(queue) do
-          limit when is_integer(limit) and limit > 0 -> max(div(limit, 2), 1)
-          _ -> nil
-        end
+  def in_flight_cap(queue), do: cap(config()[:max_in_flight], queue_limit(queue))
 
-      cap when is_integer(cap) and cap > 0 ->
-        cap
-
-      _ ->
-        nil
-    end
-  end
+  defp cap(:auto, limit) when is_integer(limit) and limit > 0, do: max(div(limit, 2), 1)
+  defp cap(value, _limit) when is_integer(value) and value > 0, do: value
+  defp cap(_value, _limit), do: nil
 
   defp queue_limit(queue) do
     queues = Application.get_env(:converger, Oban, [])[:queues] || []
@@ -467,20 +459,19 @@ defmodule Converger.Channels.Circuit do
   end
 
   @doc """
-  Push back the `available` delivery jobs of a channel that is at its
-  in-flight cap by `busy_defer_ms` (one statement, `Converger.Channels.InFlight`
-  says when), at priority 2: once due they still run after other channels'
-  fresh deliveries (priority 1) and before parked ones (3). Returns the number
-  of deferred jobs.
+  Demote the `available` priority-1 delivery jobs of a channel at its in-flight
+  cap to priority 2 (one statement, `Converger.Channels.InFlight` says when).
+  They stay available, so the channel keeps all the throughput its cap allows,
+  but other channels' fresh deliveries (priority 1) are fetched first, and its
+  backlog is not fetched and snoozed ahead of them. Parked jobs (3) are left
+  alone. Returns the number of demoted jobs.
   """
-  def defer_backlog(channel_id, defer_ms \\ config()[:busy_defer_ms]) do
-    until = DateTime.add(now(), defer_ms, :millisecond)
-
+  def demote_backlog(channel_id) do
     {count, _} =
-      from(j in waiting_jobs_query(channel_id), where: j.state == "available")
-      |> Repo.update_all(
-        set: [state: "scheduled", scheduled_at: until, priority: @deferred_priority]
+      from(j in waiting_jobs_query(channel_id),
+        where: j.state == "available" and j.priority < ^@demoted_priority
       )
+      |> Repo.update_all(set: [priority: @demoted_priority])
 
     count
   end

@@ -23,14 +23,14 @@ defmodule Converger.Workers.ActivityDeliveryWorker do
 
   @impl Oban.Worker
   def perform(%Oban.Job{args: %{"channel_id" => channel_id}} = job) do
-    # At most `max_in_flight` deliveries of one channel run at once on this
-    # node, so a dead channel cannot take every worker of the queue before its
+    # A channel runs at most `max_in_flight` deliveries at once on this node,
+    # so a dead channel cannot take every worker of the queue before its
     # breaker opens (ADR-0076). Checked first: a job over the cap is snoozed
-    # without a database query, and one of them per `busy_defer_ms` pushes the
-    # channel's waiting backlog back in one statement.
-    case InFlight.acquire(channel_id, Circuit.in_flight_cap(job.queue),
-           defer_ms: Circuit.config()[:busy_defer_ms]
-         ) do
+    # without a database query, and one of them per `busy_snooze_ms` demotes
+    # the channel's waiting backlog behind other channels' fresh deliveries.
+    busy_ms = Circuit.config()[:busy_snooze_ms]
+
+    case InFlight.acquire(channel_id, Circuit.in_flight_cap(job.queue), demote_ms: busy_ms) do
       {:ok, slot} ->
         try do
           admit_and_deliver(job)
@@ -38,9 +38,10 @@ defmodule Converger.Workers.ActivityDeliveryWorker do
           InFlight.release(slot)
         end
 
-      {:full, defer?} ->
-        if defer?, do: Circuit.defer_backlog(channel_id)
-        {:snooze, busy_snooze_seconds()}
+      {:full, demote?} ->
+        if demote?, do: Circuit.demote_backlog(channel_id)
+        # Oban snoozes in whole seconds.
+        {:snooze, max(div(busy_ms, 1000), 1)}
     end
   end
 
@@ -62,10 +63,6 @@ defmodule Converger.Workers.ActivityDeliveryWorker do
         {:snooze, seconds}
     end
   end
-
-  # Oban snoozes in whole seconds; a busy (not dead) channel at its cap should
-  # wait as little as possible.
-  defp busy_snooze_seconds, do: max(div(Circuit.config()[:busy_defer_ms], 1000), 1)
 
   defp deliver(activity, channel) do
     case Pipeline.deliver(activity, channel) do

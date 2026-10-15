@@ -119,7 +119,7 @@ Exit criteria: a nightly load test publishes p95 latency and connection counts w
 | Exit criterion | Status |
 | --- | --- |
 | Nightly load test with p95 and connection counts, thresholds enforced | See [Benchmarks](benchmarks/index.md) (nightly `Load` workflow) |
-| One dead channel does not degrade other tenants | **Met** since [ADR-0076](adr/0076-bulk-parking-and-per-channel-in-flight-cap.md) (#191): with a 10,000-delivery backlog on a dead channel in the same tier, the other tenant's p95 is 111 ms against a 64 ms baseline (it was 12.3 s before). See [Dead-channel isolation](benchmarks/dead-channel-isolation.md#after-adr-0076). |
+| One dead channel does not degrade other tenants | **Mostly met** since [ADR-0076](adr/0076-bulk-parking-and-per-channel-in-flight-cap.md) (#191): with a 10,000-delivery backlog on a dead channel in the same tier, the other tenant's p95 is 104 ms against a 67 ms baseline (it was 12.3 s before); a second, noisier run measured 535 ms, so the strict gate is not yet reliably met. See [Dead-channel isolation](benchmarks/dead-channel-isolation.md#after-adr-0076). |
 | Partition drop and archive verified on 100M rows | **Met**: measured on a 100M-row dataset ([2026-10-15 run](benchmarks/2026-10-15-partition-100m.md), [#192](https://github.com/AimTune/converger/issues/192)): detach 205 ms, drop 14 ms, writers not blocked, the 16.7M-row month archived and verified in 530 s. The 10M and 30M runs per table and the per-table 100M extrapolation are in [Partition retention at scale](benchmarks/partition-retention-scaling.md). |
 
 ## Done: v3.2 Channel Expansion (#60)
