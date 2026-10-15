@@ -9,7 +9,7 @@ description: A per-channel publishable key, usable only from allowed origins, le
 | **Status** | Accepted |
 | **Date** | 2026-10-15 |
 | **Issue** | [#195](https://github.com/AimTune/converger/issues/195) (and [#194](https://github.com/AimTune/converger/issues/194), test tokens) |
-| **Pull request** | (this PR) |
+| **Pull request** | [#197](https://github.com/AimTune/converger/pull/197) |
 | **Related** | [ADR-0059](0059-client-token-keys-revocation-rotation-and-permissions.md), [ADR-0065](0065-chativa-as-reference-client-and-history-cursor.md), [ADR-0013](0013-cluster-wide-rate-limiting-with-hammer-and-pubsub.md) |
 
 ## Context and problem statement
