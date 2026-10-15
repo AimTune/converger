@@ -1,0 +1,6 @@
+{
+  "name": "converger-chativa-compat",
+  "private": true,
+  "type": "module",
+  "description": "Vendored chativa sources and the harness driven by test/protocol/chativa_compat_test.exs"
+}

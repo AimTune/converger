@@ -2,12 +2,13 @@ defmodule ConvergerWeb.PaginationApiTest do
   use ConvergerWeb.ChannelCase, async: false
   import Phoenix.ConnTest, except: [connect: 2, connect: 3]
   import Plug.Conn
+  import ConvergerWeb.ConnCase, only: [assert_api_error: 3]
 
   @endpoint ConvergerWeb.Endpoint
 
   alias Converger.Auth.ConvergerToken
   alias Converger.ConvergerAPI.Watermark
-  alias ConvergerWeb.{ConvergerChannel, ConvergerSocket, ConversationChannel, UserSocket}
+  alias ConvergerWeb.{ConvergerChannel, ConvergerSocket}
 
   import Converger.TenantsFixtures
   import Converger.ChannelsFixtures
@@ -81,6 +82,20 @@ defmodule ConvergerWeb.PaginationApiTest do
       assert body == %{"activities" => [], "watermark" => wm, "has_more" => false}
     end
 
+    test "accepts the integer seq of Protocol v1 as the watermark", %{
+      token: token,
+      conversation: conversation,
+      activities: activities
+    } do
+      path = "/api/v1/converger/conversations/#{conversation.id}/activities"
+      body = converger_get(token, path <> "?watermark=3")
+
+      assert Enum.map(body["activities"], & &1["id"]) ==
+               activities |> Enum.drop(3) |> Enum.map(& &1.id)
+
+      assert body["watermark"] == 5
+    end
+
     test "default and max page sizes come from config", %{token: token, conversation: c} do
       put_limits(activity_default_limit: 3, activity_max_limit: 4)
       path = "/api/v1/converger/conversations/#{c.id}/activities"
@@ -103,7 +118,7 @@ defmodule ConvergerWeb.PaginationApiTest do
 
       assert Enum.map(body["data"], & &1["id"]) == activities |> Enum.take(3) |> Enum.map(& &1.id)
       assert %{"has_more" => true, "limit" => 3, "watermark" => wm} = body["meta"]
-      assert wm == Watermark.encode(Enum.at(activities, 2).seq)
+      assert wm == Enum.at(activities, 2).seq
 
       body =
         tenant
@@ -116,7 +131,7 @@ defmodule ConvergerWeb.PaginationApiTest do
 
     test "rejects an invalid watermark", %{tenant: tenant, conversation: c} do
       conn = tenant_get(tenant, "/api/v1/conversations/#{c.id}/activities?watermark=%%%")
-      assert json_response(conn, 400)["error"] == "Invalid watermark"
+      assert_api_error(conn, 400, "invalid_watermark")
     end
   end
 
@@ -163,6 +178,124 @@ defmodule ConvergerWeb.PaginationApiTest do
 
     test "requires a tenant API key" do
       assert build_conn() |> get("/api/v1/conversations") |> json_response(401)
+    end
+  end
+
+  describe "integer watermark (#63, protocol v1 section 6.5)" do
+    setup do
+      ref = make_ref()
+      handler = "watermark-deprecation-#{inspect(ref)}"
+      test_pid = self()
+
+      :telemetry.attach(
+        handler,
+        [:converger, :deprecated, :use],
+        fn _event, measurements, metadata, _ ->
+          send(test_pid, {:deprecated, measurements, metadata})
+        end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach(handler) end)
+    end
+
+    defp legacy_forms(activity) do
+      [
+        {"integer", Integer.to_string(activity.seq), false},
+        {"seq:N base64url", Watermark.encode(activity.seq), true},
+        {"legacy activity UUID", Base.url_encode64(activity.id, padding: false), true}
+      ]
+    end
+
+    test "Converger API emits a JSON number and accepts all three input forms", %{
+      token: token,
+      conversation: conversation,
+      activities: activities
+    } do
+      path = "/api/v1/converger/conversations/#{conversation.id}/activities"
+      third = Enum.at(activities, 2)
+
+      assert %{"watermark" => 2} = converger_get(token, path <> "?limit=2")
+
+      for {form, watermark, deprecated?} <- legacy_forms(third) do
+        body = converger_get(token, path <> "?watermark=#{watermark}")
+
+        assert Enum.map(body["activities"], & &1["seq"]) == [4, 5], form
+        assert body["watermark"] == 5, form
+
+        if deprecated? do
+          assert_received {:deprecated, %{count: 1},
+                           %{surface: :opaque_watermark, api: :converger}}
+        else
+          refute_received {:deprecated, _, %{surface: :opaque_watermark}}
+        end
+      end
+    end
+
+    test "an empty page hands back the client's position as an integer", %{
+      token: token,
+      conversation: conversation,
+      activities: activities
+    } do
+      path = "/api/v1/converger/conversations/#{conversation.id}/activities"
+      last = List.last(activities)
+
+      for {form, watermark, _} <- legacy_forms(last) do
+        assert converger_get(token, path <> "?watermark=#{watermark}") ==
+                 %{"activities" => [], "watermark" => 5, "has_more" => false},
+               form
+      end
+    end
+
+    test "tenant API emits a JSON number and accepts all three input forms", %{
+      tenant: tenant,
+      conversation: c,
+      activities: activities
+    } do
+      third = Enum.at(activities, 2)
+
+      for {form, watermark, deprecated?} <- legacy_forms(third) do
+        body =
+          tenant
+          |> tenant_get("/api/v1/conversations/#{c.id}/activities?watermark=#{watermark}")
+          |> json_response(200)
+
+        assert Enum.map(body["data"], & &1["seq"]) == [4, 5], form
+        assert body["meta"]["watermark"] == 5, form
+
+        if deprecated? do
+          assert_received {:deprecated, _, %{surface: :opaque_watermark, api: :tenant}}
+        else
+          refute_received {:deprecated, _, %{surface: :opaque_watermark}}
+        end
+      end
+
+      body =
+        tenant
+        |> tenant_get("/api/v1/conversations/#{c.id}/activities?watermark=#{Watermark.encode(5)}")
+        |> json_response(200)
+
+      assert body["meta"]["watermark"] == 5
+    end
+
+    test "the legacy Phoenix activitySet keeps the opaque string and accepts an integer join", %{
+      token: token,
+      conversation: conversation,
+      activities: activities
+    } do
+      {:ok, socket} = connect(ConvergerSocket, %{"token" => token})
+
+      {:ok, _, _socket} =
+        subscribe_and_join(
+          socket,
+          ConvergerChannel,
+          "converger:conversation:#{conversation.id}",
+          %{"watermark" => Enum.at(activities, 2).seq}
+        )
+
+      assert_push "activitySet", %{activities: [_, _], watermark: wm, has_more: false}
+      assert wm == Watermark.encode(5)
+      refute_received {:deprecated, _, %{surface: :opaque_watermark}}
     end
   end
 
@@ -219,31 +352,6 @@ defmodule ConvergerWeb.PaginationApiTest do
         )
 
       assert_push "activitySet", %{activities: [_, _], has_more: false}
-    end
-
-    test "legacy channel caps replay and signals replay_truncated", %{
-      tenant: tenant,
-      conversation: conversation,
-      activities: [first | rest]
-    } do
-      put_limits(ws_replay_limit: 2)
-
-      {:ok, token, _claims} = Converger.Auth.Token.generate_token(conversation, tenant, "user-1")
-
-      {:ok, socket} = connect(UserSocket, %{"token" => token})
-
-      {:ok, _, _socket} =
-        subscribe_and_join(socket, ConversationChannel, "conversation:#{conversation.id}", %{
-          "last_activity_id" => first.id
-        })
-
-      [a, b | _] = rest
-      a_id = a.id
-      b_id = b.id
-      assert_push "new_activity", %{id: ^a_id}
-      assert_push "new_activity", %{id: ^b_id}
-      assert_push "replay_truncated", %{has_more: true, last_activity_id: ^b_id}
-      refute_push "new_activity", _
     end
   end
 end

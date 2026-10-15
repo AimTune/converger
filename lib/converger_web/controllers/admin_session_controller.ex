@@ -1,9 +1,16 @@
 defmodule ConvergerWeb.AdminSessionController do
+  @moduledoc """
+  Admin login and logout. A correct password starts a server-side session
+  (`ConvergerWeb.UserAuth`), or, for admins with 2FA, a pending login that
+  `ConvergerWeb.TwoFactorLoginController` completes.
+  """
   use ConvergerWeb, :controller
 
   alias Converger.Accounts
+  alias Converger.Accounts.TOTP
   alias Converger.RateLimit.LoginThrottle
   alias ConvergerWeb.Plugs.RateLimit
+  alias ConvergerWeb.UserAuth
 
   def new(conn, _params) do
     if conn.assigns[:current_admin_user] do
@@ -34,19 +41,14 @@ defmodule ConvergerWeb.AdminSessionController do
 
   defp authenticate(conn, email, password, account) do
     case Accounts.authenticate_admin(email, password) do
-      {:ok, %{must_change_password: true} = user} ->
-        conn
-        |> renew_session()
-        |> put_session(:admin_user_id, user.id)
-        |> put_flash(:info, "Please choose a new password before continuing.")
-        |> redirect(to: "/admin/password")
-
       {:ok, user} ->
-        conn
-        |> renew_session()
-        |> put_session(:admin_user_id, user.id)
-        |> put_flash(:info, "Welcome back, #{user.name}!")
-        |> redirect(to: "/admin")
+        if TOTP.enabled?(user) do
+          conn
+          |> UserAuth.put_pending_2fa("admin", user)
+          |> redirect(to: "/admin/login/totp")
+        else
+          log_in(conn, user)
+        end
 
       {:error, :inactive} ->
         render(conn, :new, error_message: "Your account has been deactivated.")
@@ -57,16 +59,25 @@ defmodule ConvergerWeb.AdminSessionController do
     end
   end
 
-  def delete(conn, _params) do
+  @doc false
+  def log_in(conn, %{must_change_password: true} = user) do
     conn
-    |> renew_session()
-    |> put_flash(:info, "Logged out successfully.")
-    |> redirect(to: "/admin/login")
+    |> UserAuth.log_in("admin", user)
+    |> put_flash(:info, "Please choose a new password before continuing.")
+    |> redirect(to: "/admin/password")
   end
 
-  defp renew_session(conn) do
+  def log_in(conn, user) do
     conn
-    |> configure_session(renew: true)
-    |> clear_session()
+    |> UserAuth.log_in("admin", user)
+    |> put_flash(:info, "Welcome back, #{user.name}!")
+    |> redirect(to: "/admin")
+  end
+
+  def delete(conn, _params) do
+    conn
+    |> UserAuth.log_out("admin")
+    |> put_flash(:info, "Logged out successfully.")
+    |> redirect(to: "/admin/login")
   end
 end

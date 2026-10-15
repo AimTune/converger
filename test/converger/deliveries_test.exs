@@ -12,7 +12,8 @@ defmodule Converger.DeliveriesTest do
 
   setup do
     tenant = tenant_fixture()
-    channel = channel_fixture(tenant)
+    # Inbound-only, so the pipeline creates no delivery of its own to it.
+    channel = channel_fixture(tenant, %{mode: "inbound"})
     conversation = conversation_fixture(tenant, channel)
     activity = activity_fixture(tenant, conversation)
     delivery = delivery_fixture(activity, channel)

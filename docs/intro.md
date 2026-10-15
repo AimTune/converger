@@ -8,7 +8,7 @@ Converger is a self-hosted, multi-tenant **channel hub** written in Elixir on Ph
 
 ## The model in one paragraph
 
-A **tenant** owns **channels**. Each channel has a type (its adapter: `webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip`, `echo`) and a mode (`inbound`, `outbound` or `duplex`). Messages arrive through the REST API, the WebSocket sockets or a channel's inbound webhook. They are written as **activities** in a **conversation** that belongs to one channel. Inbound messages from providers that never send a Converger conversation id are matched to a conversation through the external **participant**, such as a WhatsApp phone number. Each activity gets a `seq` (1, 2, 3, ...) that is allocated under a row lock on the conversation. In the same database transaction Converger enqueues one **delivery** job per target channel: the conversation's own channel, if it can send, plus the targets of any enabled **routing rules**. Each delivery passes through the target channel's **middleware** chain (transformations) and is then handed to the adapter. It ends as `sent`, `delivered` or `read`, or as `failed` once its retries run out.
+A **tenant** owns **channels**. Each channel has a type (its adapter: `webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram`, `email`, `sms_twilio`, `sms_vonage`, `echo`) and a mode (`inbound`, `outbound` or `duplex`). Messages arrive through the REST API, the WebSocket sockets or a channel's inbound webhook. They are written as **activities** in a **conversation** that belongs to one channel. Inbound messages from providers that never send a Converger conversation id are matched to a conversation through the external **participant**, such as a WhatsApp phone number or a Slack thread. Each activity gets a `seq` (1, 2, 3, ...) that is allocated under a row lock on the conversation. In the same database transaction Converger enqueues one **delivery** job per target channel: the conversation's own channel, if it can send, plus the targets of any enabled **routing rules**. Each delivery passes through the target channel's **middleware** chain (transformations) and is then handed to the adapter. It ends as `sent`, `delivered` or `read`, or as `failed` once its retries run out.
 
 See [Concepts](concepts/overview.md) for every entity, and [Architecture](architecture/overview.md) for how the processes fit together.
 
@@ -56,10 +56,10 @@ flowchart LR
 
 WebSocket is meant to be Converger's primary, first-class channel. Two socket stacks exist today:
 
-- `/socket` (`UserSocket`, topic `conversation:<id>`), authenticated with a conversation token.
-- `/socket/converger` (`ConvergerSocket`, topic `converger:conversation:<id>`), the client API inspired by Bot Framework Direct Line, authenticated with a Converger token. On join it replays activities after an opaque watermark.
+- `/socket/converger` (`ConvergerSocket`, topics `converger:conversation:<id>` and, for agent consoles, `converger:channel:<id>`), the client API inspired by Bot Framework Direct Line, authenticated with a Converger token. On join it replays activities after an opaque watermark, clients send activities on it with `postActivity` and acknowledge deliveries with `ack`. It is the single client socket stack ([#23](https://github.com/AimTune/converger/issues/23)).
+- `/socket` (`UserSocket`, topic `conversation:<id>`), authenticated with a conversation token. **Deprecated**: new clients use `/socket/converger`; see [migrating from the legacy surfaces](api/migrating-from-legacy.md).
 
-Both receive the same canonical activity payload as REST (see [ADR-0004](adr/0004-single-canonical-activity-serializer.md)). The direction is to merge them into one documented wire protocol, the Converger Protocol v1 (spec in progress, [#21](https://github.com/AimTune/converger/issues/21), [#63](https://github.com/AimTune/converger/issues/63)). It will be wire-compatible with mekik/1 ([ADR-0024](adr/0024-converger-protocol-v1-as-superset-of-mekik-1.md)) and will add client message ids with server acks, receipts, typing and presence. That work is tracked in the v3.0 epic [#58](https://github.com/AimTune/converger/issues/58). Today the `websocket` channel type is outbound-only and reaches its clients through the PubSub broadcast. Making it a full duplex adapter is Planned ([#22](https://github.com/AimTune/converger/issues/22)).
+Both receive the same canonical activity payload as REST (see [ADR-0004](adr/0004-single-canonical-activity-serializer.md)). The direction is to merge them into one documented wire protocol, the Converger Protocol v1 (spec in progress, [#21](https://github.com/AimTune/converger/issues/21), [#63](https://github.com/AimTune/converger/issues/63)). It will be wire-compatible with mekik/1 ([ADR-0024](adr/0024-converger-protocol-v1-as-superset-of-mekik-1.md)) and will add client message ids with server acks, receipts, typing and presence. That work is tracked in the v3.0 epic [#58](https://github.com/AimTune/converger/issues/58). The `websocket` channel type is a duplex channel adapter: clients send over the socket through the same inbound path as webhooks, and deliveries to the channel are tracked, can be routing rule targets and wait for a client while none is connected ([#22](https://github.com/AimTune/converger/issues/22), [ADR-0033](adr/0033-websocket-channel-adapter-delivery.md)).
 
 ### Zero data loss
 
@@ -87,8 +87,8 @@ Broadway (`Converger.Pipeline.Broadway`) and inline (`Converger.Pipeline.Inline`
 
 - **Not a bot framework or AI agent runtime.** It carries messages to and from bots. It does not decide what to answer. The `echo` channel is a test helper, not a bot.
 - **Not a chat UI.** The admin and portal show transcripts for operators. End-user widgets connect over the WebSocket or REST client API.
-- **Not a general-purpose message broker.** Activities are conversation-scoped and stored in Postgres. Kafka and RabbitMQ appear only as optional Broadway producers. Broker channels are Planned ([#42](https://github.com/AimTune/converger/issues/42)).
-- **Not finished.** Conditional routing ([#43](https://github.com/AimTune/converger/issues/43)), a dead-letter replay UI ([#32](https://github.com/AimTune/converger/issues/32)), a management API ([#51](https://github.com/AimTune/converger/issues/51)) and the SDKs ([#46](https://github.com/AimTune/converger/issues/46)) are on the [roadmap](roadmap.md).
+- **Not a general-purpose message broker.** Activities are conversation-scoped and stored in Postgres. Kafka, RabbitMQ, NATS JetStream, Redis Streams and MQTT can be [broker channels](channels/brokers.md): integration endpoints, not the storage of conversations.
+- **Not finished.** A management API ([#51](https://github.com/AimTune/converger/issues/51)) and the bot/agent SDKs ([#67](https://github.com/AimTune/converger/issues/67)) are on the [roadmap](roadmap.md). The headless TypeScript client [`@converger/client`](sdk/typescript.md) ([#46](https://github.com/AimTune/converger/issues/46)) and the server-side SDKs for Python, Go and Elixir ([Client SDKs](sdk/server-sdks.md), [#47](https://github.com/AimTune/converger/issues/47)) exist.
 
 ## Where to go next
 
@@ -101,5 +101,5 @@ Broadway (`Converger.Pipeline.Broadway`) and inline (`Converger.Pipeline.Inline`
 ## License
 
 Converger is open source under the [MIT License](https://github.com/AimTune/converger/blob/main/LICENSE)
-([ADR-0026](adr/0026-mit-license-and-community-health-files.md)). Contributions are welcome: see
+([ADR-0073](adr/0073-mit-license-and-community-health-files.md)). Contributions are welcome: see
 [Contributing](contributing.md).

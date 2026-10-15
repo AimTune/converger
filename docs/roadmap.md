@@ -12,17 +12,17 @@ Converger connects communication channels to each other. Every channel is inboun
 
 | Phase | Epic | Focus | Status |
 | --- | --- | --- | --- |
-| 1 | [#57 v2.5 Production Hardening](https://github.com/AimTune/converger/issues/57) | No data loss, security baseline, CI | All 23 tasks closed. The epic stays open for its exit criteria (chaos test). |
-| 2 | [#58 v3.0 WebSocket-first & Converger Protocol v1](https://github.com/AimTune/converger/issues/58) | Duplex WS adapter, acks, receipts, spec, one socket stack | Open |
-| 3 | [#59 v3.1 Scale & Reliability](https://github.com/AimTune/converger/issues/59) | Clustering, partitioning, breakers, DLQ, SLO telemetry | Open |
-| 4 | [#60 v3.2 Channel Expansion](https://github.com/AimTune/converger/issues/60) | Adapter v2, conditional routing, new channels | Open |
-| 5 | [#61 v3.3 Developer Experience](https://github.com/AimTune/converger/issues/61) | OpenAPI, SDKs, docs, management API, UI | Open |
+| 1 | [#57 v2.5 Production Hardening](https://github.com/AimTune/converger/issues/57) | No data loss, security baseline, CI | Done |
+| 2 | [#58 v3.0 WebSocket-first & Converger Protocol v1](https://github.com/AimTune/converger/issues/58) | Duplex WS adapter, acks, receipts, spec, one socket stack | All tasks closed; the epic is open for its exit criteria |
+| 3 | [#59 v3.1 Scale & Reliability](https://github.com/AimTune/converger/issues/59) | Clustering, partitioning, breakers, DLQ, SLO telemetry | All tasks closed; the epic is open for its exit criteria |
+| 4 | [#60 v3.2 Channel Expansion](https://github.com/AimTune/converger/issues/60) | Adapter v2, conditional routing, new channels | Done |
+| 5 | [#61 v3.3 Developer Experience](https://github.com/AimTune/converger/issues/61) | OpenAPI, SDKs, docs, management API, UI | Open: #48, then the SDK release (#187, #188) |
 
-Phases 3 to 5 can overlap now that phase 1 is done. Phase 2 should land before the SDKs in phase 5, because the SDKs implement the protocol.
+Phases 1 and 4 are done, and every task of phases 2 and 3 is closed. What remains is #48 and, last of all, the first release of the SDK packages (#187) and publishing them from CI (#188).
 
 ## Done: v2.5 Production Hardening (#57)
 
-Every task of the hardening epic is closed. The goal was that no message can be lost, no tenant can read another tenant's secrets, and the hot paths are bounded. The decisions behind these fixes are recorded as [ADRs](adr/index.md).
+The hardening epic is closed. The goal was that no message can be lost, no tenant can read another tenant's secrets, and the hot paths are bounded. The decisions behind these fixes are recorded as [ADRs](adr/index.md).
 
 ### Data loss
 
@@ -72,27 +72,27 @@ Every task of the hardening epic is closed. The goal was that no message can be 
 | [#54](https://github.com/AimTune/converger/issues/54) | CI with format, warnings-as-errors, Credo, Dialyzer, Sobelow, dependency audit, tests on Postgres and coverage ([ADR-0021](adr/0021-ci-quality-gates-and-lf-line-endings.md)). |
 | [#56](https://github.com/AimTune/converger/issues/56) | Dependency and platform upgrades: LiveView, Hammer 7, Graph API version, Oban Web, OTEL config, Elixir/OTP alignment ([ADR-0023](adr/0023-platform-and-dependency-baseline.md)). |
 
-The remaining exit criterion is a chaos test (killing a node under load) that shows zero acknowledged messages lost across REST and WebSocket.
+The exit criterion was a chaos test: killing a node under load loses no acknowledged message across REST and WebSocket. See [Chaos testing](chaos.md).
 
-## Next: v3.0 WebSocket-first & Converger Protocol v1 (#58)
+## v3.0 WebSocket-first & Converger Protocol v1 (#58)
 
 WebSocket becomes the primary channel, with a documented wire protocol that any language can implement. A WebSocket channel can be the source or target of routing rules, delivers with acks, resumes exactly from a watermark, and exposes receipts, typing and presence. The two existing socket stacks collapse into one. The design principles: persist first, then push; client ids plus acks give at-least-once send with exactly-once persistence; the protocol comes before the SDKs; and everything is bounded.
 
 | Issue | Title | State |
 | --- | --- | --- |
-| [#63](https://github.com/AimTune/converger/issues/63) | Converger Protocol v1 must be wire-compatible with mekik/1 (hello/welcome, seq envelope, chativa frame vocabulary) | Open ([ADR-0024](adr/0024-converger-protocol-v1-as-superset-of-mekik-1.md)) |
-| [#21](https://github.com/AimTune/converger/issues/21) | Specify the Converger Protocol v1 (WebSocket wire protocol) | Open |
-| [#22](https://github.com/AimTune/converger/issues/22) | Make `websocket` a first-class duplex channel adapter (deliver to sockets, offline buffering, fan-out target) | Open |
-| [#23](https://github.com/AimTune/converger/issues/23) | Unify `UserSocket`/`ConversationChannel` and `ConvergerSocket`/`ConvergerChannel` into one protocol implementation | Open |
-| [#24](https://github.com/AimTune/converger/issues/24) | Client-side message ids with server acks over WebSocket (at-least-once send, exactly-once persistence) | Open |
-| [#25](https://github.com/AimTune/converger/issues/25) | Push delivery/read receipts, typing indicators and presence to WebSocket clients | Open |
-| [#26](https://github.com/AimTune/converger/issues/26) | Raw WebSocket endpoint (non-Phoenix framing), optional MessagePack encoding, and SSE/long-poll fallback | Open |
-| [#27](https://github.com/AimTune/converger/issues/27) | WebSocket connection limits, backpressure, socket draining and graceful shutdown | Open |
-| [#28](https://github.com/AimTune/converger/issues/28) | Rich activity model: activity types, attachment schema, reactions, edits/deletes, reply threading | Open |
-| [#68](https://github.com/AimTune/converger/issues/68) | Rich message vocabulary compatible with chativa: buttons, quick-reply, cards, carousel, image/file, GenUI and tool traces as first-class activity payloads with per-channel downgrade | Open |
-| [#64](https://github.com/AimTune/converger/issues/64) | mekik integration: agent-side multiplexed socket, `mekik` channel adapter, and seq authority between Converger and mekik | Open |
-| [#65](https://github.com/AimTune/converger/issues/65) | Chativa as the reference WebSocket client: verify `connector-mekik` against Converger, add hub extras (delivery status, upload, history, multi-conversation) | Open |
-| [#67](https://github.com/AimTune/converger/issues/67) | Agent SDK and bot-side adapters: channel-scoped agent sockets, `@converger/agent` SDKs in several languages, first-party LangServe/LangChain and mekik adapters | Open |
+| [#63](https://github.com/AimTune/converger/issues/63) | Converger Protocol v1 must be wire-compatible with mekik/1 (hello/welcome, seq envelope, chativa frame vocabulary) | Done ([Protocol v1](protocol/v1.md), [ADR-0024](adr/0024-converger-protocol-v1-as-superset-of-mekik-1.md), [ADR-0068](adr/0068-integer-seq-watermarks-on-every-surface.md)) |
+| [#21](https://github.com/AimTune/converger/issues/21) | Specify the Converger Protocol v1 (WebSocket wire protocol) | Done ([Protocol v1](protocol/v1.md), [Message vocabulary](protocol/messages.md)) |
+| [#22](https://github.com/AimTune/converger/issues/22) | Make `websocket` a first-class duplex channel adapter (deliver to sockets, offline buffering, fan-out target) | Done ([WebSocket channel](channels/websocket.md), [ADR-0033](adr/0033-websocket-channel-adapter-delivery.md)) |
+| [#23](https://github.com/AimTune/converger/issues/23) | Unify `UserSocket`/`ConversationChannel` and `ConvergerSocket`/`ConvergerChannel` into one protocol implementation | Done ([ADR-0026](adr/0026-one-client-socket-stack-and-shape-checked-legacy-tokens.md)) |
+| [#24](https://github.com/AimTune/converger/issues/24) | Client-side message ids with server acks over WebSocket (at-least-once send, exactly-once persistence) | Done ([ADR-0029](adr/0029-websocket-sends-acked-on-the-phoenix-binding.md)) |
+| [#25](https://github.com/AimTune/converger/issues/25) | Push delivery/read receipts, typing indicators and presence to WebSocket clients | Done ([ADR-0032](adr/0032-transient-conversation-signals.md)) |
+| [#26](https://github.com/AimTune/converger/issues/26) | Raw WebSocket endpoint (non-Phoenix framing), optional MessagePack encoding, and SSE/long-poll fallback | Done ([ADR-0030](adr/0030-native-websocket-endpoint-and-fallback-transports.md), [ADR-0035](adr/0035-native-transports-share-signals-limits-and-draining.md)) |
+| [#27](https://github.com/AimTune/converger/issues/27) | WebSocket connection limits, backpressure, socket draining and graceful shutdown | Done ([WebSocket limits](operations/websocket-limits.md), [ADR-0027](adr/0027-websocket-limits-backpressure-and-draining.md)) |
+| [#28](https://github.com/AimTune/converger/issues/28) | Rich activity model: activity types, attachment schema, reactions, edits/deletes, reply threading | Done ([ADR-0036](adr/0036-rich-activity-model.md)) |
+| [#68](https://github.com/AimTune/converger/issues/68) | Rich message vocabulary compatible with chativa: buttons, quick-reply, cards, carousel, image/file, GenUI and tool traces as first-class activity payloads with per-channel downgrade | Done ([Message vocabulary](protocol/messages.md), [ADR-0062](adr/0062-typed-message-payloads-on-message-activities.md), [ADR-0064](adr/0064-per-channel-rendering-of-typed-messages-and-normalised-answers.md)) |
+| [#64](https://github.com/AimTune/converger/issues/64) | mekik integration: agent-side multiplexed socket, `mekik` channel adapter, and seq authority between Converger and mekik | Done ([mekik channel](channels/mekik.md), [ADR-0063](adr/0063-channel-scoped-agent-sockets-and-the-bot-relay.md), [ADR-0066](adr/0066-mekik-channel-adapter-mode-a.md)) |
+| [#65](https://github.com/AimTune/converger/issues/65) | Chativa as the reference WebSocket client: verify `connector-mekik` against Converger, add hub extras (delivery status, upload, history, multi-conversation) | Done (Converger side, [ADR-0065](adr/0065-chativa-as-reference-client-and-history-cursor.md); the client side is open in [chativa#86](https://github.com/AimTune/chativa/issues/86)) |
+| [#67](https://github.com/AimTune/converger/issues/67) | Agent SDK and bot-side adapters: channel-scoped agent sockets, `@converger/agent` SDKs in several languages, first-party LangServe/LangChain and mekik adapters | Done ([Agent SDKs](sdk/agent.md), [ADR-0067](adr/0067-agent-sdk-api-and-wire-mapping.md), [ADR-0069](adr/0069-agent-group-eligibility-and-takeover.md)); the first npm and PyPI release is [#187](https://github.com/AimTune/converger/issues/187) |
 
 Suggested order: #63 and #68 feed the spec, then #21, then #22 with #23, #24, #25, #27, #28, and finally #26. Exit criteria: a WhatsApp to WebSocket agent console bridge works end to end with receipts; a Python client written only from the spec passes the conformance suite; a rolling restart under 10k connections loses no acknowledged message.
 
@@ -102,32 +102,32 @@ Run Converger as a cluster that meets the PRD targets (10M messages per day, 1k+
 
 | Issue | Title | State |
 | --- | --- | --- |
-| [#29](https://github.com/AimTune/converger/issues/29) | Multi-node clustering: libcluster strategies, cross-node verification, health/readiness endpoints, k8s manifests | Open |
-| [#33](https://github.com/AimTune/converger/issues/33) | Delivery and pipeline telemetry, Grafana dashboards and alert rules (SLO instrumentation) | Open |
-| [#31](https://github.com/AimTune/converger/issues/31) | Per-channel circuit breaker, provider rate limiting and tenant-fair queueing | Open |
-| [#32](https://github.com/AimTune/converger/issues/32) | Dead-letter queue with inspection and replay (API + admin UI) | Open |
-| [#30](https://github.com/AimTune/converger/issues/30) | Table partitioning and retention for `activities` and `deliveries`; archival to object storage | Open |
-| [#35](https://github.com/AimTune/converger/issues/35) | Graceful degradation under database pressure: pool sizing, timeouts, bulkheads, readiness flip | Open |
-| [#66](https://github.com/AimTune/converger/issues/66) | Pluggable event backbone: Elixir-native (PubSub + Oban) by default, Kafka/NATS/RabbitMQ selectable, with a published benchmark matrix | Open |
-| [#34](https://github.com/AimTune/converger/issues/34) | Load testing harness (k6 WebSocket + REST scenarios) with nightly CI run and published baselines | Open |
+| [#29](https://github.com/AimTune/converger/issues/29) | Multi-node clustering: libcluster strategies, cross-node verification, health/readiness endpoints, k8s manifests | Done (k8s manifests validated statically, not yet against a live cluster) |
+| [#33](https://github.com/AimTune/converger/issues/33) | Delivery and pipeline telemetry, Grafana dashboards and alert rules (SLO instrumentation) | Done |
+| [#31](https://github.com/AimTune/converger/issues/31) | Per-channel circuit breaker, provider rate limiting and tenant-fair queueing | Done |
+| [#32](https://github.com/AimTune/converger/issues/32) | Dead-letter queue with inspection and replay (API + admin UI) | Done |
+| [#30](https://github.com/AimTune/converger/issues/30) | Table partitioning and retention for `activities` and `deliveries`; archival to object storage | Done ([Retention](operations/retention.md), [ADR-0034](adr/0034-monthly-partitioning-and-per-tenant-retention.md)) |
+| [#35](https://github.com/AimTune/converger/issues/35) | Graceful degradation under database pressure: pool sizing, timeouts, bulkheads, readiness flip | Done ([ADR-0044](adr/0044-bulkheaded-pools-and-graceful-degradation-under-database-pressure.md)) |
+| [#66](https://github.com/AimTune/converger/issues/66) | Pluggable event backbone: Elixir-native (PubSub + Oban) by default, Kafka/NATS/RabbitMQ selectable, with a published benchmark matrix | Done, see [Event backbone](architecture/event-backbone.md) and [Backbone matrix](benchmarks/backbone-matrix.md) |
+| [#34](https://github.com/AimTune/converger/issues/34) | Load testing harness (k6 WebSocket + REST scenarios) with nightly CI run and published baselines | Done (Kafka column with #66; full re-run after #35), see [Benchmarks](benchmarks/index.md) |
 
 Exit criteria: a nightly load test publishes p95 latency and connection counts with enforced thresholds; one dead channel does not degrade other tenants; partition drop and archive are verified on a 100M-row dataset.
 
-## v3.2 Channel Expansion (#60)
+## Done: v3.2 Channel Expansion (#60)
 
 Turn the adapter layer into a real plugin system and ship the channels integrators ask for most. Conditional routing with reply-back makes multi-channel conversations usable.
 
 | Issue | Title | State |
 | --- | --- | --- |
-| [#36](https://github.com/AimTune/converger/issues/36) | Adapter behaviour v2: `capabilities/0`, `config_schema/0`, provider signature verification, typing, health probe | Open |
-| [#43](https://github.com/AimTune/converger/issues/43) | Conditional routing rules: filters, priority, reply-back routing, per-rule transformations, dry-run | Open |
-| [#37](https://github.com/AimTune/converger/issues/37) | WhatsApp: media messages, template (HSM) messages, interactive messages and inbound media download | Open |
-| [#38](https://github.com/AimTune/converger/issues/38) | Telegram Bot adapter (duplex) | Open |
-| [#39](https://github.com/AimTune/converger/issues/39) | Slack adapter (Events API inbound, Web API outbound, signing secret verification) | Open |
-| [#40](https://github.com/AimTune/converger/issues/40) | Email adapter (outbound via Swoosh, inbound via provider parse webhooks) | Open |
-| [#41](https://github.com/AimTune/converger/issues/41) | SMS adapters (Twilio, Vonage) with delivery receipts | Open |
-| [#42](https://github.com/AimTune/converger/issues/42) | Message broker channel adapters: Kafka, RabbitMQ, NATS, Redis Streams as first-class channels | Open |
-| [#44](https://github.com/AimTune/converger/issues/44) | Backlog of additional adapters: Discord, Microsoft Teams (Bot Framework), Facebook Messenger, Instagram, Viber, MQTT, gRPC streaming | Open |
+| [#36](https://github.com/AimTune/converger/issues/36) | Adapter behaviour v2: `capabilities/0`, `config_schema/0`, provider signature verification, typing, health probe | Done ([Writing an adapter](channels/writing-an-adapter.md), [ADR-0038](adr/0038-adapter-behaviour-v2-and-config-driven-registry.md)) |
+| [#43](https://github.com/AimTune/converger/issues/43) | Conditional routing rules: filters, priority, reply-back routing, per-rule transformations, dry-run | Done ([Routing rules](concepts/routing-rules.md), [ADR-0046](adr/0046-conditional-routing-rules-and-reply-back-routing.md)) |
+| [#37](https://github.com/AimTune/converger/issues/37) | WhatsApp: media messages, template (HSM) messages, interactive messages and inbound media download | Done ([WhatsApp](channels/whatsapp.md), [ADR-0039](adr/0039-whatsapp-rich-outbound-and-inbound-media-download.md)) |
+| [#38](https://github.com/AimTune/converger/issues/38) | Telegram Bot adapter (duplex) | Done ([Telegram](channels/telegram.md), [ADR-0041](adr/0041-telegram-adapter-chat-scoped-ids-and-stored-media.md)) |
+| [#39](https://github.com/AimTune/converger/issues/39) | Slack adapter (Events API inbound, Web API outbound, signing secret verification) | Done ([Slack](channels/slack.md), [ADR-0040](adr/0040-slack-adapter-message-refs-conversation-scopes-and-in-band-challenge.md)) |
+| [#40](https://github.com/AimTune/converger/issues/40) | Email adapter (outbound via Swoosh, inbound via provider parse webhooks) | Done ([Email](channels/email.md), [ADR-0042](adr/0042-email-adapter-threading-by-message-id-and-provider-webhooks.md)) |
+| [#41](https://github.com/AimTune/converger/issues/41) | SMS adapters (Twilio, Vonage) with delivery receipts | Done ([SMS](channels/sms.md), [ADR-0045](adr/0045-sms-adapters-opt-out-flag-and-twilio-signature-urls.md)) |
+| [#42](https://github.com/AimTune/converger/issues/42) | Message broker channel adapters: Kafka, RabbitMQ, NATS, Redis Streams as first-class channels | Done ([Broker channels](channels/brokers.md): Kafka, RabbitMQ, [NATS JetStream](channels/nats.md), [Redis Streams](channels/redis-streams.md); [ADR-0047](adr/0047-broker-channels-kafka-and-rabbitmq.md), [ADR-0054](adr/0054-nats-and-redis-streams-channels.md)) |
+| [#44](https://github.com/AimTune/converger/issues/44) | Backlog of additional adapters: Discord, Microsoft Teams (Bot Framework), Facebook Messenger, Instagram, Viber, MQTT, gRPC streaming | Done: Discord, Teams, Messenger, Instagram, Viber and HTTP pull ([Channels](channels/overview.md#planned-adapters), [ADR-0048](adr/0048-additional-adapters-shared-meta-code-bot-framework-jwt-and-pull-outbox.md)); MQTT and Discord Gateway inbound ([MQTT](channels/mqtt.md), [Discord](channels/discord.md#gateway-mode), [ADR-0055](adr/0055-mqtt-channel-and-discord-gateway.md)); gRPC streaming ([Protocol v1 over gRPC](protocol/grpc.md), [ADR-0056](adr/0056-grpc-streaming-transport.md)) |
 
 Exit criteria: adding an adapter touches only the adapter module and one config line, and at least three new duplex channels reach production quality with fixture-based tests. Adapter requests go to [#44](https://github.com/AimTune/converger/issues/44).
 
@@ -137,15 +137,17 @@ Make Converger adoptable by someone who has never read its source: a license, a 
 
 | Issue | Title | State |
 | --- | --- | --- |
-| [#48](https://github.com/AimTune/converger/issues/48) | Documentation site and OSS hygiene: guides, adapter authoring, deployment, LICENSE, CONTRIBUTING, SECURITY, templates, CHANGELOG | Done: docs site ([ADR-0025](adr/0025-docusaurus-site-and-docs-with-every-change.md)); MIT license, `SECURITY.md`, code of conduct, issue forms and changelog ([ADR-0026](adr/0026-mit-license-and-community-health-files.md)) |
-| [#45](https://github.com/AimTune/converger/issues/45) | OpenAPI 3.1 specification, Swagger UI, consistent error envelope and API versioning policy | Open |
-| [#46](https://github.com/AimTune/converger/issues/46) | TypeScript SDK (`@converger/client`) implementing Protocol v1 with reconnect, watermark resume, outbox and token refresh | Open |
-| [#47](https://github.com/AimTune/converger/issues/47) | Server-side SDKs: Python and Go (REST + WebSocket), Elixir client library, signature verification helpers | Open |
-| [#51](https://github.com/AimTune/converger/issues/51) | Management API: tenants, channels, routing rules, users and secret rotation via REST with scoped API keys | Open |
-| [#52](https://github.com/AimTune/converger/issues/52) | Auth hardening: token revocation, refresh rotation, scoped tokens, admin 2FA, password reset, session expiry | Open |
-| [#49](https://github.com/AimTune/converger/issues/49) | Platform event webhooks: tenant-level subscriptions for activity, delivery, conversation and channel events (signed, retried) | Open |
-| [#50](https://github.com/AimTune/converger/issues/50) | Admin panel and tenant portal modernization: Tailwind/daisyUI, pagination and search, channel test-send, key rotation, deliveries view, live tail | Open |
-| [#53](https://github.com/AimTune/converger/issues/53) | Windows developer setup: `bcrypt_elixir` requires MSVC `nmake`; document or offer a pure-Elixir hashing option | Open (workaround in [Getting started](getting-started.md#per-os-notes)) |
+| [#48](https://github.com/AimTune/converger/issues/48) | Documentation site and OSS hygiene: guides, adapter authoring, deployment, LICENSE, CONTRIBUTING, SECURITY, templates, CHANGELOG | Open (this site, [ADR-0025](adr/0025-docusaurus-site-and-docs-with-every-change.md)) |
+| [#45](https://github.com/AimTune/converger/issues/45) | OpenAPI 3.1 specification, Swagger UI, consistent error envelope and API versioning policy | Done ([OpenAPI](api/openapi.md), [ADR-0050](adr/0050-openapi-spec-error-envelope-and-api-versioning.md)) |
+| [#46](https://github.com/AimTune/converger/issues/46) | TypeScript SDK (`@converger/client`) implementing Protocol v1 with reconnect, watermark resume, outbox and token refresh | Done ([TypeScript SDK](sdk/typescript.md), [ADR-0051](adr/0051-typescript-sdk-transport-abstraction-and-outbox.md)) |
+| [#47](https://github.com/AimTune/converger/issues/47) | Server-side SDKs: Python and Go (REST + WebSocket), Elixir client library, signature verification helpers | Done ([Server-side SDKs](sdk/server-sdks.md), [ADR-0052](adr/0052-server-side-sdks-in-the-monorepo-with-a-shared-conformance-suite.md)) |
+| [#51](https://github.com/AimTune/converger/issues/51) | Management API: tenants, channels, routing rules, users and secret rotation via REST with scoped API keys | Done ([Management API](api/management-api.md), [ADR-0061](adr/0061-scoped-api-keys-and-the-management-api.md)) |
+| [#52](https://github.com/AimTune/converger/issues/52) | Auth hardening: token revocation, refresh rotation, scoped tokens, admin 2FA, password reset, session expiry | Done ([Client tokens](security/client-tokens.md), [Security model](security/overview.md), [ADR-0058](adr/0058-server-side-sessions-totp-2fa-and-password-reset-for-admin-and-portal.md), [ADR-0059](adr/0059-client-token-keys-revocation-rotation-and-permissions.md)) |
+| [#49](https://github.com/AimTune/converger/issues/49) | Platform event webhooks: tenant-level subscriptions for activity, delivery, conversation and channel events (signed, retried) | Done ([Platform event webhooks](platform-webhooks.md), [ADR-0053](adr/0053-platform-event-webhooks.md)) |
+| [#50](https://github.com/AimTune/converger/issues/50) | Admin panel and tenant portal modernization: Tailwind/daisyUI, pagination and search, channel test-send, key rotation, deliveries view, live tail | Done ([Admin panel and tenant portal](admin-ui.md), [ADR-0060](adr/0060-tailwind-daisyui-admin-ui-without-node.md)) |
+| [#53](https://github.com/AimTune/converger/issues/53) | Windows developer setup: `bcrypt_elixir` requires MSVC `nmake`; document or offer a pure-Elixir hashing option | Done ([Getting started](getting-started.md#per-os-notes), [dev container](contributing.md#dev-container), [ADR-0057](adr/0057-pluggable-password-hasher-and-dev-container.md)) |
+| [#187](https://github.com/AimTune/converger/issues/187) | First release of the SDK packages to npm and PyPI (manual, last on the roadmap) | Open (after #48's licence) |
+| [#188](https://github.com/AimTune/converger/issues/188) | Publish SDK releases from CI: npm token/OIDC and PyPI trusted publisher | Open (after #187) |
 
 Exit criteria: a new integrator provisions a tenant and a channel through the API, embeds the TypeScript SDK and exchanges messages using only the docs; the docs site is published from CI; the GitHub community profile is complete.
 

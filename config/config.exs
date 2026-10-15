@@ -18,6 +18,13 @@ config :converger,
   # Allowed clock skew for timestamped `x-converger-signature` inbound signatures
   inbound_signature_tolerance_seconds: 300
 
+# Hasher for new admin/tenant user passwords (Converger.Accounts.PasswordHasher,
+# ADR-0057). CONVERGER_PASSWORD_HASHER=pbkdf2 is for machines without a C
+# toolchain: mix.exs then leaves out the bcrypt_elixir NIF. Default: bcrypt.
+config :converger,
+       :password_hasher,
+       if(System.get_env("CONVERGER_PASSWORD_HASHER") == "pbkdf2", do: Pbkdf2, else: Bcrypt)
+
 # Page sizes for every list query (see Converger.Pagination). Request-supplied
 # `limit` params are clamped to the max; omitted/invalid ones use the default.
 config :converger, :pagination,
@@ -33,6 +40,56 @@ config :converger, :pagination,
   # (tenants, channels, routing rules, admin users)
   lookup_limit: 1000
 
+# Converger Protocol v1 transports: the native WebSocket (/socket/converger/v1)
+# and the Server-Sent Events stream (see ConvergerWeb.Protocol). The replay
+# batch is :ws_replay_limit above; frame size, rate and draining limits are the
+# shared client WebSocket limits (config :converger, :websocket, below).
+config :converger, ConvergerWeb.Protocol,
+  # outbound silence before the server sends a `heartbeat`
+  heartbeat_interval_ms: 30_000,
+  # inbound silence before the socket is closed with 4408
+  idle_timeout_ms: 60_000,
+  # frames replayed per handshake or `sync`; beyond it `replayTruncated`
+  replay_max: 10_000,
+  # a new agent group member (hello.group) serves the turns committed this long
+  # after it joined, so that every node knows of it first (ADR-0069)
+  group_settle_ms: 1_000
+
+# Converger Protocol v1 over gRPC (ConvergerWeb.GRPC, ADR-0056): a bidirectional
+# stream per connection on its own port, off unless GRPC_ENABLED=true
+# (config/runtime.exs). TLS when both certfile and keyfile are set.
+config :converger, ConvergerWeb.GRPC,
+  enabled: false,
+  port: 50_051,
+  certfile: nil,
+  keyfile: nil
+
+# API documentation routes (/api/docs, /api/openapi.json, ADR-0050): off
+# unless enabled per environment (dev.exs, test.exs) or with API_DOCS_ENABLED.
+config :converger, :api_docs, enabled: false
+
+# Tokens travel in query strings (`?token=` on sockets and the SSE stream):
+# keep them out of request logs.
+config :phoenix, :filter_parameters, ["password", "token", "secret"]
+
+# Dead-letter replay and export (see Converger.Deliveries.retry_dead_letters/3
+# and ConvergerWeb.DeliveryExportController).
+config :converger, :dead_letters,
+  # Max deliveries replayed by one bulk retry call
+  bulk_retry_limit: 10_000,
+  # Max rows in one CSV export
+  export_limit: 10_000
+
+# Channel adapters registered in addition to the built-in ones (echo, webhook,
+# websocket, whatsapp_meta, whatsapp_infobip), see Converger.Channels.Adapter.
+# Each module `use Converger.Channels.Adapter, type: "..."`; one with a
+# built-in type replaces the built-in. Checked at boot.
+config :converger, :adapters, []
+
+# Channel health checks (Converger.Channels.Health). A channel without
+# deliveries in the window is probed with its adapter's health_probe/1.
+config :converger, :channel_health, probe_idle_channels: true
+
 # Serialize migration runs with a session-level Postgres advisory lock instead
 # of the default table lock. Concurrent `Converger.Release.migrate/0` calls
 # (e.g. several replicas or init containers starting at once) wait for the
@@ -42,7 +99,31 @@ config :converger, :pagination,
 # Requires a session-mode connection (not PgBouncer transaction pooling).
 config :converger, Converger.Repo,
   migration_lock: :pg_advisory_lock,
-  migration_advisory_lock_retry_interval_ms: 1_000
+  migration_advisory_lock_retry_interval_ms: 1_000,
+  # Interactive pool (HTTP, WebSocket, LiveView). A checkout that waits longer
+  # than queue_target for a whole queue_interval fails fast with
+  # DBConnection.ConnectionError, answered with 503 (ConvergerWeb.Plugs.
+  # DbUnavailable). See docs/operations/database.md.
+  queue_target: 50,
+  queue_interval: 1_000,
+  timeout: 15_000
+
+# Bulkhead: Oban jobs (and Oban itself) use a second pool of the same repo, so
+# a burst of background work cannot starve requests (Converger.Repo.Pools).
+# `false` keeps a single shared pool; config/dev.exs and config/runtime.exs
+# enable it.
+config :converger, Converger.Repo.Pools, background: false
+
+# Behaviour under database pressure (Converger.Repo.Pressure):
+#   * retry_after_ms - base of the Retry-After / retryAfterMs hint (jittered
+#     up to twice the value) sent when the database is unavailable;
+#   * queue_window_ms - window of the average pool wait time;
+#   * degraded_queue_ms - readiness reports `degraded` (503) while the average
+#     wait of the interactive pool is at least this long; 0 disables.
+config :converger, Converger.Repo.Pressure,
+  retry_after_ms: 1_000,
+  queue_window_ms: 5_000,
+  degraded_queue_ms: 200
 
 # File uploads / attachments. Backends, CDN options and env vars are
 # documented in docs/storage.md; production values come from runtime.exs.
@@ -64,7 +145,71 @@ config :converger, ConvergerWeb.Endpoint,
     layout: false
   ],
   pubsub_server: Converger.PubSub,
-  live_view: [signing_salt: "a84R5GFm"]
+  live_view: [signing_salt: "a84R5GFm"],
+  # An oversize WebSocket frame is answered with close code 1009 by Bandit and
+  # reported by ConvergerWeb.SocketGuard; don't log it as a crash.
+  # HTTP/2 is off: the endpoint only needs HTTP/1.1 (REST, SSE, WebSocket), and
+  # Bandit's HTTP/2 stack is affected by EEF-CVE-2026-105659 (see mix.exs). The
+  # gRPC transport has its own server and port.
+  http: [
+    websocket_options: [log_protocol_errors: false],
+    http_2_options: [enabled: false]
+  ]
+
+# Delivery/pipeline metrics (ConvergerWeb.Telemetry); METRICS_* env vars in
+# config/runtime.exs. See docs/operations/observability.md.
+config :converger, :metrics,
+  # Add a tenant_id label to the delivery series (cardinality grows with tenants).
+  tenant_label: false,
+  # How often queue depth, dead letters and open circuits are read from the DB.
+  poll_interval_ms: 15_000
+
+# Client WebSocket limits and draining (ConvergerWeb.SocketGuard,
+# ConvergerWeb.Drain); WS_* env vars in config/runtime.exs. See
+# docs/operations/websocket-limits.md.
+config :converger, :websocket,
+  # Frames above this are answered with `payload_too_large` and not processed.
+  max_frame_bytes: 131_072,
+  # Inbound frames per socket per window (heartbeats included); above it
+  # every frame is answered with `rate_limited` and `retryAfterMs`.
+  max_messages: 20,
+  rate_window_ms: 1_000,
+  # Channels one socket may have joined at the same time.
+  max_joins: 50,
+  # Unacked sends (v1 `text` frames) per connection on the Phoenix binding
+  # (`limits.maxInFlight`); more draw `too_many_in_flight`.
+  max_in_flight: 32,
+  # Socket process mailbox lengths: above the first, ephemeral frames
+  # (typing, presence) are dropped; above the second the socket is closed
+  # with 4503 `slow_consumer`.
+  ephemeral_drop_queue_len: 100,
+  slow_consumer_queue_len: 1_000,
+  # `retryAfterMs` in drain and slow-consumer closes is this base plus a
+  # random jitter in 0..reconnect_jitter_ms.
+  reconnect_base_ms: 1_000,
+  reconnect_jitter_ms: 5_000,
+  # On shutdown, readiness reports "draining" and new sockets are refused for
+  # drain_delay_ms (so the load balancer stops routing here) before the
+  # sockets are closed in batches.
+  drain_delay_ms: 5_000,
+  drain_batch_size: 500,
+  drain_batch_interval_ms: 1_000,
+  drain_shutdown_ms: 30_000
+
+# Converger client tokens (ADR-0059, docs/security/client-tokens.md); TOKEN_*
+# env vars in config/runtime.exs. Signing keys (`:token_signing_keys`, a list
+# of {kid, secret}, signing key first) default to secret_key_base under the kid
+# "default". A refreshed token stays usable for the rotation grace period.
+config :converger, :token_rotation_grace_seconds, 30
+# Accept tokens without a kid header (issued before #52, signed with
+# secret_key_base). Turn off once they have expired.
+config :converger, :token_accept_unkeyed, true
+# Each node re-reads recent revocations this often, in case a broadcast was missed.
+config :converger, Converger.Auth.RevocationCache, sync_interval_ms: 60_000
+
+# The hard frame cap is applied by Bandit when the socket is mounted, so it is
+# read at compile time; frames above it close the socket with 1009.
+config :converger, :websocket_max_frame_size, 1_048_576
 
 # Configures the mailer
 #
@@ -74,6 +219,45 @@ config :converger, ConvergerWeb.Endpoint,
 # For production it's recommended to configure a different adapter
 # at the `config/runtime.exs`.
 config :converger, Converger.Mailer, adapter: Swoosh.Adapters.Local
+
+# Admin/portal assets (ADR-0060): `mix assets.build` / `mix assets.deploy`
+# download these exact versions of the standalone binaries on first use.
+config :esbuild,
+  version: "0.25.4",
+  converger: [
+    args:
+      ~w(js/app.js --bundle --target=es2022 --outdir=../priv/static/assets/js --external:/fonts/* --external:/images/* --alias:@=.),
+    cd: Path.expand("../assets", __DIR__),
+    env: %{"NODE_PATH" => [Path.expand("../deps", __DIR__), Mix.Project.build_path()]}
+  ]
+
+config :tailwind,
+  version: "4.3.3",
+  converger: [
+    args: ~w(
+      --input=assets/css/app.css
+      --output=priv/static/assets/css/app.css
+    ),
+    cd: Path.expand("..", __DIR__),
+    env: %{"NODE_PATH" => [Path.expand("../deps", __DIR__), Mix.Project.build_path()]}
+  ]
+
+# Admin / tenant portal account security (issue #52, ADR-0058); env overrides
+# in config/runtime.exs, see docs/operations/configuration.md.
+#   * sessions: server-side sessions end max_age_seconds after login, or
+#     idle_timeout_seconds after the last request (Converger.Accounts.Sessions);
+#   * password_min_length: Converger.Accounts.PasswordPolicy;
+#   * require_2fa_roles: admin roles that must enable TOTP 2FA before using
+#     the admin panel;
+#   * mailer_from: sender of account emails (password reset).
+config :converger, :sessions,
+  max_age_seconds: 43_200,
+  idle_timeout_seconds: 1_800
+
+config :converger,
+  password_min_length: 12,
+  require_2fa_roles: ["super_admin"],
+  mailer_from: {"Converger", "noreply@converger.local"}
 
 # Configures Elixir's Logger
 config :logger, :default_formatter,
@@ -98,17 +282,96 @@ config :converger, Oban,
     {Oban.Plugins.Cron,
      crontab: [
        {"0 * * * *", Converger.Workers.ConversationExpirationWorker},
-       {"*/5 * * * *", Converger.Workers.ChannelHealthWorker}
+       {"*/5 * * * *", Converger.Workers.ChannelHealthWorker},
+       # Data lifecycle (issue #30, docs/operations/retention.md): create the
+       # next months' partitions daily, prune health checks and audit logs
+       # daily, archive and drop expired activities/deliveries monthly.
+       {"15 0 * * *", Converger.Workers.PartitionMaintenanceWorker},
+       {"30 1 * * *", Converger.Workers.PruneWorker},
+       {"0 2 1 * *", Converger.Workers.RetentionWorker},
+       # Expired admin/portal sessions and password reset tokens (ADR-0058)
+       {"*/10 * * * *", Converger.Workers.SessionPruneWorker}
      ]}
   ],
-  queues: [default: 10, deliveries: 20]
+  # Delivery queues per tenant tier (tenants.tier), see Converger.Pipeline.Oban.
+  # `maintenance`: partitions, retention, pruning and purge jobs (issue #30).
+  # `webhooks`: platform event webhooks (issue #49, Converger.Webhooks).
+  # `backbone`: Native backbone subscriptions and parked broker publishes
+  # and retries (issue #66, Converger.Backbone).
+  queues: [
+    default: 10,
+    deliveries_high: 10,
+    deliveries: 20,
+    deliveries_bulk: 5,
+    maintenance: 1,
+    webhooks: 10,
+    backbone: 10
+  ]
+
+# Monthly partitions of activities and deliveries (Converger.Partitions).
+config :converger, Converger.Partitions,
+  months_ahead: 3,
+  detach_concurrently: true,
+  lock_timeout_ms: 5_000
+
+# Retention windows (Converger.Retention). Per-tenant retention of
+# activities/deliveries is tenants.retention_days (default 365).
+config :converger, Converger.Retention,
+  min_retention_days: 30,
+  health_check_days: 7,
+  audit_log_days: 365,
+  webhook_event_days: 7,
+  # Idempotency receipts of backbone subscriptions (ADR-0070): longer than
+  # any redelivery or dual-publish window.
+  backbone_receipt_days: 7,
+  prune_batch_size: 10_000
+
+# Archive of expired rows (Converger.Archive). storage: nil uses the
+# attachment storage (Converger.Uploads).
+config :converger, Converger.Archive,
+  storage: nil,
+  storage_opts: [],
+  prefix: "archive",
+  part_rows: 50_000
+
+# Platform event webhooks (issue #49, Converger.Webhooks, ADR-0053). Retries
+# use the shared :retry_policy; event rows are pruned after
+# Converger.Retention :webhook_event_days. `enabled: false` stops emitting.
+config :converger, :platform_webhooks,
+  enabled: true,
+  connect_timeout: 5_000,
+  receive_timeout: 10_000,
+  max_response_bytes: 65_536
+
+# Event backbone (issue #66, Converger.Backbone, ADR-0070, docs/deployment.md).
+# One implementation per deployment: Converger.Backbone.Native (Phoenix.PubSub
+# + Oban on Postgres, no extra services), .Kafka, .Nats (JetStream) or
+# .RabbitMQ. config/runtime.exs sets it from BACKBONE.
+config :converger, :backbone, Converger.Backbone.Native
+
+config :converger, Converger.Backbone,
+  # Broker topics/subjects are "<topic_prefix>.activities|deliveries|events".
+  topic_prefix: "converger",
+  # Backbones that also receive every event (dual publish while migrating).
+  mirror: [],
+  # Run this node's broker consumers (BACKBONE_CONSUMERS=false: web-only nodes).
+  consumers: true,
+  # Extra subscriptions every node declares: [{name, topics, handler, opts}].
+  subscriptions: [],
+  # A failing handler on a broker consumer is retried in place, then parked
+  # as an Oban job (queue `backbone`).
+  inline_attempts: 3,
+  inline_backoff_ms: 200,
+  # After a failed publish to a broker, publishes to it are parked at once
+  # for this long (no request waits for the produce timeout again).
+  down_ms: 5_000
 
 # Rate limiting (Hammer 7, see Converger.RateLimit).
 #   backend: :local   - per-node ETS counters (single node)
 #            :cluster - ETS counters replicated between nodes over PubSub
 #   limits:  overrides of the built-in defaults, e.g. %{inbound: {1_000, 1_000}}
 # config/runtime.exs sets the backend from RATE_LIMIT_BACKEND (defaulting to
-# :cluster when DNS_CLUSTER_QUERY is set).
+# :cluster when CLUSTER_STRATEGY enables clustering).
 config :converger, Converger.RateLimit,
   backend: :local,
   sync_interval_ms: 100,

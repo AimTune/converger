@@ -13,12 +13,14 @@ in depth in [Security: client IPs, proxies and admin access](../security.md); th
 
 | Actor | Credential | Where it is checked | Stored as |
 | --- | --- | --- | --- |
-| Operator (admin panel `/admin`) | Email + password, cookie session | `ConvergerWeb.Plugs.AdminAuth` (IP whitelist), `ConvergerWeb.Plugs.Auth` (session), LiveView `on_mount` hooks | `admin_users.password_hash` (bcrypt) |
-| Tenant staff (portal `/portal`) | Tenant name + email + password, cookie session | `ConvergerWeb.Plugs.Auth`, LiveView `on_mount` hooks | `tenant_users.password_hash` (bcrypt) |
-| Tenant backend (server to server) | `x-api-key: cvg_live_...` | `ConvergerWeb.Plugs.TenantAuth` | `tenants.api_key_hash` (SHA-256) |
+| Operator (admin panel `/admin`) | Email + password, plus a TOTP code when 2FA is on; server-side session | `ConvergerWeb.Plugs.AdminAuth` (IP whitelist), `ConvergerWeb.Plugs.Auth` (session), LiveView `on_mount` hooks | `admin_users.password_hash` (bcrypt), `admin_users.totp_secret` (AES-GCM encrypted), `user_sessions.token_hash` (SHA-256) |
+| Tenant staff (portal `/portal`) | Tenant name + email + password, plus a TOTP code when 2FA is on; server-side session | `ConvergerWeb.Plugs.Auth`, LiveView `on_mount` hooks | `tenant_users.password_hash` (bcrypt), `tenant_users.totp_secret` (AES-GCM encrypted), `user_sessions.token_hash` (SHA-256) |
+| Tenant backend (server to server) | `x-api-key: cvg_live_...`: the primary key (every scope) or a scoped key (`read`, `write`, `manage`) | `ConvergerWeb.Plugs.TenantAuth` (authentication and scope) | `tenants.api_key_hash`, `api_keys.key_hash` (SHA-256) |
+| Platform automation (admin API `/api/v1/admin`) | `ADMIN_API_TOKEN` as `Authorization: Bearer ...` | `ConvergerWeb.Plugs.AdminAuth` (IP whitelist), `ConvergerWeb.Plugs.AdminApiAuth` | Environment variable only |
 | Channel integration | Channel secret as `Authorization: Bearer ...` on `POST /api/v1/converger/tokens/generate` | `ConvergerWeb.Plugs.ConvergerAuth` (`mode: :secret`) | `channels.secret` (AES-GCM encrypted) + `channels.secret_hash` (SHA-256, for lookup) |
-| End-user client (widget, SDK) | Converger token (JWT) as Bearer or socket `token` param | `ConvergerWeb.Plugs.ConvergerAuth` (`mode: :token`), `ConvergerWeb.ConvergerSocket` | Not stored (stateless JWT) |
-| Legacy client | Channel token in `x-channel-token`, conversation token on `/socket` | `ConvergerWeb.Plugs.TenantAuth`, `ConvergerWeb.UserSocket` | Not stored (stateless JWT) |
+| End-user client (widget, SDK) | Converger token (JWT) as Bearer or socket `token` param | `ConvergerWeb.Plugs.ConvergerAuth` (`mode: :token`), `ConvergerWeb.ConvergerSocket` | Not stored (JWT); revocations and rotations in `revoked_tokens` ([client tokens](client-tokens.md)) |
+| Backend client on the gRPC transport | Converger token (JWT) as `authorization: Bearer` metadata or `Hello.token` | `ConvergerWeb.Protocol.Session` on `hello` ([Protocol v1 over gRPC](../protocol/grpc.md)) | Not stored (JWT); revocations in `revoked_tokens` |
+| Legacy client (deprecated, see [migrating](../api/migrating-from-legacy.md)) | Channel token in `x-channel-token`, conversation token on `/socket` | `ConvergerWeb.Plugs.TenantAuth`, `ConvergerWeb.UserSocket` | Not stored (stateless JWT) |
 | External provider (WhatsApp, webhook sender) | Request signature over the raw body | `ConvergerWeb.InboundController` + `Converger.Channels.InboundSignature` or the adapter's own scheme | Uses the channel secret / adapter config |
 
 ## Authentication
@@ -27,8 +29,10 @@ in depth in [Security: client IPs, proxies and admin access](../security.md); th
 
 Admin accounts live in `admin_users` with the roles `super_admin`, `admin` and `viewer`
 ([`Converger.Accounts.AdminUser`](https://github.com/AimTune/converger/blob/main/lib/converger/accounts/admin_user.ex)).
-Passwords are hashed with bcrypt (`bcrypt_elixir`, default cost) and must be at least 8 characters.
-`Converger.Accounts.authenticate_admin/2` runs `Bcrypt.no_user_verify/0` when the email is unknown, so response
+Passwords are hashed with bcrypt (`bcrypt_elixir`, default cost) through `Converger.Accounts.PasswordHasher` and
+follow the [password policy](#password-policy). Development builds without a C compiler can use PBKDF2-SHA512
+instead (`CONVERGER_PASSWORD_HASHER=pbkdf2`, [ADR-0057](../adr/0057-pluggable-password-hasher-and-dev-container.md)).
+`Converger.Accounts.authenticate_admin/2` runs `PasswordHasher.no_user_verify/0` when the email is unknown, so response
 time does not reveal whether an account exists.
 
 Every `/admin` route goes through two layers:
@@ -37,7 +41,9 @@ Every `/admin` route goes through two layers:
    `127.0.0.1,::1`) with `403`. The client IP is only taken from `X-Forwarded-For` when the TCP peer is in
    `TRUSTED_PROXIES` (see [../security.md](../security.md)).
 2. The session plugs (`fetch_admin_user`, `require_admin_user`) and the LiveView hook
-   `ConvergerWeb.Live.AuthHooks.ensure_admin_user` require an active admin user in the session.
+   `ConvergerWeb.Live.AuthHooks.ensure_admin_user` require a valid [server-side session](#sessions) of an active
+   admin user. Admins whose role must use [2FA](#two-factor-authentication-totp) and have not enabled it are
+   sent to `/admin/security` first.
 
 There is no default password. The first `super_admin` is created by `Converger.Release.seed_admin/0` (or
 `priv/repo/seeds.exs` in development) from `ADMIN_EMAIL` / `ADMIN_PASSWORD`. When `ADMIN_PASSWORD` is unset a
@@ -55,13 +61,76 @@ Tenant users (`tenant_users`, roles `owner`, `admin`, `member`, `viewer`) sign i
 tenant name, email and password. The portal is not behind the IP whitelist. Email uniqueness is scoped to the
 tenant, and the tenant must be `active`. Authorization inside the portal is role based (viewers are read-only,
 owners and admins manage users).
+Tenant users can enable [2FA](#two-factor-authentication-totp) and [reset a forgotten
+password](#password-reset) like admins; the portal's own password change is on `/portal/security`.
 
 ### Sessions
 
-Both panels use Phoenix cookie sessions (`_converger_key`, signed with `SECRET_KEY_BASE`, `SameSite=Lax`).
-The cookie is signed, not encrypted: it holds only the user id. Sessions are renewed (`configure_session(renew:
-true)`) on login and logout, and the `:browser` pipeline enables CSRF protection (`protect_from_forgery`).
-Sessions have no server-side expiry yet; see [Planned hardening](#planned-hardening).
+Logins are server-side sessions (`user_sessions`, [ADR-0058](../adr/0058-server-side-sessions-totp-2fa-and-password-reset-for-admin-and-portal.md)).
+A login stores a random 32-byte token in the Phoenix cookie session (`_converger_key`, signed with
+`SECRET_KEY_BASE`, `SameSite=Lax`) and only its SHA-256 in the table, with the client IP, user agent, login time
+and last activity. `ConvergerWeb.Plugs.Auth` and the LiveView `on_mount` hooks check on every request and mount
+that the row exists, belongs to an active user and is within:
+
+- the **absolute lifetime** (`SESSION_MAX_AGE_SECONDS`, default 12 hours from login; also the cookie `max_age`),
+- the **idle timeout** (`SESSION_IDLE_TIMEOUT_SECONDS`, default 30 minutes since the last request; `last_seen_at`
+  is updated at most once a minute).
+
+Each LiveView connects with the session's `live_socket_id` (`user_sessions:<id>`). Deleting a session
+broadcasts `disconnect` to it, so open LiveViews close at once. Sessions are deleted on logout, by **Log out
+everywhere** and per-device **Sign out** on `/admin/security` and `/portal/security`, on a password change (all
+but the current one), on a password reset, when the user is deactivated or deleted, and by a `super_admin`
+from the admin users page. `Converger.Workers.SessionPruneWorker` deletes expired rows every 10 minutes and
+disconnects their LiveViews. The cookie session is renewed (`configure_session(renew: true)`) on login and
+logout, and the `:browser` pipeline enables CSRF protection (`protect_from_forgery`).
+
+### Two-factor authentication (TOTP)
+
+Admin and tenant users can turn on TOTP (RFC 6238: 6 digits, 30-second steps, SHA-1, any authenticator app) on
+their security page (`/admin/security`, `/portal/security`). Enrollment stores a random 20-byte secret,
+encrypted at rest like other secrets ([Secrets at rest](#secrets-at-rest)), shows it in base32 together with an
+`otpauth://` URI for manual entry, and turns 2FA on only after a valid code. Turning it off needs a current code
+or the password.
+
+With 2FA on, a correct password only creates a pending login (five minutes, in the cookie session); the session
+is created after `/admin/login/totp` or `/portal/login/totp` accepts a code. Codes of the current and the
+previous step are accepted, and the accepted step is stored (`totp_last_step`) with a conditional update, so a
+code works once, even under concurrent requests. Wrong codes count as failed logins
+([login lockout](#rate-limiting-and-login-lockout)) for the client IP and the account `<type>-2fa:<user id>`.
+
+Admin roles listed in `ADMIN_REQUIRE_2FA_ROLES` (default `super_admin`) must enable 2FA: until they do, every
+admin page redirects to `/admin/security`. Lost authenticator: a `super_admin` resets another admin's 2FA from
+**Admin Users**, a tenant `owner` or `admin` resets a team member's on **Users**, and an operator can reset any
+admin from a release shell:
+
+```bash
+bin/converger eval 'Converger.Release.reset_admin_2fa("admin.com")'
+```
+
+Enabling, disabling and resetting 2FA are audit-logged (`enable_2fa`, `disable_2fa`, `reset_2fa`).
+
+### Password policy
+
+`Converger.Accounts.PasswordPolicy` applies whenever a password is set (account creation, password change,
+reset) for both admins and tenant users:
+
+- at least `PASSWORD_MIN_LENGTH` characters (default 12);
+- at most 72 bytes, the bcrypt input limit (longer passwords would be truncated silently);
+- it must not equal or contain the account's email address.
+
+Existing password hashes are not re-checked: users keep their passwords until they change them.
+
+### Password reset
+
+`/admin/password/reset` (behind the admin IP whitelist) and `/portal/password/reset` (tenant name + email) mail a
+reset link from `MAILER_FROM` through `Converger.Mailer` (`SMTP_*`, see
+[Configuration](../operations/configuration.md#accounts-sessions-and-email)). The form answers the same way
+whether or not an account matches, and requests are rate limited per client IP (`password_reset_ip`, 429) and per
+account (`password_reset_account`; over the limit no mail is sent, the answer does not change). The link carries
+a random 32-byte token (URL-safe base64); only its SHA-256 is stored (`account_tokens`). A link works once, for
+one hour, and only while the account still has the email it was sent to; any password change voids it. A reset
+clears `must_change_password`, ends every session of the user and is audit-logged (`reset_password`). Password
+changes are audit-logged too.
 
 ### Tenant API keys
 
@@ -74,6 +143,21 @@ Rotation (`Converger.Tenants.rotate_api_key/2`) keeps the previous key valid for
 `previous_api_key_expires_at`, so clients can be switched without downtime. Lookups hash the presented key and
 compare digests in the database; inactive tenants are rejected with `401`.
 
+**Scoped keys** (`api_keys`, [ADR-0061](../adr/0061-scoped-api-keys-and-the-management-api.md)) have the same format
+and are stored the same way (SHA-256 `key_hash`, display `prefix`). Each has a subset of the scopes `read`, `write`
+and `manage`, an optional `expires_at`, and a `revoked_at` once revoked (revocation is immediate; the row stays so
+audit entries resolve). `TenantAuth` requires a scope for every action, `read` for `GET` and `write` otherwise unless
+the controller says otherwise, and refuses a missing one with `403 insufficient_scope`; the primary key and the
+deprecated channel token have every scope. A key can only issue keys with scopes it has. `last_used_at` is updated
+at most once a minute. See the [management API](../api/management-api.md#api-keys-and-scopes).
+
+### Admin API token
+
+`/api/v1/admin` (tenants, API key issuance) authenticates with `ADMIN_API_TOKEN` as a bearer token: at least 32
+characters, compared as SHA-256 digests in constant time, and only from addresses in `ADMIN_IP_WHITELIST`. Unset,
+the admin API answers `401` to everything. Tenant credentials never reach it. Audit entries record actor
+`admin_api`.
+
 ### Channel secrets
 
 Each channel has a random secret (generated if none is given). It authenticates the channel integration on
@@ -83,37 +167,64 @@ constant-time comparison with the decrypted value (`Converger.Channels.get_chann
 
 ### Tokens (JWT)
 
-All tokens are HS256 JWTs created with Joken. They share one signer,
-[`Converger.Auth.Signer`](https://github.com/AimTune/converger/blob/main/lib/converger/auth/signer.ex), whose key
-is the endpoint's `SECRET_KEY_BASE`.
+All tokens are HS256 JWTs created with Joken
+([`Converger.Auth.Signer`](https://github.com/AimTune/converger/blob/main/lib/converger/auth/signer.ex)). Converger
+tokens are signed with the dedicated keys of `TOKEN_SIGNING_KEYS` and carry the key's `kid` in the header, so the
+keys rotate without downtime and independently of `SECRET_KEY_BASE`
+([client tokens](client-tokens.md#signing-keys-and-rotation)). The legacy tokens are signed with `SECRET_KEY_BASE`.
 
 | Token | Module | Claims | Lifetime | Issued by |
 | --- | --- | --- | --- | --- |
-| Converger token | `Converger.Auth.ConvergerToken` | `type: "converger"`, `channel_id`, `tenant_id`, `sub`, optional `conversation_id` and `user_id` | 1800 s | `POST /api/v1/converger/tokens/generate` (channel secret), `POST /api/v1/converger/tokens/refresh` (valid token) |
-| Conversation token (legacy) | `Converger.Auth.Token` | `conversation_id`, `tenant_id`, `sub` | 3600 s | `POST /api/v1/tokens` |
-| Channel token (legacy) | `Converger.Auth.Token.generate_channel_token/1` | `channel_id`, `tenant_id`, `sub: "channel_<id>"` | 3600 s | Shown on the admin channel page (`/admin/channels`) |
+| Converger token | `Converger.Auth.ConvergerToken` | `type: "converger"`, `channel_id`, `tenant_id`, `sub`, `jti`, `fam` (family), optional `conversation_id`, `user_id`, `scope` (only `"channel"`, never combined with `conversation_id`) and `perms` (`read`, `write`, `typing`) | 1800 s | `POST /api/v1/converger/tokens/generate` (channel secret), `POST /api/v1/converger/tokens/refresh` (valid token, rotated) |
+| Conversation token (legacy, deprecated) | `Converger.Auth.Token` | `conversation_id`, `tenant_id`, `sub` | 3600 s | `POST /api/v1/tokens` |
+| Channel token (legacy, deprecated) | `Converger.Auth.Token.generate_channel_token/1` | `channel_id`, `tenant_id`, `sub: "channel_<id>"` | 3600 s | Shown on the admin channel page (`/admin/channels`) |
+
+Because the legacy tokens and keyless Converger tokens share the `SECRET_KEY_BASE` signer, every verifier also checks the token's shape
+([ADR-0026](../adr/0026-one-client-socket-stack-and-shape-checked-legacy-tokens.md)):
+
+- `x-channel-token` (`TenantAuth`, `POST /api/v1/tokens`, `POST /api/v1/conversations`) accepts only channel tokens
+  (`Converger.Auth.Token.verify_channel_token/1`: `channel_id`, no `conversation_id`, no `type` claim). Conversation
+  tokens and Converger tokens are refused with `401`. Before [#23](https://github.com/AimTune/converger/issues/23)
+  any Converger-signed JWT was accepted there, so a conversation token sent as `x-channel-token` acted as the whole
+  tenant.
+- The legacy socket `/socket` accepts only conversation tokens (`verify_conversation_token/1`).
+- Converger tokens are rejected by both legacy verifiers.
+
+The legacy tokens and the legacy socket are deprecated; see
+[migrating from the legacy surfaces](../api/migrating-from-legacy.md).
 
 Converger tokens are rejected unless `type` is `"converger"`, and every authenticated request re-checks that the
-token's channel is still `active` (`403` otherwise). Consequences of the stateless design:
+token's channel is still `active` (`403` otherwise) and that the token was not revoked (`401 token_revoked`), with
+one ETS lookup per node ([ADR-0059](../adr/0059-client-token-keys-revocation-rotation-and-permissions.md)):
 
-- A token cannot be revoked before it expires. Deactivating a channel blocks its tokens on the next request and
-  disconnects its sockets.
-- `refresh` mints a new token from any valid one, without rotation or reuse detection.
-- Rotating `SECRET_KEY_BASE` invalidates every token and every session at once (see
-  [Rotating leaked secrets](../security.md#rotating-leaked-secrets)).
+- **Revocation:** `POST /api/v1/converger/tokens/revoke` revokes a token's family (logout) or, with the channel
+  secret, every token of an end user (a ban). Every node refuses the token within a second and the subject's sockets
+  are disconnected. Deactivating a channel still blocks all of its tokens.
+- **Refresh rotation:** a refreshed token stays valid for a 30 s grace period, then is refused; refreshing it again
+  after that revokes the whole family (reuse detection). Derived conversation tokens never outlive the token they
+  came from.
+- **Permissions:** the `perms` claim (`read`, `write`, `typing`) restricts a token, for example to a read-only
+  viewer; checked by the REST controllers, the Phoenix channel and the Protocol v1 session.
 
-Revocation, refresh rotation, scoped tokens and a dedicated signing key with `kid` are Planned
-([#52](https://github.com/AimTune/converger/issues/52)).
+See [Client tokens](client-tokens.md).
 
 ### WebSocket authentication
 
 | Socket | Connect parameter | Join rule |
 | --- | --- | --- |
-| `/socket/converger` (`ConvergerWeb.ConvergerSocket`) | `token`: a Converger token; the channel must be active for the token's tenant | `converger:conversation:<id>`: allowed when the token's `conversation_id` equals `<id>`, or, for a channel-level token, when the conversation belongs to the token's tenant and channel |
-| `/socket` (`ConvergerWeb.UserSocket`, legacy) | `token`: a conversation token | `conversation:<id>`: only the conversation named in the token, and only while its channel is active |
+| `/socket/converger` (`ConvergerWeb.ConvergerSocket`) | `token`: a Converger token; the channel must be active for the token's tenant | `converger:conversation:<id>`: allowed when the token's `conversation_id` equals `<id>`, or, for a `scope: "channel"` token, when the conversation belongs to the token's tenant and either to the token's channel (owned) or, for a `websocket` channel, to a channel that an enabled routing rule routes to it (routed). An unscoped channel-level token cannot join. `converger:channel:<id>`: only a `scope: "channel"` token of that `websocket` channel |
+| `/socket` (`ConvergerWeb.UserSocket`, legacy, deprecated) | `token`: a conversation token (Converger tokens and channel tokens are refused at connect) | `conversation:<id>`: only the conversation named in the token, and only while its channel is active |
 
-Sockets get a per-subject id (`converger_socket:<tenant_id>:user:<user_id>` or `...:conversation:<id>`), never a
-per-channel one, so a forced disconnect affects one end user only
+The gRPC transport (off unless `GRPC_ENABLED`, [Protocol v1 over gRPC](../protocol/grpc.md)) checks the same Converger
+token on `hello` as the native WebSocket, with the same identity and conversation rules; a bad credential ends the
+stream with `UNAUTHENTICATED`. Its port speaks plaintext HTTP/2 unless `GRPC_TLS_CERTFILE` and `GRPC_TLS_KEYFILE` are
+set: never expose a plaintext gRPC port to the internet, since the bearer token travels in the metadata. Restrict it
+with the Helm chart's `networkPolicy.grpcFrom`. Messages above 1 MiB end the stream before they are buffered.
+
+Sockets get a per-subject id (`converger_socket:<tenant_id>:user:<user_id>`, `...:conversation:<id>`, or
+`...:channel:<channel_id>` for a `scope: "channel"` token without `user_id`), so a forced disconnect affects one end
+user (or one agent console token) only. Channel-level tokens with none of these get no id: their sockets are still
+counted in presence but cannot be disconnected by id
 ([`ConvergerWeb.Sockets`](https://github.com/AimTune/converger/blob/main/lib/converger_web/sockets.ex),
 [ADR-0020](../adr/0020-per-subject-socket-ids-and-presence.md)). Browser connections are also checked against
 `CHECK_ORIGIN` (default: the `PHX_HOST` host); clients that send no `Origin` header are not affected. The wire
@@ -154,10 +265,13 @@ configured key can decrypt them.
 | Data | Protection |
 | --- | --- |
 | `channels.secret` | Encrypted (`Converger.Encrypted.Binary`) + SHA-256 `secret_hash` for lookup |
+| `webhook_subscriptions.secret`, `webhook_subscriptions.headers` | Encrypted (`Converger.Encrypted.Binary`, `Converger.Encrypted.Map`); the API returns header names only and the secret only on create or rotation |
 | `channels.config` (provider access tokens, `app_secret`, `verify_token`, Infobip `api_key`, webhook headers, ...) | Encrypted as a whole map (`Converger.Encrypted.Map`) |
 | `tenants.api_key_hash`, `previous_api_key_hash` | SHA-256 digest only; plaintext never stored |
-| `admin_users.password_hash`, `tenant_users.password_hash` | bcrypt |
-| Activities, attachments, `tenants.alert_webhook_url`, audit logs | Not encrypted by the application; rely on database and storage encryption |
+| `admin_users.password_hash`, `tenant_users.password_hash` | bcrypt (PBKDF2-SHA512 in a `CONVERGER_PASSWORD_HASHER=pbkdf2` build) |
+| `admin_users.totp_secret`, `tenant_users.totp_secret` | Encrypted (`Converger.Encrypted.Binary`) |
+| `user_sessions.token_hash`, `account_tokens.token_hash` | SHA-256 digest only; the session token lives in the signed cookie, the reset token in the mailed link |
+| Activities, attachments, `tenants.alert_webhook_url`, webhook subscription URLs, `webhook_events` payloads, audit logs | Not encrypted by the application; rely on database and storage encryption |
 
 Sensitive schema fields are also declared with `redact: true`, so `inspect/1` (and therefore crash reports) does
 not print them.
@@ -176,13 +290,13 @@ Back the key up separately from the database: a database backup cannot decrypt c
 
 1. Generate a new key and set it as `CLOAK_KEY`.
 2. Move the old key into `CLOAK_RETIRED_KEYS` (comma-separated; still accepted for decryption).
-3. Deploy, then re-encrypt every channel with the new key:
+3. Deploy, then re-encrypt every channel, webhook subscription and TOTP secret with the new key:
 
    ```bash
    bin/converger eval "Converger.Release.reencrypt_secrets()"
    ```
 
-4. Remove the retired key once the command reports the re-encrypted channel count.
+4. Remove the retired key once the command reports the re-encrypted counts.
 
 If the old key may have leaked, also rotate the channel secrets themselves. Details:
 [ADR-0012](../adr/0012-secrets-at-rest-and-audit-redaction.md).
@@ -190,8 +304,9 @@ If the old key may have leaked, also rotate the channel secrets themselves. Deta
 ## Audit logs and log redaction
 
 Administrative changes to tenants (including API key rotation and rate-limit overrides), channels, routing
-rules, admin users and tenant users are written to `audit_logs` (resource types `tenant`, `channel`,
-`routing_rule`, `admin_user`, `tenant_user`). When the change is made with an actor (admin panel, portal), the
+rules, admin users, tenant users, webhook subscriptions and API keys are written to `audit_logs` (resource types
+`tenant`, `channel`, `routing_rule`, `admin_user`, `tenant_user`, `webhook_subscription`, `api_key`). When the change
+is made with an actor (admin panel, portal, tenant API with the key id as `actor_id`, admin API as `admin_api`), the
 entry is inserted in the same `Ecto.Multi` transaction as the change, with the actor and a before/after snapshot. [`Converger.AuditLogs.Changes`](https://github.com/AimTune/converger/blob/main/lib/converger/audit_logs/changes.ex)
 serializes the structs, drops associations (they are audited as their own resources), and passes the result
 through `Converger.Secrets.redact/1`, which replaces values **recursively**, including inside nested maps such as
@@ -199,7 +314,7 @@ through `Converger.Secrets.redact/1`, which replaces values **recursively**, inc
 
 - keys `access_token`, `api_key`, `secret`, `token`, `password`, `password_hash`, `verify_token`, `app_secret`,
   `authorization`, `x-api-key`, `x-channel-token` (case-insensitive), and
-- any key ending in `_secret`, `_token` or `_hash`.
+- any key ending in `_secret`, `_token`, `_hash` or `_password` (the broker channels' `sasl_password`).
 
 Values become `"[REDACTED]"`; `nil` stays `nil`. Audit logs are browsable at `/admin/audit_logs`.
 
@@ -216,7 +331,7 @@ body, which `ConvergerWeb.CacheBodyReader` keeps before JSON parsing:
   the channel secret. The timestamp must be within 300 seconds of the server clock
   (`config :converger, :inbound_signature_tolerance_seconds`). Several `v1` values are accepted, for secret
   rotation.
-- Adapters with a native scheme (WhatsApp Meta `X-Hub-Signature-256` with `app_secret`) verify that instead.
+- Adapters with a native scheme (WhatsApp Meta `X-Hub-Signature-256` with `app_secret`, Slack `X-Slack-Signature` with `signing_secret` and a 5 minute timestamp window) verify that instead.
 - A signature that is present but invalid is always rejected with `401`.
 - `channels.require_signature` (default `true` for new channels) also rejects missing and legacy
   `sha256=<hex>` signatures. Channels that existed before the column was added were backfilled with `false`; they
@@ -239,16 +354,17 @@ Verification code, the test vector and the full blocked-range list are in
 [ADR-0014](../adr/0014-webhook-ssrf-guard-and-outbound-signing.md).
 
 :::note
-The SSRF guard applies to `webhook` channel deliveries. The tenant health-alert URL
-(`tenants.alert_webhook_url`, posted by `Converger.Channels.Health`) is only validated as an `http`/`https` URL
-and is set by operators, not by end users.
+The SSRF guard applies to `webhook` channel deliveries and to [platform event webhooks](../platform-webhooks.md),
+which include the tenant health-alert URL (`tenants.alert_webhook_url`, now a managed subscription): targets are
+checked when saved and again, with the connection pinned, before every request.
 :::
 
 ## Rate limiting and login lockout
 
 Hammer 7 counters (node-local ETS, optionally replicated across the cluster over PubSub) protect activity
 creation, uploads, inbound webhooks and token endpoints, and failed logins are counted per client IP and per
-account (5 failures per minute each by default) with a lockout before the password is checked. Rejected requests
+account (5 failures per minute each by default) with a lockout before the password is checked. Wrong 2FA codes
+count the same way. Password reset requests are limited per IP and per account. Rejected requests
 get `429` with `Retry-After`. See [Rate limiting](../operations/rate-limiting.md) and
 [ADR-0013](../adr/0013-cluster-wide-rate-limiting-with-hammer-and-pubsub.md).
 
@@ -256,11 +372,14 @@ get `429` with `Retry-After`. See [Rate limiting](../operations/rate-limiting.md
 
 | Control | Implementation | Configuration |
 | --- | --- | --- |
-| Client IP behind proxies | `ConvergerWeb.Plugs.TrustedProxies` (first plug in the endpoint); forwarding headers only from trusted peers | `TRUSTED_PROXIES`, see [../security.md](../security.md) and [ADR-0011](../adr/0011-custom-trusted-proxies-plug.md) |
+| Client IP behind proxies | `ConvergerWeb.Plugs.TrustedProxies` (first plug in the endpoint after the health probes); forwarding headers only from trusted peers | `TRUSTED_PROXIES`, see [../security.md](../security.md) and [ADR-0011](../adr/0011-custom-trusted-proxies-plug.md) |
 | Admin network restriction | `ConvergerWeb.Plugs.AdminAuth` | `ADMIN_IP_WHITELIST`, see [../security.md](../security.md) |
 | HTTPS redirect + HSTS | `ConvergerWeb.Plugs.ForceSSL` (runtime `Plug.SSL`; `X-Forwarded-Proto` honoured only from trusted proxies), on by default in production | `FORCE_SSL`, `HSTS`, `HSTS_MAX_AGE`, `HSTS_INCLUDE_SUBDOMAINS`, `HSTS_PRELOAD`, `FORCE_SSL_EXCLUDE_PATHS`, see [TLS, HSTS and WebSocket origins](../deployment.md#tls-hsts-and-websocket-origins) |
 | WebSocket origin check | Phoenix `check_origin` | `CHECK_ORIGIN` |
 | CORS | `CORSPlug`, origins read per request | `CORS_ORIGINS` |
+| Metrics | `ConvergerWeb.Plugs.Metrics` serves `GET /metrics` on the main port; bearer token (constant-time compare) or client-IP allowlist, `404` when neither is configured | `METRICS_TOKEN`, `METRICS_ALLOWED_IPS`; the opt-in `PROMETHEUS_PORT` listener is unauthenticated, see [Observability](../operations/observability.md#prometheus-endpoint) |
+| Health probes | `ConvergerWeb.Plugs.Health`: `GET /health/live` and `/health/ready`, unauthenticated by design; responses carry only `ok`/`error` per check and short reasons, never error details | none |
+| Erlang distribution (clustering) | Nodes connect over EPMD (4369) and a dynamic port, authenticated by the cookie; whoever has the cookie and network access can run code on every node | `RELEASE_COOKIE` (required when `CLUSTER_STRATEGY` is set), keep distribution ports on the private network; see [Clustering](../operations/clustering.md) |
 
 Design notes for the edge and boot checks: [ADR-0022](../adr/0022-deployment-hardening.md).
 
@@ -271,11 +390,13 @@ The `:browser` pipeline (admin panel and portal) sets Phoenix's secure browser h
 `x-permitted-cross-domain-policies: none`) and this Content Security Policy:
 
 ```http
-content-security-policy: default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
+content-security-policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
 ```
 
-`'unsafe-inline'` and `cdn.jsdelivr.net` are needed because the layouts load Phoenix and LiveView from jsDelivr
-with an inline bootstrap script (there is no asset pipeline).
+The admin and portal CSS and JavaScript are built into the release and served from `/assets`, so no third-party
+origin is allowed ([ADR-0060](../adr/0060-tailwind-daisyui-admin-ui-without-node.md)). `'unsafe-inline'` remains for
+the small theme script in the page `<head>` (it applies the light or dark theme before the first paint) and for the
+Oban Web dashboard at `/admin/oban`, which inlines its own script and styles.
 
 Uploaded files are typed by magic bytes (the declared type is ignored), checked against an allowlist, and served
 only through the authenticated, tenant-scoped download endpoint with `nosniff`, a sandboxing CSP and a
@@ -293,7 +414,10 @@ than run insecurely when:
   repository (see [Rotating leaked secrets](../security.md#rotating-leaked-secrets));
 - a Cloak key does not decode to 32 bytes;
 - `CHECK_ORIGIN` is set but contains no origins;
-- `RATE_LIMIT_BACKEND`, `UPLOAD_STORAGE` or `CDN_TYPE` has an unknown value;
+- `RATE_LIMIT_BACKEND`, `CLUSTER_STRATEGY`, `UPLOAD_STORAGE` or `CDN_TYPE` has an unknown value, or a clustering
+  strategy lacks a required option (`CLUSTER_SERVICE`, `CLUSTER_DNS_QUERY`);
+- clustering is enabled and `RELEASE_COOKIE` is not set (`rel/env.sh.eex`; the cookie baked into the image is
+  known to everyone who has the image);
 - the non-durable Broadway `:memory` producer is configured in production without
   `allow_memory_producer_in_prod: true`.
 
@@ -311,26 +435,28 @@ on every pull request:
   `# sobelow_skip [...]` with a justification.
 - **`mix deps.audit`** (known vulnerabilities) and **`mix hex.audit`** (retired packages). Advisories that do
   not affect Converger are acknowledged in `mix.exs` under `hex: [ignore_advisories: ...]`, each with the reason
-  (currently two `cowlib` CVEs reachable only from the Prometheus listener, and two `cloak` / `cloak_ecto` CVEs in
-  ciphers and types Converger does not use, enforced by `test/converger/vault_test.exs`).
+  and a test that keeps the affected code path unreachable. None of them has a fixed release yet:
+
+  | Advisory | Package | Why Converger is not affected | Enforced by |
+  | --- | --- | --- | --- |
+  | EEF-CVE-2026-95105 | `cloak` 1.1.4 | AES-CTR is unused; the vault only configures AES-GCM | `test/converger/vault_test.exs` |
+  | EEF-CVE-2026-94206 | `cloak_ecto` 1.3.0 | `Cloak.Ecto.PBKDF2` is unused | `test/converger/vault_test.exs` |
+  | EEF-CVE-2026-105659 | `bandit` 1.12.5 | HTTP/2 flow control; HTTP/2 is disabled on the endpoint (`http_2_options: [enabled: false]`) | `test/converger_web/http_advisories_test.exs` |
+  | EEF-CVE-2026-43966 | `cowlib` 2.21.0 | CR/LF in structured-field headers; nothing builds them, and cowboy 2.20 (gRPC server) rejects CR/LF in response headers | `test/converger_web/http_advisories_test.exs` |
+
+  Remove an entry when a fixed version ships; `mix hex.audit` warns once an entry no longer matches.
 - **Credo** (`--strict`), **Dialyzer**, and compile with warnings as errors.
 
 The Docker workflow builds the image on every pull request and scans it with Trivy (report-only for now, SARIF
 uploaded to code scanning). Dependabot opens dependency updates. See
 [ADR-0021](../adr/0021-ci-quality-gates-and-lf-line-endings.md).
 
-## Planned hardening
+## Known limitations
 
-Tracked in [#52](https://github.com/AimTune/converger/issues/52) (Planned):
-
-- token revocation (`jti` denylist), refresh-token rotation with reuse detection, scoped tokens;
-- a dedicated JWT signing key with `kid` and rollover, independent of `SECRET_KEY_BASE`;
-- TOTP two-factor authentication for admins (required for `super_admin`), password reset, password policy;
-- session `max_age`, idle timeout and "log out everywhere".
-
-Other known limitations: the login form reports "Your account has been deactivated" for an inactive account
-before the password is checked, and unauthenticated health endpoints for load balancers are Planned
-([#29](https://github.com/AimTune/converger/issues/29)).
+- 2FA has no recovery codes and no WebAuthn; a locked-out admin is reset by a `super_admin` or with
+  `Converger.Release.reset_admin_2fa/1` ([ADR-0058](../adr/0058-server-side-sessions-totp-2fa-and-password-reset-for-admin-and-portal.md)).
+- The login form reports "Your account has been deactivated" for an inactive account
+  before the password is checked.
 
 ## Reporting a vulnerability
 
@@ -354,3 +480,27 @@ fixes.
 - [ADR-0013: Cluster-wide rate limiting with Hammer and PubSub](../adr/0013-cluster-wide-rate-limiting-with-hammer-and-pubsub.md)
 - [ADR-0014: Webhook SSRF guard and outbound signing](../adr/0014-webhook-ssrf-guard-and-outbound-signing.md)
 - [ADR-0022: Deployment hardening](../adr/0022-deployment-hardening.md)
+- [ADR-0037: libcluster clustering, health endpoints and metrics on the main port](../adr/0037-libcluster-clustering-health-endpoints-and-metrics-on-the-main-port.md)
+- [ADR-0058: Server-side sessions, TOTP 2FA and password reset for the admin panel and the portal](../adr/0058-server-side-sessions-totp-2fa-and-password-reset-for-admin-and-portal.md)
+
+## Authorization boundaries
+
+These rules were tightened after a review of the token and URL handling (see the
+[CHANGELOG](https://github.com/AimTune/converger/blob/main/CHANGELOG.md)):
+
+- **Tenant API credentials.** Only the tenant API key and channel tokens unlock the tenant API.
+  All JWTs share one signing key, so `TenantAuth` checks what a token *is*: conversation tokens and
+  Converger client tokens carry a `tenant_id` too, but they belong to end users and are rejected.
+  See [API authentication](../api/overview.md).
+- **Channel binding.** A Converger client token is bound to its channel: conversations, activities,
+  uploads and attachments of other channels are `404`, even in the same tenant. Joining a conversation
+  over the WebSocket needs a conversation-bound token.
+- **Tenant ownership is immutable.** A routing rule's `tenant_id` is set on create from the
+  authenticated tenant and cannot be changed by an update.
+- **Delivery receipts are scoped.** A status webhook updates only deliveries of the channel it was
+  sent to, whether it identifies them by `provider_message_id` or by `delivery_id`.
+- **SSRF guard everywhere the server makes requests to configured URLs.** Webhook targets, the tenant
+  `alert_webhook_url` and the WhatsApp Infobip `base_url` are checked when saved and again before each
+  request (DNS can change, and older configurations were saved before the guard existed). Private,
+  loopback, link-local and metadata targets are refused unless explicitly allowed
+  (`WEBHOOK_ALLOWED_TARGETS`, see [webhooks](../webhooks.md)).

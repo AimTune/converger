@@ -118,28 +118,30 @@ defmodule Converger.ChannelsTest do
       assert channel.mode == "outbound"
     end
 
-    test "websocket channel only supports outbound", %{tenant: tenant} do
-      {:error, changeset} =
-        Channels.create_channel(%{
-          name: "test-ws",
-          type: "websocket",
-          mode: "duplex",
-          status: "active",
-          tenant_id: tenant.id
-        })
+    test "websocket channel supports every mode", %{tenant: tenant} do
+      for mode <- ~w(inbound outbound duplex) do
+        {:ok, channel} =
+          Channels.create_channel(%{
+            name: "test-ws-#{mode}",
+            type: "websocket",
+            mode: mode,
+            status: "active",
+            tenant_id: tenant.id
+          })
 
-      assert %{mode: [_]} = errors_on(changeset)
+        assert channel.mode == mode
+      end
+    end
 
-      {:ok, channel} =
-        Channels.create_channel(%{
-          name: "test-ws",
-          type: "websocket",
-          mode: "outbound",
-          status: "active",
-          tenant_id: tenant.id
-        })
+    test "websocket channel validates require_ack", %{tenant: tenant} do
+      attrs = %{name: "test-ws", type: "websocket", status: "active", tenant_id: tenant.id}
 
-      assert channel.mode == "outbound"
+      assert {:error, changeset} =
+               Channels.create_channel(Map.put(attrs, :config, %{"require_ack" => "yes"}))
+
+      assert %{config: [_]} = errors_on(changeset)
+
+      assert {:ok, _} = Channels.create_channel(Map.put(attrs, :config, %{"require_ack" => true}))
     end
 
     test "webhook channel supports all modes", %{tenant: tenant} do

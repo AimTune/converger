@@ -1,5 +1,14 @@
 defmodule ConvergerWeb.ConvergerSocket do
+  @moduledoc """
+  The client WebSocket (`/socket/converger`), the single implementation of
+  the client protocol: receive `activitySet`, send with `postActivity`
+  (`ConvergerWeb.ConvergerChannel`). Authenticates with a Converger token
+  (`Converger.Auth.ConvergerToken`).
+  """
+
   use Phoenix.Socket
+  # Rate, size and join limits, slow-consumer and drain handling.
+  use ConvergerWeb.SocketGuard
 
   alias Converger.Auth.ConvergerToken
 
@@ -16,6 +25,11 @@ defmodule ConvergerWeb.ConvergerSocket do
     else
       _ -> :error
     end
+  rescue
+    # Refused with 503 + Retry-After (ConvergerWeb.SocketGuard.handle_error/2).
+    error in DBConnection.ConnectionError ->
+      Converger.Repo.Pressure.report(:socket, error)
+      {:error, :database_unavailable}
   end
 
   def connect(_params, _socket, _connect_info), do: :error

@@ -1,0 +1,52 @@
+# One-shot migration step (docs/operations/migrations.md). Pods that start
+# before it finishes stay unready ("migrations pending" on /health/ready)
+# and receive no traffic. Concurrent runs are safe (Postgres advisory lock).
+#
+# A Job's pod template is immutable: before applying a new image, delete the
+# finished Job (`kubectl delete job converger-migrate --ignore-not-found`) or
+# wait for ttlSecondsAfterFinished. The Helm chart runs it as a hook instead.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: converger-migrate
+  labels:
+    app.kubernetes.io/name: converger
+    app.kubernetes.io/component: migrate
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: converger
+        app.kubernetes.io/component: migrate
+    spec:
+      restartPolicy: Never
+      serviceAccountName: converger
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: migrate
+          image: ghcr.io/aimtune/converger
+          imagePullPolicy: IfNotPresent
+          command: ["/app/bin/migrate"]
+          envFrom:
+            - configMapRef:
+                name: converger-config
+            - secretRef:
+                name: converger-env
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]

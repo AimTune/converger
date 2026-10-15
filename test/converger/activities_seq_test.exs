@@ -60,8 +60,9 @@ defmodule Converger.ActivitiesSeqTest do
     defp cleanup(tenant) do
       Sandbox.unboxed_run(Repo, fn ->
         Repo.delete_all(from(l in Converger.AuditLogs.AuditLog, where: l.tenant_id == ^tenant.id))
-        # Cascades to channels, conversations and activities.
-        Repo.delete_all(from(t in Converger.Tenants.Tenant, where: t.id == ^tenant.id))
+        # Cascades to channels and conversations; activities are purged by
+        # the (inline) PurgeWorker job it enqueues.
+        {:ok, _} = Converger.Tenants.delete_tenant(tenant)
       end)
     end
   end

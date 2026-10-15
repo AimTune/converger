@@ -4,7 +4,7 @@ defmodule Converger.Accounts do
   """
 
   import Ecto.Query, warn: false
-  alias Converger.Accounts.{AdminUser, TenantUser}
+  alias Converger.Accounts.{AdminUser, Audit, PasswordReset, Sessions, TenantUser}
   alias Converger.AuditLogs
   alias Converger.AuditLogs.Changes
   alias Converger.Repo
@@ -15,6 +15,57 @@ defmodule Converger.Accounts do
   def list_admin_users do
     from(u in AdminUser, order_by: [desc: u.inserted_at, desc: u.id])
     |> Converger.Pagination.bounded_all()
+  end
+
+  @doc """
+  Keyset-paginated admin users (`Converger.Pagination.keyset/2`), the admin
+  Users page.
+
+  Filters (string or atom keys, blank values ignored): `"q"` (case-insensitive
+  "contains" match on name or email), `"role"`, `"status"`.
+
+  Options: `:limit`, `:cursor`, `:direction` (`:desc` newest first, default,
+  or `:asc`). Returns `{:ok, %Converger.Pagination.Page{}}` or
+  `{:error, :invalid_cursor}`.
+  """
+  def paginate_admin_users(filters \\ %{}, opts \\ []) do
+    AdminUser
+    |> filter_users(filters)
+    |> Converger.Pagination.keyset(opts)
+  end
+
+  # Shared list filters of the admin and tenant user tables.
+  defp filter_users(query, filters) do
+    query
+    |> search_users(Converger.Pagination.contains(filter_value(filters, :q)))
+    |> filter_field(:role, filter_value(filters, :role))
+    |> filter_field(:status, filter_value(filters, :status))
+    |> filter_tenant(filter_value(filters, :tenant_id))
+  end
+
+  defp filter_tenant(query, nil), do: query
+
+  defp filter_tenant(query, tenant_id) do
+    case Ecto.UUID.cast(tenant_id) do
+      {:ok, id} -> where(query, [u], u.tenant_id == ^id)
+      :error -> where(query, [u], false)
+    end
+  end
+
+  defp search_users(query, nil), do: query
+
+  defp search_users(query, pattern) do
+    where(query, [u], ilike(u.name, ^pattern) or ilike(u.email, ^pattern))
+  end
+
+  defp filter_field(query, _field, nil), do: query
+  defp filter_field(query, field, value), do: where(query, [u], field(u, ^field) == ^value)
+
+  defp filter_value(filters, key) do
+    case Map.get(filters, Atom.to_string(key), Map.get(filters, key)) do
+      value when is_binary(value) -> if String.trim(value) == "", do: nil, else: value
+      _ -> nil
+    end
   end
 
   def get_admin_user!(id), do: Repo.get!(AdminUser, id)
@@ -83,11 +134,11 @@ defmodule Converger.Accounts do
       end)
       |> Repo.transaction()
       |> case do
-        {:ok, %{admin_user: updated}} -> {:ok, updated}
+        {:ok, %{admin_user: updated}} -> {:ok, end_sessions_if_inactive(updated)}
         {:error, :admin_user, changeset, _} -> {:error, changeset}
       end
     else
-      Repo.update(changeset)
+      changeset |> Repo.update() |> end_sessions_if_inactive()
     end
   end
 
@@ -107,11 +158,11 @@ defmodule Converger.Accounts do
       |> Multi.delete(:admin_user, user)
       |> Repo.transaction()
       |> case do
-        {:ok, %{admin_user: user}} -> {:ok, user}
+        {:ok, %{admin_user: user}} -> {:ok, end_sessions(user)}
         {:error, :admin_user, changeset, _} -> {:error, changeset}
       end
     else
-      Repo.delete(user)
+      user |> Repo.delete() |> end_sessions()
     end
   end
 
@@ -122,28 +173,45 @@ defmodule Converger.Accounts do
   @doc """
   Changes an admin user's own password after verifying the current one.
   Clears `must_change_password`. `attrs` takes `"password"` and
-  `"password_confirmation"`.
+  `"password_confirmation"`. See `change_own_password/4`.
   """
-  def change_admin_password(%AdminUser{} = user, current_password, attrs) do
-    changeset = AdminUser.password_changeset(user, attrs)
+  def change_admin_password(%AdminUser{} = user, current_password, attrs, opts \\ []) do
+    change_own_password(user, current_password, attrs, opts)
+  end
 
-    if AdminUser.valid_password?(user, current_password) do
+  @doc """
+  Changes a tenant user's own password after verifying the current one. See
+  `change_own_password/4`.
+  """
+  def change_tenant_password(%TenantUser{} = user, current_password, attrs, opts \\ []) do
+    change_own_password(user, current_password, attrs, opts)
+  end
+
+  @doc """
+  Changes a user's own password after verifying the current one. Deletes the
+  user's password reset tokens and every session except
+  `opts[:keep_session_id]` (the caller's own). Audit-logged.
+  """
+  def change_own_password(user, current_password, attrs, opts \\ []) do
+    module = user.__struct__
+    changeset = module.password_changeset(user, attrs)
+
+    if module.valid_password?(user, current_password) do
       Multi.new()
-      |> Multi.update(:admin_user, changeset)
-      |> Multi.insert(:audit_log, fn _ ->
-        AuditLogs.build_audit_log_entry(%{
-          actor_type: "admin",
-          actor_id: user.id,
-          action: "update",
-          resource_type: "admin_user",
-          resource_id: user.id,
-          changes: %{"password" => "[changed]"}
-        })
-      end)
+      |> Multi.update(:user, changeset)
+      |> Multi.delete_all(:tokens, PasswordReset.tokens_query(user_type(user), user.id))
+      |> Multi.insert(
+        :audit_log,
+        Audit.entry(user, Audit.self_actor(user), "update", %{"password" => "[changed]"})
+      )
       |> Repo.transaction()
       |> case do
-        {:ok, %{admin_user: updated}} -> {:ok, updated}
-        {:error, :admin_user, changeset, _} -> {:error, changeset}
+        {:ok, %{user: updated}} ->
+          Sessions.delete_all(user_type(user), user.id, except: opts[:keep_session_id])
+          {:ok, updated}
+
+        {:error, :user, changeset, _} ->
+          {:error, changeset}
       end
     else
       {:error,
@@ -152,6 +220,38 @@ defmodule Converger.Accounts do
        |> Map.put(:action, :update)}
     end
   end
+
+  @doc """
+  Signs a user out of every session ("log out everywhere", or an admin
+  revoking another user's sessions). Audit-logged with `actor`. Returns the
+  number of sessions ended.
+  """
+  def revoke_sessions(user, actor) do
+    count = Sessions.delete_all(user_type(user), user.id)
+    Audit.log(user, actor, "revoke_sessions", %{"sessions" => count})
+    count
+  end
+
+  @doc "The `user_type` of sessions and tokens: `admin` or `tenant`."
+  def user_type(%AdminUser{}), do: "admin"
+  def user_type(%TenantUser{}), do: "tenant"
+
+  # Deactivated and deleted users lose their sessions and reset tokens.
+  defp end_sessions_if_inactive({:ok, user}), do: {:ok, end_sessions_if_inactive(user)}
+  defp end_sessions_if_inactive(%{status: "active"} = user), do: user
+  defp end_sessions_if_inactive(%{} = user), do: end_sessions(user)
+  defp end_sessions_if_inactive(other), do: other
+
+  defp end_sessions({:ok, user}), do: {:ok, end_sessions(user)}
+
+  defp end_sessions(%{id: id} = user)
+       when is_struct(user, AdminUser) or is_struct(user, TenantUser) do
+    Sessions.delete_all(user_type(user), id)
+    user |> user_type() |> PasswordReset.tokens_query(id) |> Repo.delete_all()
+    user
+  end
+
+  defp end_sessions(other), do: other
 
   @doc """
   Creates the initial `super_admin` if no admin user exists.
@@ -227,23 +327,33 @@ defmodule Converger.Accounts do
   end
 
   @doc """
-  Keyset-paginated tenant users, newest first (`Converger.Pagination.keyset/2`).
+  Keyset-paginated tenant users (`Converger.Pagination.keyset/2`), the admin
+  Tenant Users page and (scoped with `"tenant_id"`) the portal Users page.
 
-  Filters: `"tenant_id"`. Options: `:limit`, `:cursor`.
-  Returns `{:ok, %Converger.Pagination.Page{}}` or `{:error, :invalid_cursor}`.
+  Filters (string or atom keys, blank values ignored): `"tenant_id"` (a
+  malformed id matches nothing), `"q"` (case-insensitive "contains" match on
+  name or email), `"role"`, `"status"`.
+
+  Options: `:limit`, `:cursor`, `:direction` (`:desc` newest first, default,
+  or `:asc`). Entries come with `:tenant` preloaded. Returns
+  `{:ok, %Converger.Pagination.Page{}}` or `{:error, :invalid_cursor}`.
   """
   def paginate_tenant_users(filters \\ %{}, opts \\ []) do
-    query =
-      case Map.get(filters, "tenant_id", Map.get(filters, :tenant_id)) do
-        id when is_binary(id) and id != "" -> from(u in TenantUser, where: u.tenant_id == ^id)
-        _ -> TenantUser
-      end
-
-    Converger.Pagination.keyset(query, Keyword.put(opts, :preload, [:tenant]))
+    TenantUser
+    |> filter_users(filters)
+    |> Converger.Pagination.keyset(Keyword.put(opts, :preload, [:tenant]))
   end
 
   def get_tenant_user!(id) do
     Repo.get!(TenantUser, id) |> Repo.preload(:tenant)
+  end
+
+  @doc "The tenant's user with `id`, or `nil` (also for a malformed id)."
+  def get_tenant_user(tenant_id, id) do
+    case Ecto.UUID.cast(id) do
+      {:ok, uuid} -> Repo.get_by(TenantUser, id: uuid, tenant_id: tenant_id)
+      :error -> nil
+    end
   end
 
   def get_tenant_user_by_email_and_tenant(email, tenant_id) do
@@ -332,12 +442,15 @@ defmodule Converger.Accounts do
       end)
       |> Repo.transaction()
       |> case do
-        {:ok, %{tenant_user: updated}} -> {:ok, Repo.preload(updated, :tenant)}
-        {:error, :tenant_user, changeset, _} -> {:error, changeset}
+        {:ok, %{tenant_user: updated}} ->
+          {:ok, updated |> end_sessions_if_inactive() |> Repo.preload(:tenant)}
+
+        {:error, :tenant_user, changeset, _} ->
+          {:error, changeset}
       end
     else
       case Repo.update(changeset) do
-        {:ok, user} -> {:ok, Repo.preload(user, :tenant)}
+        {:ok, user} -> {:ok, user |> end_sessions_if_inactive() |> Repo.preload(:tenant)}
         error -> error
       end
     end
@@ -360,11 +473,11 @@ defmodule Converger.Accounts do
       |> Multi.delete(:tenant_user, user)
       |> Repo.transaction()
       |> case do
-        {:ok, %{tenant_user: user}} -> {:ok, user}
+        {:ok, %{tenant_user: user}} -> {:ok, end_sessions(user)}
         {:error, :tenant_user, changeset, _} -> {:error, changeset}
       end
     else
-      Repo.delete(user)
+      user |> Repo.delete() |> end_sessions()
     end
   end
 

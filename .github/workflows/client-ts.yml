@@ -1,0 +1,130 @@
+name: client-ts
+
+# @converger/client (packages/client-ts): typecheck, unit tests against a mocked
+# server, ESM/CJS build, typedoc, and the e2e test against the real server
+# (mix phx.server, killed and restarted mid-session). See docs/sdk/typescript.md.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - "packages/**"
+      - "examples/typescript/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - ".github/workflows/client-ts.yml"
+      # The e2e test runs against the server: protocol changes must keep it green.
+      - "lib/**"
+      - "config/**"
+      - "priv/repo/migrations/**"
+      - "mix.exs"
+      - "mix.lock"
+
+concurrency:
+  group: client-ts-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  # Keep in sync with ci.yml, the Dockerfile and .tool-versions.
+  ELIXIR_VERSION: "1.19.5"
+  OTP_VERSION: "28.5.0.5"
+
+jobs:
+  unit:
+    name: Typecheck, unit tests, build (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["22", "24"]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile --filter @converger/client...
+
+      - name: Typecheck
+        run: pnpm --filter @converger/client typecheck
+
+      - name: Unit tests
+        run: pnpm --filter @converger/client test
+
+      - name: Build (ESM + CJS + .d.ts)
+        run: pnpm --filter @converger/client build
+
+      - name: Load the build (ESM and CJS)
+        working-directory: packages/client-ts
+        run: |
+          node --input-type=module -e "import('./dist/index.js').then((m) => { if (typeof m.ConvergerClient !== 'function') process.exit(1) })"
+          node -e "if (typeof require('./dist/index.cjs').ConvergerClient !== 'function') process.exit(1)"
+
+      - name: API docs (typedoc)
+        if: matrix.node == '22'
+        run: pnpm --filter @converger/client run docs
+
+  e2e:
+    name: e2e against mix phx.server
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+
+    env:
+      MIX_ENV: dev
+      E2E_MIX_ENV: dev
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          otp-version: ${{ env.OTP_VERSION }}
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            deps
+            _build
+          key: mix-dev-${{ runner.os }}-${{ env.ELIXIR_VERSION }}-${{ env.OTP_VERSION }}-${{ hashFiles('mix.lock') }}
+          restore-keys: mix-dev-${{ runner.os }}-${{ env.ELIXIR_VERSION }}-${{ env.OTP_VERSION }}-
+
+      - run: mix deps.get
+      - run: mix compile
+      # The dev server's watchers download tailwind and esbuild on first start.
+      # The test kills that server mid-session, which can leave a half-written
+      # binary that the restarted server then fails to execute (:eacces).
+      - run: mix assets.setup
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile --filter @converger/client...
+
+      # Creates and migrates converger_sdk_e2e, starts the server on :4123,
+      # kills it mid-session and restarts it.
+      - name: e2e test
+        run: pnpm --filter @converger/client test:e2e

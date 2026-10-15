@@ -17,6 +17,7 @@ config :converger, Converger.Repo,
 # Full-cost hashing makes login tests slow enough to straddle the 60 s
 # login-lockout window (see test/converger_web/controllers/rate_limiting_test.exs).
 config :bcrypt_elixir, :log_rounds, 1
+config :pbkdf2_elixir, :rounds, 1
 
 # We don't run a server during test. If one is required,
 # you can enable the server option below.
@@ -25,11 +26,24 @@ config :converger, ConvergerWeb.Endpoint,
   secret_key_base: "9Ov2AhAq9kITaSWzIOHQlF0OjtggqukSSK19U94ghQsnmuWqnKNRkQ/2PjUT9xNm",
   server: false
 
+# Agent group members become eligible quickly (the group tests wait for it).
+config :converger, ConvergerWeb.Protocol, group_settle_ms: 100
+
+# Tests sync the token revocation cache explicitly (RevocationCache.sync/0).
+config :converger, Converger.Auth.RevocationCache, sync_interval_ms: nil
+
+# No readiness grace period when the test app stops.
+config :converger, :websocket, drain_delay_ms: 0
+
 # In test we don't send emails
 config :converger, Converger.Mailer, adapter: Swoosh.Adapters.Test
 
 # Disable swoosh api client as it is only required for production adapters
 config :swoosh, :api_client, false
+
+# Email channels send through Swoosh.Adapters.Test (sent mails go to the
+# test process), whatever their provider.
+config :converger, :email_swoosh_adapter, Swoosh.Adapters.Test
 
 # Print only warnings and errors during test
 config :logger, level: :warning
@@ -43,8 +57,12 @@ config :phoenix, :plug_init_mode, :runtime
 # Use inline pipeline for synchronous testing
 config :converger, pipeline: [backend: Converger.Pipeline.Inline]
 
-# Use a different port for metrics in test to avoid conflicts with dev server
-config :converger, :prometheus_port, false
+# No health probes against real providers in tests (tests enable them per case)
+config :converger, :channel_health, probe_idle_channels: false
+
+# No database-backed metric polling (queue depth, dead letters): the poller
+# process has no sandbox connection.
+config :converger, :metrics, poll_interval_ms: false
 
 # Store test uploads in a temp dir (per partition)
 config :converger, Converger.Uploads,
@@ -69,5 +87,56 @@ config :converger, :webhook,
   connect_timeout: 200,
   receive_timeout: 1_000
 
+# Every Telegram Bot API call goes to a Req.Test stub named after the adapter;
+# tests stub it per process (Req.Test follows $callers into tasks).
+config :converger, :telegram_req_options,
+  plug: {Req.Test, Converger.Channels.Adapters.Telegram},
+  retry: false
+
 # Deterministic encryption key for tests only.
 config :converger, Converger.Vault, key: Base.encode64("converger-tst-cloak-key-32bytes!")
+
+# The SQL sandbox wraps every test in a transaction, and
+# DETACH PARTITION ... CONCURRENTLY cannot run inside one. Partitions are not
+# created on boot either: test/test_helper.exs creates them outside the sandbox.
+config :converger, Converger.Partitions,
+  detach_concurrently: false,
+  ensure_on_boot: false
+
+# No broker consumer manager: it would query channels without a sandbox
+# connection. Tests start consumers explicitly (Converger.Channels.Consumers)
+# and retry broker messages without waiting.
+config :converger, :broker_channels,
+  consumers: false,
+  inbound_backoff_ms: 1,
+  inbound_max_backoff_ms: 5,
+  dead_letter_max_backoff_ms: 5
+
+# Forward typing indicators and read receipts to external channels inline
+# (Converger.Channels.Signals), so tests see the provider calls synchronously.
+config :converger, :channel_signals_async, false
+
+# Converger.RepoFaults (test/support) can make chosen queries raise
+# DBConnection.ConnectionError, as under database pressure (issue #35).
+config :converger, :repo_faults, true
+
+# Readiness `pool` check off by default: a loaded test machine must not flip
+# /health/ready to `degraded`. Tests that need it set degraded_queue_ms.
+config :converger, Converger.Repo.Pressure, degraded_queue_ms: 0
+
+# Swagger UI and /api/openapi.json are served in tests (ADR-0050).
+config :converger, :api_docs, enabled: true
+
+# No role is forced to enroll in 2FA (ADR-0058); tests that cover the
+# enforcement set :require_2fa_roles themselves.
+config :converger, :require_2fa_roles, []
+
+# mekik channel connections (#64): fast reconnects, no periodic channel scan
+# (the relay process has no sandbox connection; tests watch channels).
+config :converger, Converger.Channels.Adapters.Mekik,
+  connect_timeout_ms: 2_000,
+  call_timeout_ms: 5_000,
+  backoff_base_ms: 20,
+  max_backoff_ms: 200,
+  auth_retry_ms: 200,
+  relay_scan_interval_ms: nil

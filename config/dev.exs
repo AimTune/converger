@@ -10,6 +10,9 @@ config :converger, Converger.Repo,
   show_sensitive_data_on_connection_error: true,
   pool_size: 20
 
+# Background pool for Oban jobs (Converger.Repo.Pools).
+config :converger, Converger.Repo.Pools, background: [pool_size: 10]
+
 # For development, we disable any cache and enable
 # debugging and code reloading.
 #
@@ -24,7 +27,10 @@ config :converger, ConvergerWeb.Endpoint,
   code_reloader: true,
   debug_errors: true,
   secret_key_base: "3QQOE3Fo01fuLFggDestryz62sQDVwUrORaf7rPYcGEXmzFOIE9hSOUPX7WtCRB7",
-  watchers: []
+  watchers: [
+    esbuild: {Esbuild, :install_and_run, [:converger, ~w(--sourcemap=inline --watch)]},
+    tailwind: {Tailwind, :install_and_run, [:converger, ~w(--watch)]}
+  ]
 
 # ## SSL Support
 #
@@ -62,8 +68,9 @@ config :phoenix, :stacktrace_depth, 20
 # Initialize plugs at runtime for faster development compilation
 config :phoenix, :plug_init_mode, :runtime
 
-# Disable swoosh api client as it is only required for production adapters.
-config :swoosh, :api_client, false
+# Email channels (the `email` adapter) send through the Swoosh API adapters,
+# which need an HTTP client.
+config :swoosh, :api_client, Swoosh.ApiClient.Req
 
 # Let development webhooks target local services. The SSRF guard blocks
 # private, loopback and link-local targets everywhere else.
@@ -72,3 +79,14 @@ config :converger, :webhook, allowed_targets: ["localhost", "127.0.0.0/8", "::1"
 # Deterministic encryption key for local development only.
 # Never use this key outside of development.
 config :converger, Converger.Vault, key: Base.encode64("converger-dev-cloak-key-32bytes!")
+
+# Let the docker compose Prometheus (docker/prometheus/prometheus.yml) scrape
+# GET /metrics of the dev server without a token: loopback and private ranges
+# (Docker Desktop's host.docker.internal). Production needs METRICS_TOKEN or
+# METRICS_ALLOWED_IPS, see docs/operations/observability.md.
+config :converger, :metrics,
+  allowed_ips: ["127.0.0.0/8", "::1", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]
+
+# Swagger UI at /api/docs and the OpenAPI document at /api/openapi.json
+# (ADR-0050). Off in prod unless API_DOCS_ENABLED=true.
+config :converger, :api_docs, enabled: true

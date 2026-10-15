@@ -38,7 +38,9 @@ defmodule Converger.Participants do
 
   @doc """
   Insert the participant `(channel, attrs["external_id"])` or return the
-  existing one. A non-nil `display_name` overwrites the stored one.
+  existing one. A non-nil `display_name` overwrites the stored one, and the
+  keys of `metadata` are merged over the stored ones (e.g. the Bot Framework
+  `service_url` a Teams reply must go to, which can change).
   """
   def upsert_participant(channel, attrs) do
     on_conflict =
@@ -46,6 +48,7 @@ defmodule Converger.Participants do
         update: [
           set: [
             display_name: fragment("COALESCE(EXCLUDED.display_name, ?)", p.display_name),
+            metadata: fragment("? || EXCLUDED.metadata", p.metadata),
             updated_at: fragment("EXCLUDED.updated_at")
           ]
         ]
@@ -88,7 +91,7 @@ defmodule Converger.Participants do
           "channel_id" => channel.id,
           "metadata" => %{"source" => "inbound_webhook"}
         })
-        |> Repo.insert()
+        |> Converger.Conversations.insert_conversation()
     end
   end
 
@@ -144,6 +147,93 @@ defmodule Converger.Participants do
   end
 
   @doc """
+  Mark the participant `(channel, external_id)` opted out (`true`, e.g. an
+  SMS `STOP`) or opted in again (`false`, `START`). The participant is
+  created when it does not exist yet. Opting out an already opted-out
+  participant keeps the original time.
+  """
+  def set_opted_out(channel, external_id, opted_out?)
+      when is_binary(external_id) and is_boolean(opted_out?) do
+    with {:ok, participant} <- upsert_participant(channel, %{"external_id" => external_id}) do
+      opted_out_at =
+        cond do
+          not opted_out? -> nil
+          participant.opted_out_at -> participant.opted_out_at
+          true -> DateTime.utc_now()
+        end
+
+      result =
+        participant
+        |> Ecto.Changeset.change(opted_out_at: opted_out_at)
+        |> Repo.update()
+
+      with {:ok, updated} <- result,
+           true <- is_nil(participant.opted_out_at) and not is_nil(updated.opted_out_at) do
+        emit_opted_out(updated)
+      end
+
+      result
+    end
+  end
+
+  # Platform event webhooks (ADR-0053): only the transition to opted out.
+  defp emit_opted_out(participant) do
+    Converger.Webhooks.emit(participant.tenant_id, "participant.opted_out", %{
+      participant_id: participant.id,
+      channel_id: participant.channel_id,
+      external_id: participant.external_id,
+      display_name: participant.display_name,
+      opted_out_at: participant.opted_out_at
+    })
+  end
+
+  @doc "Whether the participant `(channel_id, external_id)` has opted out."
+  def opted_out?(channel_id, external_id) when is_binary(channel_id) and is_binary(external_id) do
+    from(p in Participant,
+      where:
+        p.channel_id == ^channel_id and p.external_id == ^external_id and
+          not is_nil(p.opted_out_at)
+    )
+    |> Repo.exists?()
+  end
+
+  def opted_out?(_channel_id, _external_id), do: false
+
+  @doc """
+  The external id of an opted-out recipient of `activity` on `channel_id`,
+  or nil: the conversation's participant when it belongs to the channel, and
+  an explicit recipient in the activity metadata (`"to"`,
+  `"recipient_phone"`).
+  """
+  def opted_out_recipient(activity, channel_id) when is_binary(channel_id) do
+    metadata = Map.get(activity, :metadata) || %{}
+
+    [recipient_for(activity, channel_id), metadata["to"], metadata["recipient_phone"]]
+    |> Enum.filter(&(is_binary(&1) and &1 != ""))
+    |> Enum.uniq()
+    |> Enum.find(&opted_out?(channel_id, &1))
+  end
+
+  def opted_out_recipient(_activity, _channel_id), do: nil
+
+  @doc """
+  The ids of the channels among `channel_ids` that have a participant with
+  `external_id` (e.g. the channels an inbound message must not be echoed
+  back to).
+  """
+  def channels_with_participant([], _external_id), do: []
+
+  def channels_with_participant(channel_ids, external_id) when is_binary(external_id) do
+    from(p in Participant,
+      where: p.channel_id in ^channel_ids and p.external_id == ^external_id,
+      select: p.channel_id
+    )
+    |> Repo.all()
+  end
+
+  def channels_with_participant(_channel_ids, _external_id), do: []
+
+  @doc """
   The `external_id` of the participant of the activity's conversation, when
   that participant belongs to `channel_id` (e.g. the phone number to reply
   to), or nil.
@@ -159,4 +249,21 @@ defmodule Converger.Participants do
   end
 
   def recipient_for(_activity, _channel_id), do: nil
+
+  @doc """
+  The participant of the activity's conversation, when that participant
+  belongs to `channel_id`, or nil. Like `recipient_for/2`, for adapters that
+  need more than the external id (e.g. the stored Bot Framework service URL).
+  """
+  def participant_for(%{conversation_id: conversation_id}, channel_id)
+      when is_binary(conversation_id) and is_binary(channel_id) do
+    from(c in Conversation,
+      join: p in assoc(c, :participant),
+      where: c.id == ^conversation_id and p.channel_id == ^channel_id,
+      select: p
+    )
+    |> Repo.one()
+  end
+
+  def participant_for(_activity, _channel_id), do: nil
 end

@@ -220,6 +220,9 @@ defmodule Converger.Uploads do
     end
   end
 
+  @doc "The bytes of an attachment, read from storage."
+  def read(%Attachment{storage_key: key}), do: storage().get(storage_opts(), key)
+
   @doc "A presigned PUT for direct-to-storage uploads (where the backend supports it)."
   def presigned_put_url(key, opts \\ []) do
     storage().presigned_put_url(storage_opts(), key, Keyword.put_new(opts, :expires_in, 900))

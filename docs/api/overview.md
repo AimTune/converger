@@ -14,11 +14,16 @@ error bodies, rate limiting, pagination, idempotency and CORS. The endpoint refe
 - [Inbound webhooks](inbound.md): provider-facing endpoints under `/api/v1/channels/:channel_id`, called by WhatsApp, Infobip or your own systems.
 
 :::info OpenAPI
-There is no OpenAPI / Swagger description today: the repository has no `open_api_spex` dependency, no generated
-spec and no `/api/docs` route. A machine-readable spec, Swagger UI and a single error envelope are
-Planned ([#45](https://github.com/AimTune/converger/issues/45)). Until then, these pages and the controller tests
-under [`test/converger_web/controllers`](https://github.com/AimTune/converger/tree/main/test/converger_web/controllers)
-are the reference.
+The API is described by an OpenAPI 3.1 document, committed as
+[`priv/static/openapi.json`](https://github.com/AimTune/converger/blob/main/priv/static/openapi.json) and served at
+`/api/openapi.json`, with Swagger UI at `/api/docs` (on in dev, opt-in in prod). See [OpenAPI and Swagger UI](openapi.md).
+Changes follow the [versioning policy](versioning.md).
+:::
+
+:::tip SDKs
+Server-side SDKs for [Python](../sdk/python.md), [Go](../sdk/go.md) and [Elixir](../sdk/elixir.md) wrap the client
+and tenant APIs, normalize every error shape below into one error type, and verify webhook signatures. See
+[Server-side SDKs](../sdk/server-sdks.md).
 :::
 
 ## Base URLs
@@ -32,15 +37,16 @@ All paths below are relative to the base URL. Every API path is versioned under 
 
 | Path prefix | Family | Authentication |
 | --- | --- | --- |
-| `/api/v1/tokens`, `/api/v1/conversations...`, `/api/v1/routing_rules...` | Tenant API | `x-api-key` (tenant API key) or `x-channel-token` (channel token) |
+| `/api/v1/tokens`, `/api/v1/conversations...`, `/api/v1/routing_rules...` | Tenant API | `x-api-key` (tenant API key) or `x-channel-token` (channel token, deprecated, see [migrating from the legacy surfaces](migrating-from-legacy.md)) |
 | `/api/v1/channels/:channel_id/inbound`, `/api/v1/channels/:channel_id/status` | Inbound webhooks | Per-channel request signature, see [inbound](inbound.md) |
 | `/api/v1/converger/tokens/generate` | Client API | `Authorization: Bearer <channel secret>` |
 | `/api/v1/converger/...` (everything else) | Client API | `Authorization: Bearer <converger token>` |
 
-Two WebSocket endpoints complement the REST API: `/socket/websocket` (legacy conversation channel, joined with a
-conversation token from `POST /api/v1/tokens`) and `/socket/converger/websocket` (the Converger client socket,
-joined with a converger token; its URL is returned as `streamUrl`). See [WebSocket](../websocket.md). The wire
-protocol for the client socket is Converger Protocol v1 (spec in progress,
+Two WebSocket endpoints complement the REST API: `/socket/converger/websocket` (the Converger client socket,
+joined with a converger token; its URL is returned as `streamUrl`; clients can also send activities on it with
+`postActivity`) and `/socket/websocket` (legacy conversation channel, joined with a conversation token from
+`POST /api/v1/tokens`; **deprecated**, see [migrating from the legacy surfaces](migrating-from-legacy.md)). See
+[WebSocket](../websocket.md). The wire protocol for the client socket is Converger Protocol v1 (spec in progress,
 [#21](https://github.com/AimTune/converger/issues/21), [#63](https://github.com/AimTune/converger/issues/63)).
 
 Requests and responses are JSON (`content-type: application/json`), except the multipart upload endpoint and the
@@ -53,11 +59,18 @@ with an `Accept` header that excludes JSON is rejected with `406`.
 
 | Credential | Where it comes from | Sent as | Used by |
 | --- | --- | --- | --- |
-| Tenant API key | Created with the tenant (admin panel); format `cvg_live_` + 43 URL-safe Base64 chars | `x-api-key: <key>` | Tenant API |
-| Channel token | Shown (and copyable) per channel in the admin panel, Channels page | `x-channel-token: <jwt>` | Tenant API: create conversation, issue conversation token, and accepted by every tenant-authenticated route |
-| Conversation token | `POST /api/v1/tokens` | `token` param of the legacy socket `/socket/websocket` | Legacy WebSocket channel `conversation:<id>` |
+| Tenant API key (primary) | Created with the tenant (admin panel or admin API); format `cvg_live_` + 43 URL-safe Base64 chars; every scope | `x-api-key: <key>` | Tenant API and management API |
+| Scoped API key | `POST /api/v1/manage/api_keys` or the admin API; same format; scopes `read`, `write`, `manage`, optional expiry ([management API](management-api.md#api-keys-and-scopes)) | `x-api-key: <key>` | What its scopes allow |
+| Admin API token | `ADMIN_API_TOKEN` ([configuration](../operations/configuration.md#network-trust-and-admin-access)) | `Authorization: Bearer <token>` | Admin API `/api/v1/admin` only, from the admin IP allowlist |
+| Channel token (deprecated) | Shown (and copyable) per channel in the admin panel, Channels page | `x-channel-token: <jwt>` | Tenant API: create conversation, issue conversation token, and accepted by every tenant-authenticated route |
+| Conversation token (deprecated) | `POST /api/v1/tokens` | `token` param of the legacy socket `/socket/websocket` | Legacy WebSocket channel `conversation:<id>` |
 | Channel secret | Generated per channel (admin panel) | `Authorization: Bearer <secret>` | `POST /api/v1/converger/tokens/generate` only |
 | Converger token | `POST /api/v1/converger/tokens/generate`, `/tokens/refresh`, `/conversations` | `Authorization: Bearer <jwt>` | Client API and `/socket/converger/websocket` |
+
+Channel tokens, conversation tokens, `POST /api/v1/tokens` and the legacy socket are deprecated
+([#23](https://github.com/AimTune/converger/issues/23)) and will be removed no earlier than two minor releases and
+six months after it. They keep working unchanged until then.
+The tenant API key is not deprecated. See [migrating from the legacy surfaces](migrating-from-legacy.md).
 
 API keys and channel secrets are stored hashed (and the channel secret also encrypted) and looked up by hash; see
 [ADR-0012](../adr/0012-secrets-at-rest-and-audit-redaction.md). Rotating a tenant API key keeps the previous key
@@ -73,24 +86,32 @@ End-user clients get short-lived converger tokens from your backend, which excha
 [`ConvergerWeb.Plugs.TenantAuth`](https://github.com/AimTune/converger/blob/main/lib/converger_web/plugs/tenant_auth.ex)
 checks, in this order:
 
-1. `x-api-key`: the key is hashed and matched against the current key or the previous key while its grace period
-   lasts. The tenant must have status `active`.
-2. `x-channel-token`: the token is verified as a Converger-signed JWT and its `tenant_id` claim selects the tenant,
-   which must be `active`.
+1. `x-api-key`: the key is hashed and matched against the scoped keys (not revoked, not expired), then against the
+   tenant's primary key or its previous key while the grace period lasts. The tenant must have status `active`.
+2. `x-channel-token`: the token must be a **channel token**. Every token type is signed with the same key, so
+   the claims decide: a channel token has `typ: "channel"` (tokens issued before that claim existed are
+   recognised by `sub: "channel_<channel_id>"` and the absence of `conversation_id` and `type`). Its channel must
+   exist, be `active` and belong to the token's tenant, and the tenant must be `active`. Conversation tokens and
+   Converger client tokens (which end-user browsers hold) are rejected with `Invalid token`, even though they carry
+   a `tenant_id`.
 
-Failures return `401` with a flat string error:
+Failures return `401` with code `unauthorized` ([error envelope](errors.md)):
 
 ```json
-{ "error": "Unauthorized: Invalid or inactive API Key" }
+{ "error": { "code": "unauthorized", "message": "Invalid or inactive API Key", "details": null, "request_id": "..." } }
 ```
 
-| Message suffix | Cause |
+| `message` | Cause |
 | --- | --- |
 | `Missing authentication headers` | Neither header present |
-| `Invalid or inactive API Key` | Unknown key, expired previous key, or tenant not `active` |
-| `Invalid token` | `x-channel-token` signature, expiry or claims invalid |
-| `Tenant is not active` | Token valid, tenant suspended |
-| `Tenant not found` | Token valid, tenant deleted |
+| `Invalid or inactive API Key` | Unknown key, expired previous key, revoked or expired scoped key, or tenant not `active` |
+| `Invalid token` | `x-channel-token` signature or expiry invalid, not a channel token, or its channel or tenant does not exist |
+| `Channel is not active` | Channel token valid, channel deactivated |
+| `Tenant is not active` | Channel token valid, tenant suspended |
+
+Then the request must have the scope its action needs: `read` for `GET`, `write` for other methods, `manage` for
+configuration changes ([scopes](management-api.md#api-keys-and-scopes)). Without it the answer is
+`403 insufficient_scope`. The primary key and channel tokens have every scope.
 
 Some endpoints apply stricter rules on top. `GET /api/v1/conversations` requires `x-api-key` and answers `403` to a
 channel token. `POST /api/v1/conversations` and `POST /api/v1/tokens` do not run `TenantAuth` at all and
@@ -107,17 +128,18 @@ reads `Authorization: Bearer <value>` and runs in one of two modes:
 - **Token mode** (all other client routes): the value must be a valid converger token (signature, `exp`,
   `type: "converger"`), and the channel in its `channel_id` claim must still exist and be `active`.
 
-Errors use a nested object:
+Errors use the [error envelope](errors.md):
 
 ```json
-{ "error": { "code": "Unauthorized", "message": "Invalid or expired token" } }
+{ "error": { "code": "unauthorized", "message": "Invalid or expired token", "details": null, "request_id": "..." } }
 ```
 
 | Status | `code` | `message` |
 | --- | --- | --- |
-| `401` | `Unauthorized` | `Missing or malformed Authorization header` |
-| `401` | `Unauthorized` | `Invalid or expired token` |
-| `403` | `Forbidden` | `Channel not found or inactive` (token valid, channel disabled or deleted) |
+| `401` | `unauthorized` | `Missing or malformed Authorization header` |
+| `401` | `unauthorized` | `Invalid or expired token` (bad signature, wrong token type) |
+| `401` | `token_expired` | `Token expired` (refresh before `exp`, or issue a new token) |
+| `403` | `channel_inactive` | `Channel not found or inactive` (token valid, channel disabled or deleted) |
 
 A disabled channel therefore invalidates every outstanding converger token for it immediately, even before `exp`.
 
@@ -130,13 +152,17 @@ rotating `SECRET_KEY_BASE` invalidates every issued token. Each also carries Jok
 
 | Token | Module | Claims | TTL |
 | --- | --- | --- | --- |
-| Channel token | [`Converger.Auth.Token.generate_channel_token/1`](https://github.com/AimTune/converger/blob/main/lib/converger/auth/token.ex) | `channel_id`, `tenant_id`, `sub: "channel_<channel_id>"` | 3600 s (default `exp`) |
+| Channel token | [`Converger.Auth.Token.generate_channel_token/1`](https://github.com/AimTune/converger/blob/main/lib/converger/auth/token.ex) | `typ: "channel"`, `channel_id`, `tenant_id`, `sub: "channel_<channel_id>"` | 3600 s (default `exp`) |
 | Conversation token | `Converger.Auth.Token.generate_token/3` | `conversation_id`, `tenant_id`, `sub: <user_id>` | 3600 s (`expires_in: 3600` in the response) |
 | Converger token | [`Converger.Auth.ConvergerToken`](https://github.com/AimTune/converger/blob/main/lib/converger/auth/converger_token.ex) | `type: "converger"`, `channel_id`, `tenant_id`, `sub: "converger_<channel_id>"`, optional `conversation_id`, optional `user_id` | 1800 s (`expires_in: 1800`) |
 
-A converger token without `conversation_id` is **unscoped**: it was issued by `/tokens/generate` and can create
-conversations. A token with `conversation_id` is **conversation-bound**: requests for any other conversation id are
-answered `403` (`{"errors": {"detail": "Forbidden"}}`), and attachments of other conversations are reported as `404`.
+Every converger token is bound to **one channel**: conversations (and their activities, uploads and attachments)
+on any other channel are reported as `404`, even within the same tenant. A converger token without
+`conversation_id` is **unscoped**: it was issued by `/tokens/generate`, can create conversations and resume
+(`GET /conversations/:id`) conversations of its channel, but cannot join a conversation over the WebSocket; the
+socket needs the conversation token those endpoints return. A token with `conversation_id` is
+**conversation-bound**: requests for any other conversation id are answered `403`
+`forbidden`, and attachments of other conversations are reported as `404`.
 `user_id` is copied from `user.id` at generation time and carried through refreshes; it identifies the end user's
 socket (see [ADR-0020](../adr/0020-per-subject-socket-ids-and-presence.md)).
 
@@ -145,43 +171,44 @@ displayed.
 
 ## Error responses
 
-The error body shape currently depends on where the error is raised. A single envelope is Planned
-([#45](https://github.com/AimTune/converger/issues/45)); until then, clients should handle these shapes:
+Every error response, on every family, uses one envelope ([errors](errors.md),
+[ADR-0050](../adr/0050-openapi-spec-error-envelope-and-api-versioning.md)):
 
-| Shape | Example | Raised by |
-| --- | --- | --- |
-| Flat string | `{"error": "Missing x-channel-token header"}` | `FallbackController` (string reasons), `TenantAuth`, rate limiter, upload and inbound specifics |
-| Phoenix detail | `{"errors": {"detail": "Not Found"}}` | `FallbackController` for `:not_found` / `:unauthorized` / `:forbidden`, and Phoenix for exceptions (`ErrorJSON`) |
-| Changeset errors | `{"errors": {"text": ["should be at most 65536 byte(s)"]}}` | Validation failures (`422`) |
-| Coded object | `{"error": {"code": "Unauthorized", "message": "..."}}` | `ConvergerAuth` (client API) |
-| Closed conversation | `{"error": "conversation_closed", "detail": "Conversation is closed"}` | Any activity write to a closed conversation (`409`) |
+```json
+{ "error": { "code": "conversation_closed", "message": "Conversation is closed", "details": null, "request_id": "GBHDfGZ0bW5Sl2YAAAEB" } }
+```
+
+Branch on `code`, never on `message`. `details` carries the errors per field for `422` (`invalid_message`,
+`validation_failed`) and `retry_after_ms` for `429` / `503`. `request_id` is the request's `x-request-id`.
 
 ### Status codes
 
-Mapped in [`ConvergerWeb.FallbackController`](https://github.com/AimTune/converger/blob/main/lib/converger_web/controllers/fallback_controller.ex)
-and [`ConvergerWeb.ErrorJSON`](https://github.com/AimTune/converger/blob/main/lib/converger_web/controllers/error_json.ex):
-
-| Status | Body | When |
+| Status | Codes | When |
 | --- | --- | --- |
-| `400` | `{"error": "<message>"}` | Request-level problem reported as a string, e.g. `Missing x-channel-token header`, `Invalid cursor`, `Invalid watermark`, `Invalid channel_id`, `Missing file in upload` |
-| `400` | `{"error": "Channel is inactive"}` | The addressed channel is disabled |
-| `400` | `{"error": "Channel does not accept inbound messages"}` | Inbound message to an outbound-only channel |
-| `400` | `{"errors": {"detail": "Bad Request"}}` | Malformed UUID in a path or lookup (`Ecto.Query.CastError`), or missing required body params (`Phoenix.ActionClauseError`) |
-| `401` | `{"errors": {"detail": "Unauthorized"}}` | Invalid channel token, invalid inbound signature |
-| `403` | `{"errors": {"detail": "Forbidden"}}` | Authenticated but not allowed (wrong conversation for the token, channel token where an API key is required) |
-| `404` | `{"errors": {"detail": "Not Found"}}` | Unknown resource, or a resource of another tenant (tenant isolation never reveals existence), unknown route |
-| `409` | `{"error": "conversation_closed", "detail": "Conversation is closed"}` | Activity posted to a closed conversation ([ADR-0017](../adr/0017-conversation-lifecycle-enforced-under-the-seq-lock.md)) |
-| `413` | `{"error": "File too large (max 10.0MB)"}` or `{"errors": {"detail": "Request Entity Too Large"}}` | Upload over the size limit (the second form when the whole multipart body exceeds the limit plus 1 MB) |
-| `415` | `{"error": "File type application/octet-stream is not allowed"}` | Upload whose sniffed type is not allow-listed |
-| `422` | `{"errors": {"<field>": ["<message>"]}}` | Changeset validation failed |
-| `422` | `{"error": "Inbound message has no text and no attachments"}` | Empty generic inbound message |
-| `429` | `{"error": "Too many requests. Please try again later."}` | Rate limit exceeded |
-| `500` | `{"errors": {"detail": "Internal Server Error"}}` | Unhandled exception |
-| `502` | `{"error": "File could not be stored, please retry"}` / `{"error": "Attachment storage unavailable"}` | Storage backend failure on upload / download |
-| `503` | `{"error": "Activity could not be accepted, please retry"}` | The activity was rolled back because its delivery jobs could not be enqueued (transactional outbox, [ADR-0001](../adr/0001-transactional-outbox-with-oban.md)); safe to retry with an idempotency key |
+| `400` | `bad_request`, `invalid_watermark`, `channel_inactive`, `inbound_not_supported` | A request-level problem (`Missing x-channel-token header`, `Invalid cursor`, `Invalid channel_id`, `Missing file in upload`, malformed JSON or UUID, missing required body params), a bad watermark, a disabled channel, inbound to an outbound-only channel |
+| `401` | `unauthorized`, `token_expired` | Missing or invalid credential, invalid inbound signature, expired Converger token |
+| `403` | `forbidden`, `insufficient_scope`, `insufficient_permission`, `channel_inactive` | Authenticated but not allowed (wrong conversation for the token, channel token where an API key is required, IP outside the admin allowlist); the API key lacks the scope or the Converger token the permission; the token's channel is disabled |
+| `404` | `not_found` | Unknown resource, or a resource of another tenant (tenant isolation never reveals existence), unknown route |
+| `406` | `not_acceptable` | The `Accept` header excludes JSON |
+| `409` | `conversation_closed`, `not_failed` | Activity posted to a closed conversation ([ADR-0017](../adr/0017-conversation-lifecycle-enforced-under-the-seq-lock.md)); replay of a delivery that is not `failed` ([tenant API](tenant-api.md#retry-a-delivery)) |
+| `412` | `precondition_failed` | A management call's `If-Match` ETag is stale ([management API](management-api.md#conventions)) |
+| `413` | `payload_too_large` | Upload over the size limit (`File too large (max 10.0MB)`), or a raw inbound body over the limit |
+| `415` | `unsupported_media_type` | Upload whose sniffed type is not allow-listed |
+| `422` | `invalid_message`, `validation_failed`, `unsupported_channel_type`, `invalid_channel_config` | Validation failed (`details` per field), or the channel cannot do the operation |
+| `429` | `rate_limited` | Rate limit exceeded |
+| `500` | `internal` | Unhandled exception (no exception text is returned) |
+| `502` | `upstream_unavailable` | Storage backend or provider failure (`File could not be stored, please retry`, `Attachment storage unavailable`) |
+| `503` | `unavailable` | The activity was rolled back because its delivery jobs could not be enqueued (transactional outbox, [ADR-0001](../adr/0001-transactional-outbox-with-oban.md); `details.reason: "delivery_enqueue_failed"`, safe to retry with an idempotency key), the database is unavailable, or the node is draining |
+
+The endpoint references show an error as `code` or `code: message`; the body is always the envelope above.
 
 Every response carries an `x-request-id` header (`Plug.RequestId`), which is also attached to the server log lines of
 that request. Quote it when reporting a problem.
+
+Responses to deprecated requests (`POST /api/v1/tokens` and any request authenticated with `x-channel-token`) also
+carry the RFC 9745 header `Deprecation: @<unix time>` and
+`Link: <https://converger.aimtune.dev/api/migrating-from-legacy>; rel="deprecation"`. See the
+[versioning and deprecation policy](versioning.md) (`Sunset` headers, 12-month support window).
 
 ## Rate limiting
 
@@ -191,7 +218,7 @@ and aligned to wall-clock time.
 
 | Bucket | Applies to | Counted per | Default |
 | --- | --- | --- | --- |
-| `activity_create` | `POST /api/v1/conversations/:id/activities`, `POST /api/v1/converger/conversations/:id/activities` | tenant (shared by both APIs) | 100 per 1 s |
+| `activity_create` | `POST /api/v1/conversations/:id/activities`, `POST /api/v1/converger/conversations/:id/activities` | tenant (shared by both APIs and the socket `postActivity` event) | 100 per 1 s |
 | `upload` | `POST /api/v1/converger/conversations/:id/upload` | tenant | 10 per 1 s |
 | `inbound` | `POST /api/v1/channels/:channel_id/inbound` and `/status` | channel (path parameter, checked before the channel is loaded) | 500 per 1 s |
 | `token_generate` | `POST /api/v1/converger/tokens/generate`, `POST /api/v1/converger/tokens/refresh` | channel | 10 per 60 s |
@@ -209,12 +236,12 @@ HTTP/1.1 429 Too Many Requests
 retry-after: 1
 content-type: application/json; charset=utf-8
 
-{"error":"Too many requests. Please try again later."}
+{"error":{"code":"rate_limited","message":"Too many requests. Please try again later.","details":{"retry_after_ms":830},"request_id":"GBHDfGZ0bW5Sl2YAAAEB"}}
 ```
 
 `retry-after` is in whole seconds (at least `1`) until the current window ends. No `X-RateLimit-*` headers are
-sent. `retry-after` is not in the CORS exposed headers, so browser code on another origin cannot read it; back off
-with your own delay there.
+sent. `retry-after` is not in the CORS exposed headers, so browser code on another origin cannot read it; use
+`error.details.retry_after_ms` from the body instead.
 
 ## Pagination
 
@@ -230,7 +257,7 @@ of the previous page, so rows inserted meanwhile never shift pages.
 | Param | Meaning |
 | --- | --- |
 | `limit` | Page size. Default `50`, capped at `500`. Missing, non-numeric or non-positive values use the default. |
-| `cursor` | The previous response's `meta.next_cursor`. Omit (or send empty) for the first page. A malformed cursor returns `400 {"error": "Invalid cursor"}`. |
+| `cursor` | The previous response's `meta.next_cursor`. Omit (or send empty) for the first page. A malformed cursor returns `400 bad_request: Invalid cursor`. |
 
 ```json
 {
@@ -245,18 +272,20 @@ URL-safe Base64 of `ts:<ISO 8601 timestamp>|<uuid>`, but clients must not build 
 ### Sequence watermarks (activities)
 
 Activities are paged oldest first on the per-conversation `seq` that the server assigns under the conversation row
-lock ([ADR-0006](../adr/0006-per-conversation-seq-and-opaque-watermarks.md)). The position is an opaque
-**watermark**:
+lock ([ADR-0006](../adr/0006-per-conversation-seq-and-opaque-watermarks.md)). The position is the
+**watermark**, the integer `seq` itself ([ADR-0068](../adr/0068-integer-seq-watermarks-on-every-surface.md)):
 
 | Param | Meaning |
 | --- | --- |
 | `limit` | Default `100`, capped at `1000` (same clamping rules). |
 | `watermark` | The previous response's watermark: return activities with a higher `seq`. Omit to start at the beginning of the conversation. |
 
-The watermark is the `seq` of the last activity returned, encoded as URL-safe Base64 without padding of `seq:<n>`
-(for example `c2VxOjQy` is `seq:42`). Resuming needs no database lookup. When a page is empty, the watermark you
-sent is returned unchanged. Legacy watermarks (Base64 of an activity id, issued before `seq` existed) are still
-accepted. The tenant API answers a malformed watermark with `400`; the client API starts from the beginning instead.
+The watermark is the `seq` of the last activity returned, a JSON number (`42`), the same number Protocol v1 frames
+carry. Resuming needs no database lookup. When a page is empty, the position you sent is returned as an integer
+(`null` if you sent none). Before v3.0 the watermark was opaque (URL-safe Base64 of `seq:<n>`, `c2VxOjQy` for
+`seq:42`); for one release both APIs still accept that form, its decimal string and legacy Base64 activity-id
+watermarks, and log them as the deprecated `opaque_watermark` surface
+([migration](../protocol/v1.md#65-the-watermark-and-its-migration)). The tenant API answers a malformed watermark with `400`; the client API starts from the beginning instead.
 The response shapes differ per family; see [tenant API](tenant-api.md#list-activities) and
 [client API](client-api.md#list-activities).
 
@@ -294,7 +323,7 @@ Inbound batches are de-duplicated per message; see [inbound webhooks](inbound.md
 
 ## Mass assignment
 
-Clients can only set an activity's `type`, `text`, `attachments` and `metadata`. The server sets `tenant_id`,
+Clients can only set an activity's `type`, `text`, `attachments`, `metadata` and `reply_to_id`. The server sets `tenant_id`,
 `conversation_id`, `sender`, `idempotency_key`, `seq` and `inserted_at`, ignoring any such fields in a body
 ([ADR-0005](../adr/0005-separate-client-and-system-changesets.md)). Every API renders activities from one canonical
 serializer, so REST, WebSocket and outbound webhook payloads cannot drift
@@ -304,7 +333,7 @@ Activity limits (`config :converger, :activity_limits`), violations of which ret
 
 | Limit | Default |
 | --- | --- |
-| `type` | One of `message`, `event`, `typing`, `conversationUpdate`, `endOfConversation` |
+| `type` | One of `message`, `event`, `typing`, `messageReaction`, `messageUpdate`, `messageDelete`, `conversationUpdate`, `endOfConversation` |
 | `max_text_bytes` | 65,536 bytes of `text` |
 | `max_attachments` | 10 entries in `attachments` |
 | `max_attachment_bytes` | 4,096 bytes per attachment object, measured as JSON |

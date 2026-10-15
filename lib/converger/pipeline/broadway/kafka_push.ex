@@ -2,7 +2,8 @@ defmodule Converger.Pipeline.Broadway.KafkaPush do
   @moduledoc """
   Kafka message push module.
 
-  Requires `{:brod, "~> 3.16"}` or `{:broadway_kafka, "~> 0.4"}` in your deps.
+  Uses the `:brod` client named `client_id`, which must be started (for
+  example with `:brod.start_client/3`) before the first push.
 
   ## Configuration
 

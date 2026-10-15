@@ -1,5 +1,47 @@
 # Excluded unless asked for:
 # - :benchmark tests (seeded, slow): `--include benchmark`
 # - live storage emulator tests (MinIO, Azurite): `--only` / `--include`
-ExUnit.start(exclude: [:benchmark, :minio, :azurite])
+# - :cluster, the two-node suite in test/cluster (boots extra VMs with
+#   :peer): `mix test --only cluster`
+# - :kafka, :rabbitmq, :nats, :redis_streams and :mqtt, the broker channel
+#   suites against real brokers (KAFKA_BROKERS, RABBITMQ_URL, NATS_URL,
+#   REDIS_URL, MQTT_HOST): `mix test --only kafka --only rabbitmq ...`,
+#   see docs/channels/brokers.md
+#
+# assert_receive / assert_reply / assert_push wait up to 1 s (ExUnit's
+# default is 100 ms). Channel and pipeline tests wait for messages from other
+# processes; on a loaded CI runner 100 ms was occasionally too short and the
+# tests flaked. Passing tests are not slowed down: the assertion returns as
+# soon as the message arrives. refute_receive keeps its own 100 ms default.
+ExUnit.start(
+  exclude: [
+    :benchmark,
+    :minio,
+    :azurite,
+    :cluster,
+    :kafka,
+    :rabbitmq,
+    :nats,
+    :redis_streams,
+    :mqtt,
+    # a real mekik/1 server (MEKIK_URL), see test/converger/channels/mekik_live_test.exs
+    # and test/acceptance/mekik_whatsapp_live_test.exs
+    :mekik,
+    # the real refund demo behind Converger (MEKIK_DIR), see
+    # test/protocol/mekik_converger_live_test.exs
+    :mekik_converger,
+    # the Python LangChain FAQ example in Docker, see
+    # test/acceptance/langchain_faq_live_test.exs
+    :langchain_faq
+  ],
+  assert_receive_timeout: 1_000
+)
+
+# activities/deliveries are partitioned by month (issue #30). Tests backdate
+# rows to 2024, so make sure those months exist, committed outside the
+# sandbox (the migration only creates the current and next months).
+Ecto.Adapters.SQL.Sandbox.checkout(Converger.Repo, sandbox: false)
+Converger.Partitions.ensure_partitions(from: ~D[2024-01-01])
+Ecto.Adapters.SQL.Sandbox.checkin(Converger.Repo)
+
 Ecto.Adapters.SQL.Sandbox.mode(Converger.Repo, :manual)

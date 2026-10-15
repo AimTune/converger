@@ -26,7 +26,7 @@ defmodule Converger.Conversations do
   import Ecto.Query, warn: false
   require Logger
   alias Converger.Repo
-  alias Converger.Conversations.Conversation
+  alias Converger.Conversations.{Conversation, ConversationChannel}
 
   @open "active"
   @closed "closed"
@@ -75,9 +75,14 @@ defmodule Converger.Conversations do
   Keyset-paginated conversations on `(inserted_at, id)`, newest first by default.
 
   Filters (string or atom keys, `""` ignored): `tenant_id`, `channel_id`,
-  `status`, `external_id` (the participant's provider id), and `q` (a
-  conversation id; anything that is not a UUID matches nothing). Options: `:limit`, `:cursor`, `:direction` (`:desc` | `:asc`),
-  `:preload`. See `Converger.Pagination.keyset/2`.
+  `status`, `external_id` (the participant's provider id, exact),
+  `updated_since` (a `DateTime`: last activity at or after it), and `q`
+  (the list search box: an exact conversation id, or a case-insensitive
+  "contains" match on the participant's `external_id` or `display_name`).
+  Options: `:limit`, `:cursor`, `:direction` (`:desc` | `:asc`),
+  `:field` (the timestamp to order by, default `:inserted_at`; `:updated_at`
+  lists the most recently active first), `:preload`. See
+  `Converger.Pagination.keyset/2`.
 
   Returns `{:ok, %Converger.Pagination.Page{}}` or `{:error, :invalid_cursor}`.
   """
@@ -89,11 +94,8 @@ defmodule Converger.Conversations do
 
   defp apply_filters(query, filters) do
     Enum.reduce(filters, query, fn
-      {key, value}, q when key in ["q", :q] and is_binary(value) and value != "" ->
-        case Ecto.UUID.cast(String.trim(value)) do
-          {:ok, id} -> where(q, id: ^id)
-          :error -> where(q, [c], false)
-        end
+      {key, value}, q when key in ["q", :q] and is_binary(value) ->
+        where_search(q, value)
 
       {"tenant_id", value}, q when value != "" ->
         where(q, tenant_id: ^value)
@@ -113,6 +115,9 @@ defmodule Converger.Conversations do
       {:status, value}, q when value != "" ->
         where(q, status: ^value)
 
+      {key, %DateTime{} = since}, q when key in ["updated_since", :updated_since] ->
+        where(q, [c], c.updated_at >= ^since)
+
       {"external_id", value}, q when is_binary(value) ->
         where_external_id(q, value)
 
@@ -122,6 +127,34 @@ defmodule Converger.Conversations do
       {_, _}, q ->
         q
     end)
+  end
+
+  # The list search box: a conversation id (exact UUID) or the participant's
+  # external id / display name (case-insensitive "contains").
+  defp where_search(query, term) do
+    case Converger.Pagination.contains(term) do
+      nil ->
+        query
+
+      pattern ->
+        query = join(query, :left, [c], p in assoc(c, :participant), as: :search_participant)
+
+        case Ecto.UUID.cast(String.trim(term)) do
+          {:ok, id} ->
+            where(
+              query,
+              [c, search_participant: p],
+              c.id == ^id or ilike(p.external_id, ^pattern)
+            )
+
+          :error ->
+            where(
+              query,
+              [search_participant: p],
+              ilike(p.external_id, ^pattern) or ilike(p.display_name, ^pattern)
+            )
+        end
+    end
   end
 
   # Conversations whose participant (on the conversation's channel) has this
@@ -148,7 +181,85 @@ defmodule Converger.Conversations do
   def create_conversation(attrs \\ %{}) do
     %Conversation{}
     |> Conversation.changeset(attrs)
-    |> Repo.insert()
+    |> insert_conversation()
+  end
+
+  @doc """
+  Insert a new conversation changeset together with its `origin` row in
+  `conversation_channels` (the conversation's channel and participant).
+  """
+  def insert_conversation(%Ecto.Changeset{} = changeset) do
+    Ecto.Multi.new()
+    |> Ecto.Multi.insert(:conversation, changeset)
+    |> Ecto.Multi.run(:origin, fn _repo, %{conversation: conversation} ->
+      record_channels(conversation, [
+        {Conversation.origin_channel_id(conversation), "origin", conversation.participant_id}
+      ])
+
+      {:ok, nil}
+    end)
+    |> Repo.transaction()
+    |> case do
+      {:ok, %{conversation: conversation}} ->
+        emit_webhook(conversation, "conversation.created", %{})
+        {:ok, conversation}
+
+      {:error, :conversation, changeset, _} ->
+        {:error, changeset}
+    end
+  end
+
+  @doc """
+  Record channels the conversation spans, as `{channel_id, role}` or
+  `{channel_id, role, participant_id}` (see
+  `Converger.Conversations.ConversationChannel`). A channel already recorded
+  keeps its row and role.
+  """
+  def record_channels(_conversation, []), do: :ok
+
+  def record_channels(%{id: conversation_id, tenant_id: tenant_id}, entries) do
+    now = DateTime.utc_now()
+
+    rows =
+      entries
+      |> Enum.map(fn
+        {channel_id, role} -> {channel_id, role, nil}
+        {_channel_id, _role, _participant_id} = entry -> entry
+      end)
+      |> Enum.reject(fn {channel_id, _, _} -> is_nil(channel_id) end)
+      |> Enum.uniq_by(fn {channel_id, _, _} -> channel_id end)
+      |> Enum.map(fn {channel_id, role, participant_id} ->
+        %{
+          id: Ecto.UUID.generate(),
+          conversation_id: conversation_id,
+          channel_id: channel_id,
+          tenant_id: tenant_id,
+          role: role,
+          participant_id: participant_id,
+          inserted_at: now,
+          updated_at: now
+        }
+      end)
+
+    Repo.insert_all(ConversationChannel, rows,
+      on_conflict: :nothing,
+      conflict_target: [:conversation_id, :channel_id]
+    )
+
+    :ok
+  end
+
+  @doc "The channels a conversation spans: the origin first, then in the order they joined."
+  def list_conversation_channels(conversation_id) do
+    from(cc in conversation_channels_query(), where: cc.conversation_id == ^conversation_id)
+    |> Repo.all()
+  end
+
+  @doc "Query of `conversation_channels` in display order (for preloads)."
+  def conversation_channels_query do
+    from(cc in ConversationChannel,
+      order_by: [desc: cc.role == "origin", asc: cc.inserted_at, asc: cc.id]
+    )
   end
 
   def update_conversation(%Conversation{} = conversation, attrs) do
@@ -166,7 +277,10 @@ defmodule Converger.Conversations do
   ones are rejected with `:conversation_closed`. The emitted
   `conversationUpdate` activity is therefore the last one in the conversation.
 
-  Options: `:reason` (string, default `"manual"`), stored in the event's metadata.
+  Options: `:reason` (string, default `"manual"`), stored in the event's
+  metadata, and `:actor` (`%{type: ..., id: ...}`): when given, the status
+  change is recorded in the audit log (action `"close"`, resource
+  `"conversation"`). An idempotent no-op writes no audit entry.
   """
   def close_conversation(%Conversation{} = conversation, opts \\ []) do
     transition(conversation, @open, @closed, opts)
@@ -174,7 +288,8 @@ defmodule Converger.Conversations do
 
   @doc """
   Reopen a closed conversation so it accepts activities again. Idempotent.
-  Options: `:reason` (string, default `"manual"`).
+  Options: `:reason` (string, default `"manual"`) and `:actor` (audited as
+  action `"reopen"`, see `close_conversation/2`).
   """
   def reopen_conversation(%Conversation{} = conversation, opts \\ []) do
     transition(conversation, @closed, @open, opts)
@@ -185,6 +300,7 @@ defmodule Converger.Conversations do
 
     case Repo.update_all(query, set: [status: to, updated_at: DateTime.utc_now()]) do
       {1, [conversation]} ->
+        audit_transition(Keyword.get(opts, :actor), conversation)
         emit_lifecycle_event(conversation, Keyword.get(opts, :reason, "manual"))
         {:ok, conversation}
 
@@ -195,6 +311,43 @@ defmodule Converger.Conversations do
         end
     end
   end
+
+  defp audit_transition(nil, _conversation), do: :ok
+
+  defp audit_transition(%{type: type, id: actor_id}, %Conversation{} = updated) do
+    %{
+      tenant_id: updated.tenant_id,
+      actor_type: type,
+      actor_id: actor_id,
+      action: transition_action(updated.status),
+      resource_type: "conversation",
+      resource_id: updated.id,
+      changes: %{
+        "before" => %{"status" => previous_status(updated.status)},
+        "after" => %{"status" => updated.status}
+      }
+    }
+    |> Converger.AuditLogs.create_audit_log()
+    |> case do
+      {:ok, _} ->
+        :ok
+
+      {:error, error} ->
+        Logger.error("Failed to audit conversation status change",
+          conversation_id: updated.id,
+          error: inspect(error)
+        )
+
+        :error
+    end
+  end
+
+  defp transition_action(@closed), do: "close"
+  defp transition_action(@open), do: "reopen"
+
+  # A transition only succeeds from the opposite status.
+  defp previous_status(@closed), do: @open
+  defp previous_status(@open), do: @closed
 
   @doc """
   Open conversations with no activity (no `updated_at` change) since `threshold`.
@@ -261,6 +414,10 @@ defmodule Converger.Conversations do
       }
     }
 
+    emit_webhook(conversation, "conversation.#{event_name(conversation.status)}", %{
+      reason: to_string(reason)
+    })
+
     case Converger.Activities.create_activity(attrs, allow_closed: true) do
       {:ok, _activity} ->
         :ok
@@ -279,8 +436,45 @@ defmodule Converger.Conversations do
   defp event_name(@closed), do: "closed"
   defp event_name(@open), do: "reopened"
 
+  # Platform event webhooks (ADR-0053).
+  defp emit_webhook(%Conversation{} = conversation, type, extra) do
+    Converger.Webhooks.emit(
+      conversation.tenant_id,
+      type,
+      Map.merge(
+        %{
+          conversation_id: conversation.id,
+          status: conversation.status,
+          channel_id: conversation.channel_id,
+          origin_channel_id: conversation.origin_channel_id,
+          participant_id: conversation.participant_id,
+          metadata: conversation.metadata || %{},
+          inserted_at: conversation.inserted_at,
+          updated_at: conversation.updated_at
+        },
+        extra
+      )
+    )
+  end
+
+  @doc """
+  Deletes a conversation. Its activities and their deliveries (partitioned
+  tables without foreign keys, ADR-0034) are purged by a
+  `Converger.Workers.PurgeWorker` job enqueued in the same transaction.
+  """
   def delete_conversation(%Conversation{} = conversation) do
-    Repo.delete(conversation)
+    Ecto.Multi.new()
+    |> Ecto.Multi.delete(:conversation, conversation)
+    |> Oban.insert(
+      :purge,
+      Converger.Workers.PurgeWorker.new(%{conversation_ids: [conversation.id]})
+    )
+    |> Repo.transaction()
+    |> case do
+      {:ok, %{conversation: deleted}} -> {:ok, deleted}
+      {:error, :conversation, changeset, _} -> {:error, changeset}
+      {:error, _step, reason, _} -> {:error, reason}
+    end
   end
 
   def change_conversation(%Conversation{} = conversation, attrs \\ %{}) do

@@ -4,8 +4,8 @@ title: Chaos testing
 
 # Chaos testing
 
-The chaos test kills the Converger node with `SIGKILL` while clients send
-messages over REST and WebSocket. It then checks that **no message the server
+The chaos test kills the Converger node with `SIGKILL` (or, in mode `db_pause`, freezes Postgres) while clients
+send messages over REST and WebSocket. It then checks that **no message the server
 acknowledged was lost**, none was stored twice, the per-conversation `seq` has
 no gaps, and every acknowledged message reached its outbound webhook. This is
 the exit criterion of the v2.5 hardening epic (#57).
@@ -75,22 +75,28 @@ dumps.
 | `CHAOS_APP_PORT` | `14000` | Host port of the app. |
 | `CHAOS_SKIP_BUILD` | `0` | `1` reuses the existing image. |
 | `CHAOS_KEEP` | `0` | `1` leaves the stack running after the run. |
+| `CHAOS_MODE` | `kill` | `kill`, or `db_pause` to pause Postgres instead (see [Database pause](#database-pause)). |
+| `CHAOS_DB_PAUSES` / `CHAOS_DB_PAUSE_S` | `1` / `10` | Number and length of the pauses in `db_pause` mode (the first starts at `CHAOS_FIRST_KILL_S`). |
 
 ### In CI
 
 [`.github/workflows/chaos.yml`](https://github.com/AimTune/converger/blob/main/.github/workflows/chaos.yml) runs the
 same script on `ubuntu-latest`: on demand (`workflow_dispatch`, with the
 number of kills and the duration as inputs), nightly, and on pull requests
-that change the harness. The results directory is uploaded as the
-`chaos-results` artifact. It is not part of the regular CI workflow because it
+that change the harness. It runs both modes (`kill` and `db_pause`) as a matrix; a manual run can pick one with the `mode` input. The
+results directory of each is uploaded as the `chaos-results-<mode>` artifact. It is not part of the regular CI workflow because it
 builds the release image.
+
+The [load harness](benchmarks/index.md) applies the same zero-loss rule under
+heavier load and on three nodes (`rolling_restart` and `node_kill` scenarios).
+It detects loss from each subscriber's `seq` instead of from database dumps.
 
 ## What counts as acknowledged
 
 | Transport | Request | Acknowledged when |
 | --- | --- | --- |
 | REST | `POST /api/v1/conversations/:id/activities` with `x-api-key` and `x-idempotency-key` | `2xx` response with the activity id |
-| WebSocket | legacy socket `/socket/websocket`, channel `conversation:ID`, push `new_activity` with `idempotency_key` | `phx_reply` with status `ok` (the response carries the activity `id` and `seq`) |
+| WebSocket | Converger API socket `/socket/converger/websocket`, channel `converger:conversation:ID`, push `postActivity` with `clientId` | `phx_reply` with status `ok` (the response carries the activity `id`, `seq` and `watermark`) |
 
 Every message keeps its idempotency key across retries. Connection errors,
 timeouts and `5xx` responses are retried with backoff. A WebSocket push whose
@@ -162,6 +168,9 @@ channel
 Keep the key when re-sending after a timeout or reconnect; use a new one per
 message.
 
+Since [#23](https://github.com/AimTune/converger/issues/23) the harness drives the Converger API socket with
+`postActivity` and `clientId` instead; the legacy push is deprecated.
+
 ### Deliveries stuck for 30 minutes after a crash
 
 A delivery job that was running when the node was killed stays `executing` in
@@ -180,10 +189,76 @@ takes at most about 90 s. A rescued job may re-send a request that the
 receiver already got before the crash (8 such redeliveries in the 5-kill
 run), which is why receivers must de-duplicate by `x-converger-delivery-id`.
 
+## Database pause
+
+In mode `db_pause` ([#35](https://github.com/AimTune/converger/issues/35)) the app is not killed: the Postgres
+container is frozen with `docker pause` for `CHAOS_DB_PAUSE_S` (10 s) while the driver keeps sending. Connections stay
+open but nothing answers, so queries hang, both pools fill up and new checkouts are dropped. The app must answer with
+retryable errors and recover on its own ([Database pools and pressure](operations/database.md)):
+
+```bash
+CHAOS_MODE=db_pause test/chaos/run.sh
+```
+
+On top of the checks above, `verify.js` fails the run in this mode when
+
+- any REST answer was a `5xx` other than `503` (`rest_server_errors`; `rest_unavailable` counts the `503`s);
+- any message was never acknowledged: every refusal is retryable, and the driver retries WebSocket replies
+  `unavailable` / `rate_limited` after their `retry_after_ms`;
+- the app container restarted (`timing.app_restarts`).
+
+`timing.json` also reports `ready_after_unpause_s` (until `/health/ready` is `200` again),
+`readiness_non_200_probes` (from `readiness.log`, one probe per second) and `app_db_error_logs` (error-level log
+lines about database connection errors, which should be 0).
+
+Measured on 2026-10-12 on Docker Desktop (Windows 11, WSL2), one 10 s pause after 10 s of a 60 s run:
+
+| Run | Sent | Acked | Lost | Duplicates | `503` | Other `5xx` | WS retried after `unavailable` | Crash logs | Restarts | Ready after unpause |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Before the socket-connect fix | 7,041 | 7,035 | 0 | 0 | 55 | 0 | 6 (counted as rejected by the old driver) | 14 (WebSocket upgrades) | 0 | 3 s |
+| Final | 5,456 | 5,456 | 0 | 0 | 70 | 0 | 6 | 0 | 0 | 7 s |
+
+The first run found two problems: WebSocket upgrades (`ConvergerSocket.connect/3` reads the channel) still crashed
+with `DBConnection.ConnectionError`, which is now answered `503` with `Retry-After`, and the driver treated the
+retryable `unavailable` reply as a permanent rejection. The REST requests that hit the 5 s client timeout while
+Postgres was frozen (13) were retried and acknowledged.
+
+The nightly workflow runs both modes.
+## Alert rules chaos test
+
+`test/chaos/alerts.sh` checks that the delivery [alert rules](operations/observability.md#alert-rules) fire
+against a real node when a webhook target dies, and resolve when it comes back. It reuses the harness above
+(same image, `setup.exs`, `driver.js`, `sink.js`) and adds a Prometheus
+(`test/chaos/docker-compose.alerts.yml`) that scrapes the app every 5 s and evaluates
+`docker/prometheus/alerts.yml` with the `for:` durations shortened to 10 to 20 s.
+
+```bash
+test/chaos/alerts.sh
+```
+
+Under steady REST load (2 conversations, one sender each), the script:
+
+1. waits until delivery metrics are scraped and checks that no delivery alert fires while the sink is up;
+2. raises the breaker's `failure_threshold` (over `bin/converger rpc`) so the failures are not contained, kills the
+   sink (`docker compose kill sink`) and waits for `ConvergerDeliverySuccessRateLow`;
+3. restores the breaker defaults, so the next failures open it, and waits for `ConvergerChannelCircuitOpen`;
+4. starts the sink again and waits for `ConvergerChannelCircuitOpen` to resolve once a probe closes the breaker.
+
+Each wait times out after `CHAOS_ALERT_TIMEOUT_S` (240 s) and fails the run. The time each step took is written to
+`test/chaos/.run/out/timings.txt` and the final alert state to `alerts.json`. Other tunables:
+`CHAOS_REST_CONVERSATIONS` (2), `CHAOS_APP_PORT` (14300), `CHAOS_PROMETHEUS_PORT` (19300), `CHAOS_PROJECT`
+(`converger-chaos-alerts`), `CHAOS_SKIP_BUILD`, `CHAOS_KEEP`.
+
+Step 2 is needed because the [circuit breaker](delivery.md#circuit-breaker) contains a dead endpoint after 5
+failures: the deliveries are parked rather than attempted, so the success rate barely moves. That is why
+`ConvergerChannelCircuitOpen` exists next to the success-rate alert.
+
+The rules themselves are unit tested with `promtool test rules docker/prometheus/alerts.test.yml`.
+
 ## Not covered
 
-- Killing Postgres. The test assumes a durable database; see
-  [backups and restore](deployment.md#backups-and-restore).
+- Killing Postgres (losing it): the test assumes a durable database; see
+  [backups and restore](deployment.md#backups-and-restore). A *paused* database is covered by `db_pause`.
 - Several app nodes behind a load balancer (the run uses one node that is
   killed and restarted).
 - The Converger API WebSocket (`/socket/converger`). It only delivers

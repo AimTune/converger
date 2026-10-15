@@ -1,92 +1,689 @@
 defmodule ConvergerWeb.ConvergerChannel do
+  @moduledoc """
+  Channel of the Converger API socket (`/socket/converger`).
+
+  ## Topics
+
+    * `converger:conversation:<conversation id>` - one conversation. Allowed
+      for a token restricted to that conversation, and for a channel-scoped
+      token (`scope: "channel"`) of either the conversation's own channel
+      (**owned**) or a `websocket` channel that an enabled routing rule
+      targets from the conversation's channel (**routed**). An unscoped
+      channel-level token cannot join: it must get a conversation token first.
+      An owned socket receives every activity of the conversation as it is
+      committed (the `conversation:<id>` broadcast). A routed socket receives
+      what the pipeline delivers to its channel, after that channel's
+      middleware (`Converger.Channels.Adapters.WebSocket.conversation_topic/2`).
+    * `converger:channel:<channel id>` - every delivery to a `websocket`
+      channel, across conversations (an agent console). Requires a
+      `scope: "channel"` token of that channel. Frames carry `conversation_id`.
+
+  Every live and replayed activity is pushed as an `activitySet` frame. On a
+  conversation topic the socket tracks the last `seq` it pushed: a frame at or
+  below it is dropped (replay overlap, the same activity on two topics) and a
+  frame above `last + 1` first pushes the missing range from the database
+  (PubSub is at-most-once across nodes, and deliveries run concurrently).
+
+  ## Client events
+
+    * `postActivity` - send an activity. It goes through `Converger.Inbound`,
+      so the socket's channel must be `inbound` or `duplex`. On a channel
+      topic the payload names its `conversation_id`.
+    * `ack` `{watermark}` - the client has received everything up to the
+      watermark; marks the channel's pending deliveries `sent`
+      (`Converger.Deliveries.acknowledge/3`). On a channel topic the payload
+      names its `conversation_id`.
+    * `typing`, `read` - conversation topics only.
+    * `frame` - a Converger Protocol v1 client frame (conversation topics
+      only). A `text` frame is a send: it is stored like `postActivity` and
+      answered with an `ack` or `error` frame, pushed as the event `frame`;
+      the Phoenix reply is only a transport receipt. At most `max_in_flight`
+      sends may be unacked (`ConvergerWeb.Protocol.InFlight`).
+
+  Unless the channel requires acks (`require_ack: true` in its config), a
+  replay also marks the replayed activities' deliveries `sent`.
+  """
+
   use ConvergerWeb, :channel
 
   require Logger
 
-  alias Converger.{Activities, Conversations}
+  alias Converger.{
+    Activities,
+    Channels,
+    Deliveries,
+    Inbound,
+    RateLimit
+  }
+
+  alias Converger.Auth.ConvergerToken
+  alias Converger.Channels.Adapters.WebSocket
   alias Converger.ConvergerAPI.Watermark
   alias Converger.Pagination
+  alias Converger.Pipeline
+  alias Converger.Repo.Pressure
   alias ConvergerWeb.ConvergerAPI.ActivityJSON
+  alias ConvergerWeb.{ConversationSignals, Protocol, SocketGuard}
+  alias ConvergerWeb.Protocol.{Frames, InFlight, Send}
 
+  # Client frames only the bot answers (section 9, ConvergerWeb.Protocol.BotRelay).
+  @bot_frames ConvergerWeb.Protocol.BotRelay.forwarded_types()
+
+  # Receiving a conversation needs the token's `read` permission (ADR-0059).
   @impl true
-  def join("converger:conversation:" <> conversation_id, payload, socket) do
+  def join(topic, payload, socket) do
+    if ConvergerToken.permitted?(socket.assigns.converger_claims, "read"),
+      do: do_join(topic, payload, socket),
+      else: {:error, %{reason: "insufficient_permission", required: "read"}}
+  rescue
+    error in DBConnection.ConnectionError ->
+      Pressure.report(:channel, error)
+      {:error, %{reason: "unavailable", retry_after_ms: Pressure.retry_after_ms()}}
+  end
+
+  defp do_join("converger:conversation:" <> conversation_id, payload, socket) do
     claims = socket.assigns.converger_claims
 
-    if authorized?(conversation_id, claims) do
-      watermark = payload["watermark"]
-      socket = assign(socket, :conversation_id, conversation_id)
+    with {:ok, channel} <- Channels.get_active_channel(claims["channel_id"], claims["tenant_id"]),
+         {:ok, source, conversation} <- conversation_access(conversation_id, channel, claims) do
+      # The head is read before subscribing: anything committed later arrives
+      # live or is pushed by gap detection.
+      socket =
+        socket
+        |> assign(:channel, channel)
+        |> assign(:conversation_id, conversation.id)
+        |> assign(:source, source)
+        |> assign(:last_seq, conversation.last_seq)
+        |> assign(:participant, ConversationSignals.participant(claims))
+        |> assign(:presence?, ConversationSignals.presence?(channel, claims))
+        |> assign(:typing, ConversationSignals.new_typing())
+        |> assign(:in_flight, InFlight.new())
 
-      # Subscribe to the existing PubSub topic used by the pipeline
-      ConvergerWeb.Endpoint.subscribe("conversation:#{conversation_id}")
+      # Queued before subscribing, so every live frame is handled after the
+      # replay and dropped when the replay already covered it.
+      send(self(), {:after_join, payload["watermark"]})
 
-      send(self(), {:after_join, watermark})
+      # The conversation topic carries delivery statuses for every socket and,
+      # for an owned socket, the activities; a routed socket gets activities
+      # from its channel's topic. Plus the transient signals (typing, read).
+      ConvergerWeb.Endpoint.subscribe("conversation:#{conversation.id}")
+
+      if source == :routed,
+        do:
+          ConvergerWeb.Endpoint.subscribe(
+            WebSocket.conversation_topic(channel.id, conversation.id)
+          )
+
+      ConversationSignals.subscribe(conversation.id, socket.assigns.presence?)
+
       {:ok, socket}
     else
-      {:error, %{reason: "unauthorized"}}
+      _ -> {:error, %{reason: "unauthorized"}}
     end
   end
 
-  def join(_, _, _), do: {:error, %{reason: "invalid_topic"}}
-
-  @impl true
-  def handle_info({:after_join, watermark}, socket) do
-    conversation_id = socket.assigns.conversation_id
+  defp do_join("converger:channel:" <> channel_id, _payload, socket) do
     claims = socket.assigns.converger_claims
 
-    ConvergerWeb.Sockets.track(socket, claims["channel_id"], %{
-      tenant_id: claims["tenant_id"],
+    with %{"scope" => "channel", "channel_id" => ^channel_id} <- claims,
+         {:ok, %{type: "websocket"} = channel} <-
+           Channels.get_active_channel(channel_id, claims["tenant_id"]) do
+      send(self(), :after_join)
+      ConvergerWeb.Endpoint.subscribe(WebSocket.channel_topic(channel_id))
+
+      {:ok,
+       socket
+       |> assign(:channel, channel)
+       |> assign(:conversation_id, nil)
+       |> assign(:source, :channel)
+       |> assign(:participant, ConversationSignals.participant(claims))}
+    else
+      _ -> {:error, %{reason: "unauthorized"}}
+    end
+  end
+
+  defp do_join(_, _, _), do: {:error, %{reason: "invalid_topic"}}
+
+  # `clientId` syntax of Protocol v1 (docs/protocol/v1.md, section 7).
+  @client_id_format ~r/\A[A-Za-z0-9._:~-]{1,128}\z/
+
+  # A client event that fails because the database is unavailable is answered
+  # with a retryable error; the channel stays joined (issue #35).
+  @impl true
+  def handle_in(event, payload, socket) do
+    permission = required_permission(event)
+
+    if is_nil(permission) or
+         ConvergerToken.permitted?(socket.assigns.converger_claims, permission),
+       do: do_handle_in(event, payload, socket),
+       else: insufficient_permission(event, payload, permission, socket)
+  rescue
+    error in DBConnection.ConnectionError ->
+      Pressure.report(:channel, error)
+
+      {:reply, {:error, %{reason: "unavailable", retry_after_ms: Pressure.retry_after_ms()}},
+       socket}
+  end
+
+  # `postActivity`: send an activity over the socket, the WebSocket
+  # equivalent of `POST /api/v1/converger/conversations/:id/activities`.
+  #
+  # The payload is a Direct Line-style activity (`type`, `text`,
+  # `attachments`, `channelData`, `from.id`). The sender is the token's
+  # verified `user_id` when it has one (a client-asserted `from.id` cannot
+  # override it), otherwise `from.id`, otherwise `"user"`.
+  #
+  # The activity is received through `Converger.Inbound`, like an inbound
+  # webhook of the socket's channel: the channel must be `inbound` or
+  # `duplex`, and the pipeline (routing rules, middleware, deliveries) applies.
+  #
+  # An optional `clientId` makes a re-send safe: the activity is stored once
+  # and a re-send with the same `clientId` (also after a reconnect) is
+  # answered with the stored activity. The key is namespaced by sender
+  # (`ws:<sender>:<clientId>`), so it cannot collide with REST
+  # `X-Idempotency-Key`s or other senders.
+  #
+  # The reply carries the activity's `id`, `seq` and `watermark`, so the
+  # client can match its send to the `activitySet` that follows.
+  defp do_handle_in("postActivity", payload, socket) when is_map(payload) do
+    claims = socket.assigns.converger_claims
+    sender = sender(claims, payload)
+
+    with {:ok, conversation_id} <- target_conversation(socket, payload),
+         {:ok, client_id} <- client_id(payload),
+         :ok <- rate_limit(claims["tenant_id"]) do
+      message =
+        payload
+        |> client_params()
+        |> Map.merge(%{
+          "sender" => sender,
+          "idempotency_key" => client_id && Frames.client_key(sender, client_id)
+        })
+
+      socket.assigns.channel
+      |> receive_message(message, conversation_id)
+      |> reply_to_post(socket)
+    else
+      {:error, reply} -> {:reply, {:error, reply}, socket}
+    end
+  end
+
+  defp do_handle_in("postActivity", _payload, socket) do
+    {:reply, {:error, %{reason: "invalid_activity"}}, socket}
+  end
+
+  # `ack {watermark}`: the client received everything up to the watermark.
+  defp do_handle_in("ack", %{"watermark" => watermark} = payload, socket) do
+    %{channel: channel} = socket.assigns
+
+    with {:ok, conversation_id} <- ack_conversation(socket, payload),
+         {:ok, seq} <- ack_seq(watermark) do
+      count =
+        if channel.type == "websocket",
+          do: Deliveries.acknowledge(channel.id, conversation_id, seq),
+          else: 0
+
+      {:reply, {:ok, %{acknowledged: count}}, socket}
+    else
+      _ -> {:reply, {:error, %{reason: "invalid_ack"}}, socket}
+    end
+  end
+
+  # --- Client frames ---
+
+  # Typing, read receipts and v1 sends belong to one conversation.
+  defp do_handle_in(event, _payload, %{assigns: %{source: :channel}} = socket)
+       when event in ["typing", "read", "frame"],
+       do: bad_request(socket)
+
+  # `frame`: a Converger Protocol v1 client frame (docs/protocol/v1.md,
+  # sections 2.2 and 7). The protocol answer is pushed as a `frame` event;
+  # the Phoenix reply only says the frame arrived. Typing and read receipts
+  # have their own events on this binding.
+  # Section 9: frames only the bot answers go to the conversation.s bot channel.
+  defp do_handle_in(
+         "frame",
+         %{"type" => type} = frame,
+         %{assigns: %{conversation_id: id}} = socket
+       )
+       when is_binary(id) and type in @bot_frames do
+    case ConvergerWeb.Protocol.BotRelay.forward(
+           Converger.Conversations.get_conversation(id),
+           frame
+         ) do
+      :ok ->
+        :ok
+
+      {:error, :bot_unavailable} ->
+        push_frames(socket, [
+          Frames.error("bot_unavailable", "this conversation has no bot channel",
+            frame_type: type,
+            client_id: valid_client_id(frame)
+          )
+        ])
+    end
+
+    {:reply, :ok, socket}
+  end
+
+  defp do_handle_in("frame", %{} = frame, socket) do
+    case Send.kind(frame["type"]) do
+      kind when kind in [:text, :rich] ->
+        send_frame(frame, socket)
+
+      :reserved ->
+        type = frame["type"]
+        message = "#{type} is not a client frame on this binding"
+        push_frames(socket, [Frames.error("bad_request", message, frame_type: type)])
+        {:reply, :ok, socket}
+
+      :unknown ->
+        push_frames(socket, [Frames.error("bad_request", "unknown frame type")])
+        {:reply, :ok, socket}
+    end
+  end
+
+  defp do_handle_in("frame", _payload, socket) do
+    push_frames(socket, [Frames.error("bad_request", "a frame must be a JSON object")])
+    {:reply, :ok, socket}
+  end
+
+  # `typing {isTyping}`: relayed to the conversation's other connections and,
+  # when the adapter supports it, to the external channel. Never stored.
+  defp do_handle_in("typing", %{"isTyping" => is_typing}, socket) when is_boolean(is_typing) do
+    %{conversation_id: conversation_id, participant: participant, typing: typing} =
+      socket.assigns
+
+    typing = ConversationSignals.typing(typing, conversation_id, participant, is_typing)
+    {:reply, :ok, assign(socket, :typing, typing)}
+  end
+
+  defp do_handle_in("typing", _payload, socket), do: bad_request(socket)
+
+  # `read {watermark}`: the connection's participant has read everything up
+  # to `watermark`. The stored position never moves backwards.
+  defp do_handle_in("read", %{"watermark" => watermark}, socket) do
+    %{conversation_id: conversation_id, participant: participant} = socket.assigns
+
+    case ConversationSignals.read(conversation_id, participant, watermark) do
+      {:ok, read_seq} -> {:reply, {:ok, %{watermark: read_seq}}, socket}
+      {:error, :invalid_watermark} -> {:reply, {:error, %{reason: "invalid_watermark"}}, socket}
+      {:error, :not_found} -> {:reply, {:error, %{reason: "not_found"}}, socket}
+    end
+  end
+
+  defp do_handle_in("read", _payload, socket),
+    do: {:reply, {:error, %{reason: "invalid_watermark"}}, socket}
+
+  # A malformed known event or an unknown event: answered, the channel stays joined.
+  defp do_handle_in(_event, _payload, socket), do: bad_request(socket)
+
+  defp bad_request(socket), do: {:reply, {:error, %{reason: "bad_request"}}, socket}
+
+  # Token permissions (ADR-0059): sending needs `write`, typing needs
+  # `typing`; acks and read receipts come with `read`, checked on join.
+  defp required_permission(event) when event in ["postActivity", "frame"], do: "write"
+  defp required_permission("typing"), do: "typing"
+  defp required_permission(_event), do: nil
+
+  defp insufficient_permission("frame", frame, permission, socket) do
+    push_frames(socket, [
+      Frames.error("insufficient_permission", "the token lacks the #{permission} permission",
+        frame_type: if(is_map(frame), do: frame["type"]),
+        client_id: if(is_map(frame), do: valid_client_id(frame))
+      )
+    ])
+
+    {:reply, {:error, %{reason: "insufficient_permission", required: permission}}, socket}
+  end
+
+  defp insufficient_permission(_event, _payload, permission, socket),
+    do: {:reply, {:error, %{reason: "insufficient_permission", required: permission}}, socket}
+
+  defp sender(%{"user_id" => user_id}, _payload) when is_binary(user_id) and user_id != "",
+    do: user_id
+
+  defp sender(_claims, %{"from" => %{"id" => id}}) when is_binary(id) and id != "", do: id
+  defp sender(_claims, _payload), do: "user"
+
+  # Same mapping as the REST endpoint (ConvergerAPI.ActivityController).
+  defp client_params(payload) do
+    %{
+      "type" => payload["type"] || "message",
+      "text" => payload["text"],
+      "attachments" => payload["attachments"] || [],
+      "metadata" => payload["channelData"] || %{},
+      "reply_to_id" => payload["replyToId"]
+    }
+  end
+
+  defp client_id(payload) do
+    case Map.get(payload, "clientId") do
+      nil ->
+        {:ok, nil}
+
+      id when is_binary(id) ->
+        if Regex.match?(@client_id_format, id),
+          do: {:ok, id},
+          else: client_id_error()
+
+      _ ->
+        client_id_error()
+    end
+  end
+
+  defp client_id_error do
+    {:error,
+     %{
+       reason: "invalid_activity",
+       errors: %{clientId: ["must be 1 to 128 characters of A-Z a-z 0-9 . _ : ~ -"]}
+     }}
+  end
+
+  # Shares the tenant's `activity_create` bucket with the REST endpoints.
+  defp rate_limit(tenant_id) do
+    case RateLimit.check(:activity_create, "tenant:#{tenant_id}", tenant: tenant_id) do
+      {:allow, _count} ->
+        :ok
+
+      {:deny, retry_after_ms, _spec} ->
+        {:error, %{reason: "rate_limited", retry_after_ms: retry_after_ms}}
+    end
+  end
+
+  # For a `websocket` channel the socket is the channel's own transport, so
+  # its messages are the channel's inbound messages (mode checked). A token of
+  # another channel type (echo, webhook, ...) is a client of the conversation,
+  # like the REST endpoint.
+  defp receive_message(%{type: "websocket"} = channel, message, conversation_id),
+    do: Inbound.receive_message(channel, message, conversation_id: conversation_id)
+
+  # A resent clientId is reported as `:duplicate` (the `duplicate: true` of an
+  # ack), as `Converger.Inbound` does for `websocket` channels.
+  defp receive_message(channel, message, conversation_id) do
+    case Activities.get_activity_by_idempotency_key(conversation_id, message["idempotency_key"]) do
+      nil -> create_message(channel, message, conversation_id)
+      existing -> {:duplicate, existing}
+    end
+  end
+
+  defp create_message(channel, message, conversation_id) do
+    message
+    |> Activities.create_client_activity(%{
+      tenant_id: channel.tenant_id,
+      conversation_id: conversation_id,
+      source_channel_id: channel.id,
+      sender: message["sender"],
+      idempotency_key: message["idempotency_key"]
+    })
+    |> case do
+      {:ok, activity} -> {:created, activity}
+      {:error, %Ecto.Changeset{} = changeset} -> {:rejected, changeset}
+      {:error, _} = error -> error
+    end
+  end
+
+  # A v1 send (`frame` event with a `text` frame). Runs in this channel
+  # process, one send at a time and in order: the ack is pushed right after
+  # the commit, before this process handles the activity's broadcast, so the
+  # sender gets its ack before its own `activitySet`.
+  defp send_frame(frame, socket) do
+    max = InFlight.limit()
+    {decision, window} = InFlight.admit(socket.assigns.in_flight, max, &send_frame?/1)
+    socket = assign(socket, :in_flight, window)
+
+    frames =
+      case decision do
+        :accept ->
+          persist_frame(frame, socket)
+
+        :reject ->
+          [
+            Frames.error("too_many_in_flight", "more than #{max} sends are unacked",
+              frame_type: frame["type"],
+              client_id: valid_client_id(frame)
+            )
+          ]
+      end
+
+    push_frames(socket, frames)
+    {:reply, :ok, socket}
+  end
+
+  defp send_frame?(%{"type" => type}), do: Send.kind(type) in [:text, :rich]
+  defp send_frame?(_payload), do: false
+
+  defp persist_frame(frame, socket) do
+    %{channel: channel, converger_claims: claims, conversation_id: conversation_id} =
+      socket.assigns
+
+    sender = sender(claims, %{})
+
+    with {:ok, client_id} <- Send.client_id(frame),
+         {:ok, params} <- Send.message_params(frame, client_id),
+         :ok <- rate_limit(claims["tenant_id"]) do
+      params = Send.resolve_reply_to(params, frame, conversation_id)
+
+      message =
+        Map.merge(params, %{
+          "sender" => sender,
+          "idempotency_key" => client_id && Frames.client_key(sender, client_id)
+        })
+
+      channel
+      |> receive_message(message, conversation_id)
+      |> send_result(client_id, frame["type"])
+    else
+      {:error, code, message, opts} ->
+        [Frames.error(code, message, [frame_type: frame["type"]] ++ opts)]
+
+      {:error, %{reason: "rate_limited", retry_after_ms: retry_after_ms}} ->
+        [
+          Frames.error("rate_limited", "too many messages",
+            frame_type: frame["type"],
+            client_id: valid_client_id(frame),
+            retry_after_ms: retry_after_ms
+          )
+        ]
+    end
+  rescue
+    error in DBConnection.ConnectionError ->
+      Pressure.report(:channel, error)
+
+      [
+        Frames.error("unavailable", "the database is unavailable, retry",
+          frame_type: frame["type"],
+          client_id: valid_client_id(frame),
+          retry_after_ms: Pressure.retry_after_ms()
+        )
+      ]
+  end
+
+  defp send_result({tag, _activity}, nil, _frame_type) when tag in [:created, :duplicate], do: []
+
+  defp send_result({tag, activity}, client_id, _frame_type) when tag in [:created, :duplicate],
+    do: [Frames.ack(activity, client_id, tag == :duplicate)]
+
+  defp send_result(result, client_id, frame_type) do
+    opts = [frame_type: frame_type, client_id: client_id]
+
+    frame =
+      case result do
+        {:rejected, changeset} ->
+          details = Frames.changeset_details(changeset)
+
+          Frames.error(
+            "invalid_message",
+            "the message failed validation",
+            [details: details] ++ opts
+          )
+
+        {:error, :conversation_closed} ->
+          Frames.error("conversation_closed", "the conversation is closed", opts)
+
+        {:error, :inbound_not_supported} ->
+          Frames.error("forbidden", "the channel does not accept messages (mode outbound)", opts)
+
+        {:error, :not_found} ->
+          Frames.error("conversation_not_found", "the conversation does not exist", opts)
+
+        {:error, reason} ->
+          Logger.warning("Protocol send failed", reason: inspect(reason))
+          Frames.error("internal", "the message could not be accepted, retry", opts)
+      end
+
+    [frame]
+  end
+
+  defp valid_client_id(frame) do
+    case Send.client_id(frame) do
+      {:ok, client_id} -> client_id
+      {:error, _, _, _} -> nil
+    end
+  end
+
+  defp push_frames(socket, frames), do: Enum.each(frames, &push(socket, "frame", &1))
+
+  defp target_conversation(%{assigns: %{source: :channel}} = socket, payload) do
+    %{channel: channel, converger_claims: claims} = socket.assigns
+
+    case conversation_access(payload["conversation_id"], channel, claims) do
+      {:ok, _source, conversation} -> {:ok, conversation.id}
+      :error -> {:error, %{reason: "unauthorized"}}
+    end
+  end
+
+  defp target_conversation(socket, _payload), do: {:ok, socket.assigns.conversation_id}
+
+  defp reply_to_post({tag, activity}, socket) when tag in [:created, :duplicate] do
+    reply = %{id: activity.id, seq: activity.seq, watermark: Watermark.encode(activity.seq)}
+    reply = if tag == :duplicate, do: Map.put(reply, :duplicate, true), else: reply
+    {:reply, {:ok, reply}, socket}
+  end
+
+  defp reply_to_post({:rejected, changeset}, socket),
+    do: {:reply, {:error, %{reason: "invalid_activity", errors: errors(changeset)}}, socket}
+
+  defp reply_to_post({:error, reason}, socket)
+       when reason in [:conversation_closed, :inbound_not_supported, :not_found],
+       do: {:reply, {:error, %{reason: to_string(reason)}}, socket}
+
+  defp reply_to_post({:error, _reason}, socket),
+    do: {:reply, {:error, %{reason: "invalid_activity"}}, socket}
+
+  defp errors(changeset) do
+    Ecto.Changeset.traverse_errors(changeset, fn {msg, opts} ->
+      Enum.reduce(opts, msg, fn {key, value}, acc ->
+        String.replace(acc, "%{#{key}}", fn _ -> to_string(value) end)
+      end)
+    end)
+  end
+
+  defp ack_conversation(%{assigns: %{source: :channel}}, payload),
+    do: Ecto.UUID.cast(payload["conversation_id"])
+
+  defp ack_conversation(socket, _payload), do: {:ok, socket.assigns.conversation_id}
+
+  # The integer seq, its decimal string or an opaque `seq:<n>` watermark (a
+  # legacy activity-id watermark names no seq).
+  defp ack_seq(watermark) do
+    case Protocol.parse_watermark(watermark) do
+      {:ok, {:seq, seq}} -> {:ok, seq}
+      _ -> :error
+    end
+  end
+
+  # --- Server pushes ---
+
+  @impl true
+  def handle_info(:after_join, socket) do
+    channel = socket.assigns.channel
+
+    ConvergerWeb.Sockets.track(socket, channel.id, %{
+      tenant_id: channel.tenant_id,
+      scope: "channel"
+    })
+
+    {:noreply, socket}
+  end
+
+  def handle_info({:after_join, watermark}, socket) do
+    %{channel: channel, conversation_id: conversation_id} = socket.assigns
+
+    ConvergerWeb.Sockets.track(socket, channel.id, %{
+      tenant_id: channel.tenant_id,
       conversation_id: conversation_id
     })
 
-    # Without a watermark the client starts live (no replay). Replay is capped
-    # at :ws_replay_limit activities (the oldest ones after the watermark);
-    # when `has_more` is true the client fetches the rest over
-    # GET /api/v1/converger/conversations/:id/activities?watermark=<frame watermark>
-    # until `has_more` is false, de-duplicating by activity id against live frames.
-    {activities, has_more} =
-      case Watermark.decode(watermark) do
-        {:ok, nil} ->
-          {[], false}
+    if socket.assigns.presence? do
+      %{conversation_id: conversation_id, participant: participant} = socket.assigns
+      ConversationSignals.track_presence(conversation_id, participant)
 
-        {:ok, position} ->
-          Activities.page_activities_since(conversation_id, position,
-            limit: Pagination.config(:ws_replay_limit)
-          )
-
-        {:error, _} ->
-          {[], false}
-      end
-
-    if activities != [] do
-      new_watermark = activities |> List.last() |> Map.get(:seq) |> Watermark.encode()
-
-      push(socket, "activitySet", %{
-        activities: Enum.map(activities, &ActivityJSON.activity_data/1),
-        watermark: new_watermark,
-        has_more: has_more
-      })
+      conversation_id
+      |> ConversationSignals.presence_snapshot(participant)
+      |> Enum.each(&SocketGuard.push_ephemeral(socket, &1.type, &1))
     end
 
+    # Without a watermark the client starts live (no replay) from the current
+    # head. Replay is capped at :ws_replay_limit activities (the oldest ones
+    # after the watermark); when `has_more` is true the client fetches the
+    # rest over GET /api/v1/converger/conversations/:id/activities?watermark=<frame watermark>
+    # until `has_more` is false.
+    socket =
+      case Protocol.parse_watermark(watermark) do
+        {:ok, {_, _} = position} -> replay(socket, position)
+        _ -> socket
+      end
+
     {:noreply, socket}
   end
 
-  # Handle PubSub broadcasts from the pipeline (conversation:{id} topic)
-  @impl true
-  def handle_info(%Phoenix.Socket.Broadcast{event: "new_activity", payload: payload}, socket) do
-    watermark = Watermark.encode(payload.seq)
-
-    activity_set = %{
+  def handle_info(
+        %Phoenix.Socket.Broadcast{event: "new_activity", payload: payload},
+        %{assigns: %{source: :channel}} = socket
+      ) do
+    push(socket, "activitySet", %{
+      conversation_id: payload.conversation_id,
       activities: [ActivityJSON.activity_data(payload)],
-      watermark: watermark,
+      watermark: Watermark.encode(payload.seq),
       has_more: false
-    }
+    })
 
-    push(socket, "activitySet", activity_set)
     {:noreply, socket}
   end
 
-  # Handle delivery status broadcasts
-  def handle_info(%Phoenix.Socket.Broadcast{event: "delivery_status"}, socket) do
+  # A routed socket takes activities from its channel's topic only (after the
+  # channel's middleware), not the committed ones from the conversation topic.
+  def handle_info(
+        %Phoenix.Socket.Broadcast{event: "new_activity", topic: "conversation:" <> _},
+        %{assigns: %{source: :routed}} = socket
+      ) do
+    {:noreply, socket}
+  end
+
+  # A bot.s transient frame (run, genui_components, skills, error), BotRelay.
+  def handle_info(%Phoenix.Socket.Broadcast{event: "bot_transient", payload: frame}, socket) do
+    push(socket, "frame", frame)
+    {:noreply, socket}
+  end
+
+  def handle_info(%Phoenix.Socket.Broadcast{event: "new_activity", payload: payload}, socket) do
+    {:noreply, push_live(socket, payload)}
+  end
+
+  # Transient signals: delivery and read receipts, typing, presence
+  # (ConversationSignals decides what this connection sees).
+  def handle_info(%Phoenix.Socket.Broadcast{event: event, payload: payload}, socket)
+      when event in ~w(delivery_status typing read presence_diff) do
+    %{conversation_id: conversation_id, participant: participant} = socket.assigns
+
+    event
+    |> ConversationSignals.frames(payload, conversation_id, participant)
+    |> Enum.each(fn
+      {:reliable, frame} -> push(socket, frame.type, frame)
+      {:ephemeral, frame} -> SocketGuard.push_ephemeral(socket, frame.type, frame)
+    end)
+
     {:noreply, socket}
   end
 
@@ -94,17 +691,118 @@ defmodule ConvergerWeb.ConvergerChannel do
     {:noreply, socket}
   end
 
-  defp authorized?(conversation_id, %{"conversation_id" => claim_cid})
-       when is_binary(claim_cid) do
-    conversation_id == claim_cid
+  # A connection that closes while its participant is typing clears the
+  # indicator for the others instead of leaving it to expire.
+  @impl true
+  def terminate(_reason, socket) do
+    case socket.assigns do
+      %{typing: typing, conversation_id: conversation_id, participant: participant} ->
+        ConversationSignals.stop_typing(typing, conversation_id, participant)
+
+      _ ->
+        :ok
+    end
+
+    :ok
   end
 
-  defp authorized?(conversation_id, %{"channel_id" => channel_id, "tenant_id" => tenant_id}) do
-    case Conversations.get_conversation(conversation_id, tenant_id) do
-      %Conversations.Conversation{channel_id: ^channel_id} -> true
-      _ -> false
+  # --- Pushing activities ---
+
+  defp push_live(%{assigns: %{last_seq: last}} = socket, %{seq: seq} = payload) do
+    cond do
+      seq == last + 1 ->
+        push(socket, "activitySet", %{
+          activities: [ActivityJSON.activity_data(payload)],
+          watermark: Watermark.encode(seq),
+          has_more: false
+        })
+
+        assign(socket, :last_seq, seq)
+
+      # Already pushed: replay overlap or a duplicate broadcast.
+      seq <= last ->
+        socket
+
+      # A gap: push the missing range (which includes this activity) from the database.
+      true ->
+        replay(socket, {:seq, last})
     end
   end
 
-  defp authorized?(_, _), do: false
+  # When the database is unavailable the replay is skipped: the socket stays
+  # joined, keeps its position and pushes `error {code: "replay_unavailable"}`;
+  # the client fetches the range after `watermark` again later (rejoin or
+  # REST). A gap replay is retried by the next live activity (issue #35).
+  defp replay(socket, position) do
+    {activities, has_more} =
+      Activities.page_activities_since(socket.assigns.conversation_id, position,
+        limit: Pagination.config(:ws_replay_limit)
+      )
+
+    push_activities(socket, activities, has_more)
+  rescue
+    error in DBConnection.ConnectionError ->
+      Pressure.report(:channel, error)
+      push(socket, "error", replay_unavailable(position))
+      socket
+  end
+
+  defp replay_unavailable(position) do
+    payload = %{
+      code: "replay_unavailable",
+      message: "the database is unavailable, fetch the missed activities again",
+      retry_after_ms: Pressure.retry_after_ms()
+    }
+
+    case position do
+      {:seq, seq} -> Map.put(payload, :watermark, Watermark.encode(seq))
+      _ -> payload
+    end
+  end
+
+  # One activitySet for activities read from the database (in seq order).
+  defp push_activities(socket, [], _has_more), do: socket
+
+  defp push_activities(socket, activities, has_more) do
+    last_seq = List.last(activities).seq
+
+    case Enum.flat_map(activities, &frame(socket, &1)) do
+      [] ->
+        :ok
+
+      frames ->
+        push(socket, "activitySet", %{
+          activities: frames,
+          watermark: Watermark.encode(last_seq),
+          has_more: has_more
+        })
+    end
+
+    acknowledge_replayed(socket, last_seq)
+    assign(socket, :last_seq, last_seq)
+  end
+
+  # A routed socket sees activities as delivered to its channel: the
+  # channel's middleware and the matching rules' transformations apply (a
+  # halted activity is not pushed).
+  defp frame(%{assigns: %{source: :routed, channel: channel}}, activity) do
+    case Pipeline.transform(activity, channel) do
+      {:ok, transformed} -> [ActivityJSON.activity_data(transformed)]
+      {:halt, _reason} -> []
+    end
+  end
+
+  defp frame(_socket, activity), do: [ActivityJSON.activity_data(activity)]
+
+  defp acknowledge_replayed(%{assigns: %{channel: channel, conversation_id: id}}, seq) do
+    if channel.type == "websocket" and not WebSocket.require_ack?(channel),
+      do: Deliveries.acknowledge(channel.id, id, seq)
+  end
+
+  # --- Authorization ---
+
+  # {:ok, :owned | :routed, conversation} when the token may follow the
+  # conversation (ConvergerWeb.Protocol.Access).
+  defp conversation_access(conversation_id, channel, claims),
+    do: ConvergerWeb.Protocol.Access.conversation(conversation_id, channel, claims)
 end

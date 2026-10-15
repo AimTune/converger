@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://converger.aimtune.dev/schemas/protocol/v1/frames/channel/agent-frame.schema.json",
+  "title": "agent -> server: a conversation-level frame on a channel-scoped connection (#64/#67)",
+  "description": "What an agent (an agent console, the @converger/agent SDK, the mekik transport) sends inside a {conversationId, frame} envelope: a message frame (stored as the agent's reply; a message `id` is kept), a mekik-native persistent frame (`tool_call`, `skill`, `genui`, `interrupt`, `interrupt_resolved`; stored and renumbered, a `seq` the agent sends is ignored), a transient bot frame relayed to the conversation's connections (`run`, `genui_components`, `skills`, `error`), or `typing`, `read`, `sync`. End-user-only frames (`resume`, `genui_event`, ...) are refused.",
+  "type": "object",
+  "required": ["type"],
+  "properties": { "type": { "type": "string" } },
+  "allOf": [
+    {
+      "if": { "properties": { "type": { "const": "tool_call" } } },
+      "then": { "required": ["data"], "properties": { "data": { "$ref": "../../messages/tool-call.schema.json" }, "seq": { "type": "integer" } } }
+    },
+    {
+      "if": { "properties": { "type": { "const": "skill" } } },
+      "then": { "required": ["data"], "properties": { "data": { "$ref": "../server/skill.schema.json#/properties/data" }, "seq": { "type": "integer" } } }
+    },
+    {
+      "if": { "properties": { "type": { "const": "genui" } } },
+      "then": {
+        "required": ["streamId", "done", "chunk"],
+        "properties": {
+          "streamId": { "type": "string", "minLength": 1 },
+          "done": { "type": "boolean" },
+          "chunk": { "$ref": "../../common.schema.json#/$defs/aiChunk" },
+          "seq": { "type": "integer" }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "type": { "const": "interrupt" } } },
+      "then": { "required": ["id", "data"], "properties": { "id": { "type": "string" }, "data": { "$ref": "../server/interrupt.schema.json#/properties/data" }, "seq": { "type": "integer" } } }
+    },
+    {
+      "if": { "properties": { "type": { "const": "interrupt_resolved" } } },
+      "then": { "required": ["id", "data"], "properties": { "id": { "type": "string" }, "data": { "$ref": "../server/interrupt_resolved.schema.json#/properties/data" }, "seq": { "type": "integer" } } }
+    },
+    { "if": { "properties": { "type": { "const": "run" } } }, "then": { "$ref": "../server/run.schema.json" } },
+    { "if": { "properties": { "type": { "const": "genui_components" } } }, "then": { "$ref": "../server/genui_components.schema.json" } },
+    { "if": { "properties": { "type": { "const": "skills" } } }, "then": { "$ref": "../server/skills.schema.json" } },
+    { "if": { "properties": { "type": { "const": "error" } } }, "then": { "$ref": "../server/error.schema.json" } },
+    { "if": { "properties": { "type": { "const": "typing" } } }, "then": { "$ref": "../client/typing.schema.json" } },
+    { "if": { "properties": { "type": { "const": "read" } } }, "then": { "$ref": "../client/read.schema.json" } },
+    { "if": { "properties": { "type": { "const": "sync" } } }, "then": { "$ref": "../client/sync.schema.json" } },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "not": { "enum": ["tool_call", "skill", "genui", "interrupt", "interrupt_resolved", "run", "genui_components", "skills", "error", "typing", "read", "sync"] }
+          }
+        }
+      },
+      "then": { "$ref": "../client/message.schema.json" }
+    }
+  ],
+  "examples": [
+    { "type": "text", "id": "msg-1", "data": { "text": "Refund complete: ORD-42" } },
+    { "type": "buttons", "clientId": "agent-c-3", "data": { "text": "Pick one", "buttons": [{ "label": "Refund", "value": "refund" }, { "label": "Replace", "value": "replace" }] } },
+    { "type": "tool_call", "data": { "id": "t1", "name": "get_order", "status": "running", "params": { "id": "ORD-42" } } },
+    { "type": "genui", "streamId": "stream-1", "done": false, "chunk": { "type": "text", "content": "Hel", "id": 1 } },
+    { "type": "interrupt", "id": "approve/0:interrupt#0", "data": { "payload": { "title": "249.90 TRY refund" }, "actions": [{ "label": "Approve", "value": { "approved": true } }] } },
+    { "type": "run", "data": { "status": "started" } },
+    { "type": "typing", "isTyping": true }
+  ]
+}

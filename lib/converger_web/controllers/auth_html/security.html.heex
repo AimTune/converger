@@ -1,0 +1,185 @@
+<Layouts.app flash={@flash} nav={@nav}>
+  <.header>
+    Security
+    <:subtitle>Two-factor authentication, password and active sessions.</:subtitle>
+  </.header>
+
+  <div :if={@error_message} role="alert" class="alert alert-error">
+    <.icon name="hero-exclamation-circle" class="size-5 shrink-0" />
+    <span>{@error_message}</span>
+  </div>
+
+  <.panel id="two-factor" title="Two-factor authentication">
+    <div :if={@required} role="alert" class="alert alert-warning">
+      <.icon name="hero-shield-exclamation" class="size-5 shrink-0" />
+      <span>
+        Your role requires two-factor authentication. Set it up to continue to the admin panel.
+      </span>
+    </div>
+
+    <div :if={@totp_enabled} class="space-y-3">
+      <p class="text-sm">
+        <.badge value="enabled">Enabled</.badge>
+        since {format_time(@user.totp_enabled_at)}. Each login asks for a code from your authenticator app.
+      </p>
+      <form action={@base <> "/security/totp"} method="post" class="flex flex-wrap items-end gap-3">
+        <input type="hidden" name="_csrf_token" value={get_csrf_token()} />
+        <input type="hidden" name="_method" value="delete" />
+        <.input
+          type="password"
+          id="disable_code_or_password"
+          name="code_or_password"
+          value=""
+          label="Current code or password"
+          autocomplete="off"
+          required
+        />
+        <button type="submit" class="btn btn-error btn-soft mb-2">Turn off 2FA</button>
+      </form>
+    </div>
+
+    <div :if={!@totp_enabled && !@totp_pending} class="space-y-3">
+      <p class="text-sm">
+        <.badge value="disabled">Off</.badge>
+        Protect your account with a 6-digit code from an authenticator app (TOTP).
+      </p>
+      <form action={@base <> "/security/totp/setup"} method="post">
+        <input type="hidden" name="_csrf_token" value={get_csrf_token()} />
+        <button type="submit" class="btn btn-primary">Set up two-factor authentication</button>
+      </form>
+    </div>
+
+    <div :if={@totp_pending} class="space-y-3">
+      <p class="text-sm">
+        Add this account to your authenticator app, then enter the code it shows to turn 2FA on.
+      </p>
+      <div>
+        <p class="mb-1 text-sm"><strong>Secret key</strong> (manual entry, time-based):</p>
+        <code
+          id="totp-secret"
+          class="block rounded-box bg-base-200 p-3 font-mono text-lg tracking-widest break-all"
+        >{@secret}</code>
+      </div>
+      <div>
+        <p class="mb-1 text-sm">
+          <strong>Setup URI</strong> (for apps or QR code generators):
+        </p>
+        <code id="totp-uri" class="block rounded-box bg-base-200 p-3 font-mono text-xs break-all">{@otpauth_uri}</code>
+      </div>
+
+      <form action={@base <> "/security/totp"} method="post" class="flex flex-wrap items-end gap-3">
+        <input type="hidden" name="_csrf_token" value={get_csrf_token()} />
+        <.input
+          type="text"
+          id="confirm_code"
+          name="code"
+          value=""
+          label="Code from the app"
+          class="input font-mono tracking-[0.2em]"
+          inputmode="numeric"
+          autocomplete="one-time-code"
+          maxlength="7"
+          required
+        />
+        <button type="submit" class="btn btn-primary mb-2">Turn on 2FA</button>
+      </form>
+    </div>
+  </.panel>
+
+  <.panel :if={@base == "/portal"} id="password" title="Password">
+    <div :if={@password_errors != []} role="alert" class="alert alert-error text-sm">
+      <.icon name="hero-exclamation-circle" class="size-5 shrink-0" />
+      <div>
+        <div :for={error <- @password_errors}>{error}</div>
+      </div>
+    </div>
+    <form action={@base <> "/security/password"} method="post">
+      <input type="hidden" name="_csrf_token" value={get_csrf_token()} />
+      <input type="hidden" name="_method" value="put" />
+      <div class="grid gap-x-4 sm:grid-cols-3">
+        <.input
+          type="password"
+          id="password_current_password"
+          name="password[current_password]"
+          value=""
+          label="Current password"
+          autocomplete="current-password"
+          required
+        />
+        <.input
+          type="password"
+          id="password_password"
+          name="password[password]"
+          value=""
+          label="New password"
+          autocomplete="new-password"
+          minlength={@min_length}
+          required
+        />
+        <.input
+          type="password"
+          id="password_password_confirmation"
+          name="password[password_confirmation]"
+          value=""
+          label="Confirm"
+          autocomplete="new-password"
+          minlength={@min_length}
+          required
+        />
+      </div>
+      <p class="mb-3 text-xs text-base-content/60">
+        At least {@min_length} characters. Your other sessions are signed out.
+      </p>
+      <button type="submit" class="btn btn-primary">Change password</button>
+    </form>
+  </.panel>
+
+  <.panel :if={@base == "/admin"} id="password" title="Password">
+    <p class="text-sm">
+      <.link href="/admin/password" class="link link-primary">Change your password</.link>. Your other sessions are signed out.
+    </p>
+  </.panel>
+
+  <.panel id="sessions" title="Active sessions">
+    <:actions>
+      <form action={@base <> "/security/sessions"} method="post">
+        <input type="hidden" name="_csrf_token" value={get_csrf_token()} />
+        <input type="hidden" name="_method" value="delete" />
+        <button type="submit" class="btn btn-error btn-soft btn-sm">Log out everywhere</button>
+      </form>
+    </:actions>
+    <p class="text-sm text-base-content/70">
+      Sessions end after {@max_age_hours} hours, or {@idle_minutes} minutes without activity.
+    </p>
+    <div class="overflow-x-auto">
+      <.table id="user-sessions" rows={@sessions} row_id={&"session-#{&1.id}"}>
+        <:col :let={session} label="Signed in">
+          <span class="text-xs whitespace-nowrap">{format_time(session.inserted_at)}</span>
+        </:col>
+        <:col :let={session} label="Last active">
+          <span class="text-xs whitespace-nowrap">{format_time(session.last_seen_at)}</span>
+        </:col>
+        <:col :let={session} label="IP"><span class="font-mono text-xs">{session.ip}</span></:col>
+        <:col :let={session} label="Browser">
+          <span class="block max-w-80 truncate text-xs" title={session.user_agent}>
+            {session.user_agent}
+          </span>
+        </:col>
+        <:action :let={session}>
+          <span :if={session.id == @current_session_id} class="text-xs text-base-content/60">
+            (this session)
+          </span>
+          <form
+            :if={session.id != @current_session_id}
+            action={@base <> "/security/sessions/" <> session.id}
+            method="post"
+          >
+            <input type="hidden" name="_csrf_token" value={get_csrf_token()} />
+            <input type="hidden" name="_method" value="delete" />
+            <button type="submit" class="btn btn-error btn-soft btn-xs">Sign out</button>
+          </form>
+        </:action>
+      </.table>
+    </div>
+  </.panel>
+</Layouts.app>

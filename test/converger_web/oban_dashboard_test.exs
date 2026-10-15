@@ -19,7 +19,7 @@ defmodule ConvergerWeb.ObanDashboardTest do
   defp admin_conn(admin, ip \\ {127, 0, 0, 1}) do
     build_conn()
     |> Map.put(:remote_ip, ip)
-    |> init_test_session(%{admin_user_id: admin.id})
+    |> log_in_admin(admin)
   end
 
   test "admins get through to the dashboard" do

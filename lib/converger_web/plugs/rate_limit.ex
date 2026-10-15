@@ -22,9 +22,9 @@ defmodule ConvergerWeb.Plugs.RateLimit do
   """
 
   import Plug.Conn
-  import Phoenix.Controller, only: [json: 2]
 
   alias Converger.RateLimit
+  alias ConvergerWeb.APIError
 
   def init(opts), do: opts
 
@@ -51,9 +51,7 @@ defmodule ConvergerWeb.Plugs.RateLimit do
   defp deny(conn, retry_after_ms) do
     conn
     |> put_resp_header("retry-after", Integer.to_string(retry_after_seconds(retry_after_ms)))
-    |> put_status(:too_many_requests)
-    |> json(%{error: "Too many requests. Please try again later."})
-    |> halt()
+    |> APIError.send_error("rate_limited", nil, %{retry_after_ms: retry_after_ms})
   end
 
   @doc false

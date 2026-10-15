@@ -36,12 +36,18 @@ services:
       CREATE_DB: "true"
       PHX_HOST: ${PHX_HOST:-localhost}
       PORT: "4000"
-      PROMETHEUS_PORT: "9568"
       # Local compose serves plain HTTP. Set FORCE_SSL=true (and
       # TRUSTED_PROXIES) when running behind a TLS-terminating proxy.
       FORCE_SSL: ${FORCE_SSL:-false}
       TRUSTED_PROXIES: ${TRUSTED_PROXIES:-}
+      # GET /metrics on port 4000 needs this bearer token (or an IP in
+      # METRICS_ALLOWED_IPS); unset, /metrics answers 404.
+      METRICS_TOKEN: ${METRICS_TOKEN:-}
+      METRICS_ALLOWED_IPS: ${METRICS_ALLOWED_IPS:-}
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      # Protocol v1 over gRPC (docs/protocol/grpc.md): GRPC_ENABLED=true serves it
+      # on port 50051 (plaintext h2c here).
+      GRPC_ENABLED: ${GRPC_ENABLED:-false}
 
   app:
     build: .
@@ -53,7 +59,8 @@ services:
         condition: service_completed_successfully
     ports:
       - "4000:4000"
-      - "9568:9568"
+      # gRPC (only listening when GRPC_ENABLED=true)
+      - "50051:50051"
     environment:
       <<: *app_env
       CREATE_DB: "false"
@@ -63,6 +70,7 @@ services:
     image: prom/prometheus:latest
     volumes:
       - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./docker/prometheus/alerts.yml:/etc/prometheus/alerts.yml
     ports:
       - "9090:9090"
 

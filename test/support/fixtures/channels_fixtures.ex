@@ -7,12 +7,16 @@ defmodule Converger.ChannelsFixtures do
   def unique_channel_name, do: "Channel #{System.unique_integer()}"
 
   def channel_fixture(tenant, attrs \\ %{}) do
+    attrs = Map.new(attrs)
+    # `echo` is outbound-only; websocket channels default to duplex like new channels.
+    mode = if attrs[:type] == "echo", do: "outbound", else: "duplex"
+
     {:ok, channel} =
       attrs
       |> Enum.into(%{
         name: unique_channel_name(),
         type: "websocket",
-        mode: "outbound",
+        mode: mode,
         status: "active",
         tenant_id: tenant.id
       })

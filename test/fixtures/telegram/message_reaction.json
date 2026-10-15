@@ -1,0 +1,11 @@
+{
+  "update_id": 912345605,
+  "message_reaction": {
+    "chat": {"id": 123456789, "first_name": "Ada", "type": "private"},
+    "message_id": 41,
+    "user": {"id": 123456789, "is_bot": false, "first_name": "Ada", "language_code": "en"},
+    "date": 1760140980,
+    "old_reaction": [],
+    "new_reaction": [{"type": "emoji", "emoji": "👍"}]
+  }
+}

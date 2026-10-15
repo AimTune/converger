@@ -13,6 +13,10 @@ defmodule Converger.Release do
   docs/deployment.md.
   """
 
+  alias Converger.Accounts
+  alias Converger.Accounts.{Sessions, TOTP}
+  alias Converger.Partitions.Conversion
+
   @app :converger
 
   def create_db do
@@ -59,15 +63,21 @@ defmodule Converger.Release do
   def reencrypt_secrets do
     load_app()
 
-    {:ok, count, _} =
+    {:ok, {channels, subscriptions, totp_secrets}, _} =
       Ecto.Migrator.with_repo(Converger.Repo, fn _repo ->
         {:ok, _} = Application.ensure_all_started(:cloak)
         start_vault()
-        Converger.Channels.reencrypt_all()
+
+        {Converger.Channels.reencrypt_all(), Converger.Webhooks.reencrypt_all(),
+         TOTP.reencrypt_all()}
       end)
 
-    IO.puts("Re-encrypted #{count} channel(s)")
-    count
+    IO.puts(
+      "Re-encrypted #{channels} channel(s), #{subscriptions} webhook subscription(s) " <>
+        "and #{totp_secrets} TOTP secret(s)"
+    )
+
+    channels + subscriptions + totp_secrets
   end
 
   defp start_vault do
@@ -75,6 +85,97 @@ defmodule Converger.Release do
       {:ok, _pid} -> :ok
       {:error, {:already_started, _pid}} -> :ok
     end
+  end
+
+  @doc """
+  Online first half of the activities/deliveries partitioning migration
+  (issue #30): creates the partitioned shadow tables and mirror triggers and
+  copies existing rows in batches, while the **old** release keeps serving
+  traffic. Resumable; run it again after an interruption. Then stop the old
+  release and run `bin/migrate` (the swap). See
+  docs/operations/migrations.md.
+
+      bin/converger eval "Converger.Release.prepare_partitioning()"
+
+  Options: `:batch_size` (default 10,000).
+  """
+  def prepare_partitioning(opts \\ []) do
+    load_app()
+
+    {:ok, result, _} =
+      Ecto.Migrator.with_repo(Converger.Repo, fn repo ->
+        if Conversion.converted?(repo) do
+          IO.puts("activities and deliveries are already partitioned")
+          :already_partitioned
+        else
+          Conversion.prepare(repo, opts)
+          IO.puts("Shadow tables and mirror triggers in place; copying...")
+
+          copied =
+            Conversion.copy(
+              repo,
+              Keyword.put(opts, :on_batch, fn table, total ->
+                IO.puts("  #{table}: #{total} rows copied")
+              end)
+            )
+
+          IO.puts(
+            "Copy complete: #{inspect(copied)}. Stop the old release and run bin/migrate " <>
+              "to swap the tables in."
+          )
+
+          {:ok, copied}
+        end
+      end)
+
+    result
+  end
+
+  @doc """
+  Drops `activities_legacy` and `deliveries_legacy`, kept by the
+  partitioning migration on populated installations. Irreversible; run it
+  after verifying the new tables (docs/operations/migrations.md).
+  """
+  def drop_legacy_partition_tables do
+    load_app()
+
+    {:ok, :ok, _} =
+      Ecto.Migrator.with_repo(Converger.Repo, &Conversion.drop_legacy_tables/1)
+
+    :ok
+  end
+
+  @doc """
+  Runs retention now instead of waiting for the monthly job (enqueues
+  `Converger.Workers.RetentionWorker`; unique, so it never overlaps a
+  running one). Requires a running node: use `bin/converger rpc`.
+
+      bin/converger rpc "Converger.Release.run_retention()"
+  """
+  def run_retention do
+    Oban.insert(Converger.Workers.RetentionWorker.new(%{}))
+  end
+
+  @doc """
+  Re-imports archived activities/deliveries (`mix converger.archive.import`
+  for releases). One of:
+
+      bin/converger eval 'Converger.Release.import_archive(tenant: "<uuid>", month: "2025-01")'
+      bin/converger eval 'Converger.Release.import_archive(key: "archive/<uuid>/2025-01/activities-00001.jsonl.gz")'
+      bin/converger eval 'Converger.Release.import_archive(file: "/tmp/activities-00001.jsonl.gz")'
+  """
+  def import_archive(opts) do
+    load_app()
+
+    {:ok, result, _} =
+      Ecto.Migrator.with_repo(Converger.Repo, fn _repo ->
+        {:ok, _} = Application.ensure_all_started(:req)
+        result = Converger.Archive.import(opts)
+        IO.puts(inspect(result))
+        result
+      end)
+
+    result
   end
 
   def rollback(repo, version) do
@@ -97,7 +198,7 @@ defmodule Converger.Release do
     {:ok, result, _} =
       Ecto.Migrator.with_repo(Converger.Repo, fn _repo ->
         result =
-          Converger.Accounts.bootstrap_super_admin(
+          Accounts.bootstrap_super_admin(
             email: System.get_env("ADMIN_EMAIL"),
             password: System.get_env("ADMIN_PASSWORD")
           )
@@ -108,6 +209,46 @@ defmodule Converger.Release do
 
     result
   end
+
+  @doc """
+  Turns off TOTP 2FA of the admin with `email` (lost authenticator, locked
+  out super_admin) and signs them out everywhere. Audit-logged with actor
+  `system` / `release`. At the next login an admin whose role requires 2FA
+  is asked to enroll again.
+
+      bin/converger eval 'Converger.Release.reset_admin_2fa("admin@example.com")'
+  """
+  def reset_admin_2fa(email) when is_binary(email) do
+    load_app()
+
+    {:ok, result, _} =
+      Ecto.Migrator.with_repo(Converger.Repo, fn _repo ->
+        {:ok, _} = Application.ensure_all_started(:cloak)
+        start_vault()
+
+        result =
+          case Accounts.get_admin_user_by_email(String.trim(email)) do
+            nil ->
+              {:error, :not_found}
+
+            user ->
+              {:ok, _} = TOTP.reset(user, %{type: "system", id: "release"})
+              Sessions.delete_all("admin", user.id)
+              :ok
+          end
+
+        report_reset_admin_2fa(email, result)
+        result
+      end)
+
+    result
+  end
+
+  defp report_reset_admin_2fa(email, :ok),
+    do: IO.puts("Two-factor authentication of #{email} is off; their sessions were ended")
+
+  defp report_reset_admin_2fa(email, {:error, :not_found}),
+    do: IO.puts("No admin user with email #{email}")
 
   @doc false
   def report_seed_admin({:ok, user, :generated, password}) do

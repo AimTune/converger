@@ -2,9 +2,10 @@ defmodule Converger.Channels.Channel do
   use Ecto.Schema
   import Ecto.Changeset
 
+  alias Converger.Channels.Adapter
+
   @type t :: %__MODULE__{}
 
-  @channel_types ~w(echo webhook websocket whatsapp_meta whatsapp_infobip)
   @channel_modes ~w(inbound outbound duplex)
 
   @primary_key {:id, :binary_id, autogenerate: true}
@@ -26,12 +27,19 @@ defmodule Converger.Channels.Channel do
     field :transformations, {:array, :map}, default: []
     # Per-channel delivery retry overrides, see Converger.Pipeline.RetryPolicy.
     field :retry_policy, :map, default: %{}
+    # Outbound rate limit ("80/s", "1000/m", "5000/h"), see Converger.Channels.Circuit.
+    field :rate_limit, :string
+    # Delivery circuit breaker, managed by Converger.Channels.Circuit (never cast).
+    field :circuit_state, :string, default: "closed"
+    field :circuit_changed_at, :utc_datetime_usec
+    field :consecutive_failures, :integer, default: 0
     belongs_to :tenant, Converger.Tenants.Tenant
 
     timestamps(type: :utc_datetime_usec)
   end
 
-  def channel_types, do: @channel_types
+  @doc "The registered channel types, see `Converger.Channels.Adapter.types/0`."
+  def channel_types, do: Adapter.types()
   def channel_modes, do: @channel_modes
 
   @doc false
@@ -47,49 +55,71 @@ defmodule Converger.Channels.Channel do
       :require_signature,
       :config,
       :transformations,
-      :retry_policy
+      :retry_policy,
+      :rate_limit
     ])
     |> validate_required([:name, :status, :tenant_id])
-    |> validate_inclusion(:type, @channel_types)
+    |> validate_inclusion(:type, Adapter.types())
     |> validate_inclusion(:mode, @channel_modes)
     |> validate_channel_config()
-    |> validate_signature_config()
+    |> validate_unsupported_activities()
+    |> validate_show_tool_traces()
     |> validate_mode_compatibility()
     |> validate_transformations()
     |> validate_retry_policy()
+    |> validate_rate_limit()
     |> unique_constraint([:tenant_id, :name])
     |> ensure_secret()
     |> put_secret_hash()
     |> unique_constraint(:secret_hash)
   end
 
+  # The adapter's config schema and checks. Fields required only on signed
+  # channels (`required: :with_signature`, e.g. Meta's app_secret) depend on
+  # `require_signature`; fields required per direction (`required: :inbound`,
+  # e.g. a broker channel's topic_in) depend on `mode`.
   defp validate_channel_config(changeset) do
     type = get_field(changeset, :type)
     config = get_field(changeset, :config) || %{}
 
-    case Converger.Channels.Adapter.validate_config(type, config) do
+    opts = [
+      require_signature: get_field(changeset, :require_signature) == true,
+      mode: get_field(changeset, :mode) || "duplex"
+    ]
+
+    case Adapter.validate_config(type, config, opts) do
       :ok -> changeset
       {:error, message} -> add_error(changeset, :config, message)
     end
   end
 
-  # WhatsApp Meta signs webhooks with the app secret, so a channel that
-  # requires signatures cannot accept anything without it.
-  defp validate_signature_config(changeset) do
-    type = get_field(changeset, :type)
+  # Optional config key: what to do with activity types the adapter cannot
+  # deliver natively (Converger.Activities.Downgrade).
+  defp validate_unsupported_activities(changeset) do
     config = get_field(changeset, :config) || %{}
-    app_secret = config["app_secret"]
+    policies = Converger.Activities.Downgrade.policies()
 
-    if type == "whatsapp_meta" and get_field(changeset, :require_signature) == true and
-         (not is_binary(app_secret) or app_secret == "") do
+    policy = Map.get(config, "unsupported_activities")
+
+    if is_nil(policy) or policy in policies do
+      changeset
+    else
       add_error(
         changeset,
         :config,
-        "whatsapp_meta config missing: app_secret (required when require_signature is true)"
+        "unsupported_activities must be one of: #{Enum.join(policies, ", ")}"
       )
-    else
-      changeset
     end
+  end
+
+  # Optional config key: deliver `tool_call` traces to this channel as a
+  # `name: status` line (Converger.Activities.Downgrade, #68).
+  defp validate_show_tool_traces(changeset) do
+    config = get_field(changeset, :config) || %{}
+
+    if Map.get(config, "show_tool_traces") in [nil, true, false],
+      do: changeset,
+      else: add_error(changeset, :config, "show_tool_traces must be a boolean")
   end
 
   defp validate_mode_compatibility(changeset) do
@@ -118,6 +148,15 @@ defmodule Converger.Channels.Channel do
     end)
   end
 
+  defp validate_rate_limit(changeset) do
+    validate_change(changeset, :rate_limit, fn :rate_limit, value ->
+      case Converger.Channels.Circuit.parse_rate_limit(value) do
+        {:ok, _} -> []
+        :error -> [rate_limit: "must look like 80/s, 1000/m or 5000/h"]
+      end
+    end)
+  end
+
   defp validate_transformations(changeset) do
     transformations = get_field(changeset, :transformations) || []
 
@@ -129,6 +168,18 @@ defmodule Converger.Channels.Channel do
         {:error, message} -> add_error(changeset, :transformations, message)
       end
     end
+  end
+
+  @doc """
+  A changeset replacing the channel's secret with a freshly generated one
+  (and its lookup hash). The old secret stops matching immediately.
+  """
+  def rotate_secret_changeset(channel) do
+    channel
+    |> change()
+    |> put_change(:secret, generate_secret())
+    |> put_secret_hash()
+    |> unique_constraint(:secret_hash)
   end
 
   defp ensure_secret(changeset) do
@@ -151,7 +202,8 @@ defmodule Converger.Channels.Channel do
     end
   end
 
-  defp generate_secret do
+  @doc "A new random channel secret."
+  def generate_secret do
     :crypto.strong_rand_bytes(32) |> Base.encode64(padding: false)
   end
 end

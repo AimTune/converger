@@ -9,9 +9,20 @@ A **channel** is a tenant-owned connection to one external system: a WhatsApp nu
 This page covers the behaviour, the built-in channel types and what each one supports, the shared inbound endpoints and their signature scheme, and channel health checks. Each adapter has its own page:
 
 - [WhatsApp (Meta Cloud API and Infobip)](whatsapp.md)
+- [Slack](slack.md)
+- [Telegram](telegram.md)
+- [Discord](discord.md)
+- [Microsoft Teams](teams.md)
+- [Facebook Messenger](messenger.md) and [Instagram Direct](instagram.md)
+- [Viber](viber.md)
+- [Email](email.md)
+- [SMS (Twilio, Vonage)](sms.md)
+- [Broker channels](brokers.md): [Kafka](kafka.md), [RabbitMQ](rabbitmq.md), [NATS JetStream](nats.md), [Redis Streams](redis-streams.md) and [MQTT](mqtt.md)
 - [Echo](echo.md)
 - [WebSocket](websocket.md)
+- [mekik](mekik.md): Converger dials a mekik/1 bot server per conversation (Mode A of [#64](https://github.com/AimTune/converger/issues/64))
 - Generic HTTP webhook: see [Outbound webhooks](../webhooks.md)
+- [HTTP pull (outbox)](http-pull.md)
 - [Writing an adapter](writing-an-adapter.md)
 
 ## Channel types and modes
@@ -20,7 +31,7 @@ The channel schema ([`lib/converger/channels/channel.ex`](https://github.com/Aim
 
 | Field | Values | Default |
 | --- | --- | --- |
-| `type` | `echo`, `webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip` | `webhook` |
+| `type` | `echo`, `webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram`, `email`, `sms_twilio`, `sms_vonage`, `messenger`, `instagram`, `viber`, `discord`, `teams`, `http_pull`, `kafka`, `rabbitmq`, `nats`, `redis_streams`, `mqtt`, `mekik` | `webhook` |
 | `mode` | `inbound`, `outbound`, `duplex` | `duplex` |
 | `status` | `active` or another value such as `inactive`. Only `active` channels accept inbound requests and socket joins, are routing-rule targets and get health checks. | `active` |
 | `require_signature` | `true` / `false` | `true` |
@@ -35,31 +46,68 @@ The mode decides the direction of traffic:
 - `outbound`: the pipeline delivers activities to the channel. Inbound messages are refused (`400 Channel does not accept inbound messages`); delivery receipts are still accepted.
 - `duplex`: both.
 
-The changeset rejects a mode the adapter does not support (`<type> channels only support modes: ...`). `echo` and `websocket` are `outbound` only; the others support all three modes.
+The changeset rejects a mode the adapter does not support (`<type> channels only support modes: ...`). The modes follow from the adapter's capabilities: `echo` and `http_pull` are `outbound` only, `mekik` is `duplex` only; the others support all three modes.
 
-Channels are created and edited in the admin panel (`/admin/channels`) and the tenant portal (`/portal/channels`). The config form fields per type are listed on each adapter page.
+Channels are created and edited in the admin panel (`/admin/channels`) and the tenant portal (`/portal/channels`). The admin config form is generated from the adapter's `config_schema/0`; the fields per type are listed on each adapter page.
 
 ## The adapter behaviour
 
-The behaviour lives in [`lib/converger/channels/adapter.ex`](https://github.com/AimTune/converger/blob/main/lib/converger/channels/adapter.ex). The module is also the dispatcher: `Adapter.adapter_for/1` maps a type string to its module, and the `Adapter.*` functions with the same names call the adapter (and handle missing optional callbacks).
+The behaviour lives in [`lib/converger/channels/adapter.ex`](https://github.com/AimTune/converger/blob/main/lib/converger/channels/adapter.ex). The module is also the registry and the dispatcher: `Adapter.adapter_for/1` maps a type string to its module, and the `Adapter.*` functions with the same names call the adapter (and handle missing optional callbacks). Adapters start with `use Converger.Channels.Adapter, type: "<type>"`, which defines `type/0` and defaults for the optional callbacks.
+
+### Registry
+
+The channel types are the registered adapters: the built-ins (`echo`, `webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram`, `email`, `sms_twilio`, `sms_vonage`, `messenger`, `instagram`, `viber`, `discord`, `teams`, `http_pull`, `kafka`, `rabbitmq`, `nats`, `redis_streams`, `mqtt`, `mekik`) followed by the modules in `config :converger, :adapters`. A configured adapter with a built-in type replaces it. `Adapter.types/0` lists the types (the channel changeset and the admin type dropdown use it), and `Adapter.types_with/1` the types with a capability. The registry is checked at boot (`Adapter.validate_registry!/0`). Nothing else in the code base lists channel types: the pipeline, health checks, the admin forms and the inbound controller ask the adapter. See [Writing an adapter](writing-an-adapter.md) and [ADR-0038](../adr/0038-adapter-behaviour-v2-and-config-driven-registry.md).
+
+### Callbacks
 
 | Callback | Required | Returns | Purpose |
 | --- | --- | --- | --- |
-| `supported_modes/0` | yes | `[String.t()]` | Modes the type accepts, checked by the channel changeset. |
-| `validate_config/1` | yes | `:ok` or `{:error, message}` | Validates `channel.config` on create and update. The message becomes a `config` error on the changeset. |
-| `deliver_activity/2` | yes | `:ok`, `{:ok, map}` or `{:error, term}` | Delivers one activity to the provider. Called by the pipeline only. |
+| `type/0` | yes (defined by `use`) | `String.t()` | The channel type string. |
+| `deliver_activity/2` | yes | `:ok`, `{:ok, map}`, `{:pending, map}` or `{:error, term}` | Delivers one activity to the provider. Called by the pipeline only. |
 | `parse_inbound/2` | yes | `{:ok, [message]}`, `{:ok, message}` or `{:error, term}` | Turns an inbound webhook body into zero or more messages. |
+| `supported_modes/0` | yes (derived by `use`) | `[String.t()]` | Modes the type accepts, checked by the channel changeset. `use` derives them from `:inbound` and `:outbound`. |
+| `config_schema/0` | no | `[field]` | Config fields (`name`, `type`, `required`, `secret`, `label`, `placeholder`, `help`, `summary`, `form`). Validates `channel.config` and renders the admin form. Missing callback means `[]`. See [config validation](writing-an-adapter.md#3-config-validation). |
+| `validate_config/1` | no | `:ok` or `{:error, message}` | Adapter rules beyond the schema, run after it on create and update. The message becomes a `config` error on the changeset. |
 | `parse_status_update/2` | no | `{:ok, [update]}`, `:ignore` or `{:error, term}` | Extracts delivery and read receipts. Missing callback means `:ignore`. |
 | `verify_inbound_signature/3` | no | `:ok`, `:legacy`, `:missing` or `{:error, reason}` | Provider-native signature check. Missing callback means the generic `x-converger-signature` scheme. |
+| `verify_subscription/2` | no | `{:ok, body}` or `:error` | Answers the provider's `GET` webhook handshake (Meta's `hub.challenge`). Missing callback means `200 ok`. |
 | `retry_policy/0` | no | `map` | Adapter defaults merged over the global retry policy and under the channel's `retry_policy`. |
+| `normalize_error/1` | no | `DeliveryError` or a map with `reason`, `retryable?`, `retry_after_ms` | Classifies a delivery failure for the retry policy and the circuit breaker. Missing callback means `DeliveryError.normalize/1`. |
+| `rate_limit/0` | no | `String.t()` or `nil` | The provider's default outbound rate, see [rate limiting](../operations/rate-limiting.md). |
+| `health_probe/1` | no | `:ok` or `{:error, term}` | Checks the provider account for channels without recent deliveries, see [channel health](#channel-health). |
+| `register_webhook/2` | no | `:ok` or `{:error, term}` | Points the provider's webhook at the channel's inbound URL (Telegram `setWebhook`). The admin channel list shows a **Register webhook** button for adapters that implement it; a successful call is audited as `register_webhook`. |
+| `capabilities/0` | no | list of atoms and `activity_types: [String.t()]` | What the adapter can do (below). An `activity_types: [...]` entry names the activity types it delivers natively; other types are downgraded to text or skipped per channel ([capabilities and downgrade](writing-an-adapter.md#capabilities-and-downgrade)). Missing callback means `[:inbound, :outbound]`; a missing `activity_types` entry means every client type. |
+| `send_typing/2` | no | `:ok` or `{:error, term}` | Shows a WebSocket participant's typing indicator to the channel's participant. Missing callback means the channel gets no typing. |
+| `send_read_receipt/2` | no | `:ok` or `{:error, term}` | Marks the channel participant's messages as read when a WebSocket participant reads them. Missing callback means no read receipts are sent. |
+| `inbound_response/1` | no | `{content_type, body}` | The body the provider expects in a `200` answer to a handled inbound request (Twilio: an empty TwiML `<Response>`). Missing callback means the JSON summary. |
+| `inbound_response/2` | no | `{content_type, body}` or `:default` | Like `inbound_response/1`, with the request params, for answers that depend on the request (a Discord interaction response, a Teams invoke response). Takes precedence over `inbound_response/1`; `:default` means the JSON summary. |
+
+### Capabilities
+
+| Capability | Effect | Built-in adapters with it |
+| --- | --- | --- |
+| `:inbound` | Accepts inbound messages; with `:outbound`, allows `duplex` | every built-in except `echo` and `http_pull` |
+| `:outbound` | The pipeline delivers to its channels | all twenty-two |
+| `:external_delivery` | Its channels get health checks and dashboard health | `webhook`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram`, `email`, `sms_twilio`, `sms_vonage`, `messenger`, `instagram`, `viber`, `discord`, `teams`, `kafka`, `rabbitmq`, `nats`, `redis_streams`, `mqtt`, `mekik` |
+| `:receipts` | Reports delivery or read receipts | `webhook`, `whatsapp_meta`, `whatsapp_infobip`, `email`, `sms_twilio`, `sms_vonage`, `messenger`, `instagram`, `viber` |
+| `:typing` | Forwards typing indicators | `whatsapp_meta`, `telegram`, `teams` |
+| `:lifecycle_events` | Receives conversation close and reopen events | `webhook`, `websocket`, `http_pull`, `kafka`, `rabbitmq`, `nats`, `redis_streams`, `mqtt` |
+| `:consumer` | Inbound messages are pulled by a consumer Converger runs per channel, once in the cluster ([broker channels](brokers.md#consumers-in-a-cluster)): a broker subscription, or a provider connection such as the Discord Gateway. Broker channels have no inbound webhook; Discord keeps its Interactions Endpoint and runs a consumer only with `gateway: true` | `kafka`, `rabbitmq`, `nats`, `redis_streams`, `mqtt`, `discord` (Gateway mode) |
+| `:provider_ack` | Handled inbound requests always get `200` | `whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram`, `email`, `sms_twilio`, `sms_vonage`, `messenger`, `instagram`, `viber`, `discord`, `teams` |
+| `:media` | Native outbound files | `whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram` (photos and documents), `email` (stored uploads are attached), `sms_twilio` (MMS from absolute URLs), `messenger` (URLs and stored uploads), `discord` (stored uploads), `instagram`, `viber` and `teams` (absolute URLs) |
+| `:templates` | Sends provider message templates (WhatsApp HSM) ([WhatsApp](whatsapp.md#templates-hsm)) | `whatsapp_meta`, `whatsapp_infobip` |
+| `:edits` | Edits and deletes of posted messages | `slack` |
+| `:reactions` | Native outbound reactions (descriptive) | none yet |
+| `:bot_relay` | The channel relays to a mekik/1 bot itself: a conversation routed to it treats it as its bot channel, so the end users' bot-only frames (`resume`, `genui_event`, ...) and per-turn `meta` reach it ([protocol section 9](../protocol/v1.md#9-the-bot-channel-and-mekik-relay-implemented-64)) | `mekik` |
 
 ### `deliver_activity/2`
 
 - `:ok`: the delivery is marked `sent`.
-- `{:ok, map}`: marked `sent`; the map is merged into the delivery's `metadata`. If it contains `whatsapp_message_id` or `infobip_message_id`, that value is stored as the delivery's `provider_message_id`, which is how later receipts find the delivery (see `Converger.Deliveries.mark_sent/2`).
+- `{:ok, map}`: marked `sent`; the map is merged into the delivery's `metadata`. If it contains `provider_message_id` (or the older `whatsapp_message_id` / `infobip_message_id` keys), that value is stored as the delivery's `provider_message_id`, which is how later receipts find the delivery (see `Converger.Deliveries.mark_sent/2`).
+- `{:pending, map}`: handed off, but receipt is not confirmed yet. The delivery stays `pending` (`attempts` incremented, map merged into `metadata`) and is **not** retried; `Converger.Deliveries.acknowledge/3` marks it `sent` later. The `websocket` adapter returns it when no client is connected or the channel requires acks.
 - `{:error, %Converger.Channels.DeliveryError{retryable?: false}}`: the delivery is dead-lettered after this attempt (`status: "failed"`), no retry.
 - `{:error, %DeliveryError{retry_after_ms: ms}}`: retried, and the next attempt waits `ms` instead of the policy backoff.
-- any other `{:error, term}`: retryable; the next attempt follows the channel's retry policy until `max_attempts` is reached.
+- any other `{:error, term}`: classified by the adapter's `normalize_error/1` (default: retryable); the next attempt follows the channel's retry policy until `max_attempts` is reached.
 
 `DeliveryError` ([`lib/converger/channels/delivery_error.ex`](https://github.com/AimTune/converger/blob/main/lib/converger/channels/delivery_error.ex)) has the fields `reason`, `status`, `retry_after_ms` and `retryable?` (default `true`). Its helpers classify failures the same way for every adapter:
 
@@ -79,9 +127,12 @@ Providers batch several messages into one webhook call, so the callback returns 
 | Key | Required | Meaning |
 | --- | --- | --- |
 | `sender` | yes | Sender identifier stored on the activity (`activity.sender`). |
-| `text`, `type`, `attachments`, `metadata` | no | Activity client fields. `type` defaults to `message`. |
+| `text`, `type`, `attachments`, `metadata`, `reply_to_id` | no | Activity client fields. `type` defaults to `message`; attachments are validated ([attachment schema](../concepts/activities.md#attachments)), so put provider fields in an attachment's `channelData`. |
+| `reply_to_provider_id` | no | The provider id of the message this one replies or reacts to (a WhatsApp `context.id` or `reaction.message_id`). The controller resolves it to `reply_to_id`; an unresolvable `messageReaction`, `messageUpdate` or `messageDelete` is stored as an `event`. |
 | `idempotency_key` | no | A stable provider message id (a WhatsApp `wamid`, an Infobip `messageId`). A re-delivered webhook carrying the same id never creates a second activity. |
 | `participant` | no | `%{"external_id" => ..., "display_name" => ...}`. When present (and the request has no `conversation_id`), the message joins the participant's active conversation on the channel. See [ADR-0016](../adr/0016-participant-based-conversation-resolution.md). |
+| `thread_refs` | no | Provider message ids of the messages this one replies to, most recent first (an email's `In-Reply-To` and `References`). Before the participant, the message joins the active conversation of the first one that went through this channel: an inbound message (by idempotency key) or an outbound one (by its delivery's provider message id), whatever channel that conversation started on. |
+| `thread_activity_ids` | no | Ids of activities this one replies to (decoded from the `Message-ID` Converger gives outbound email). Used like `thread_refs`, for activities with a delivery on this channel. |
 
 Only client fields are taken from the parsed message when the activity is created (`Activities.create_client_activity/2`); `sender` and `idempotency_key` are passed as server-controlled attributes by the controller.
 
@@ -102,20 +153,40 @@ Status progression is monotonic (`pending` < `sent` < `delivered` < `read`): a `
 
 ## Capability matrix
 
-| Type | Modes | Outbound delivery | Inbound webhook | Status receipts | Inbound signature | Batches |
-| --- | --- | --- | --- | --- | --- | --- |
-| `webhook` | inbound, outbound, duplex | Canonical activity JSON to the configured URL, signed with `x-converger-signature` | One message per request | Yes: `delivery_id` or `provider_message_id` plus `status` | Generic `x-converger-signature` | No (one message per request) |
-| `whatsapp_meta` | inbound, outbound, duplex | Text messages through the Graph API | Yes (Cloud API webhook) | Yes (`statuses`) | Meta `X-Hub-Signature-256` keyed with `app_secret` | Yes: every `entry` / `changes` / `messages` / `statuses` item |
-| `whatsapp_infobip` | inbound, outbound, duplex | Text messages through the Infobip API | Yes (`results`) | Yes (delivery reports in `results`) | Generic `x-converger-signature` (no Infobip-native check) | Yes: every item of `results` |
-| `echo` | outbound | Creates a reply activity from `bot` in the same conversation | No | No | Not applicable | Not applicable |
-| `websocket` | outbound | No-op; clients receive activities through the PubSub broadcast | No (clients send over the socket) | No | Not applicable | Not applicable |
+| Type | Modes | Outbound delivery | Native activity types | Inbound webhook | Status receipts | Inbound signature | Batches | Typing / read receipts out |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `webhook` | inbound, outbound, duplex | Canonical activity JSON to the configured URL, signed with `x-converger-signature` | all | One message per request | Yes: `delivery_id` or `provider_message_id` plus `status` | Generic `x-converger-signature` | No (one message per request) | No |
+| `whatsapp_meta` | inbound, outbound, duplex | Text, media, template, interactive, location and contacts messages through the Graph API | `message` | Yes (Cloud API webhook) | Yes (`statuses`) | Meta `X-Hub-Signature-256` keyed with `app_secret` | Yes: every `entry` / `changes` / `messages` / `statuses` item | Yes: typing indicator and mark as read |
+| `whatsapp_infobip` | inbound, outbound, duplex | Text, media, template, interactive, location and contacts messages through the Infobip API | `message` | Yes (`results`) | Yes (delivery reports in `results`) | Generic `x-converger-signature` (no Infobip-native check) | Yes: every item of `results` | No |
+| `slack` | inbound, outbound, duplex | `chat.postMessage` (cards as Block Kit, files through `files.uploadV2`), `chat.update`, `chat.delete` | `message`, `messageUpdate`, `messageDelete` | Yes (Events API and card button interactions) | No | Slack `X-Slack-Signature` keyed with `signing_secret`, 5 minute window | One event per request | No |
+| `telegram` | inbound, outbound, duplex | Text, photos and documents through the Bot API; card buttons as inline keyboards | `message` | Yes (one `Update` per request: messages, edits, button presses, reactions, media) | No (the Bot API has none) | `X-Telegram-Bot-Api-Secret-Token` against `secret_token` | Not applicable (one update per request) | Typing only (`sendChatAction`) |
+| `email` | inbound, outbound, duplex | Email through Swoosh: SMTP, Amazon SES, SendGrid, Mailgun or Postmark ([Email](email.md)) | `message` | Yes: SES (SNS), SendGrid Inbound Parse, Mailgun routes, Postmark inbound, raw `message/rfc822` | Yes: delivered, opened, bounced and complained events; bounce mails | SES: SNS signature and topic; Mailgun: payload signature; others: basic auth or `x-converger-signature` | One email per request (SendGrid events: an array) | No |
+| `sms_twilio` | inbound, outbound, duplex | SMS / MMS through Twilio Programmable Messaging ([SMS](sms.md)) | `message` | Yes (form-encoded messaging webhook, MMS media as attachments) | Yes: status callbacks (`sent`, `delivered`, `undelivered`, `failed`, `read`) | Twilio `X-Twilio-Signature` keyed with `auth_token` | One message per request | No |
+| `sms_vonage` | inbound, outbound, duplex | SMS through the Vonage Messages API ([SMS](sms.md)) | `message` | Yes (Messages API inbound webhook) | Yes: status webhook (`submitted`, `delivered`, `rejected`, `undeliverable`, `read`) | Vonage signed-webhook JWT keyed with `signature_secret`, with body hash | One message per request | No |
+| `messenger` | inbound, outbound, duplex | Text, files (URLs and uploads) and quick replies through the Send API ([Messenger](messenger.md)) | `message` | Yes (Messenger Platform webhook: messages, postbacks, reactions, edits, unsends) | Yes: `delivery` events | Meta `X-Hub-Signature-256` keyed with `app_secret` | Yes: every `entry` / `messaging` item | No |
+| `instagram` | inbound, outbound, duplex | Text, files (URLs) and quick replies through the Send API ([Instagram](instagram.md)) | `message` | Yes (as Messenger, plus story replies and mentions) | Yes: `read` events | Meta `X-Hub-Signature-256` keyed with `app_secret` | Yes: every `entry` / `messaging` item | No |
+| `viber` | inbound, outbound, duplex | Text with keyboards, pictures, videos, files, locations and contacts through `send_message` ([Viber](viber.md)) | `message` | Yes (messages, conversation started, subscribed, unsubscribed) | Yes: `delivered`, `seen`, `failed` | `X-Viber-Content-Signature` keyed with `auth_token` | One callback per request | No |
+| `discord` | inbound, outbound, duplex | Channel messages with buttons, files and threads through the bot API ([Discord](discord.md)) | `message` | Yes (Interactions Endpoint: slash commands, components, modals); plain messages over the Gateway with `gateway: true` | No | Ed25519 `X-Signature-Ed25519` with the application's `public_key` | One interaction per request | No |
+| `teams` | inbound, outbound, duplex | Bot Framework messages with hero and Adaptive Cards to the conversation's `serviceUrl` ([Microsoft Teams](teams.md)) | `message` | Yes (Bot Framework Activities: messages, card actions, reactions, edits, deletes) | No | Bot Framework JWT (OpenID keys, `aud` = `app_id`, `serviceurl` claim) | One Activity per request | Typing only |
+| `http_pull` | outbound | Canonical activity JSON kept in the channel's outbox until the integrator acknowledges it ([HTTP pull](http-pull.md)) | all | No | Watermark acknowledgement marks deliveries `sent` | Not applicable (tenant API key) | Not applicable | No |
+| `kafka` | inbound, outbound, duplex | The [envelope](brokers.md#envelope) produced to `topic_out`, keyed by `conversation_id` ([Kafka](kafka.md)) | all | No: consumes `topic_in` | No | Not applicable (broker credentials, SASL / TLS) | Not applicable (one message per record) | No |
+| `rabbitmq` | inbound, outbound, duplex | The [envelope](brokers.md#envelope) published to `exchange` with `routing_key`, with publisher confirms ([RabbitMQ](rabbitmq.md)) | all | No: consumes `queue` | No | Not applicable (broker credentials, TLS) | Not applicable (one message per AMQP message) | No |
+| `nats` | inbound, outbound, duplex | The [envelope](brokers.md#envelope) published to `subject_out` with a JetStream publish acknowledged by the stream ([NATS JetStream](nats.md)) | all | No: pulls from a durable consumer on `stream` | No | Not applicable (user/password, token, NKey or creds; TLS) | Not applicable (one message per NATS message) | No |
+| `redis_streams` | inbound, outbound, duplex | The [envelope](brokers.md#envelope) in the `payload` field of an entry appended to `stream_out` (`XADD`) ([Redis Streams](redis-streams.md)) | all | No: reads `stream_in` with a consumer group | No | Not applicable (password or ACL user, TLS) | Not applicable (one message per stream entry) | No |
+| `mqtt` | inbound, outbound, duplex | The [envelope](brokers.md#envelope) published with QoS 1 to the conversation's `topic_out` ([MQTT](mqtt.md)) | all | No: subscribes to `topic_in` (persistent session) | No | Not applicable (broker credentials, TLS) | Not applicable (one message per `PUBLISH`) | No |
+| `mekik` | duplex | The end user's turns as mekik/1 `text` (or `resume` for an interrupt answer) on a per-conversation upstream WebSocket to the bot ([mekik](mekik.md)) | all | No: the bot's frames arrive on the upstream WebSocket and are stored as the channel's | No | Not applicable (`token` sent to the bot) | Not applicable | Bot typing from `run` frames |
+| `echo` | outbound | Creates a reply activity from `bot` in the same conversation | `message` | No | No | Not applicable | Not applicable | No |
+| `websocket` | inbound, outbound, duplex | Broadcast to the channel's connected sockets; `pending` until a client is connected, replays or acks ([WebSocket](websocket.md)) | all | No (clients send over the socket, through the same inbound path) | Client `ack` over the socket | Not applicable (socket token) | Not applicable | Not applicable (clients get `typing` and `deliveryStatus` frames) |
 
 Notes:
 
-- The pipeline only calls adapters for `echo`, `webhook`, `whatsapp_meta` and `whatsapp_infobip` (`@delivery_types` in [`lib/converger/pipeline.ex`](https://github.com/AimTune/converger/blob/main/lib/converger/pipeline.ex)). `websocket` channels get no delivery rows.
-- Conversation lifecycle events (close, reopen) are delivered only to `webhook` channels.
-- An inbound message from the conversation's participant is never delivered back to that participant's own channel.
-- Outbound WhatsApp media, templates and interactive messages are planned ([#37](https://github.com/AimTune/converger/issues/37)). Adapter capabilities declared by the adapter itself are planned in adapter behaviour v2 ([#36](https://github.com/AimTune/converger/issues/36)).
+- The pipeline calls the adapter of every channel whose adapter has the `:outbound` capability (`Adapter.capability?/2`, used by `resolve_delivery_channels/1` in [`lib/converger/pipeline.ex`](https://github.com/AimTune/converger/blob/main/lib/converger/pipeline.ex)): all twenty-two built-in types today.
+- Conversation lifecycle events (close, reopen) are delivered only to channels whose adapter has `:lifecycle_events` (`webhook`, `websocket`, `http_pull`, `kafka`, `rabbitmq`, `nats`, `redis_streams` and `mqtt`).
+- Activity types outside an adapter's native types (the `activity_types:` entry of `capabilities/0`) are downgraded to a text `message` (for example `messageReaction` becomes `"user reacted with 👍"`) or skipped, as set by the channel config key `unsupported_activities` (`downgrade`, the default, or `skip`). `typing` and the internal `deliveryReceipt` never reach messaging adapters. See [activities](../concepts/activities.md#delivery-to-channels).
+- Typed messages (`message_type`, [#68](https://github.com/AimTune/converger/issues/68)) reach adapters natively when they declare the type in a `message_types:` capability entry (or have neither `message_types` nor `activity_types`, like webhook, WebSocket and broker channels). WhatsApp, Telegram, Slack and email render buttons, cards and media natively; every other end-user channel gets the prompt with its actions as a numbered list, and a user's tap, list choice or numeric reply comes back as one normalised turn with `metadata.action` ([messages.md sections 5 and 6](../protocol/messages.md), [ADR-0064](../adr/0064-per-channel-rendering-of-typed-messages-and-normalised-answers.md)). Set `show_tool_traces: true` in a channel's config to deliver `tool_call` traces there as `name: status` lines ([activities](../concepts/activities.md#delivery-to-channels)).
+- An inbound message is never delivered back to its author: not to the conversation participant's own channel, and not to any target channel on which the sender is a participant (an email reply in a web chat conversation), unless it is a `websocket` channel (its other sockets need it).
+- A delivery to a participant who opted out (an SMS `STOP`, see [SMS](sms.md#opt-out-stop--start)) fails immediately with `recipient <id> opted out`, without calling the adapter.
+- WhatsApp channels send media, templates, interactive messages, locations and contacts, and download inbound media into Converger storage ([WhatsApp](whatsapp.md#what-is-sent), [ADR-0039](../adr/0039-whatsapp-rich-outbound-and-inbound-media-download.md)). `capabilities/0` drives pipeline delivery (`:outbound`), health checks (`:external_delivery`), lifecycle events, the inbound `200` policy (`:provider_ack`) and, with its `activity_types:` entry, the downgrade of unsupported activity types ([#28](https://github.com/AimTune/converger/issues/28)).
 
 ## Inbound endpoints
 
@@ -123,11 +194,11 @@ Defined in [`lib/converger_web/router.ex`](https://github.com/AimTune/converger/
 
 | Method and path | Action | Purpose |
 | --- | --- | --- |
-| `GET /api/v1/channels/:channel_id/inbound` | `verify` | Webhook verification handshake. For `whatsapp_meta` it checks `hub.verify_token` against the channel's `verify_token` and echoes `hub.challenge`; any other type answers `200 ok`. |
-| `POST /api/v1/channels/:channel_id/inbound` | `create` | Messages and receipts. WhatsApp sends both to the same URL. |
+| `GET /api/v1/channels/:channel_id/inbound` | `verify` | Webhook verification handshake. Answered by the adapter's `verify_subscription/2`: for `whatsapp_meta` it checks `hub.verify_token` against the channel's `verify_token` and echoes `hub.challenge` (`403` on mismatch); adapters without the callback answer `200 ok`. |
+| `POST /api/v1/channels/:channel_id/inbound` | `create` | Messages and receipts. WhatsApp sends both to the same URL. An adapter with `inbound_challenge/2` answers an in-band handshake here once the signature is verified (Slack's `url_verification`), without creating anything. |
 | `POST /api/v1/channels/:channel_id/status` | `status` | Receipts only (delivery and read receipts). |
 
-There is no bearer token or API key on these routes. A request is authenticated by the **channel id in the path** plus the **signature** described below. The id is a UUID; treat the full URL as a credential anyway.
+There is no bearer token or API key on these routes. A request is authenticated by the **channel id in the path** plus the **signature** described below. The id is a UUID; treat the full URL as a credential anyway. Broker channels (`kafka`, `rabbitmq`, `nats`, `redis_streams`, `mqtt`) do not use these endpoints: their inbound messages are consumed from the broker ([broker channels](brokers.md)), and a `POST` to their inbound URL is rejected.
 
 Processing order for `POST .../inbound`:
 
@@ -142,7 +213,7 @@ flowchart TD
   G -- "none" --> H["Apply receipts, 200"]
   G -- "one or more" --> I["Apply receipts, then each message in order"]
   I --> J["Duplicate check by idempotency_key on the channel"]
-  J --> K["Resolve conversation (conversation_id, participant or new)"]
+  J --> K["Resolve conversation (conversation_id, thread, participant or new)"]
   K --> L["Create activity + delivery jobs (one transaction per message)"]
 ```
 
@@ -182,14 +253,14 @@ A receipts-only request returns `{"status": "accepted", "receipts_processed": 2}
 | Status | When |
 | --- | --- |
 | `201` | Generic channel (`webhook`), at least one activity created. |
-| `200` | Duplicates only, receipts only, or any handled request on `whatsapp_meta` / `whatsapp_infobip`. WhatsApp channels always get `200` once the request was handled, even when every message was rejected permanently, because the provider would otherwise retry for days. |
-| `400` | Channel inactive (`{"error": "Channel is inactive"}`), channel mode `outbound` with messages (`{"error": "Channel does not accept inbound messages"}`), or the adapter could not parse the body (`{"error": "unable to parse WhatsApp Meta webhook payload"}` and similar). |
+| `200` | Duplicates only, receipts only, or any handled request on a channel whose adapter has `:provider_ack` (`whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram`, `email`, `sms_twilio`, `sms_vonage`, `messenger`, `instagram`, `viber`, `discord`, `teams`). These channels always get `200` once the request was handled, even when every message was rejected permanently, because the provider would otherwise retry for days. |
+| `400` | Channel inactive (`channel_inactive`), channel mode `outbound` with messages (`inbound_not_supported`), or the adapter could not parse the body (`bad_request`, message "unable to parse WhatsApp Meta webhook payload" and similar). Bodies use the [error envelope](../api/errors.md). |
 | `401` | Signature missing (on a `require_signature` channel), legacy, invalid, malformed or outside the time window. |
 | `404` | Unknown channel id, or an unknown `conversation_id` for the channel's tenant. |
 | `409` | The explicit `conversation_id` refers to a closed conversation. |
 | `422` | Generic channel and every message was invalid (changeset errors), or the message has neither text nor attachments. |
 | `429` | Rate limit exceeded, with a `Retry-After` header. Default: 500 requests per second per channel (`inbound` bucket), overridable per tenant. |
-| `503` | The activity could not be accepted because its delivery jobs could not be enqueued. Retry; idempotency keys make that safe. |
+| `503` | `unavailable`: the activity could not be accepted because its delivery jobs could not be enqueued (`details.reason` is `delivery_enqueue_failed`). Retry; idempotency keys make that safe. |
 
 ### Conversation resolution
 
@@ -232,7 +303,7 @@ Outbound webhooks are signed with the same scheme; the verification snippets and
 
 A signature that is present but wrong is always rejected, even when signatures are optional. `require_signature: false` exists for channels created before signatures were enforced; unsigned requests will be rejected in a future release. The decision is recorded in [ADR-0009](../adr/0009-inbound-signature-scheme-and-per-channel-enforcement.md).
 
-`whatsapp_meta` channels use Meta's own `X-Hub-Signature-256` instead (see [WhatsApp](whatsapp.md#inbound-signature-x-hub-signature-256)); for them the generic header is not accepted in its place.
+`whatsapp_meta` channels use Meta's own `X-Hub-Signature-256` instead (see [WhatsApp](whatsapp.md#inbound-signature-x-hub-signature-256)), and `slack` channels Slack's `X-Slack-Signature` (see [Slack](slack.md#signature-x-slack-signature)); for them the generic header is not accepted in its place. `telegram` channels compare `X-Telegram-Bot-Api-Secret-Token` with their `secret_token`; once a `secret_token` is set, a missing or wrong header is rejected even when `require_signature` is `false` (see [Telegram](telegram.md#secret-token)). `sms_twilio` channels verify `X-Twilio-Signature` and `sms_vonage` channels a signed JWT (see [SMS](sms.md)); for them too the generic header is not accepted. `messenger` and `instagram` channels check `X-Hub-Signature-256` like WhatsApp. `viber` (`X-Viber-Content-Signature`), `discord` (Ed25519) and `teams` (Bot Framework JWT) channels reject a missing or invalid signature even when `require_signature` is `false`, because their providers sign every request (see [Viber](viber.md), [Discord](discord.md#signature), [Microsoft Teams](teams.md#jwt-validation)).
 
 ### Signing a request with bash and openssl
 
@@ -279,7 +350,7 @@ Inside the Converger code base (tests, tools), `Converger.Channels.InboundSignat
 
 ## Channel health
 
-Converger computes a health status for every active `webhook`, `whatsapp_meta` and `whatsapp_infobip` channel from its delivery failure rate.
+Converger computes a health status for every active channel whose adapter has the `:external_delivery` capability (built in: `webhook`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram`, `email`, `sms_twilio`, `sms_vonage`, `messenger`, `instagram`, `viber`, `discord`, `teams`, `kafka`, `rabbitmq`, `nats` and `redis_streams`) from its delivery failure rate.
 
 - [`Converger.Channels.Health`](https://github.com/AimTune/converger/blob/main/lib/converger/channels/health.ex) counts the channel's deliveries created in the last 60 minutes and the ones with status `failed`.
 - [`Converger.Channels.HealthCheck`](https://github.com/AimTune/converger/blob/main/lib/converger/channels/health_check.ex) is the stored result (table `channel_health_checks`): `status`, `total_deliveries`, `failed_deliveries`, `failure_rate` (0.0 to 1.0, rounded to 4 decimals) and `checked_at`.
@@ -290,12 +361,16 @@ Converger computes a health status for every active `webhook`, `whatsapp_meta` a
 | `healthy` | below 10% |
 | `degraded` | 10% or more, below 50% |
 | `unhealthy` | 50% or more |
-| `unknown` | no deliveries in the window |
+| `unknown` | no deliveries in the window, and no health probe (or probes disabled) |
+
+### Health probes
+
+A channel without deliveries in the window says nothing about its provider. When its adapter implements `health_probe/1`, the check calls it: `:ok` stores `healthy`, `{:error, reason}` (or a raise) stores `degraded` and logs `Health probe failed for channel <id>: <reason>`. A failed probe never yields `unhealthy`, so a single failed call cannot open the [circuit breaker](../delivery.md#circuit-breaker). The `whatsapp_meta` adapter probes `GET https://graph.facebook.com/<version>/<phone_number_id>?fields=id` with the channel's access token (5 second timeout, no retry), which catches an expired or revoked token before the next message fails. The `slack` adapter calls `auth.test` with its bot token, and the `telegram` adapter `getMe`. The `sms_twilio` adapter reads its account, and `sms_vonage` reads the account balance (API key auth) or checks that its application key signs a JWT. `messenger` and `instagram` read their Page or account, `viber` calls `get_account_info`, `discord` `GET /users/@me`, and `teams` requests a Bot Framework token. The `kafka` adapter requests the metadata of its topics and `rabbitmq` opens a connection ([broker channels](brokers.md#operations)). Disable probes with `config :converger, :channel_health, probe_idle_channels: false` (they are disabled in the test environment).
 
 Each run inserts one health check per channel. When a channel's status differs from its previous check, the worker:
 
 1. broadcasts `health_changed` on the PubSub topic `channel_health` (used by the admin dashboard);
-2. if the tenant has an `alert_webhook_url`, posts this JSON to it (fire-and-forget, 10 second timeout, through `Converger.HTTP`):
+2. emits the `channel.health_changed` [platform event](../platform-webhooks.md) to the tenant's subscriptions (signed, retried, logged). The tenant's legacy `alert_webhook_url` is such a subscription ([details](../platform-webhooks.md#the-legacy-alert_webhook_url)) and still receives this JSON:
 
 ```json
 {
@@ -313,6 +388,13 @@ Each run inserts one health check per channel. When a channel's status differs f
 ```
 
 The first check of a channel never alerts (there is no previous status). Health checks older than 7 days are pruned at the end of every run.
+
+## Planned adapters
+
+All adapters tracked in [#44](https://github.com/AimTune/converger/issues/44) are implemented: Discord (Interactions
+Endpoint and [Gateway mode](discord.md#gateway-mode)), Microsoft Teams, Messenger, Instagram, Viber, HTTP pull and
+[MQTT](mqtt.md). gRPC streaming is not a channel type but a transport of Protocol v1 for backend clients:
+[Protocol v1 over gRPC](../protocol/grpc.md). New adapter requests get their own issue.
 
 ## Related
 

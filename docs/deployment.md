@@ -10,6 +10,10 @@ deployment-specific settings are read from environment variables in
 `config/runtime.exs` when the release boots, so the same build can be promoted
 between environments without recompiling.
 
+The image build also compiles the admin panel and tenant portal CSS and JavaScript (`mix assets.deploy`, standalone
+tailwind and esbuild binaries downloaded during the build) into the release, so the running server needs no Node.js
+and loads nothing from a CDN; see [Admin panel and tenant portal](admin-ui.md#assets).
+
 Contents:
 
 - [Environment variables](#environment-variables)
@@ -43,7 +47,7 @@ See [TLS, HSTS and WebSocket origins](#tls-hsts-and-websocket-origins).
 | `HSTS_MAX_AGE` | `31536000` | HSTS `max-age` in seconds. Start low (e.g. `300`) when first enabling it. |
 | `HSTS_INCLUDE_SUBDOMAINS` | `false` | Add `includeSubDomains`. Only if every subdomain serves HTTPS. |
 | `HSTS_PRELOAD` | `false` | Add `preload`. Only together with a long max-age and `includeSubDomains`, and after submitting to the preload list. |
-| `FORCE_SSL_EXCLUDE_PATHS` | unset | Comma-separated paths served over plain HTTP without redirect (e.g. a load balancer health check path). Requests for host `localhost`/`127.0.0.1` are never redirected. |
+| `FORCE_SSL_EXCLUDE_PATHS` | unset | Comma-separated paths served over plain HTTP without redirect. `/health/live`, `/health/ready` and `/metrics` never need it. Requests for host `localhost`/`127.0.0.1` are never redirected. |
 | `CHECK_ORIGIN` | host of `PHX_HOST` | Comma-separated origins allowed to open browser WebSocket connections (LiveView, `/socket`, `/socket/converger`), e.g. `https://converger.example.com,//*.example.com`. Clients that send no `Origin` header (servers, mobile SDKs) are not affected. |
 
 ### Release scripts
@@ -62,12 +66,29 @@ See [TLS, HSTS and WebSocket origins](#tls-hsts-and-websocket-origins).
 | `PHX_HOST` | `example.com` | Public host name used when generating URLs (prod only). URLs are generated as `https://PHX_HOST:443`. |
 | `PORT` | `4000` | Port the HTTP endpoint listens on (prod; also honoured in dev). |
 
+### gRPC transport
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `GRPC_ENABLED` | `false` | Starts the [Protocol v1 gRPC server](protocol/grpc.md) for backend clients. |
+| `GRPC_PORT` | `50051` | Its port. Expose it next to `PORT` (docker compose maps `50051:50051`; the Helm chart adds a `grpc` Service port with `grpc.enabled`). |
+| `GRPC_TLS_CERTFILE`, `GRPC_TLS_KEYFILE` | unset | PEM paths; both set enable TLS. Otherwise plaintext h2c: keep the port on a private network or behind a TLS-terminating, gRPC-aware proxy. |
+
+WebSocket limits and draining are tuned with `WS_*` variables (frame size, message rate, joins, slow consumers,
+drain delay and batches); see [WebSocket limits and draining](operations/websocket-limits.md#configuration).
+Load balancers and Kubernetes probe `GET /health/live` and `GET /health/ready`.
+
 ### Database
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `POOL_SIZE` | `10` | Ecto connection pool size (prod only). |
+| `POOL_SIZE` | `10` | Interactive connection pool size: HTTP, WebSocket, LiveView (prod only). |
+| `BACKGROUND_POOL_SIZE` | `10` | Background pool size for Oban jobs (prod only); `0` shares the interactive pool. |
 | `ECTO_IPV6` | unset | Set to `true` or `1` to connect to Postgres over IPv6 (prod only). |
+
+Queue targets, timeouts and the readiness threshold (`DB_*`, `BACKGROUND_DB_*`, `READY_DB_QUEUE_MS`) are listed in the
+[Configuration reference](operations/configuration.md#database); sizing and the behaviour under database pressure are in
+[Database pools and pressure](operations/database.md).
 
 ### Security
 
@@ -77,12 +98,22 @@ See [TLS, HSTS and WebSocket origins](#tls-hsts-and-websocket-origins).
 | `ADMIN_IP_WHITELIST` | `127.0.0.1,::1` | Comma-separated list of client IPs allowed to reach the `/admin` routes. |
 | `TRUSTED_PROXIES` | unset | Comma-separated IPs/CIDRs of reverse proxies whose `X-Forwarded-For` and `X-Forwarded-Proto` headers are honoured. See [docs/security.md](security.md). |
 
-### Clustering and metrics
+### Clustering, health and metrics
+
+See [Clustering](operations/clustering.md), [Kubernetes](operations/kubernetes.md) and
+[Observability](operations/observability.md#health-endpoints).
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `DNS_CLUSTER_QUERY` | unset | DNS name queried by `DNSCluster` to discover and connect other nodes (prod only). Clustering is disabled when unset. |
-| `PROMETHEUS_PORT` | `9568` | Port of the Prometheus metrics exporter. Not started in `test` unless set. |
+| `CLUSTER_STRATEGY` | `none` | How nodes discover each other (libcluster): `none`, `kubernetes_dns` (with `CLUSTER_SERVICE`), `dns` (with `CLUSTER_DNS_QUERY`), `gossip` (with `CLUSTER_GOSSIP_SECRET`) or `epmd` (with `CLUSTER_HOSTS`). The full list of `CLUSTER_*` variables is in the [Configuration reference](operations/configuration.md#clustering). |
+| `RELEASE_COOKIE` | none | Shared Erlang distribution cookie. **Required** when `CLUSTER_STRATEGY` is not `none`; the release refuses to start without it. |
+| `CLUSTER_NODE_BASENAME` | `converger` | Node names are `<basename>@<ip>`; `rel/env.sh.eex` sets `RELEASE_DISTRIBUTION=name` and `RELEASE_NODE` from `POD_IP` / `FLY_PRIVATE_IP` / `hostname -i`. |
+| `DNS_CLUSTER_QUERY` | unset | Deprecated (former `dns_cluster` setting); implies `CLUSTER_STRATEGY=dns` with this query. |
+| `METRICS_TOKEN` | unset | Bearer token for `GET /metrics` on the main port. |
+| `METRICS_ALLOWED_IPS` | unset | IPs/CIDRs that may read `/metrics` without a token. With neither set, `/metrics` answers `404`. |
+| `PROMETHEUS_PORT` | unset | Opt-in legacy listener serving `/metrics` **without authentication** on a separate port (formerly always on at `9568`). |
+
+`GET /health/live` and `GET /health/ready` need no configuration and no authentication.
 
 ### Background jobs (Oban)
 
@@ -97,11 +128,25 @@ plugin rescues it; only then is the delivery retried. See
 | `OBAN_LIFELINE_RESCUE_AFTER_SECONDS` | `1800` (30 min) | Seconds after which a job still `executing` is considered orphaned and made available again. Lower it to re-deliver sooner after a crash, but keep it well above the longest job runtime (a webhook delivery takes at most about 90 s: connect plus receive timeout), or a slow job that is still running is executed a second time. Receivers de-duplicate by `x-converger-delivery-id` either way. |
 | `OBAN_LIFELINE_INTERVAL_SECONDS` | `60` | How often Lifeline looks for orphaned jobs. |
 
+### Event backbone
+
+Where platform events are published ([Event backbone](architecture/event-backbone.md),
+[ADR-0070](adr/0070-pluggable-event-backbone.md)). Switching is the one variable `BACKBONE`; how to choose and how
+to migrate without downtime are [below](#choosing-an-event-backbone). The full list, with the broker connection
+settings, is in the [Configuration reference](operations/configuration.md#event-backbone).
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `BACKBONE` | `native` | `native` (Phoenix.PubSub + Oban on Postgres), `kafka`, `nats` (JetStream) or `rabbitmq`. |
+| `BACKBONE_MIRROR` | unset | Comma-separated backbones that also receive every event (dual publish while migrating). |
+| `BACKBONE_CONSUMERS` | `true` | `false` keeps this node's broker consumers off (web-only nodes). |
+| `BACKBONE_KAFKA_BROKERS` / `BACKBONE_NATS_SERVERS` / `BACKBONE_RABBITMQ_URL` | `localhost` defaults | The broker of the selected backbone. |
+
 ### Rate limiting
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `RATE_LIMIT_BACKEND` | `cluster` when `DNS_CLUSTER_QUERY` is set, otherwise `local` | `local`: per-node ETS counters. `cluster`: per-node ETS counters replicated to every connected node over Phoenix PubSub, so limits apply across the cluster. |
+| `RATE_LIMIT_BACKEND` | `cluster` when clustering is enabled (`CLUSTER_STRATEGY` other than `none`), otherwise `local` | `local`: per-node ETS counters. `cluster`: per-node ETS counters replicated to every connected node over Phoenix PubSub, so limits apply across the cluster. |
 | `RATE_LIMIT_SYNC_INTERVAL_MS` | `100` | How often the `cluster` backend broadcasts counter deltas to the other nodes. |
 
 Default limits (requests per window; rejected requests get `429` with a
@@ -138,7 +183,7 @@ no database or network round trip.
 - `local` is exact on a single node. Behind a load balancer with N nodes each
   node counts on its own, so a client can get up to N times the limit.
 - `cluster` needs no extra infrastructure (it uses the Erlang distribution
-  that `DNS_CLUSTER_QUERY` already sets up). Counter deltas are batched and
+  that clustering (`CLUSTER_STRATEGY`) already sets up). Counter deltas are batched and
   broadcast every `RATE_LIMIT_SYNC_INTERVAL_MS`, so it is eventually
   consistent: a burst can overshoot by what the other nodes accept within one
   interval. Counters are in memory: a restarted node starts empty for the
@@ -264,8 +309,9 @@ reaches the app directly cannot claim `X-Forwarded-Proto: https`. So:
 2. Make the proxy set (overwrite) `X-Forwarded-Proto` (nginx:
    `proxy_set_header X-Forwarded-Proto $scheme;`; ALB, GCP LB, Traefik and
    ingress-nginx do this by default).
-3. If the load balancer health-checks over plain HTTP, either health-check the
-   `localhost` host header, or list the path in `FORCE_SSL_EXCLUDE_PATHS`.
+3. Point load balancer health checks at `/health/ready` (or `/health/live`):
+   `/health/*` is served before `ForceSSL` and never redirected, so plain HTTP
+   probes work without `FORCE_SSL_EXCLUDE_PATHS`.
 4. Roll HSTS out with a short `HSTS_MAX_AGE` first; browsers cache it.
 
 Set `FORCE_SSL=false` only when TLS is enforced elsewhere and clients can never
@@ -354,10 +400,13 @@ maintenance page), run `bin/migrate`, then start the new release:
 | `20261008150000_add_seq_to_activities` | In one transaction it adds `activities.seq`, backfills **every** activity row with `row_number()`, sets `NOT NULL` and builds a non-concurrent unique index. `activities` is locked (`ACCESS EXCLUSIVE`) for the whole run, the table is fully rewritten (expect WAL roughly the table size and dead tuples; run `VACUUM ANALYZE activities` afterwards), and old code that inserts activities without `seq` fails once it commits. Time it on a restored copy of production first. |
 | `20261008100000_encrypt_channel_secrets` (issue #12) | Rewrites every `channels` row with encrypted `secret`/`config` and drops the plaintext columns; old code cannot read the new values. Needs `CLOAK_KEY` at migration time. The table is small, so the window is short. |
 | `20261008100001_hash_tenant_api_keys` (issue #12) | Replaces stored tenant API keys with hashes; old code can no longer authenticate tenants. |
+| `20261010300100_partition_activities_and_deliveries` (issue #30) | Converts `activities` and `deliveries` to monthly partitioned tables and swaps them in under `ACCESS EXCLUSIVE`; old releases cannot write the new `deliveries` columns. Small installations (up to `PARTITION_MAX_INLINE_ROWS`, default 1,000,000 activities) convert inside `bin/migrate`; larger ones first run the online copy `bin/converger eval "Converger.Release.prepare_partitioning()"` while the old release still serves traffic, so the window only covers the swap. Runbook: [Migrations](operations/migrations.md#partitioning-activities-and-deliveries-20261010300100). |
 
-`20261008120000_add_require_signature_to_channels` and
-`20261009550000_add_must_change_password_to_admin_users` only add columns with
-constant defaults (metadata-only on Postgres 11+) and are rolling-deploy safe.
+`20261008120000_add_require_signature_to_channels`,
+`20261009550000_add_must_change_password_to_admin_users` and
+`20261010300000_add_retention_and_archive_parts` only add columns with
+constant defaults (metadata-only on Postgres 11+) or new tables and are
+rolling-deploy safe.
 
 ## Initial admin account
 
@@ -385,6 +434,11 @@ What to back up:
    key. Store it in your secret manager, separately from the database backups.
 3. `SECRET_KEY_BASE` (losing it only logs everyone out and invalidates issued
    tokens, but keep it to avoid that).
+4. **The retention archive** (`archive/` in the attachment bucket, or
+   `ARCHIVE_BUCKET`). Once retention has archived and dropped a month, the
+   archive is the only copy of those activities and deliveries: enable
+   versioning or object lock and replicate it like a backup. See
+   [Data retention](operations/retention.md).
 
 ### Logical backups (pg_dump)
 
@@ -458,8 +512,14 @@ Rolling upgrade (expand-only migrations):
 
 1. Build and push the new image.
 2. Run `bin/migrate` once with the **new** image.
-3. Roll the replicas to the new image (`bin/server`). Readiness should gate
-   traffic; old and new replicas coexist safely.
+3. Roll the replicas to the new image (`bin/server`), one at a time. Use
+   `GET /health/ready` as the readiness probe and give each replica a
+   termination grace period of at least 60 s. On `SIGTERM` a replica turns
+   not-ready, refuses new WebSockets, then closes its sockets in batches with
+   1012 and a jittered `retryAfterMs`, so clients move to the other replicas
+   without a reconnect storm. See
+   [WebSocket limits and draining](operations/websocket-limits.md#draining-on-shutdown).
+   Old and new replicas coexist safely.
 4. Watch error rate, latency, Oban queue depth and delivery failures
    (Grafana/Prometheus) for a while.
 
@@ -486,25 +546,89 @@ Rollback:
   instead, accepting the loss of data written since. Prefer a forward fix when
   possible.
 
+## Choosing an event backbone
+
+Platform events (activity created, delivery status changes, conversation, channel and participant events) go
+through the [event backbone](architecture/event-backbone.md). Channel deliveries and the WebSocket fan-out do not
+depend on it: they work the same on every backbone. What changes is what else runs next to Converger, and who
+besides Converger can read the events.
+
+| Your situation | Team size | Existing infrastructure | Event throughput | Replay / downstream consumers | Recommended backbone |
+| --- | --- | --- | --- | --- | --- |
+| Getting started, one product team, Converger is the only consumer of its events | 1-5 | Postgres | up to a few thousand events/s | not needed (webhooks are enough) | **Native** (default) |
+| Several services react to conversation traffic, no broker yet | any | Postgres | up to a few thousand events/s | platform webhooks per tenant | **Native**; add a broker only when you need one of the rows below |
+| A data or platform team already runs Kafka; analytics, CRM or bots consume from topics | 5+ | Kafka / Redpanda | high, bursty | yes: rewind, reprocess, many independent consumer groups | **Kafka** |
+| Lightweight messaging already on NATS; edge or multi-region | any | NATS with JetStream | high | yes, within the stream's `max_age` | **NATS JetStream** |
+| Existing RabbitMQ estate, consumers are queue workers | any | RabbitMQ | moderate | no (a message is gone once acknowledged) | **RabbitMQ** |
+| Strict per-conversation ordering for downstream consumers | any | Kafka | any | yes | **Kafka** (one partition per conversation) |
+
+Rules of thumb:
+
+- **Do not add a broker to get durability.** Native is durable: events live in Postgres as Oban jobs until handled,
+  the same database the activities are in. A broker adds durability *outside* Converger, for other consumers.
+- **Kafka when events are a product of their own**: other teams build on them, need replay, or need per-conversation
+  order. It is the only backbone with order per conversation and replay over a long retention.
+- **Numbers**: see the [backbone matrix](benchmarks/backbone-matrix.md) (Native and Kafka, 1 and 3 nodes). Measure
+  with your own traffic profile before you switch.
+
+Whatever the backbone, Postgres stays the source of truth and Erlang distribution stays required for clustering
+(PubSub, presence, rate limits).
+
+## Migrating between backbones without downtime
+
+Every event keeps one id wherever it travels, and the backbone's subscriptions apply each id once (idempotency
+receipts). That makes a dual-publish period safe. To move from Native to Kafka (any pair works the same way):
+
+1. **Prepare the target.** Make sure the broker is reachable from every node. Topics are created at boot when
+   missing (`BACKBONE_KAFKA_PARTITIONS`, default 12, and `BACKBONE_KAFKA_REPLICATION_FACTOR`, default 1: set 3 on a
+   production cluster); create them beforehand if your cluster forbids topic creation.
+2. **Dual publish.** Set `BACKBONE_MIRROR=kafka` (keep `BACKBONE=native`) and roll the nodes. Events now reach both
+   backbones; only Native's subscriptions consume. Downstream consumers can start reading the Kafka topics.
+3. **Switch the primary.** Set `BACKBONE=kafka` and `BACKBONE_MIRROR=native`, and roll the nodes. During the roll,
+   old nodes still publish to Native (and mirror to Kafka), new nodes publish to Kafka (and mirror to Native). The
+   new nodes' consumer groups start at the earliest offset (`BACKBONE_KAFKA_START_OFFSET`), so they also see the
+   events mirrored before; their receipts skip every event Native already handled. Native jobs already queued keep
+   running on every node (Oban runs everywhere), with the same receipts.
+4. **Drain and drop the mirror.** When the `backbone` Oban queue is empty, unset `BACKBONE_MIRROR` and roll again.
+
+Keep steps 2 and 3 within the receipt retention (`BACKBONE_RECEIPT_RETENTION_DAYS`, 7 days): an event older than its receipt
+would be applied again. If the dual-publish period must be longer, raise the retention, or set
+`BACKBONE_KAFKA_START_OFFSET=latest` for step 3 (safe because, until the switch, every event was published to
+Native too). Rolling back is the same procedure in reverse.
+
+While a broker is unreachable, nothing fails: events are parked in Postgres (the `backbone` queue grows) and are
+published when the broker is back. Alert on that queue's depth.
+
 ## Capacity guidance
 
-Starting points; measure with your traffic (`test/load/performance_test.exs`,
-the Prometheus metrics on `PROMETHEUS_PORT`):
+Starting points; measure with your traffic (the [load harness](benchmarks/index.md)
+with per-node limits such as `LOAD_APP_CPUS=1 LOAD_APP_MEMORY=1g`, and the
+Prometheus metrics at `/metrics`). Published runs, with the hardware they ran on,
+are in [Benchmarks](benchmarks/index.md):
 
 - **Replicas**: at least 2 behind the load balancer for availability. The app is
-  stateless apart from WebSocket connections; enable clustering with
-  `DNS_CLUSTER_QUERY` so PubSub broadcasts reach sockets on every node.
-- **CPU / memory**: 1 vCPU and 1 GiB per replica handles a few thousand idle
-  WebSocket connections; each connected socket costs tens of KiB. Scale out on
-  CPU and on connection count.
-- **Database connections**: `replicas x POOL_SIZE` (+ Oban, + `bin/migrate`)
-  must stay below Postgres `max_connections` with headroom. Start with
-  `POOL_SIZE=10`; raise it when Ecto queue time (`converger.repo.query.queue_time`)
-  grows. Use PgBouncer in session mode in front of many replicas.
+  stateless apart from WebSocket connections; enable clustering
+  (`CLUSTER_STRATEGY`, see [Clustering](operations/clustering.md)) so PubSub
+  broadcasts reach sockets on every node. Point the load balancer health
+  check at `/health/ready`.
+- **CPU / memory**: an idle Protocol v1 connection measured about 130–150 KiB
+  of node RSS ([first benchmark](benchmarks/2026-10-12-612ec15.md): 10 000
+  sockets added 1.9 GB on one node), so plan about 1.5 GiB per 10 000 idle
+  sockets on top of the base footprint. Every handshake reads the database:
+  spread reconnects (clients back off with jitter) or raise `POOL_SIZE`. Scale
+  out on CPU and on connection count.
+- **Database connections**: `replicas x (POOL_SIZE + BACKGROUND_POOL_SIZE + 1)`
+  (+ `bin/migrate`) must stay below Postgres `max_connections` with headroom.
+  Start with 10 + 10; raise `POOL_SIZE` when the interactive queue time
+  (`converger.repo.pool.queue_time_ms`) grows. Use PgBouncer in session mode in
+  front of many replicas. See [Database pools and pressure](operations/database.md#sizing).
 - **Postgres**: `activities` and `deliveries` grow fastest; plan storage and
   autovacuum for them, and keep conversation expiry (Oban) enabled.
 - **File descriptors**: raise `ulimit -n` (e.g. 65536) for many WebSocket
   connections; Bandit defaults are fine otherwise.
+- **Per-socket memory** is bounded by the WebSocket limits (1 MiB hard frame
+  cap, at most 1 000 frames buffered for a slow client); see
+  [WebSocket limits and draining](operations/websocket-limits.md).
 
 ## Toolchain versions
 

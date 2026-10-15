@@ -17,15 +17,6 @@ defmodule Converger.MixProject do
       # when a fixed version ships.
       hex: [
         ignore_advisories: [
-          # cowlib 2.20.0, no fixed release yet. cowlib is only pulled in for
-          # the Prometheus metrics listener (plug_cowboy); the app is served by
-          # Bandit. Neither affected function is reachable with client input:
-          # EEF-CVE-2026-43966: cow_http_struct_hd:escape_string/2 (encoding
-          # structured response headers, not used by the metrics endpoint).
-          "CVE-2026-43966",
-          # EEF-CVE-2026-43969: cow_cookie:cookie/1 builds client Cookie
-          # request headers; we never act as a cowboy/gun HTTP client.
-          "CVE-2026-43969",
           # cloak 1.1.4 / cloak_ecto 1.3.0, no fixed releases yet. Neither
           # affected code path is used (enforced by test/converger/vault_test.exs):
           # EEF-CVE-2026-95105: Cloak.Ciphers.AES.CTR is unauthenticated; the
@@ -33,7 +24,16 @@ defmodule Converger.MixProject do
           "CVE-2026-95105",
           # EEF-CVE-2026-94206: Cloak.Ecto.PBKDF2 ignores the iteration count;
           # we only use Cloak.Ecto.Binary / Cloak.Ecto.Map fields.
-          "CVE-2026-94206"
+          "CVE-2026-94206",
+          # bandit 1.12.5 / cowlib 2.21.0, no fixed releases yet (enforced by
+          # test/converger_web/http_advisories_test.exs):
+          # EEF-CVE-2026-105659: Bandit HTTP/2 flow-control deadlines; HTTP/2 is
+          # disabled on the endpoint (config/config.exs), so it is unreachable.
+          "CVE-2026-105659",
+          # EEF-CVE-2026-43966: cow_http_struct_hd:escape_string/2 lets CR/LF
+          # through; nothing builds structured headers with it, and cowboy
+          # 2.20 (gRPC server) rejects CR/LF in response headers.
+          "CVE-2026-43966"
         ]
       ],
       dialyzer: [
@@ -82,22 +82,61 @@ defmodule Converger.MixProject do
       {:ecto_sql, "~> 3.13"},
       {:postgrex, ">= 0.0.0"},
       {:swoosh, "~> 1.16"},
+      {:gen_smtp, "~> 1.3"},
+      {:mail, "~> 0.5.2"},
       {:req, "~> 0.7"},
+      {:open_api_spex, "~> 3.22"},
       {:telemetry_metrics, "~> 1.0"},
       {:telemetry_poller, "~> 1.0"},
       {:jason, "~> 1.2"},
-      {:dns_cluster, "~> 0.3.1"},
+      {:msgpax, "~> 2.4"},
+      {:libcluster, "~> 3.4"},
       {:bandit, "~> 1.12"},
       {:oban, "~> 2.24"},
       {:oban_web, "~> 2.13"},
       {:joken, "~> 2.7"},
       {:logger_json, "~> 7.0"},
       {:phoenix_live_view, "~> 1.2.12"},
+      # Admin/portal assets (ADR-0060): standalone tailwind + esbuild binaries, no
+      # Node.js. heroicons and daisyUI are sparse git checkouts read by tailwind.
+      {:esbuild, "~> 0.10", runtime: Mix.env() == :dev},
+      {:tailwind, "~> 0.5", runtime: Mix.env() == :dev},
+      {:heroicons,
+       github: "tailwindlabs/heroicons",
+       tag: "v2.2.0",
+       sparse: "optimized",
+       app: false,
+       compile: false,
+       depth: 1},
+      {:daisyui,
+       github: "saadeghi/daisyui",
+       tag: "v5.5.20",
+       sparse: "packages/bundle",
+       app: false,
+       compile: false,
+       depth: 1},
       {:lazy_html, ">= 0.1.0", only: :test},
-      {:jsv, "~> 0.26", only: :test},
+      # Protocol v1 JSON Schemas: typed message payloads are validated on write (#68).
+      {:jsv, "~> 0.26"},
+      # Discord Gateway client (ADR-0055); also the WebSocket client of the tests.
+      {:mint_web_socket, "~> 1.0"},
       {:gettext, "~> 1.0"},
       {:cors_plug, "~> 3.0"},
       {:broadway, "~> 1.3"},
+      # Broker channels (kafka, rabbitmq adapters, ADR-0047; nats, redis_streams,
+      # ADR-0054). Patch-level pins: the consumers rely on their ack /
+      # offset-commit semantics.
+      {:broadway_kafka, "~> 0.7.0"},
+      {:brod, "~> 4.7.0"},
+      {:broadway_rabbitmq, "~> 0.8.2"},
+      {:amqp, "~> 4.3.0"},
+      # gRPC transport for Protocol v1 (ADR-0056). Patch-level pins: the stream
+      # handler relies on the server adapter's send_reply / request-stream semantics.
+      {:grpc_server, "~> 1.0.5"},
+      {:grpc, "~> 1.0.5"},
+      {:protobuf, "~> 0.17.1"},
+      {:gnat, "~> 1.18.1"},
+      {:redix, "~> 1.9.2"},
       {:hammer, "~> 7.5"},
       {:opentelemetry, "~> 1.5"},
       {:opentelemetry_exporter, "~> 1.8"},
@@ -105,8 +144,12 @@ defmodule Converger.MixProject do
       {:opentelemetry_ecto, "~> 1.2"},
       {:opentelemetry_oban, "~> 1.2"},
       {:opentelemetry_req, "~> 1.0"},
-      {:telemetry_metrics_prometheus, "~> 1.1"},
-      {:bcrypt_elixir, "~> 3.0"},
+      {:telemetry_metrics_prometheus_core, "~> 1.2"},
+      # Password hashing (Converger.Accounts.PasswordHasher, ADR-0057). Both implement
+      # Comeonin; pbkdf2_elixir is pure Elixir, see password_hasher_deps/0.
+      {:pbkdf2_elixir, "~> 2.3"},
+      # TOTP two-factor authentication for admin and portal users (ADR-0058).
+      {:nimble_totp, "~> 1.0"},
       {:cloak, "~> 1.1"},
       {:cloak_ecto, "~> 1.3"},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
@@ -114,7 +157,23 @@ defmodule Converger.MixProject do
       {:sobelow, "~> 0.13", only: [:dev, :test], runtime: false},
       {:mix_audit, "~> 2.1", only: [:dev, :test], runtime: false},
       {:excoveralls, "~> 0.18", only: :test}
-    ]
+    ] ++ password_hasher_deps()
+  end
+
+  # bcrypt_elixir is a C NIF; on Windows it needs the MSVC build tools (#53).
+  # CONVERGER_PASSWORD_HASHER=pbkdf2 leaves it out and hashes with pbkdf2_elixir
+  # instead (config/config.exs reads the same variable). Default: bcrypt.
+  defp password_hasher_deps do
+    case System.get_env("CONVERGER_PASSWORD_HASHER", "bcrypt") do
+      "bcrypt" ->
+        [{:bcrypt_elixir, "~> 3.0"}]
+
+      "pbkdf2" ->
+        []
+
+      other ->
+        Mix.raise("CONVERGER_PASSWORD_HASHER must be bcrypt or pbkdf2, got: #{inspect(other)}")
+    end
   end
 
   # Aliases are shortcuts or tasks specific to the current project.
@@ -125,10 +184,21 @@ defmodule Converger.MixProject do
   # See the documentation for `Mix` for more info on aliases.
   defp aliases do
     [
-      setup: ["deps.get", "ecto.setup"],
+      setup: ["deps.get", "ecto.setup", "assets.setup", "assets.build"],
       "ecto.setup": ["ecto.create", "ecto.migrate", "run priv/repo/seeds.exs"],
       "ecto.reset": ["ecto.drop", "ecto.setup"],
       test: ["ecto.create --quiet", "ecto.migrate --quiet", "test"],
+      "assets.setup": ["tailwind.install --if-missing", "esbuild.install --if-missing"],
+      "assets.build": ["compile", "tailwind converger", "esbuild converger"],
+      "assets.deploy": [
+        "tailwind converger --minify",
+        "esbuild converger --minify",
+        "phx.digest"
+      ],
+      # The committed OpenAPI 3.1 document, priv/static/openapi.json (ADR-0050).
+      # `--check` fails on drift (CI). Replaces open_api_spex's own task,
+      # which writes OpenAPI 3.0.
+      "openapi.spec.json": ["converger.openapi"],
       # Mirrors the CI "lint" and "test" jobs (.github/workflows/ci.yml), but
       # fixes formatting / unused lock entries instead of only checking them.
       # Dialyzer is slow, so it is a separate step: `mix dialyzer`.

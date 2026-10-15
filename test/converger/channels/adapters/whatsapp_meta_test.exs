@@ -168,8 +168,10 @@ defmodule Converger.Channels.Adapters.WhatsAppMetaTest do
       assert [
                %{
                  "contentType" => "image/jpeg",
-                 "providerMediaId" => "media-123",
-                 "provider" => "whatsapp_meta"
+                 "channelData" => %{
+                   "providerMediaId" => "media-123",
+                   "provider" => "whatsapp_meta"
+                 }
                }
              ] = message["attachments"]
 
@@ -210,15 +212,43 @@ defmodule Converger.Channels.Adapters.WhatsAppMetaTest do
       assert {:ok, [doc, loc, btn, react]} =
                WhatsAppMeta.parse_inbound(@channel, webhook(messages))
 
-      assert [%{"contentType" => "application/pdf", "name" => "a.pdf", "providerMediaId" => "m1"}] =
-               doc["attachments"]
+      assert [
+               %{
+                 "contentType" => "application/pdf",
+                 "name" => "a.pdf",
+                 "channelData" => %{"providerMediaId" => "m1"}
+               }
+             ] = doc["attachments"]
 
       assert [%{"content" => %{"latitude" => 1.5, "longitude" => 2.5}}] = loc["attachments"]
       assert loc["text"] == "HQ"
       assert btn["text"] == "Yes"
       assert btn["metadata"]["interactive_reply"]["id"] == "yes"
-      assert react["type"] == "event"
+      refute Map.has_key?(btn, "answer")
+      assert react["type"] == "messageReaction"
+      assert react["text"] == "👍"
+      assert react["reply_to_provider_id"] == "wamid.orig"
       assert react["metadata"]["reaction"] == %{"message_id" => "wamid.orig", "emoji" => "👍"}
+    end
+
+    test "button and list replies with an answer key carry the answer (#68)" do
+      ref = "a:6f1c2a4e-0b7d-4c55-9a1e-3d2f8e7b9c10:0"
+
+      messages =
+        for {id, type} <- [{"wamid.b", "button_reply"}, {"wamid.l", "list_reply"}] do
+          %{
+            "from" => "1",
+            "id" => id,
+            "type" => "interactive",
+            "context" => %{"id" => "wamid.offer"},
+            "interactive" => %{"type" => type, type => %{"id" => ref, "title" => "Track an…"}}
+          }
+        end
+
+      assert {:ok, [button, list]} = WhatsAppMeta.parse_inbound(@channel, webhook(messages))
+      assert button["answer"] == %{"ref" => ref, "source" => "button", "label" => "Track an…"}
+      assert list["answer"]["source"] == "list"
+      assert button["reply_to_provider_id"] == "wamid.offer"
     end
 
     test "keeps the reply-to context" do
@@ -229,6 +259,7 @@ defmodule Converger.Channels.Adapters.WhatsAppMetaTest do
 
       assert {:ok, [message]} = WhatsAppMeta.parse_inbound(@channel, webhook([reply]))
       assert message["metadata"]["reply_to"] == "wamid.original"
+      assert message["reply_to_provider_id"] == "wamid.original"
     end
 
     test "returns an empty list for a status-only payload" do

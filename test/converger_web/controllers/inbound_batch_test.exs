@@ -157,7 +157,12 @@ defmodule ConvergerWeb.InboundBatchTest do
 
       assert [activity] = activities_for_channel(meta)
 
-      assert [%{"contentType" => "image/jpeg", "providerMediaId" => "media-42"}] =
+      assert [
+               %{
+                 "contentType" => "image/jpeg",
+                 "channelData" => %{"providerMediaId" => "media-42"}
+               }
+             ] =
                activity.attachments
 
       assert activity.metadata["whatsapp_type"] == "image"

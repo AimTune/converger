@@ -17,6 +17,11 @@ defmodule ConvergerWeb.ConnCase do
 
   use ExUnit.CaseTemplate
 
+  import ExUnit.Assertions
+
+  alias Converger.Accounts.Sessions
+  alias ConvergerWeb.UserAuth
+
   using do
     quote do
       # The default endpoint for testing
@@ -44,6 +49,67 @@ defmodule ConvergerWeb.ConnCase do
     |> Plug.Conn.put_req_header("content-type", "application/json")
     |> Plug.Conn.put_req_header("x-converger-signature", signature)
     |> Phoenix.ConnTest.dispatch(ConvergerWeb.Endpoint, :post, path, body)
+  end
+
+  @doc """
+  Asserts that `conn` answered `status` with the API error envelope
+  (`ConvergerWeb.APIError`, ADR-0050) and the error `code`, and that the body
+  matches the OpenAPI `ErrorResponse` schema. Returns the `error` object.
+  """
+  def assert_api_error(conn, status, code) do
+    body = Phoenix.ConnTest.json_response(conn, status)
+
+    assert %{"error" => error} = body
+    assert map_size(body) == 1
+    assert error |> Map.keys() |> Enum.sort() == ~w(code details message request_id)
+    assert error["code"] == code
+    assert code in ConvergerWeb.APIError.code_names()
+    assert is_binary(error["message"]) and error["message"] != ""
+    assert is_nil(error["details"]) or is_map(error["details"])
+
+    case Plug.Conn.get_resp_header(conn, "x-request-id") do
+      [request_id] -> assert error["request_id"] == request_id
+      [] -> :ok
+    end
+
+    OpenApiSpex.TestAssertions.assert_schema(body, "ErrorResponse", ConvergerWeb.ApiSpec.spec())
+    error
+  end
+
+  @doc """
+  Asserts that the response matches the OpenAPI response schema of the
+  operation that handled it (looked up from the controller and action) for
+  its status. Returns the conn.
+  """
+  def assert_api_response(conn) do
+    # Plugs that halt (auth, rate limits) answer before the controller runs:
+    # find the action from the route.
+    %{plug: controller, plug_opts: action} =
+      Phoenix.Router.route_info(ConvergerWeb.Router, conn.method, conn.request_path, conn.host)
+
+    %OpenApiSpex.Operation{operationId: operation_id} = controller.open_api_operation(action)
+
+    conn
+    |> Plug.Conn.put_private(:open_api_spex, %{spec_module: ConvergerWeb.ApiSpec})
+    |> OpenApiSpex.TestAssertions.assert_operation_response(operation_id)
+  end
+
+  @doc """
+  Logs `admin` in: creates a server-side session (ADR-0058) and puts its
+  token in the test session. Returns the conn.
+  """
+  def log_in_admin(conn, admin), do: log_in_user(conn, "admin", admin)
+
+  @doc "Logs a tenant user in, like `log_in_admin/2`."
+  def log_in_tenant_user(conn, user), do: log_in_user(conn, "tenant", user)
+
+  defp log_in_user(conn, user_type, user) do
+    {:ok, token, session} = Sessions.create(user_type, user)
+
+    Phoenix.ConnTest.init_test_session(conn, %{
+      UserAuth.token_key(user_type) => token,
+      :live_socket_id => Sessions.live_socket_id(session)
+    })
   end
 
   setup tags do

@@ -23,7 +23,7 @@ defmodule ConvergerWeb.Admin.CrudTest do
   defp admin_conn(conn, admin) do
     conn
     |> Map.put(:remote_ip, @admin_user_ip)
-    |> init_test_session(%{admin_user_id: admin.id})
+    |> log_in_admin(admin)
   end
 
   describe "Tenant CRUD" do
@@ -34,7 +34,7 @@ defmodule ConvergerWeb.Admin.CrudTest do
       # Create
       html =
         view
-        |> form("form", tenant: %{name: "New Tenant"})
+        |> form("#tenant-form", tenant: %{name: "New Tenant"})
         |> render_submit()
 
       assert html =~ "Tenant created"
@@ -93,7 +93,7 @@ defmodule ConvergerWeb.Admin.CrudTest do
 
       # Create
       assert view
-             |> form("form",
+             |> form("#channel-form",
                channel: %{
                  name: "New Channel",
                  tenant_id: tenant.id,

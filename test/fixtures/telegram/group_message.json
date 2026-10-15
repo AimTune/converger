@@ -1,0 +1,10 @@
+{
+  "update_id": 912345609,
+  "message": {
+    "message_id": 7,
+    "from": {"id": 222333444, "is_bot": false, "first_name": "Grace", "username": "grace_h"},
+    "chat": {"id": -1001234567890, "title": "Support Team", "type": "supergroup"},
+    "date": 1760141220,
+    "text": "hello from the group"
+  }
+}

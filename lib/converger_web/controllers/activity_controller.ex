@@ -1,8 +1,10 @@
 defmodule ConvergerWeb.ActivityController do
   use ConvergerWeb, :controller
+  use OpenApiSpex.ControllerSpecs
+
+  import ConvergerWeb.ApiSchemas
 
   alias Converger.Activities
-  alias Converger.ConvergerAPI.Watermark
   alias Converger.Conversations
 
   plug ConvergerWeb.Plugs.TenantAuth
@@ -13,11 +15,28 @@ defmodule ConvergerWeb.ActivityController do
 
   action_fallback ConvergerWeb.FallbackController
 
+  tags(["Activities"])
+  security([%{"apiKey" => []}, %{"channelToken" => []}])
+
+  operation(:index,
+    summary: "List activities",
+    description: "Oldest first, paged by watermark.",
+    operation_id: "listActivities",
+    parameters: [
+      conversation_id: path_id("Conversation id"),
+      limit: limit_param(),
+      watermark:
+        query(watermark_param_schema(), "`meta.watermark` of the previous page (the integer seq)")
+    ],
+    responses: with_errors(%{200 => json_schema("A page", ref("ActivityList"))}, [400, 401, 404])
+  )
+
   @doc """
   One page of a conversation's activities, oldest first.
 
   Query params: `limit` (default/max from `config :converger, :pagination`)
-  and `watermark` (opaque, from a previous response's `meta.watermark`).
+  and `watermark` (from a previous response's `meta.watermark`: the integer
+  seq; the pre-v1 opaque form is still accepted during the migration window).
   The response is `%{data: [...], meta: %{watermark, has_more, limit}}`.
   """
   def index(conn, %{"conversation_id" => conversation_id} = params) do
@@ -33,8 +52,8 @@ defmodule ConvergerWeb.ActivityController do
 
       watermark =
         case List.last(activities) do
-          nil -> params["watermark"]
-          last -> Watermark.encode(last.seq)
+          nil -> ConvergerWeb.Protocol.watermark_seq(position, conversation.id)
+          last -> last.seq
         end
 
       render(conn, :index,
@@ -44,12 +63,32 @@ defmodule ConvergerWeb.ActivityController do
     end
   end
 
-  defp decode_watermark(watermark) do
-    case Watermark.decode(watermark) do
-      {:ok, position} -> {:ok, position}
-      {:error, :invalid_watermark} -> {:error, "Invalid watermark"}
-    end
-  end
+  # `{:error, :invalid_watermark}` is answered 400 `invalid_watermark`.
+  defp decode_watermark(watermark),
+    do: ConvergerWeb.Protocol.parse_watermark(watermark, deprecation: [api: :tenant])
+
+  operation(:create,
+    summary: "Post an activity",
+    description:
+      "The caller names the `sender` (default `user`). Idempotent with `x-idempotency-key`.",
+    operation_id: "createActivity",
+    parameters: [
+      conversation_id: path_id("Conversation id"),
+      "x-idempotency-key": idempotency_key()
+    ],
+    request_body: json_schema("The activity", ref("CreateActivityRequest")),
+    responses:
+      with_errors(
+        %{
+          201 =>
+            json_schema(
+              "Created (or the original, for a repeated idempotency key)",
+              ref("ActivityResponse")
+            )
+        },
+        [400, 401, 404, 409, 422, 429, 503]
+      )
+  )
 
   def create(conn, %{"conversation_id" => conversation_id} = activity_params) do
     tenant = conn.assigns.tenant

@@ -24,9 +24,7 @@ and the rule that every change ships with its documentation.
   opening a pull request you agree that your contribution is licensed under the same terms (inbound = outbound;
   there is no CLA). Code copied from elsewhere must have a compatible license, and its notice is kept next to it
   (as for the vendored mekik fixtures in `test/protocol/fixtures/mekik/`).
-  See [ADR-0026](adr/0026-mit-license-and-community-health-files.md).
-- Notable changes go in [`CHANGELOG.md`](https://github.com/AimTune/converger/blob/main/CHANGELOG.md) under
-  **Unreleased** ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format), in the same pull request.
+  See [ADR-0073](adr/0073-mit-license-and-community-health-files.md).
 
 ## Development setup
 
@@ -34,14 +32,35 @@ The full walkthrough is in [Getting started](./getting-started.md). In short:
 
 - Install the toolchain from `.tool-versions` (Elixir `1.19.5-otp-28`, Erlang `28.5.0.5`), for example with asdf
   or mise, and a PostgreSQL server (CI and compose use 17).
-- `mix setup` runs `deps.get` and `ecto.setup` (create, migrate, seed). The seed creates the first `super_admin`
+- `mix setup` runs `deps.get` and `ecto.setup` (create, migrate, seed) and builds the admin/portal assets
+  (`assets.setup`, `assets.build`: standalone tailwind and esbuild, no Node.js). The seed creates the first `super_admin`
   from `ADMIN_EMAIL` / `ADMIN_PASSWORD`, or prints a one-time password.
-- `mix phx.server` starts the app on `http://localhost:4000` (admin panel at `/admin`).
+- `mix phx.server` starts the app on `http://localhost:4000` (admin panel at `/admin`); its watchers rebuild
+  the CSS and JavaScript on change. UI conventions: [Admin panel and tenant portal](admin-ui.md#writing-pages).
 - Database settings come from `DB_USERNAME`, `DB_PASSWORD`, `DB_HOSTNAME`, `DB_NAME` (defaults
   `postgres` / `postgres` / `localhost` / `converger_dev`); see the
   [Configuration reference](operations/configuration.md#database).
 - Optional: `cp .env.example .env`, fill it in, and `docker compose up -d` for Prometheus, Grafana, Jaeger and the
   OpenTelemetry collector ([Observability](operations/observability.md#local-observability-stack)).
+- No C compiler (Windows without the MSVC build tools): set `CONVERGER_PASSWORD_HASHER=pbkdf2`, see
+  [Line endings and Windows](#line-endings-and-windows).
+
+### Dev container
+
+`.devcontainer/` describes a ready-made environment for VS Code Dev Containers, GitHub Codespaces or the
+[`devcontainer` CLI](https://github.com/devcontainers/cli): the pinned Elixir/OTP image of the `Dockerfile` with
+build-essential, cmake (Kafka's `crc32cer` NIF) and inotify-tools, plus a Postgres 17 service. It works the same on
+Windows, macOS and Linux and needs only Docker.
+
+- VS Code: install the Dev Containers extension and run **Dev Containers: Reopen in Container**. The first start
+  builds the image and runs `mix deps.get && mix compile` (several minutes).
+- CLI: `devcontainer up --workspace-folder .`, then `devcontainer exec --workspace-folder . mix test`.
+
+Inside the container `DB_HOSTNAME` is `db` (user and password `postgres`), so `mix setup`, `mix phx.server` and
+`mix test` work without further settings. Port 4000 is forwarded to the host. `deps/` and `_build` are kept in Docker
+volumes (`MIX_DEPS_PATH`, `MIX_BUILD_ROOT`), not in the checkout, so they never clash with a native build on the
+host; `docker compose -p converger-devcontainer down -v` removes them together with the database. The dev container
+is independent of the root `docker-compose.yml`, which runs the release image.
 
 ## Branches, commits and pull requests
 
@@ -57,9 +76,35 @@ The full walkthrough is in [Getting started](./getting-started.md). In short:
   something, a **Deployment notes** or **Breaking changes** section (new required variables, migrations that need
   a maintenance window, behavior changes for integrators). Those sections feed
   [Upgrades](operations/upgrades.md).
-- Dependency updates arrive from Dependabot (`mix`, `converger_js` npm, GitHub Actions, Docker; weekly).
+- Dependency updates arrive from Dependabot (`mix`, npm for the pnpm workspace and `website`, GitHub Actions, Docker; weekly).
+
+## Changelog and releases
+
+`CHANGELOG.md` is updated **only when a release is cut**, not in feature or fix pull requests: parallel pull
+requests kept conflicting on it. Describe user-facing changes, **Breaking changes** and **Deployment notes** in the
+pull request description instead; the release notes are compiled from those descriptions.
+
+Cutting a release (maintainers):
+
+1. List what was merged since the last tag (`git describe --tags --abbrev=0`; with no tag yet, everything): the
+   merge commits on `main` and the merged pull requests' descriptions.
+2. Draft the notes in [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) groups (Added, Changed, Fixed,
+   Deprecated, Removed, Security), plus Breaking changes and Deployment notes, each line linking its pull request,
+   and pick the [SemVer](https://semver.org/) version.
+3. The maintainer reviews and approves the draft and the version.
+4. A `chore(release): vX.Y.Z` pull request adds the `## [X.Y.Z] - YYYY-MM-DD` section to `CHANGELOG.md` and bumps
+   `version` in `mix.exs`. After it is merged, tag the merge commit `vX.Y.Z` and publish the GitHub release with the
+   same notes.
 
 ## Checks
+
+### Required check on `main`
+
+`main` requires the CI job **chativa reference client compatibility** (branch protection, #65): chativa's unmodified
+`@chativa/connector-mekik` and `parseChatFrame` run against a real server
+([connecting chat clients](protocol/clients.md)), so a protocol change that breaks the reference client cannot be
+merged. The other jobs are not required (the `hex.audit` step carries a known advisory without a fixed release), but
+keep them green.
 
 ### Run `mix precommit` before pushing
 
@@ -93,6 +138,12 @@ Hex advisories go in `mix.exs` under `hex: [ignore_advisories: ...]`, also with 
 
 To debug failures: `mix test test/path/to/file_test.exs`, `mix test --failed`.
 
+`test/acceptance/` holds end-to-end tests of an issue's acceptance criteria, driven only through the
+public edges (signed inbound webhooks, native sockets via `ConvergerWeb.ProtocolClient`, provider APIs
+stubbed with `Req.Test`, mail captured by `Swoosh.Adapters.Test`). Deliveries there run in socket,
+connection and pipeline processes that are not the test's callers, so these tests are `async: false`
+and use `Req.Test.set_req_test_to_shared/1` and `config :swoosh, :shared_test_process`.
+
 ### What CI runs
 
 [`.github/workflows/ci.yml`](https://github.com/AimTune/converger/blob/main/.github/workflows/ci.yml) runs on every
@@ -122,6 +173,14 @@ AZURITE_ENDPOINT=http://127.0.0.1:10000/devstoreaccount1 \
   mix test test/converger/uploads/storage_integration_test.exs --only minio --only azurite
 ```
 
+### Asynchronous assertions
+
+`test/test_helper.exs` raises ExUnit's `assert_receive_timeout` to 1 s, so `assert_receive`,
+`assert_reply` and `assert_push` tolerate a busy CI runner; they still return as soon as the message
+arrives. Don't pass short explicit timeouts to them, and use `refute_receive` (100 ms default) for
+negative checks. Tests that need wall-clock windows (rate limits, lockouts) must not depend on landing
+inside one; see `start_in_fresh_window/2` in `test/converger_web/controllers/rate_limiting_test.exs`.
+
 ## Line endings and Windows
 
 `.gitattributes` sets `* text=auto eol=lf`: files are stored and checked out with LF on every platform (only
@@ -131,7 +190,13 @@ Linux containers. If your clone predates the rule, run `git add --renormalize .`
 
 Notes for developing on Windows:
 
-- `bcrypt_elixir` compiles a C NIF and needs the Microsoft C++ Build Tools. Run `mix` from an
+- `bcrypt_elixir` compiles a C NIF and needs the Microsoft C++ Build Tools. Without them, set
+  `$env:CONVERGER_PASSWORD_HASHER = "pbkdf2"`: `mix.exs` leaves `bcrypt_elixir` out and passwords are hashed with
+  pure-Elixir PBKDF2 ([ADR-0057](adr/0057-pluggable-password-hasher-and-dev-container.md)). The variable is read at
+  compile time, so switching modes recompiles; give the pbkdf2 mode its own build root to avoid that
+  (`$env:MIX_BUILD_ROOT = "_build_pbkdf2"`, ignored by git).
+  Changes that touch password hashing must pass in both modes; CI runs the default (bcrypt). Or use the
+  [dev container](#dev-container). With the build tools, run `mix` from an
   "x64 Native Tools Command Prompt", or call `vcvars64.bat` first, for example in a small wrapper script:
 
   ```powershell
@@ -140,8 +205,11 @@ Notes for developing on Windows:
 
 - Environment variables in PowerShell: `$env:DB_PASSWORD = "postgres"; mix test`.
 - To run several test suites at once (for example in two worktrees), give each a partition so they use separate
-  databases and upload directories: `$env:MIX_TEST_PARTITION = "2"; mix test`. The Prometheus listener is off in
-  test, so suites do not compete for port 9568.
+  databases and upload directories: `$env:MIX_TEST_PARTITION = "2"; mix test`. No extra port is opened in test
+  (metrics are served on the endpoint, which does not listen in test), so suites do not compete for ports.
+- The two-node cluster suite (`test/cluster`, see [Clustering](operations/clustering.md#the-two-node-test-suite))
+  is excluded by default; run it with `mix test --only cluster`. It boots two extra VMs with `:peer` and uses its
+  own database (`<test database>_cluster`), so it also works on Windows and next to other partitions.
 - The release overlays are POSIX shell scripts; test release behavior with the Docker image rather than natively.
 
 ## Documentation with every change

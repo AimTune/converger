@@ -1,0 +1,35 @@
+<Layouts.auth
+  flash={@flash}
+  title="Two-factor authentication"
+  subtitle="Enter the 6-digit code from your authenticator app."
+>
+  <div :if={@error_message} role="alert" class="alert alert-error text-sm">
+    <.icon name="hero-exclamation-circle" class="size-5 shrink-0" />
+    <span>{@error_message}</span>
+  </div>
+
+  <form action={@base <> "/login/totp"} method="post">
+    <input type="hidden" name="_csrf_token" value={get_csrf_token()} />
+
+    <.input
+      type="text"
+      id="totp_code"
+      name="code"
+      value=""
+      label="Code"
+      class="input w-full font-mono text-lg tracking-[0.2em]"
+      inputmode="numeric"
+      autocomplete="one-time-code"
+      pattern="[0-9 ]*"
+      maxlength="7"
+      required
+      autofocus
+    />
+
+    <button type="submit" class="btn btn-primary mt-3 w-full">Verify</button>
+  </form>
+
+  <p class="text-center text-sm">
+    <.link href={@base <> "/login"} class="link link-primary">Back to sign in</.link>
+  </p>
+</Layouts.auth>

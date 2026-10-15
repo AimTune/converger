@@ -6,7 +6,7 @@ defmodule Converger.Channels do
   import Ecto.Query, warn: false
   alias Ecto.Multi
   alias Converger.Repo
-  alias Converger.Channels.Channel
+  alias Converger.Channels.{Adapter, Channel, Circuit}
   alias Converger.AuditLogs
   alias Converger.AuditLogs.Changes
 
@@ -23,13 +23,73 @@ defmodule Converger.Channels do
     |> Converger.Pagination.bounded_all()
   end
 
+  @doc """
+  Keyset-paginated channels on `(inserted_at, id)`, newest first by default
+  (the admin and portal channel lists).
+
+  Filters (string or atom keys, `""` and `nil` ignored): `tenant_id`, `mode`,
+  `status`, `type`, and `q` (a case-insensitive "contains" search on the
+  name or the type, see `Converger.Pagination.contains/1`). An invalid
+  `tenant_id` matches nothing. Options: `:limit`, `:cursor`, `:direction`
+  (`:desc` | `:asc`), `:preload` (see `Converger.Pagination.keyset/2`).
+
+  Returns `{:ok, %Converger.Pagination.Page{}}` or `{:error, :invalid_cursor}`.
+  """
+  def paginate_channels(filters \\ %{}, opts \\ []) do
+    Channel
+    |> apply_filters(filters)
+    |> Converger.Pagination.keyset(opts)
+  end
+
+  defp apply_filters(query, filters) do
+    Enum.reduce(filters, query, fn {key, value}, q ->
+      apply_filter(q, to_string(key), value)
+    end)
+  end
+
+  defp apply_filter(q, _key, value) when value in [nil, ""], do: q
+
+  defp apply_filter(q, "q", value) when is_binary(value) do
+    case Converger.Pagination.contains(value) do
+      nil -> q
+      pattern -> where(q, [c], ilike(c.name, ^pattern) or ilike(c.type, ^pattern))
+    end
+  end
+
+  defp apply_filter(q, "tenant_id", value) do
+    case Ecto.UUID.cast(value) do
+      {:ok, id} -> where(q, tenant_id: ^id)
+      :error -> where(q, [c], false)
+    end
+  end
+
+  defp apply_filter(q, "mode", value) when is_binary(value), do: where(q, mode: ^value)
+  defp apply_filter(q, "status", value) when is_binary(value), do: where(q, status: ^value)
+  defp apply_filter(q, "type", value) when is_binary(value), do: where(q, type: ^value)
+
+  defp apply_filter(q, _key, _value), do: q
+
   def get_channel!(id), do: Repo.get!(Channel, id)
+
+  @doc "The channel with `id` in tenant `tenant_id`, or nil (also for a malformed id)."
+  def get_channel(id, tenant_id) do
+    case Ecto.UUID.cast(id) do
+      {:ok, uuid} -> Repo.get_by(Channel, id: uuid, tenant_id: tenant_id)
+      :error -> nil
+    end
+  end
 
   def get_channel!(id, tenant_id) do
     Repo.get_by!(Channel, id: id, tenant_id: tenant_id)
   end
 
   def create_channel(attrs \\ %{}, actor \\ nil) do
+    attrs
+    |> do_create_channel(actor)
+    |> notify_consumers()
+  end
+
+  defp do_create_channel(attrs, actor) do
     changeset = Channel.changeset(%Channel{}, attrs)
 
     if actor do
@@ -62,12 +122,13 @@ defmodule Converger.Channels do
   """
   def update_channel(%Channel{} = channel, attrs, actor \\ nil) do
     result = do_update_channel(channel, attrs, actor)
+    Converger.Channels.Templates.invalidate(channel.id)
 
     with {:ok, %Channel{status: status} = updated} when status != "active" <- result do
       ConvergerWeb.Sockets.disconnect_channel(updated.id)
     end
 
-    result
+    notify_consumers(result)
   end
 
   defp do_update_channel(channel, attrs, actor) do
@@ -105,32 +166,165 @@ defmodule Converger.Channels do
       ConvergerWeb.Sockets.disconnect_channel(deleted.id)
     end
 
+    notify_consumers(result)
+  end
+
+  # The channel's conversations cascade with the row. Their activities, and
+  # deliveries to this channel, are in partitioned tables without foreign keys
+  # (ADR-0034) and are purged in batches by PurgeWorker jobs enqueued in the
+  # same transaction (the conversation ids are captured before the cascade).
+  defp do_delete_channel(channel, actor) do
+    alias Converger.Workers.PurgeWorker
+
+    Multi.new()
+    |> maybe_audit_delete(channel, actor)
+    |> Multi.run(:conversation_ids, fn repo, _ ->
+      {:ok,
+       repo.all(
+         from(c in Converger.Conversations.Conversation,
+           where: c.channel_id == ^channel.id,
+           select: c.id
+         )
+       )}
+    end)
+    |> Oban.insert_all(:purge_conversations, fn %{conversation_ids: ids} ->
+      PurgeWorker.conversation_jobs(ids)
+    end)
+    |> Oban.insert(:purge_deliveries, PurgeWorker.new(%{channel_id: channel.id}))
+    |> Multi.delete(:channel, channel)
+    |> Repo.transaction()
+    |> case do
+      {:ok, %{channel: channel}} -> {:ok, channel}
+      {:error, :channel, changeset, _} -> {:error, changeset}
+      {:error, _step, reason, _} -> {:error, reason}
+    end
+  end
+
+  defp maybe_audit_delete(multi, _channel, nil), do: multi
+
+  defp maybe_audit_delete(multi, channel, actor) do
+    Multi.insert(multi, :audit_log, fn _ ->
+      AuditLogs.build_audit_log_entry(%{
+        tenant_id: channel.tenant_id,
+        actor_type: actor.type,
+        actor_id: actor.id,
+        action: "delete",
+        resource_type: "channel",
+        resource_id: channel.id,
+        changes: Changes.for_delete(channel)
+      })
+    end)
+  end
+
+  @doc """
+  Pause deliveries to a channel: new and pending deliveries are parked
+  (`status: "paused"`) until `resume_deliveries/2`. See `Converger.Channels.Circuit`.
+  """
+  def pause_deliveries(%Channel{} = channel, actor \\ nil) do
+    {:ok, updated} = Circuit.pause(channel)
+    audit_circuit(channel, updated, "pause_deliveries", actor)
+    {:ok, updated}
+  end
+
+  @doc """
+  Resume deliveries to a paused channel (or force-close an open circuit
+  breaker) and release its parked deliveries.
+  """
+  def resume_deliveries(%Channel{} = channel, actor \\ nil) do
+    {:ok, updated} = Circuit.resume(channel)
+    audit_circuit(channel, updated, "resume_deliveries", actor)
+    {:ok, updated}
+  end
+
+  @doc """
+  Replace the channel's secret with a freshly generated one (like the one
+  generated on insert). The old secret stops working at once: inbound
+  signatures and secret-authenticated requests must use the new one.
+
+  The rotation is audit-logged (action `rotate_secret`, secret values
+  redacted, with `"rotated" => ["secret"]`) when an actor is given. Returns
+  `{:ok, channel}` with the new plaintext `secret` (show it once) or
+  `{:error, changeset}`.
+  """
+  def rotate_secret(%Channel{} = channel, actor \\ nil) do
+    changeset = Channel.rotate_secret_changeset(channel)
+
+    result =
+      if actor do
+        Multi.new()
+        |> Multi.update(:channel, changeset)
+        |> Multi.insert(:audit_log, fn %{channel: updated} ->
+          AuditLogs.build_audit_log_entry(%{
+            tenant_id: channel.tenant_id,
+            actor_type: actor.type,
+            actor_id: actor.id,
+            action: "rotate_secret",
+            resource_type: "channel",
+            resource_id: channel.id,
+            changes:
+              channel
+              |> Changes.for_update(updated)
+              |> Map.put("rotated", ["secret"])
+          })
+        end)
+        |> Repo.transaction()
+        |> case do
+          {:ok, %{channel: updated}} -> {:ok, updated}
+          {:error, :channel, changeset, _} -> {:error, changeset}
+        end
+      else
+        Repo.update(changeset)
+      end
+
+    notify_consumers(result)
+  end
+
+  @doc """
+  Send a test message to `channel` through the normal pipeline, see
+  `Converger.Channels.TestMessage.send_test_message/3`.
+  """
+  defdelegate send_test_message(channel, text, actor \\ nil),
+    to: Converger.Channels.TestMessage
+
+  @doc """
+  Point the provider's webhook at `inbound_url` with the channel's adapter
+  (`c:Converger.Channels.Adapter.register_webhook/2`, e.g. Telegram's
+  `setWebhook`). Audited when an actor is given. Returns `:ok`,
+  `{:error, reason}` or `:unsupported`.
+  """
+  def register_webhook(%Channel{} = channel, inbound_url, actor \\ nil) do
+    result = Adapter.register_webhook(channel, inbound_url)
+
+    if result == :ok and actor do
+      AuditLogs.create_audit_log(%{
+        tenant_id: channel.tenant_id,
+        actor_type: actor.type,
+        actor_id: actor.id,
+        action: "register_webhook",
+        resource_type: "channel",
+        resource_id: channel.id,
+        changes: %{"after" => %{"webhook_url" => inbound_url}}
+      })
+    end
+
     result
   end
 
-  defp do_delete_channel(channel, actor) do
-    if actor do
-      Multi.new()
-      |> Multi.insert(:audit_log, fn _ ->
-        AuditLogs.build_audit_log_entry(%{
-          tenant_id: channel.tenant_id,
-          actor_type: actor.type,
-          actor_id: actor.id,
-          action: "delete",
-          resource_type: "channel",
-          resource_id: channel.id,
-          changes: Changes.for_delete(channel)
-        })
-      end)
-      |> Multi.delete(:channel, channel)
-      |> Repo.transaction()
-      |> case do
-        {:ok, %{channel: channel}} -> {:ok, channel}
-        {:error, :channel, changeset, _} -> {:error, changeset}
-      end
-    else
-      Repo.delete(channel)
-    end
+  defp audit_circuit(_before, _updated, _action, nil), do: :ok
+
+  defp audit_circuit(before, updated, action, actor) do
+    AuditLogs.create_audit_log(%{
+      tenant_id: before.tenant_id,
+      actor_type: actor.type,
+      actor_id: actor.id,
+      action: action,
+      resource_type: "channel",
+      resource_id: before.id,
+      changes: %{
+        "before" => %{"circuit_state" => before.circuit_state},
+        "after" => %{"circuit_state" => updated.circuit_state}
+      }
+    })
   end
 
   def change_channel(%Channel{} = channel, attrs \\ %{}) do
@@ -222,4 +416,44 @@ defmodule Converger.Channels do
     )
     |> Repo.all()
   end
+
+  @doc """
+  Every channel that needs a consumer, across tenants: active, `inbound`
+  or `duplex`, of a type with the `:consumer` capability, and accepted by
+  `Converger.Channels.Broker.consumes?/1` (a Discord channel only in
+  Gateway mode). See `Converger.Channels.Consumers`.
+  """
+  def list_consumer_channels do
+    case Adapter.types_with(:consumer) do
+      [] ->
+        []
+
+      types ->
+        from(c in Channel,
+          where: c.type in ^types and c.mode in ["inbound", "duplex"] and c.status == "active",
+          order_by: [asc: c.id]
+        )
+        # Complete on purpose (no bounded_all cap): a channel missing from
+        # the list would have its consumer stopped.
+        |> Repo.all()
+        |> Enum.filter(&Converger.Channels.Broker.consumes?/1)
+    end
+  end
+
+  @doc "The channel with `id`, or nil."
+  def get_channel(id) do
+    case Ecto.UUID.cast(id) do
+      {:ok, uuid} -> Repo.get(Channel, uuid)
+      :error -> nil
+    end
+  end
+
+  # Broker channels consume through Converger.Channels.Consumers: every node's
+  # consumer manager reconciles the channel after a change.
+  defp notify_consumers({:ok, %Channel{id: id}} = result) do
+    Converger.Channels.Consumers.notify_changed(id)
+    result
+  end
+
+  defp notify_consumers(result), do: result
 end

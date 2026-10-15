@@ -20,23 +20,196 @@ if System.get_env("PHX_SERVER") do
   config :converger, ConvergerWeb.Endpoint, server: true
 end
 
-# Prometheus metrics listener. Not started in test (see config/test.exs), so
-# concurrent test runs on one machine don't fight over the port; set
-# PROMETHEUS_PORT to force one anyway.
-cond do
-  port = System.get_env("PROMETHEUS_PORT") ->
-    config :converger, :prometheus_port, String.to_integer(port)
+# Prometheus metrics are served on the main port at GET /metrics
+# (ConvergerWeb.Plugs.Metrics). Access needs METRICS_TOKEN (sent as
+# `Authorization: Bearer <token>`) or a client IP in METRICS_ALLOWED_IPS
+# (comma-separated IPs/CIDRs); with neither set, /metrics answers 404.
+metrics_config =
+  [
+    token:
+      case System.get_env("METRICS_TOKEN") do
+        nil -> nil
+        token -> if String.trim(token) == "", do: nil, else: String.trim(token)
+      end,
+    allowed_ips:
+      (System.get_env("METRICS_ALLOWED_IPS") || "")
+      |> String.split(",", trim: true)
+      |> Enum.map(&String.trim/1)
+      |> Enum.reject(&(&1 == ""))
+  ]
+  |> Enum.reject(fn {_key, value} -> value in [nil, []] end)
 
-  config_env() != :test ->
-    config :converger, :prometheus_port, 9568
-
-  true ->
-    :ok
+if metrics_config != [] do
+  config :converger, :metrics, metrics_config
 end
+
+# Converger client token signing keys (ADR-0059): comma-separated kid:secret
+# pairs, the signing key first; every listed key verifies. Rotate by putting a
+# new key first, then removing the old one after a token lifetime (30 min).
+# Secrets must be at least 32 bytes. Unset: secret_key_base, kid "default".
+if keys = System.get_env("TOKEN_SIGNING_KEYS") do
+  token_keys =
+    keys
+    |> String.split(",", trim: true)
+    |> Enum.map(&String.trim/1)
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.map(fn entry ->
+      case String.split(entry, ":", parts: 2) do
+        [kid, secret] when kid != "" and byte_size(secret) >= 32 ->
+          {kid, secret}
+
+        [kid, _short] when kid != "" ->
+          raise "TOKEN_SIGNING_KEYS: the secret of #{kid} must be at least 32 bytes"
+
+        _ ->
+          raise "TOKEN_SIGNING_KEYS entries must be kid:secret"
+      end
+    end)
+
+  kids = Enum.map(token_keys, &elem(&1, 0))
+  if kids != Enum.uniq(kids), do: raise("TOKEN_SIGNING_KEYS has a duplicate kid")
+  if token_keys != [], do: config(:converger, :token_signing_keys, token_keys)
+end
+
+if grace = System.get_env("TOKEN_ROTATION_GRACE_SECONDS") do
+  config :converger, :token_rotation_grace_seconds, String.to_integer(grace)
+end
+
+if accept = System.get_env("TOKEN_ACCEPT_UNKEYED") do
+  config :converger, :token_accept_unkeyed, accept in ~w(true 1)
+end
+
+# Legacy separate metrics listener: only started when PROMETHEUS_PORT is set.
+# It is unauthenticated, so it must only be reachable from the scraper.
+if port = System.get_env("PROMETHEUS_PORT") do
+  config :converger, :prometheus_port, String.to_integer(port)
+end
+
+# Clustering (libcluster, see Converger.Cluster and
+# docs/operations/clustering.md). CLUSTER_STRATEGY selects how nodes find each
+# other: none (default), kubernetes_dns, dns, gossip or epmd. The Erlang
+# distribution itself (node name, cookie) is set up by rel/env.sh.eex from
+# RELEASE_NODE / RELEASE_DISTRIBUTION / RELEASE_COOKIE.
+# DNS_CLUSTER_QUERY (the former dns_cluster setting) still works and implies
+# CLUSTER_STRATEGY=dns.
+cluster_env = fn var ->
+  case System.get_env(var) do
+    nil -> nil
+    value -> if String.trim(value) == "", do: nil, else: String.trim(value)
+  end
+end
+
+cluster_int = fn var ->
+  if value = cluster_env.(var), do: String.to_integer(value)
+end
+
+cluster_strategy =
+  case cluster_env.("CLUSTER_STRATEGY") do
+    nil ->
+      if cluster_env.("DNS_CLUSTER_QUERY"), do: :dns, else: :none
+
+    "none" ->
+      :none
+
+    "kubernetes_dns" ->
+      :kubernetes_dns
+
+    "dns" ->
+      :dns
+
+    "gossip" ->
+      :gossip
+
+    "epmd" ->
+      :epmd
+
+    other ->
+      raise "CLUSTER_STRATEGY must be none, kubernetes_dns, dns, gossip or epmd, got: #{inspect(other)}"
+  end
+
+cluster_basename = cluster_env.("CLUSTER_NODE_BASENAME") || "converger"
+
+cluster_options =
+  case cluster_strategy do
+    :none ->
+      []
+
+    :kubernetes_dns ->
+      [
+        service:
+          cluster_env.("CLUSTER_SERVICE") ||
+            raise(
+              "CLUSTER_STRATEGY=kubernetes_dns requires CLUSTER_SERVICE (the headless service)"
+            ),
+        application_name: cluster_basename,
+        polling_interval: cluster_int.("CLUSTER_POLL_INTERVAL_MS")
+      ]
+
+    :dns ->
+      [
+        query:
+          cluster_env.("CLUSTER_DNS_QUERY") || cluster_env.("DNS_CLUSTER_QUERY") ||
+            raise("CLUSTER_STRATEGY=dns requires CLUSTER_DNS_QUERY"),
+        node_basename: cluster_basename,
+        polling_interval: cluster_int.("CLUSTER_POLL_INTERVAL_MS")
+      ]
+
+    :gossip ->
+      [
+        port: cluster_int.("CLUSTER_GOSSIP_PORT"),
+        if_addr: cluster_env.("CLUSTER_GOSSIP_IF_ADDR"),
+        multicast_addr: cluster_env.("CLUSTER_GOSSIP_MULTICAST_ADDR"),
+        multicast_if: cluster_env.("CLUSTER_GOSSIP_MULTICAST_IF"),
+        broadcast_only: cluster_env.("CLUSTER_GOSSIP_BROADCAST_ONLY") in ~w(true 1),
+        secret: cluster_env.("CLUSTER_GOSSIP_SECRET")
+      ]
+
+    :epmd ->
+      [
+        # Node names are operator configuration, not user input.
+        hosts:
+          (cluster_env.("CLUSTER_HOSTS") || "")
+          |> String.split(",", trim: true)
+          |> Enum.map(&String.trim/1)
+          |> Enum.reject(&(&1 == ""))
+          |> Enum.map(&String.to_atom/1)
+      ]
+  end
+
+if config_env() != :test do
+  config :converger, Converger.Cluster,
+    strategy: cluster_strategy,
+    options: Enum.reject(cluster_options, fn {_key, value} -> is_nil(value) end)
+end
+
+# Delivery/pipeline metrics (ConvergerWeb.Telemetry). METRICS_TENANT_LABEL=true
+# adds a tenant_id label to the delivery series (one series per tenant: keep
+# it off with many tenants). METRICS_POLL_INTERVAL_MS sets how often queue
+# depth, dead letters and open circuits are read from the database.
+metrics_config =
+  [
+    tenant_label: System.get_env("METRICS_TENANT_LABEL") in ~w(true 1),
+    poll_interval_ms:
+      case System.get_env("METRICS_POLL_INTERVAL_MS") do
+        nil -> nil
+        value -> String.to_integer(value)
+      end
+  ]
+  |> Enum.reject(fn {_key, value} -> value in [nil, false] end)
+
+if metrics_config != [], do: config(:converger, :metrics, metrics_config)
 
 # Configurable CORS origins and admin IP whitelist.
 # CORS origins are read per request by ConvergerWeb.Endpoint, so this takes
 # effect on releases without recompiling.
+# Swagger UI at /api/docs and the OpenAPI document at /api/openapi.json
+# (ADR-0050); off by default in prod.
+case System.get_env("API_DOCS_ENABLED") do
+  value when value in ~w(true 1) -> config :converger, :api_docs, enabled: true
+  value when value in ~w(false 0) -> config :converger, :api_docs, enabled: false
+  _ -> :ok
+end
+
 if cors_origins = System.get_env("CORS_ORIGINS") do
   config :converger,
     cors_origins:
@@ -49,6 +222,99 @@ end
 if admin_ips = System.get_env("ADMIN_IP_WHITELIST") do
   config :converger,
     admin_ip_whitelist: admin_ips |> String.split(",", trim: true) |> Enum.map(&String.trim/1)
+end
+
+# Platform admin API (/api/v1/admin, issue #51, ADR-0061): a bearer token of
+# at least 32 characters. Unset, the admin API answers 401 to everything.
+case System.get_env("ADMIN_API_TOKEN") do
+  token when token in [nil, ""] ->
+    :ok
+
+  token when byte_size(token) < 32 ->
+    raise "ADMIN_API_TOKEN must be at least 32 characters (e.g. `openssl rand -base64 48`)"
+
+  token ->
+    config :converger, admin_api_token: token
+end
+
+# Admin / tenant portal account security (issue #52, ADR-0058; defaults in
+# config/config.exs, see docs/operations/configuration.md):
+#   SESSION_MAX_AGE_SECONDS       absolute session lifetime (default 43200, 12 h)
+#   SESSION_IDLE_TIMEOUT_SECONDS  idle timeout (default 1800, 30 min)
+#   PASSWORD_MIN_LENGTH           minimum password length (default 12)
+#   ADMIN_REQUIRE_2FA_ROLES       comma-separated admin roles that must use 2FA
+#                                 (default "super_admin"; "" for none)
+#   MAILER_FROM                   sender of account emails: "addr" or "Name <addr>"
+account_int = fn var ->
+  case System.get_env(var) do
+    nil ->
+      nil
+
+    value ->
+      case Integer.parse(String.trim(value)) do
+        {n, ""} when n > 0 -> n
+        _ -> raise "#{var} must be a positive integer, got: #{inspect(value)}"
+      end
+  end
+end
+
+session_overrides =
+  [
+    max_age_seconds: account_int.("SESSION_MAX_AGE_SECONDS"),
+    idle_timeout_seconds: account_int.("SESSION_IDLE_TIMEOUT_SECONDS")
+  ]
+  |> Enum.reject(fn {_key, value} -> is_nil(value) end)
+
+if session_overrides != [] do
+  config :converger, :sessions, session_overrides
+end
+
+if min_length = account_int.("PASSWORD_MIN_LENGTH") do
+  config :converger, :password_min_length, min_length
+end
+
+if roles = System.get_env("ADMIN_REQUIRE_2FA_ROLES") do
+  roles =
+    roles |> String.split(",", trim: true) |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == ""))
+
+  config :converger, :require_2fa_roles, roles
+end
+
+if mailer_from = System.get_env("MAILER_FROM") do
+  mailer_from = String.trim(mailer_from)
+
+  sender =
+    case Regex.run(~r/^(.*?)\s*<([^<>]+)>$/, mailer_from) do
+      [_, "", address] -> address
+      [_, name, address] -> {String.trim(name, "\""), address}
+      nil -> mailer_from
+    end
+
+  config :converger, :mailer_from, sender
+end
+
+# Outgoing mail for account emails (password reset). With SMTP_HOST set,
+# Converger.Mailer sends through SMTP; otherwise it keeps the adapter of the
+# environment (in prod: no delivery, the Local adapter without storage).
+if smtp_host = System.get_env("SMTP_HOST") do
+  smtp_ssl = System.get_env("SMTP_SSL") in ~w(true 1)
+
+  smtp_config =
+    [
+      adapter: Swoosh.Adapters.SMTP,
+      relay: smtp_host,
+      port: account_int.("SMTP_PORT") || 587,
+      username: System.get_env("SMTP_USERNAME"),
+      password: System.get_env("SMTP_PASSWORD"),
+      ssl: smtp_ssl,
+      tls: if(smtp_ssl, do: :never, else: :always),
+      auth: if(System.get_env("SMTP_USERNAME"), do: :always, else: :never),
+      retries: 2,
+      no_mx_lookups: true
+    ]
+    |> Enum.reject(fn {_key, value} -> is_nil(value) end)
+
+  config :converger, Converger.Mailer, smtp_config
 end
 
 # Pagination limits (defaults in config/config.exs), e.g. PAGINATION_MAX_LIMIT=200.
@@ -69,6 +335,72 @@ pagination_overrides =
 # Keyword values are deep-merged with the compile-time config.
 if pagination_overrides != [] do
   config :converger, :pagination, pagination_overrides
+end
+
+# Client WebSocket limits and draining (defaults in config/config.exs), e.g.
+# WS_MAX_MESSAGES_PER_WINDOW=50. See docs/operations/websocket-limits.md.
+websocket_env = [
+  max_frame_bytes: "WS_MAX_FRAME_BYTES",
+  max_messages: "WS_MAX_MESSAGES_PER_WINDOW",
+  rate_window_ms: "WS_RATE_WINDOW_MS",
+  max_joins: "WS_MAX_JOINS",
+  max_in_flight: "WS_MAX_IN_FLIGHT",
+  ephemeral_drop_queue_len: "WS_EPHEMERAL_DROP_QUEUE_LEN",
+  slow_consumer_queue_len: "WS_SLOW_CONSUMER_QUEUE_LEN",
+  reconnect_base_ms: "WS_RECONNECT_BASE_MS",
+  reconnect_jitter_ms: "WS_RECONNECT_JITTER_MS",
+  drain_delay_ms: "WS_DRAIN_DELAY_MS",
+  drain_batch_size: "WS_DRAIN_BATCH_SIZE",
+  drain_batch_interval_ms: "WS_DRAIN_BATCH_INTERVAL_MS",
+  drain_shutdown_ms: "WS_DRAIN_SHUTDOWN_MS"
+]
+
+websocket_overrides =
+  for {key, var} <- websocket_env, value = System.get_env(var), value not in [nil, ""] do
+    {key, String.to_integer(value)}
+  end
+
+if websocket_overrides != [] do
+  config :converger, :websocket, websocket_overrides
+end
+
+# Protocol v1 over gRPC (ADR-0056, docs/protocol/grpc.md): GRPC_ENABLED=true starts
+# the server on GRPC_PORT (default 50051). GRPC_TLS_CERTFILE and GRPC_TLS_KEYFILE
+# (PEM paths) switch it to TLS; without them it serves plaintext h2c, for a
+# private network or a TLS-terminating proxy.
+grpc_overrides =
+  [
+    enabled: System.get_env("GRPC_ENABLED"),
+    port: System.get_env("GRPC_PORT"),
+    certfile: System.get_env("GRPC_TLS_CERTFILE"),
+    keyfile: System.get_env("GRPC_TLS_KEYFILE")
+  ]
+  |> Enum.reject(fn {_key, value} -> value in [nil, ""] end)
+  |> Enum.map(fn
+    {:enabled, value} -> {:enabled, String.downcase(value) in ~w(true 1)}
+    {:port, port} -> {:port, String.to_integer(port)}
+    pair -> pair
+  end)
+
+if grpc_overrides != [] do
+  config :converger, ConvergerWeb.GRPC, grpc_overrides
+end
+
+# Behaviour under database pressure (defaults in config/config.exs). See
+# docs/operations/database.md.
+pressure_overrides =
+  for {key, var} <- [
+        retry_after_ms: "DB_RETRY_AFTER_MS",
+        queue_window_ms: "DB_QUEUE_WINDOW_MS",
+        degraded_queue_ms: "READY_DB_QUEUE_MS"
+      ],
+      value = System.get_env(var),
+      value not in [nil, ""] do
+    {key, String.to_integer(value)}
+  end
+
+if pressure_overrides != [] do
+  config :converger, Converger.Repo.Pressure, pressure_overrides
 end
 
 # Oban Lifeline: jobs left `executing` by a node that died (SIGKILL, OOM, lost
@@ -117,12 +449,132 @@ if System.get_env("WEBHOOK_ALLOW_PRIVATE_TARGETS") in ~w(true 1) do
   config :converger, :webhook, allow_private_targets: true
 end
 
+# Broker channels (kafka, rabbitmq, nats, redis_streams, mqtt) and Discord
+# Gateway connections (see Converger.Channels.Consumers).
+# BROKER_CONSUMERS=false keeps broker consumers off this node (e.g. web-only
+# nodes); the other nodes run them. BROKER_RECONCILE_INTERVAL_MS sets how
+# often consumers are reconciled with the channels (default 30000).
+case System.get_env("BROKER_CONSUMERS") do
+  nil -> :ok
+  value -> config :converger, :broker_channels, consumers: value in ~w(true 1)
+end
+
+if interval = System.get_env("BROKER_RECONCILE_INTERVAL_MS") do
+  config :converger, :broker_channels, reconcile_interval_ms: String.to_integer(interval)
+end
+
+# Event backbone (issue #66, Converger.Backbone, ADR-0070, docs/deployment.md):
+# switching backbone is this one variable.
+#   BACKBONE                native (default) | kafka | nats | rabbitmq
+#   BACKBONE_MIRROR         comma-separated backbones that also receive every
+#                           event (dual publish while migrating)
+#   BACKBONE_CONSUMERS      false keeps broker consumers off this node
+#   BACKBONE_TOPIC_PREFIX   broker topic/subject prefix (default converger)
+#   BACKBONE_KAFKA_BROKERS, BACKBONE_KAFKA_SASL_MECHANISM / _USERNAME / _PASSWORD,
+#   BACKBONE_KAFKA_TLS, BACKBONE_KAFKA_PARTITIONS, BACKBONE_KAFKA_REPLICATION_FACTOR,
+#   BACKBONE_KAFKA_START_OFFSET (earliest | latest)
+#   BACKBONE_NATS_SERVERS, BACKBONE_NATS_USERNAME / _PASSWORD / _TOKEN,
+#   BACKBONE_NATS_TLS, BACKBONE_NATS_REPLICAS
+#   BACKBONE_RABBITMQ_URL, BACKBONE_RABBITMQ_USERNAME / _PASSWORD
+backbone_module = fn name, variable ->
+  case name do
+    "native" -> Converger.Backbone.Native
+    "kafka" -> Converger.Backbone.Kafka
+    "nats" -> Converger.Backbone.Nats
+    "rabbitmq" -> Converger.Backbone.RabbitMQ
+    other -> raise "#{variable} must be native, kafka, nats or rabbitmq, got: #{inspect(other)}"
+  end
+end
+
+if backbone = System.get_env("BACKBONE") do
+  config :converger, :backbone, backbone_module.(String.trim(backbone), "BACKBONE")
+end
+
+backbone_overrides =
+  [
+    mirror:
+      case System.get_env("BACKBONE_MIRROR") do
+        nil ->
+          nil
+
+        mirrors ->
+          mirrors
+          |> String.split(",", trim: true)
+          |> Enum.map(&String.trim/1)
+          |> Enum.reject(&(&1 == ""))
+          |> Enum.map(&backbone_module.(&1, "BACKBONE_MIRROR"))
+      end,
+    consumers:
+      case System.get_env("BACKBONE_CONSUMERS") do
+        nil -> nil
+        value -> value in ~w(true 1)
+      end,
+    topic_prefix: System.get_env("BACKBONE_TOPIC_PREFIX")
+  ]
+  |> Enum.reject(fn {_key, value} -> is_nil(value) end)
+
+if backbone_overrides != [] do
+  config :converger, Converger.Backbone, backbone_overrides
+end
+
+backbone_env = fn variables ->
+  variables
+  |> Enum.map(fn {key, variable, cast} ->
+    case System.get_env(variable) do
+      nil -> {key, nil}
+      "" -> {key, nil}
+      value -> {key, cast.(value)}
+    end
+  end)
+  |> Enum.reject(fn {_key, value} -> is_nil(value) end)
+end
+
+string = & &1
+boolean = &(&1 in ~w(true 1))
+integer = &String.to_integer/1
+
+kafka_backbone =
+  backbone_env.([
+    {:brokers, "BACKBONE_KAFKA_BROKERS", string},
+    {:sasl_mechanism, "BACKBONE_KAFKA_SASL_MECHANISM", string},
+    {:sasl_username, "BACKBONE_KAFKA_SASL_USERNAME", string},
+    {:sasl_password, "BACKBONE_KAFKA_SASL_PASSWORD", string},
+    {:tls, "BACKBONE_KAFKA_TLS", boolean},
+    {:partitions, "BACKBONE_KAFKA_PARTITIONS", integer},
+    {:replication_factor, "BACKBONE_KAFKA_REPLICATION_FACTOR", integer},
+    {:start_offset, "BACKBONE_KAFKA_START_OFFSET", string}
+  ])
+
+if kafka_backbone != [], do: config(:converger, Converger.Backbone.Kafka, kafka_backbone)
+
+nats_backbone =
+  backbone_env.([
+    {:servers, "BACKBONE_NATS_SERVERS", string},
+    {:username, "BACKBONE_NATS_USERNAME", string},
+    {:password, "BACKBONE_NATS_PASSWORD", string},
+    {:token, "BACKBONE_NATS_TOKEN", string},
+    {:tls, "BACKBONE_NATS_TLS", boolean},
+    {:replicas, "BACKBONE_NATS_REPLICAS", integer}
+  ])
+
+if nats_backbone != [], do: config(:converger, Converger.Backbone.Nats, nats_backbone)
+
+rabbitmq_backbone =
+  backbone_env.([
+    {:url, "BACKBONE_RABBITMQ_URL", string},
+    {:username, "BACKBONE_RABBITMQ_USERNAME", string},
+    {:password, "BACKBONE_RABBITMQ_PASSWORD", string}
+  ])
+
+if rabbitmq_backbone != [],
+  do: config(:converger, Converger.Backbone.RabbitMQ, rabbitmq_backbone)
+
 # Rate-limit backend: "local" (per-node counters) or "cluster" (counters
 # replicated between nodes over PubSub). Defaults to "cluster" when node
-# discovery is configured through DNS_CLUSTER_QUERY, otherwise "local".
+# discovery is configured (CLUSTER_STRATEGY other than none), otherwise "local".
 rate_limit_backend =
   case System.get_env("RATE_LIMIT_BACKEND") do
-    nil -> if System.get_env("DNS_CLUSTER_QUERY") in [nil, ""], do: nil, else: :cluster
+    nil -> if cluster_strategy == :none, do: nil, else: :cluster
     "local" -> :local
     "cluster" -> :cluster
     other -> raise "RATE_LIMIT_BACKEND must be \"local\" or \"cluster\", got: #{inspect(other)}"
@@ -262,6 +714,65 @@ if config_env() != :test and System.get_env("UPLOAD_STORAGE") do
     signed_url_ttl: String.to_integer(env.("UPLOAD_SIGNED_URL_TTL") || "300"),
     allowed_content_types: allowed,
     cdn: cdn
+
+  # Archive of expired activities/deliveries (docs/operations/retention.md).
+  # Same backend and credentials as attachments; ARCHIVE_BUCKET (S3, MinIO,
+  # R2, GCS), ARCHIVE_CONTAINER (Azure) or ARCHIVE_DIR (local) put it in a
+  # separate bucket/container/directory.
+  archive_override =
+    case storage do
+      Converger.Uploads.AzureBlobStorage -> {:container, blank_to_nil.(env.("ARCHIVE_CONTAINER"))}
+      Converger.Uploads.LocalStorage -> {:dir, blank_to_nil.(env.("ARCHIVE_DIR"))}
+      _ -> {:bucket, blank_to_nil.(env.("ARCHIVE_BUCKET"))}
+    end
+
+  case archive_override do
+    {_key, nil} ->
+      :ok
+
+    {key, value} ->
+      config :converger, Converger.Archive,
+        storage: storage,
+        storage_opts:
+          storage_opts |> Enum.reject(fn {_k, v} -> is_nil(v) end) |> Keyword.put(key, value)
+  end
+end
+
+# Retention and archive tuning (defaults in config/config.exs).
+retention_env = [
+  min_retention_days: "RETENTION_MIN_DAYS",
+  health_check_days: "HEALTH_CHECK_RETENTION_DAYS",
+  audit_log_days: "AUDIT_LOG_RETENTION_DAYS",
+  webhook_event_days: "WEBHOOK_EVENT_RETENTION_DAYS",
+  backbone_receipt_days: "BACKBONE_RECEIPT_RETENTION_DAYS"
+]
+
+retention_overrides =
+  for {key, var} <- retention_env, value = System.get_env(var), value not in [nil, ""] do
+    {key, String.to_integer(value)}
+  end
+
+if retention_overrides != [] do
+  config :converger, Converger.Retention, retention_overrides
+end
+
+archive_overrides =
+  [
+    prefix: System.get_env("ARCHIVE_PREFIX"),
+    part_rows:
+      case System.get_env("ARCHIVE_PART_ROWS") do
+        value when value in [nil, ""] -> nil
+        value -> String.to_integer(value)
+      end
+  ]
+  |> Enum.reject(fn {_k, v} -> v in [nil, ""] end)
+
+if archive_overrides != [] do
+  config :converger, Converger.Archive, archive_overrides
+end
+
+if months_ahead = System.get_env("PARTITION_MONTHS_AHEAD") do
+  config :converger, Converger.Partitions, months_ahead: String.to_integer(months_ahead)
 end
 
 if config_env() == :prod do
@@ -277,10 +788,32 @@ if config_env() == :prod do
   config :converger, Converger.Repo,
     # ssl: true,
     url: database_url,
+    # Interactive pool: HTTP, WebSocket and LiveView (docs/operations/database.md).
     pool_size: String.to_integer(System.get_env("POOL_SIZE") || "10"),
-    # For machines with several cores, consider starting multiple pools of `pool_size`
-    # pool_count: 4,
+    queue_target: String.to_integer(System.get_env("DB_QUEUE_TARGET_MS") || "50"),
+    queue_interval: String.to_integer(System.get_env("DB_QUEUE_INTERVAL_MS") || "1000"),
+    timeout: String.to_integer(System.get_env("DB_TIMEOUT_MS") || "15000"),
     socket_options: maybe_ipv6
+
+  # Background pool for Oban jobs, a bulkhead between background work and
+  # requests (Converger.Repo.Pools). BACKGROUND_POOL_SIZE=0 shares the
+  # interactive pool instead (the behaviour before #35).
+  background_pool_size = String.to_integer(System.get_env("BACKGROUND_POOL_SIZE") || "10")
+
+  background_pool =
+    if background_pool_size > 0 do
+      [
+        pool_size: background_pool_size,
+        queue_target: String.to_integer(System.get_env("BACKGROUND_DB_QUEUE_TARGET_MS") || "500"),
+        queue_interval:
+          String.to_integer(System.get_env("BACKGROUND_DB_QUEUE_INTERVAL_MS") || "5000"),
+        timeout: String.to_integer(System.get_env("BACKGROUND_DB_TIMEOUT_MS") || "60000")
+      ]
+    else
+      false
+    end
+
+  config :converger, Converger.Repo.Pools, background: background_pool
 
   # The secret key base is used to sign/encrypt cookies and other secrets.
   # A default value is used in config/dev.exs and config/test.exs but you
@@ -341,8 +874,6 @@ if config_env() == :prod do
 
   host = System.get_env("PHX_HOST") || "example.com"
   port = String.to_integer(System.get_env("PORT") || "4000")
-
-  config :converger, :dns_cluster_query, System.get_env("DNS_CLUSTER_QUERY")
 
   config :converger, ConvergerWeb.Endpoint,
     url: [host: host, port: 443, scheme: "https"],

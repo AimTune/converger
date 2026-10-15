@@ -40,32 +40,48 @@ defmodule ConvergerWeb.Portal.DashboardLive do
      )}
   end
 
+  defp tile_class,
+    do:
+      "block rounded-box transition hover:shadow-md focus-visible:outline-2 focus-visible:outline-primary"
+
   def render(assigns) do
     ~H"""
-    <h1>Dashboard</h1>
-    <p style="color: #666; margin-bottom: 20px;">
-      Tenant: <strong><%= @current_tenant.name %></strong>
-    </p>
+    <Layouts.app flash={@flash} nav={@nav}>
+      <.header>
+        Dashboard
+        <:subtitle>Tenant: <strong>{@current_tenant.name}</strong></:subtitle>
+      </.header>
 
-    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px;">
-      <div class="card">
-        <h3>Channels</h3>
-        <p style="font-size: 2em; font-weight: bold;"><%= @stats.channels %></p>
-        <div style="display: flex; gap: 8px; margin-top: 8px;">
-          <span class="badge badge-inbound"><%= "← #{Map.get(@channel_modes, "inbound", 0)}" %></span>
-          <span class="badge badge-outbound"><%= "→ #{Map.get(@channel_modes, "outbound", 0)}" %></span>
-          <span class="badge badge-duplex"><%= "↔ #{Map.get(@channel_modes, "duplex", 0)}" %></span>
-        </div>
+      <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <.link id="tile-channels" navigate={~p"/portal/channels"} class={tile_class()}>
+          <.stat title="Channels" value={@stats.channels}>
+            <div class="flex flex-wrap gap-2">
+              <.badge value="inbound" title="Inbound">
+                ← {Map.get(@channel_modes, "inbound", 0)}
+              </.badge>
+              <.badge value="outbound" title="Outbound">
+                → {Map.get(@channel_modes, "outbound", 0)}
+              </.badge>
+              <.badge value="duplex" title="Duplex">↔ {Map.get(@channel_modes, "duplex", 0)}</.badge>
+            </div>
+          </.stat>
+        </.link>
+        <.link id="tile-conversations" navigate={~p"/portal/conversations"} class={tile_class()}>
+          <.stat title="Conversations" value={@stats.conversations} />
+        </.link>
+        <.stat title="Activities" value={@stats.activities} />
       </div>
-      <div class="card">
-        <h3>Conversations</h3>
-        <p style="font-size: 2em; font-weight: bold;"><%= @stats.conversations %></p>
+      <div class="flex flex-wrap gap-2">
+        <.button
+          id="dashboard-failed-deliveries"
+          navigate={~p"/portal/deliveries?#{[status: "failed"]}"}
+          size="sm"
+          variant="neutral"
+        >
+          <.icon name="hero-exclamation-triangle" class="size-4" /> Failed deliveries
+        </.button>
       </div>
-      <div class="card">
-        <h3>Activities</h3>
-        <p style="font-size: 2em; font-weight: bold;"><%= @stats.activities %></p>
-      </div>
-    </div>
+    </Layouts.app>
     """
   end
 end

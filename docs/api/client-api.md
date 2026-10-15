@@ -6,9 +6,9 @@ sidebar_position: 3
 
 The Converger client API lives under `/api/v1/converger`. End-user clients such as web chat widgets and mobile
 apps use it. It is modelled on Bot Framework Direct Line: your backend exchanges a channel secret for a short-lived
-token, the client starts a conversation with that token, then posts activities over REST and receives them over the
-WebSocket at `streamUrl` (or by polling the activities endpoint with a watermark). Shared conventions (errors, rate
-limits, pagination, idempotency, CORS) are in the [overview](overview.md).
+token, the client starts a conversation with that token, then posts activities over REST (or over the socket with
+`postActivity`) and receives them over the WebSocket at `streamUrl` (or by polling the activities endpoint with a
+watermark). Shared conventions (errors, rate limits, pagination, idempotency, CORS) are in the [overview](overview.md).
 
 Controllers live in [`lib/converger_web/controllers/converger/`](https://github.com/AimTune/converger/tree/main/lib/converger_web/controllers/converger)
 (module prefix `ConvergerWeb.ConvergerAPI`). Field names in this API are camelCase (`conversationId`, `channelData`),
@@ -18,19 +18,25 @@ unlike the snake_case tenant API.
 
 | Method | Path | Auth | Purpose |
 | --- | --- | --- | --- |
-| `POST` | `/api/v1/converger/tokens/generate` | Bearer channel secret | Issue an unscoped converger token (backend only) |
-| `POST` | `/api/v1/converger/tokens/refresh` | Bearer converger token | Exchange a valid token for a fresh one |
+| `POST` | `/api/v1/converger/tokens/generate` | Bearer channel secret | Issue an unscoped or channel-scoped converger token (backend only) |
+| `POST` | `/api/v1/converger/tokens/refresh` | Bearer converger token | Exchange a valid token for a fresh one (the old one is rotated) |
+| `POST` | `/api/v1/converger/tokens/revoke` | Bearer converger token, or channel secret | Revoke a token and its family (logout), or every token of an end user (backend) |
 | `POST` | `/api/v1/converger/conversations` | Bearer converger token | Start a conversation; returns a conversation-bound token and `streamUrl` |
+| `GET` | `/api/v1/converger/conversations` | Bearer channel-scoped converger token | List the channel's conversations, most recently active first (agent consoles) |
 | `GET` | `/api/v1/converger/conversations/:id` | Bearer converger token | Reconnect: new token and `streamUrl` for an existing conversation |
 | `POST` | `/api/v1/converger/conversations/:id/close` | Bearer converger token | Close the conversation |
 | `POST` | `/api/v1/converger/conversations/:id/reopen` | Bearer converger token | Reopen the conversation |
 | `POST` | `/api/v1/converger/conversations/:conversation_id/activities` | Bearer converger token | Post an activity |
-| `GET` | `/api/v1/converger/conversations/:conversation_id/activities` | Bearer converger token | List activities after a watermark |
+| `GET` | `/api/v1/converger/conversations/:conversation_id/activities` | Bearer converger token | List activities after a watermark, or page backwards with a `seq` cursor; as activities or Protocol v1 frames |
+| `GET` | `/api/v1/converger/conversations/:conversation_id/events` | Bearer converger token or `?token=` | Server-Sent Events stream of Protocol v1 frames (fallback when WebSockets are blocked) |
 | `POST` | `/api/v1/converger/conversations/:conversation_id/upload` | Bearer converger token | Upload a file as a new activity (multipart) |
 | `GET` | `/api/v1/converger/attachments/:id` | Bearer converger token | Download an uploaded file |
 
 Authentication is described in [client authentication](overview.md#client-authentication-authorization-bearer).
-Every token-authenticated route also checks that the token's channel is still `active` (`403` otherwise).
+Every token-authenticated route also checks that the token's channel is still `active` (`403` otherwise), that
+the token was not revoked (`401 token_revoked`), and that it has the permission the route needs (`403
+insufficient_permission`, see [Permissions](#permissions)). How tokens are signed, rotated and revoked is in
+[Client tokens](../security/client-tokens.md).
 
 ## Flow
 
@@ -57,7 +63,8 @@ sequenceDiagram
 
 | Token | Issued by | Can do |
 | --- | --- | --- |
-| Unscoped (no `conversation_id` claim) | `tokens/generate`, `tokens/refresh` of an unscoped token | Create conversations. Accepted for any conversation id of the tenant. |
+| Unscoped (no `conversation_id` claim) | `tokens/generate`, `tokens/refresh` of an unscoped token | Create conversations. Accepted for the conversations of its own channel (other channels' conversations get `404`). Cannot join a conversation topic on the WebSocket. |
+| Channel-scoped (`scope: "channel"`, no `conversation_id`) | `tokens/generate` with `"scope": "channel"`, `tokens/refresh` of a channel-scoped token | Everything an unscoped token can do, plus listing the channel's conversations (`GET /conversations`), plus, on the WebSocket (role `agent`), joining `converger:channel:<channel_id>` of a `websocket` channel to follow every delivery to it, and joining the conversations owned by or routed to its channel (agent console). See [WebSocket](../websocket.md). |
 | Conversation-bound | `POST /conversations`, `GET /conversations/:id`, `tokens/refresh` of a bound token | Only its own conversation: other conversation ids get `403`, attachments of other conversations `404`. |
 
 :::tip
@@ -66,7 +73,25 @@ a conversation-bound one (`POST /conversations`) as early as possible, and do no
 :::
 
 Every token expires after 1800 seconds (`expires_in`). Refresh it with `POST /tokens/refresh` before it expires;
-an expired token cannot be refreshed, so the client has to get a new one from your backend.
+an expired token cannot be refreshed, so the client has to get a new one from your backend. A token issued by
+`POST /conversations` or `GET /conversations/:id` never outlives the token that asked for it (`expires_in` says how
+long it has left): only a refresh extends a session, and a refresh rotates the token.
+
+### Permissions
+
+A token may be restricted with `permissions` on `tokens/generate` (the `perms` claim). The restriction is
+carried to every token derived from it (`POST /conversations`, `GET /conversations/:id`) or refreshed from it, and
+cannot be widened. A token without the claim has every permission.
+
+| Permission | Allows |
+| --- | --- |
+| `read` | `GET /conversations` (channel-scoped tokens), `GET /conversations/:id`, `GET .../activities`, `GET .../events` (SSE), `GET /attachments/:id`; joining a conversation on the WebSocket (and with it `ack`, `read` receipts, `sync`) |
+| `write` | `POST /conversations` (and starting one on the native WebSocket), `POST .../activities`, `POST .../upload`, `close`, `reopen`; `postActivity` and `text` frames on the WebSocket |
+| `typing` | Typing indicators on the WebSocket |
+
+A missing permission is answered `403 insufficient_permission` with `details.required` (WebSocket:
+`insufficient_permission`, see [Protocol v1](../protocol/v1.md#122-error-codes)). Example: a read-only viewer of a
+conversation gets `{"permissions": ["read"]}`.
 
 The examples use:
 
@@ -91,6 +116,8 @@ Called by **your backend** with the channel secret. Never call it from a browser
 | Body field | Type | Notes |
 | --- | --- | --- |
 | `user.id` | string | Optional end-user id, stored as the `user_id` claim and carried through refreshes and conversation tokens. Used for the per-user socket id, so one user can be disconnected individually. |
+| `scope` | string | Optional. The only accepted value is `"channel"`: the token gets the `scope: "channel"` claim and may join `converger:channel:<channel_id>` on the client socket (agent console). Conversation tokens minted from it (`POST /conversations`) do not carry the scope. |
+| `permissions` | array of strings | Optional. A non-empty subset of `read`, `write`, `typing` (see [Permissions](#permissions)). Omitted: every permission. |
 
 ```bash
 curl -s -X POST "$CONVERGER/api/v1/converger/tokens/generate" \
@@ -102,22 +129,33 @@ curl -s -X POST "$CONVERGER/api/v1/converger/tokens/generate" \
 `200 OK`:
 
 ```json
-{ "conversationId": null, "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...", "expires_in": 1800 }
+{ "conversationId": null, "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...", "expires_in": 1800, "permissions": null }
 ```
 
-| Status | Body | Cause |
+`permissions` echoes the restriction (`null`: every permission).
+
+| Status | Error (`code: message`) | Cause |
 | --- | --- | --- |
-| `400` | `{"error": "Token generation requires channel secret, not a token"}` | A converger token was sent instead of the secret |
-| `401` | `{"error": {"code": "Unauthorized", "message": "Missing or malformed Authorization header"}}` | No `Bearer` header |
-| `401` | `{"error": {"code": "Unauthorized", "message": "Invalid or expired token"}}` | Unknown secret, or the channel is inactive |
-| `429` | rate limit body | Channel's `token_generate` limit exceeded |
+| `400` | `bad_request: Token generation requires channel secret, not a token` | A converger token was sent instead of the secret |
+| `400` | `bad_request: scope must be one of: channel` | Unknown `scope` value |
+| `400` | `bad_request: permissions must be a ...` | `permissions` is not a non-empty list of known permissions |
+| `401` | `unauthorized: Missing or malformed Authorization header` | No `Bearer` header |
+| `401` | `unauthorized: Invalid or expired token` | Unknown secret, or the channel is inactive |
+| `429` | `rate_limited` | Channel's `token_generate` limit exceeded |
 
 ### Refresh a token
 
 `POST /api/v1/converger/tokens/refresh`
 
-Exchanges a still-valid token for a new one with a fresh 1800 s expiry, keeping its `conversation_id` (if any) and
-`user_id`. No body.
+Exchanges a still-valid token for a new one with a fresh 1800 s expiry, keeping its `conversation_id` (if any),
+`user_id`, `scope`, permissions and family. No body.
+
+The presented token is **rotated**: it keeps working for the rotation grace period (default 30 s, so requests
+already in flight with it succeed) and is then rejected with `401 token_revoked`. Use the new token from now on.
+Refreshing the same old token again within the grace period returns another token (two tabs refreshing at once);
+refreshing it **after** the grace period is treated as token theft: the whole family (every token derived or
+refreshed from the same generated token, the legitimate one included) is revoked and the answer is `401
+token_revoked`. The client then needs a new token from your backend.
 
 ```bash
 curl -s -X POST "$CONVERGER/api/v1/converger/tokens/refresh" \
@@ -130,8 +168,29 @@ curl -s -X POST "$CONVERGER/api/v1/converger/tokens/refresh" \
 { "conversationId": "3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10", "token": "eyJhbGciOi...", "expires_in": 1800 }
 ```
 
-`conversationId` is `null` for an unscoped token. Errors: `401` (invalid or expired token), `403` (channel
-inactive), `429` (`token_generate` limit, per channel).
+`conversationId` is `null` for an unscoped token. Errors: `401` (invalid or expired token, `token_revoked`), `403`
+(channel inactive), `429` (`token_generate` limit, per channel).
+
+### Revoke tokens
+
+`POST /api/v1/converger/tokens/revoke`
+
+Revocation takes effect on every node within a second, for REST and WebSocket alike: revoked tokens are refused
+(`401 token_revoked`, WebSocket close 4401) and the sockets of the token's subject (its end user, or its
+conversation) are disconnected; holders of other valid tokens of that subject reconnect normally.
+
+| Credential | Body | Revokes |
+| --- | --- | --- |
+| Converger token | none | The token and its family: every token generated, derived or refreshed in the same chain. Use it on logout. |
+| Channel secret (backend) | `{"token": "..."}` | That token of the channel and its family. A token of another channel is `403`; an invalid or expired token needs no revocation and is answered `200`. |
+| Channel secret (backend) | `{"user": {"id": "user-42"}}` | Every token of that end user on the channel issued until now (a banned user). Tokens generated afterwards are valid. |
+
+```bash
+curl -s -X POST "$CONVERGER/api/v1/converger/tokens/revoke" \n  -H "authorization: Bearer $CHANNEL_SECRET" \n  -H "content-type: application/json" \n  -d '{"user": {"id": "user-42"}}'
+```
+
+`200 OK`: `{"revoked": "user"}` (or `"token"`). Errors: `400` (neither `token` nor `user.id` with the secret), `401`,
+`403`, `429` (`token_generate` limit, per channel).
 
 ## Conversations
 
@@ -139,8 +198,9 @@ inactive), `429` (`token_generate` limit, per channel).
 
 `POST /api/v1/converger/conversations`
 
-Creates a conversation on the token's channel, with `metadata: {"source": "converger"}`. The request body is
-ignored.
+Creates a conversation on the token's channel, with `metadata: {"source": "converger"}`. The optional body field
+`title` (a string of at most 200 bytes, chativa's `createConversation(title)`) is stored as `metadata.title`;
+anything else in the body is ignored, and a title that is not a string or is too long is a `400`.
 
 ```bash
 curl -s -X POST "$CONVERGER/api/v1/converger/conversations" \
@@ -163,6 +223,63 @@ client socket with the token already in the query string. It is built from the s
 `ws` otherwise), host and port of the request as Phoenix sees it, so behind a reverse proxy that rewrites them you
 may need to build the URL yourself. See [WebSocket](../websocket.md) for joining the channel and the frame format.
 
+### List the channel's conversations
+
+`GET /api/v1/converger/conversations`
+
+The conversations of the token's channel, most recently active first, for agent consoles such as chativa's
+agent-panel mode ([connecting clients](../protocol/clients.md#agent-panel-mode),
+[ADR-0065](../adr/0065-chativa-as-reference-client-and-history-cursor.md)). It needs a **channel-scoped** token
+(`tokens/generate` with `{"scope": "channel"}`, called by your backend with the channel secret) with the `read`
+permission; an end-user or conversation-bound token gets `403 forbidden`, because the list exposes every end
+user's conversations. Only the token's tenant and channel are listed.
+
+| Query param | Notes |
+| --- | --- |
+| `limit` | Default `50`, max `500` |
+| `cursor` | The `cursor` of the previous page. An invalid cursor is a `400`. |
+| `status` | `active` or `closed` |
+| `updated_since` | Only conversations with activity at or after this time: ISO 8601 (`2026-10-14T09:00:00Z`) or milliseconds since the epoch |
+
+```bash
+curl -s "$CONVERGER/api/v1/converger/conversations?status=active&limit=20" \
+  -H "authorization: Bearer $CHANNEL_TOKEN"
+```
+
+`200 OK`:
+
+```json
+{
+  "conversations": [
+    {
+      "id": "3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10",
+      "title": "Order ORD-42",
+      "contact": "Ayse Yilmaz",
+      "status": "active",
+      "lastMessage": "Where is my order?",
+      "lastMessageAt": 1791936076762,
+      "lastSeq": 17,
+      "metadata": { "source": "converger", "title": "Order ORD-42" },
+      "createdAt": "2026-10-14T09:12:03.004512Z",
+      "updatedAt": "2026-10-14T09:31:16.762118Z"
+    }
+  ],
+  "cursor": "dHM6MjAyNi0xMC0xNFQwOToxMjowMy4wMDQ1MTJafDNmNmQ...",
+  "has_more": true
+}
+```
+
+- Order and paging are keyset on `(updatedAt, id)`, descending. `updatedAt` moves with every activity, so a
+  conversation that becomes active while you page can move to the first page; keep the list current from the
+  socket rather than by re-paging.
+- Field names follow chativa's `Conversation` where one exists: `title` is `metadata.title`, else `contact`;
+  `contact` is the participant's display name, else its external id (a phone number, for example);
+  `lastMessage` is the text of the latest message (null when it was deleted or has no text) and `lastMessageAt`
+  its time in milliseconds. `status` is Converger's: map `active` to chativa's `open`. An unread count is not
+  computed; a client derives it from `lastSeq` and the seq it has read.
+- `lastSeq` is the head seq: pass it as `hello.watermark` to start a socket for that conversation at the
+  present, or page the history backwards from it.
+
 ### Reconnect to a conversation
 
 `GET /api/v1/converger/conversations/:id`
@@ -175,7 +292,7 @@ reload. Pass `watermark` to have it appended to `streamUrl`, so the socket repla
 | `watermark` | Optional. The last watermark the client processed. Appended to `streamUrl` verbatim. |
 
 ```bash
-curl -s "$CONVERGER/api/v1/converger/conversations/$CONV?watermark=c2VxOjQy" \
+curl -s "$CONVERGER/api/v1/converger/conversations/$CONV?watermark=42" \
   -H "authorization: Bearer $TOKEN"
 ```
 
@@ -186,16 +303,16 @@ curl -s "$CONVERGER/api/v1/converger/conversations/$CONV?watermark=c2VxOjQy" \
   "conversationId": "3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10",
   "token": "eyJhbGciOi...",
   "expires_in": 1800,
-  "streamUrl": "ws://localhost:4000/socket/converger/websocket?token=eyJhbGciOi...&conversation_id=3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10&watermark=c2VxOjQy"
+  "streamUrl": "ws://localhost:4000/socket/converger/websocket?token=eyJhbGciOi...&conversation_id=3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10&watermark=42"
 }
 ```
 
 The conversation's status is not checked here: a closed conversation can still be reconnected to and read.
 
-| Status | Body | Cause |
+| Status | Error (`code: message`) | Cause |
 | --- | --- | --- |
-| `403` | `{"errors": {"detail": "Forbidden"}}` | Token bound to another conversation |
-| `404` | `{"errors": {"detail": "Not Found"}}` | Unknown conversation, or one of another tenant |
+| `403` | `forbidden` | Token bound to another conversation |
+| `404` | `not_found` | Unknown conversation, or one of another tenant |
 
 ### Close and reopen
 
@@ -231,22 +348,36 @@ REST and socket payloads are identical ([ADR-0004](../adr/0004-single-canonical-
 ```json
 {
   "id": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d",
+  "seq": 42,
   "type": "message",
   "from": { "id": "user-42" },
   "text": "Hi, I need help with my order",
   "timestamp": "2026-10-09T12:05:41.004512Z",
   "attachments": [],
   "conversationId": "3f6d1c2e-8a4b-4f1e-9c51-0e6a2b7d9f10",
-  "channelData": {}
+  "channelData": {},
+  "replyToId": null,
+  "messageType": null,
+  "payload": null,
+  "editedAt": null,
+  "deletedAt": null
 }
 ```
 
 | Field | Canonical field |
 | --- | --- |
+| `seq` | `seq`: the per-conversation sequence number, the Protocol v1 watermark and the history cursor |
 | `from.id` | `sender` |
 | `timestamp` | `inserted_at` (server time) |
 | `conversationId` | `conversation_id` |
 | `channelData` | `metadata` |
+| `replyToId` | `reply_to_id`: the activity this one replies to, reacts to, edits or deletes |
+| `messageType`, `payload` | `message_type`, `payload`: a typed message (buttons, card, image, tool_call, ...), null for a plain message ([typed messages](../concepts/activities.md#typed-messages)) |
+| `editedAt`, `deletedAt` | `edited_at`, `deleted_at`: set on a message once a `messageUpdate` / `messageDelete` for it was accepted. The message keeps its original content; apply the update yourself. |
+
+The shape is published as a JSON Schema,
+[`priv/protocol/v1/activity.schema.json`](https://github.com/AimTune/converger/blob/main/priv/protocol/v1/activity.schema.json).
+See [activities](../concepts/activities.md#references-replies-reactions-edits-and-deletes) for the rules.
 
 `seq` and `idempotency_key` are not included; the position is carried by the watermark instead.
 
@@ -262,14 +393,17 @@ REST and socket payloads are identical ([ADR-0004](../adr/0004-single-canonical-
 
 | Body field | Type | Default | Notes |
 | --- | --- | --- | --- |
-| `type` | string | `message` | `message`, `event`, `typing`, `conversationUpdate`, `endOfConversation` |
-| `text` | string | `null` | Up to 65,536 bytes |
-| `attachments` | array | `[]` | At most 10 objects, each at most 4,096 bytes as JSON. Use the upload endpoint for files. |
+| `type` | string | `message` | `message`, `event`, `typing`, `messageReaction`, `messageUpdate`, `messageDelete`, `conversationUpdate`, `endOfConversation`. Anything else (including the internal `deliveryReceipt`) is a `422`. |
+| `text` | string | `null` | Up to 65,536 bytes. For `messageReaction` the emoji (at most 64 bytes). |
+| `attachments` | array | `[]` | At most 10 objects, each at most 4,096 bytes as JSON, each with a required `contentType` ([attachment schema](../concepts/activities.md#attachments)). Use the upload endpoint for files. |
+| `replyToId` | string | `null` | An activity of this conversation. Required for `messageReaction`, `messageUpdate` and `messageDelete`. |
 | `channelData` | object | `{}` | Stored as `metadata` (16,384 bytes max). `metadata` is accepted as an alias when `channelData` is absent. |
-| `from.id` | string | `"user"` | Stored as the activity's `sender` |
+| `messageType` | string | `null` | A typed message of [the vocabulary](../protocol/messages.md) (`buttons`, `card`, `image`, `location`, ...), a mekik-native type (`tool_call`, `genui`, `interrupt`, ...) or an open renderer name. Needs `payload` and `type: message`. |
+| `payload` | object | `null` | The typed message as its frame body without `type` and `seq`, for example `{"data": {"buttons": [...]}}`. Validated against the Protocol v1 schemas (`422` with per-field details); at most 131,072 bytes. `text` is filled from it when absent. |
+| `from.id` | string | the token's `user_id`, else `"user"` | Stored as the activity's `sender` |
 
-These are the only fields read from the body. The client changeset casts only `type`, `text`, `attachments` and
-`metadata`; `tenant_id`, `conversation_id` and the idempotency key come from the token and headers
+These are the only fields read from the body. The client changeset casts only `type`, `text`, `attachments`,
+`metadata`, `reply_to_id`, `message_type` and `payload`; `tenant_id`, `conversation_id` and the idempotency key come from the token and headers
 ([ADR-0005](../adr/0005-separate-client-and-system-changesets.md)). `from.id` is a display identity chosen by the
 client and is not verified against the token's `user_id`.
 
@@ -289,29 +423,39 @@ curl -s -X POST "$CONVERGER/api/v1/converger/conversations/$CONV/activities" \
 
 The full activity arrives on the socket and in the activities list.
 
-| Status | Body | Cause |
+The same activity can also be sent over the socket with the `postActivity` event, which shares the
+`activity_create` bucket and replies with `id`, `seq` and `watermark`; see
+[WebSocket](../websocket.md#6-send-activities-over-the-socket).
+
+| Status | Error (`code: message`) | Cause |
 | --- | --- | --- |
-| `403` | `{"errors": {"detail": "Forbidden"}}` | Token bound to another conversation |
-| `404` | `{"errors": {"detail": "Not Found"}}` | Unknown or foreign conversation |
-| `409` | `{"error": "conversation_closed", "detail": "Conversation is closed"}` | Conversation is closed |
-| `422` | `{"errors": {"type": ["is invalid"]}}` | Validation failed (type, sizes) |
-| `429` | rate limit body | Tenant's `activity_create` limit exceeded |
-| `503` | `{"error": "Activity could not be accepted, please retry"}` | Delivery jobs could not be enqueued; nothing stored. Retry with the same idempotency key. |
+| `403` | `forbidden` | Token bound to another conversation |
+| `404` | `not_found` | Unknown or foreign conversation |
+| `409` | `conversation_closed` | Conversation is closed |
+| `422` | `invalid_message` with `details` `{"type": ["is invalid"]}` | Validation failed: unknown type, sizes, an attachment without `contentType` (`invalid_message` with `details` `{"attachments": ["attachment 0: contentType can't be blank"]}`), or a bad reference (`invalid_message` with `details` `{"reply_to_id": ["does not exist in this conversation"]}`). Error keys use the stored field names. |
+| `429` | `rate_limited` | Tenant's `activity_create` limit exceeded |
+| `503` | `unavailable` | Delivery jobs could not be enqueued; nothing stored. Retry with the same idempotency key. |
 
 ### List activities
 
 `GET /api/v1/converger/conversations/:conversation_id/activities`
 
-The activities after a watermark, oldest first ([ADR-0006](../adr/0006-per-conversation-seq-and-opaque-watermarks.md)).
+The activities after a watermark, oldest first ([ADR-0006](../adr/0006-per-conversation-seq-and-opaque-watermarks.md), [ADR-0068](../adr/0068-integer-seq-watermarks-on-every-surface.md)).
 Use it to catch up after a reconnect, to fetch what the socket replay did not include, or to poll without a socket.
+It also pages **backwards** for "load older messages" (see [below](#history-paging-backwards)), and returns
+Protocol v1 frames with `format=frames`.
 
 | Query param | Notes |
 | --- | --- |
-| `watermark` | The `watermark` of the previous response, or of the last socket `activitySet` frame. Omit to start at the first activity. |
+| `watermark` | The `watermark` of the previous response (the integer seq), the `seq` of the last v1 frame you processed, or the `watermark` of the last legacy Phoenix `activitySet` frame. Omit to start at the first activity. |
+| `before` | Backward paging: the activities with a `seq` below this one (a positive integer: the `cursor` of the previous backward page). Anything else is a `400`. |
+| `direction` | `forward` (default) or `backward`. `backward` without `before` starts at the newest activity. |
+| `format` | `activities` (default) or `frames`: the page as [Protocol v1 frames](../protocol/v1.md#54-activities-as-frames) in `frames` |
+| `userId` | With `format=frames` and a token without `user_id`: the end user whose activities are `from: "user"` |
 | `limit` | Default `100`, max `1000` |
 
 ```bash
-curl -s "$CONVERGER/api/v1/converger/conversations/$CONV/activities?watermark=c2VxOjQx&limit=50" \
+curl -s "$CONVERGER/api/v1/converger/conversations/$CONV/activities?watermark=41&limit=50" \
   -H "authorization: Bearer $TOKEN"
 ```
 
@@ -331,26 +475,125 @@ curl -s "$CONVERGER/api/v1/converger/conversations/$CONV/activities?watermark=c2
       "channelData": {}
     }
   ],
-  "watermark": "c2VxOjQy",
+  "watermark": 42,
   "has_more": false
 }
 ```
 
 #### Watermarks
 
-- A watermark is opaque. Today it is URL-safe Base64 without padding of `seq:<n>`, where `n` is the `seq` of the
-  last activity in the response (`c2VxOjQy` is `seq:42`). Store it as a string; do not build or parse it.
+- The watermark is the **integer `seq`** of the last activity in the response, a JSON number (`42`), the same
+  number [Protocol v1](../protocol/v1.md) frames carry as `seq` and `watermark` (issue
+  [#63](https://github.com/AimTune/converger/issues/63)). Before v3.0 it was an opaque string (URL-safe Base64 of
+  `seq:<n>`, `c2VxOjQy` for `seq:42`); see [migration](#watermark-migration) below.
 - To resume, send the watermark back. The response contains activities with a higher `seq` only, so nothing is
   delivered twice and, because `seq` is gap-free and assigned under the conversation lock, nothing is skipped.
 - If `has_more` is `true`, call again immediately with the new watermark; otherwise you are caught up.
-- An empty page returns the watermark you sent unchanged (`null` if you sent none).
-- The socket and REST share the watermark format: on join the socket replays at most `ws_replay_limit` (default 100)
-  activities after the watermark in an `activitySet` frame with `has_more`; fetch the rest here starting from that
-  frame's watermark.
+- An empty page returns the position you sent, as an integer (`null` if you sent none).
+- REST and the sockets share the position: resume a v1 socket (`hello.watermark`) from a REST page's watermark, or
+  page REST from the `seq` of the last v1 frame (for example the `watermark` of a `replayTruncated` frame). On the
+  legacy Phoenix binding the join replays at most `ws_replay_limit` (default 100) activities in an `activitySet`
+  frame with `has_more`; fetch the rest here starting from that frame's watermark.
 - Unlike the tenant API, an invalid watermark is not an error here: the list starts at the beginning of the
-  conversation. Watermarks issued before `seq` existed (Base64 activity ids) are still accepted.
+  conversation.
 
-Errors: `403` (token bound to another conversation), `404` (unknown or foreign conversation).
+#### Watermark migration
+
+Since v3.0 ([section 6.5 of the spec](../protocol/v1.md#65-the-watermark-and-its-migration),
+[ADR-0068](../adr/0068-integer-seq-watermarks-on-every-surface.md)) responses carry the integer. For one release
+the server still **accepts** every earlier form in `?watermark=`: the integer, its decimal string, the opaque
+`seq:<n>` watermark and a legacy Base64 activity-id watermark (issued before `seq` existed). Opaque forms are
+logged as the deprecated `opaque_watermark` surface (telemetry `[:converger, :deprecated, :use]`) so operators can
+find the clients still sending them. Only the legacy Phoenix `activitySet` frame still emits the opaque string.
+
+A client that stores the watermark and sends it back unchanged keeps working. A typed client must accept a number
+where it used to expect a string; the [SDKs](../sdk/typescript.md) accept both. The release that stops accepting
+the opaque forms is announced in the changelog one release ahead.
+
+#### History paging backwards
+
+A chat widget opens at the latest messages and loads older ones on scroll (chativa's `loadHistory(cursor)`).
+Ask for the newest page with `direction=backward`, then pass each response's `cursor` back as `before`
+([ADR-0065](../adr/0065-chativa-as-reference-client-and-history-cursor.md)):
+
+```bash
+curl -s "$CONVERGER/api/v1/converger/conversations/$CONV/activities?direction=backward&limit=20&format=frames" \
+  -H "authorization: Bearer $TOKEN"
+```
+
+```json
+{
+  "frames": [
+    { "type": "text", "id": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d", "seq": 81, "from": "user", "sender": { "id": "user-42", "role": "user" }, "data": { "text": "Where is my order?" }, "timestamp": 1791936076762 },
+    { "type": "tool_call", "seq": 82, "data": { "id": "t1", "name": "get_order", "status": "completed" } }
+  ],
+  "watermark": 82,
+  "has_more": true,
+  "cursor": "81"
+}
+```
+
+- The page is still **oldest first**: the activities with the highest `seq` below `before` (or the newest ones),
+  so a client prepends it as it is.
+- `cursor` is the `seq` of the oldest activity of the page, as a string; send it as `before` for the next older
+  page. It is `null` and `has_more` is `false` when the page reaches the first activity. In a backward page
+  `has_more` means "older activities exist".
+- `watermark` is the watermark of the newest activity of the page, so the first backward page tells a client
+  where the live stream starts.
+- Forward pages are unchanged and have no `cursor`.
+
+With `format=frames` each activity is the frame the native WebSocket and the SSE stream deliver (a `text` or
+typed message frame with `from` relative to the token's `user_id`, `tool_call`, `genui`, `interrupt`, ...),
+rendered as on a replay. chativa feeds them to the same routing as live frames. Without `format`, the response is
+`activities` as before.
+
+Errors: `400` (malformed `before`, `direction` or `format`), `403` (token bound to another conversation),
+`404` (unknown or foreign conversation).
+
+### Stream events (Server-Sent Events)
+
+```http
+GET /api/v1/converger/conversations/6f1c0e7e-1f0b-4a5e-9a39-2b7c6f0d9a11/events?watermark=41
+Authorization: Bearer <conversation token>
+Accept: text/event-stream
+```
+
+```text
+retry: 3000
+
+id: 42
+event: text
+data: {"type":"text","id":"…","seq":42,"from":"bot","sender":{"id":"bot-1","role":"bot"},"data":{"text":"Hi!"},"timestamp":1750000000000}
+
+event: heartbeat
+data: {"type":"heartbeat","timestamp":1750000030000,"headSeq":42}
+```
+
+A fallback for networks that block WebSockets. Each event is a [Protocol v1](../protocol/v1.md) server frame
+named by its `type`; persistent frames carry their `seq` as the event `id`.
+
+- The token may be passed as `?token=` because the browser `EventSource` cannot set headers (query-string tokens
+  are filtered from request logs). The stream is authorized like the activities endpoint, and the conversation
+  must belong to the token's channel.
+- Resume: `Last-Event-ID` (sent automatically by a reconnecting `EventSource`) or `?watermark=` (an integer seq or
+  an opaque watermark); `Last-Event-ID` wins. No watermark replays the whole conversation (at most 10 000 frames,
+  then a `replayTruncated` event: page the rest with the activities endpoint above). An invalid watermark starts
+  from the beginning; one above the conversation head draws an `error` event `invalid_watermark` and the stream
+  continues live.
+- A `heartbeat` event is sent every 30 s (`heartbeat_interval_ms`).
+- Receipts, typing and presence of the other participants arrive as `deliveryStatus`, `typing` and `presence`
+  events (no `id`), as on the WebSocket. An identified viewer (token with `user_id`) counts as online for presence
+  while the stream is open. Send read receipts and typing over a WebSocket; the stream is receive-only.
+- The stream ends after an `error` event `token_expired` when the token expires, `channel_inactive` when the
+  channel is deactivated, or `unavailable` (with `retryAfterMs`) when the node shuts down. Reconnect with a fresh
+  token (after `token_expired`) and the last `seq`. While a node shuts down, new streams are refused with `503` and
+  `Retry-After`.
+- `from` is relative to the token's `user_id` (or `?userId=`): that user's activities are `user`, everyone else's
+  `bot`.
+- Send with [Post an activity](#post-an-activity) and an `X-Idempotency-Key`.
+
+Errors: `401` (no or invalid token), `403` (token bound to another conversation), `404` (unknown conversation or
+one of another channel), `503` (the node is draining; retry after `Retry-After` seconds).
 
 ## Uploads
 
@@ -369,7 +612,7 @@ Send `multipart/form-data` with these parts:
 | Part | Required | Notes |
 | --- | --- | --- |
 | `file` | yes | The file. Its declared content type is ignored. |
-| `activity` | no | JSON string (or form map) with optional `type`, `text`, `from.id`, and `channelData` (or `metadata`) for the created activity. Invalid JSON is ignored. |
+| `activity` | no | JSON string (or form map) with optional `type`, `text`, `from.id`, `replyToId` and `channelData` (or `metadata`) for the created activity. Invalid JSON is ignored. |
 
 Validation, in [`Converger.Uploads`](https://github.com/AimTune/converger/blob/main/lib/converger/uploads.ex):
 
@@ -397,34 +640,58 @@ curl -s -X POST "$CONVERGER/api/v1/converger/conversations/$CONV/upload" \
 ```json
 {
   "id": "e4d3c2b1-a0f9-4e8d-9c7b-6a5f4e3d2c1b",
+  "seq": 18,
   "attachments": [
     {
       "id": "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
       "contentType": "image/png",
       "contentUrl": "https://chat.example.com/api/v1/converger/attachments/9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
+      "name": "receipt.png",
       "size": 48213
     }
-  ]
+  ],
+  "frame": {
+    "type": "text",
+    "id": "e4d3c2b1-a0f9-4e8d-9c7b-6a5f4e3d2c1b",
+    "seq": 18,
+    "from": "user",
+    "sender": { "id": "user-42", "role": "user" },
+    "data": {
+      "text": "Here is my receipt",
+      "attachments": [
+        {
+          "contentType": "image/png",
+          "contentUrl": "https://chat.example.com/api/v1/converger/attachments/9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
+          "name": "receipt.png",
+          "size": 48213
+        }
+      ]
+    },
+    "timestamp": 1791936076762
+  }
 }
 ```
 
-`id` is the created activity. Its `attachments` contain
+`id` and `seq` are the created activity's. `frame` is the attachment message as the WebSocket delivers it, rendered
+for the uploading end user (the token's `user_id`): chativa's `sendFile` can show it at once and de-duplicate the
+socket copy by `id` ([connecting clients](../protocol/clients.md#hub-extras)). The activity's `sender` is
+`activity.from.id`, else the token's `user_id`, else `"user"`. Its `attachments` contain
 `{"contentType", "contentUrl", "name", "size"}` (`name` is the sanitized original filename), and its `text`
 defaults to `""`. `contentUrl` is built from the endpoint's configured URL (`PHX_HOST` in production), not from the
 request.
 
-| Status | Body | Cause |
+| Status | Error (`code: message`) | Cause |
 | --- | --- | --- |
-| `400` | `{"error": "Missing file in upload"}` | No `file` part |
-| `403` | `{"errors": {"detail": "Forbidden"}}` | Token bound to another conversation |
-| `404` | `{"errors": {"detail": "Not Found"}}` | Unknown or foreign conversation |
-| `409` | `{"error": "conversation_closed", "detail": "Conversation is closed"}` | Conversation is closed |
-| `413` | `{"error": "File too large (max 10.0MB)"}` | File over `max_file_size` |
-| `413` | `{"errors": {"detail": "Request Entity Too Large"}}` | Whole multipart body over `max_file_size` + 1 MB |
-| `415` | `{"error": "File type application/octet-stream is not allowed"}` | Sniffed type not in the allowlist |
-| `422` | `{"errors": {...}}` | The activity failed validation (for example an unknown `type`); the stored file is deleted |
-| `429` | rate limit body | Tenant's `upload` limit exceeded |
-| `502` | `{"error": "File could not be stored, please retry"}` | Storage backend error |
+| `400` | `bad_request: Missing file in upload` | No `file` part |
+| `403` | `forbidden` | Token bound to another conversation |
+| `404` | `not_found` | Unknown or foreign conversation |
+| `409` | `conversation_closed` | Conversation is closed |
+| `413` | `payload_too_large: File too large (max 10.0MB)` | File over `max_file_size` |
+| `413` | `payload_too_large` | Whole multipart body over `max_file_size` + 1 MB |
+| `415` | `unsupported_media_type: File type application/octet-stream is not allowed` | Sniffed type not in the allowlist |
+| `422` | `invalid_message` | The activity failed validation (for example an unknown `type`); the stored file is deleted |
+| `429` | `rate_limited` | Tenant's `upload` limit exceeded |
+| `502` | `upstream_unavailable: File could not be stored, please retry` | Storage backend error |
 
 ## Attachments
 
@@ -471,18 +738,18 @@ etag: "<sha256 of the file>"
 The signed URL itself carries no Converger authentication, so with `curl` use `-L` to follow it. Browsers follow
 the redirect automatically; for cross-origin storage, the bucket's own CORS settings apply.
 
-| Status | Body | Cause |
+| Status | Error (`code: message`) | Cause |
 | --- | --- | --- |
-| `401` | `{"error": {"code": "Unauthorized", ...}}` | Missing or invalid token |
-| `403` | `{"error": {"code": "Forbidden", ...}}` | Token's channel inactive |
-| `404` | `{"errors": {"detail": "Not Found"}}` | Unknown, malformed, foreign, or missing from storage |
-| `502` | `{"error": "Attachment storage unavailable"}` | Storage backend error |
+| `401` | `unauthorized` or `token_expired` | Missing, invalid or expired token |
+| `403` | `channel_inactive` | Token's channel inactive |
+| `404` | `not_found` | Unknown, malformed, foreign, or missing from storage |
+| `502` | `upstream_unavailable: Attachment storage unavailable` | Storage backend error |
 
 ## Closed conversations
 
 | Operation on a closed conversation | Result |
 | --- | --- |
-| `POST .../activities` | `409 {"error": "conversation_closed", "detail": "Conversation is closed"}` |
+| `POST .../activities` | `409 conversation_closed` |
 | `POST .../upload` | `409`, same body, before anything is stored |
 | Same idempotency key as an activity accepted before the close | `200` with the original id |
 | `GET .../activities`, `GET /conversations/:id` | Allowed |

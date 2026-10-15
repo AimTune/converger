@@ -17,7 +17,7 @@ The `echo` channel type ([`lib/converger/channels/adapters/echo.ex`](https://git
 | --- | --- |
 | `type` | `echo` |
 | `mode` | `outbound` only (other modes fail validation with `echo channels only support modes: outbound`) |
-| `config` | none; `validate_config/1` accepts any map |
+| `config` | none; its `config_schema/0` is empty, so any map is accepted |
 | `require_signature` | irrelevant, the channel has no inbound webhook |
 
 Note that the channel's default mode is `duplex`, so set `mode: "outbound"` explicitly when you create an echo channel.
@@ -71,7 +71,7 @@ Only `text` is copied. Attachments, `type` and other metadata of the original ar
 
 ## Inbound
 
-`parse_inbound/2` always returns `{:error, "echo channel does not support inbound webhooks"}`. A `POST /api/v1/channels/<id>/inbound` to an echo channel is rejected: with `401` when it is unsigned and the channel requires signatures (the default), otherwise with `400` and `{"error": "echo channel does not support inbound webhooks"}`. Activities enter an echo conversation through the tenant API, the client API or a WebSocket.
+`parse_inbound/2` always returns `{:error, "echo channel does not support inbound webhooks"}`. A `POST /api/v1/channels/<id>/inbound` to an echo channel is rejected: with `401` when it is unsigned and the channel requires signatures (the default), otherwise with `400` `bad_request` and the message "echo channel does not support inbound webhooks" (see [errors](../api/errors.md)). Activities enter an echo conversation through the tenant API, the client API or a WebSocket.
 
 ## Example
 

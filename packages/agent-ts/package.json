@@ -1,0 +1,92 @@
+{
+  "name": "@converger/agent",
+  "version": "0.1.0",
+  "description": "Agent SDK for Converger: serve every conversation of a channel from one WebSocket with onTurn/reply, streaming, tool traces, GenUI and interrupts.",
+  "license": "MIT",
+  "author": "AimTune",
+  "homepage": "https://converger.aimtune.dev/sdk/agent",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AimTune/converger.git",
+    "directory": "packages/agent-ts"
+  },
+  "bugs": "https://github.com/AimTune/converger/issues",
+  "keywords": [
+    "converger",
+    "agent",
+    "bot",
+    "llm",
+    "websocket",
+    "mekik"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./testing": {
+      "import": {
+        "types": "./dist/testing.d.ts",
+        "default": "./dist/testing.js"
+      },
+      "require": {
+        "types": "./dist/testing.d.cts",
+        "default": "./dist/testing.cjs"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "peerDependencies": {
+    "ws": "^8.0.0"
+  },
+  "peerDependenciesMeta": {
+    "ws": {
+      "optional": true
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "generate:types": "node scripts/generate-types.mjs",
+    "check:types": "node scripts/generate-types.mjs --check",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
+    "test": "vitest run --project unit",
+    "test:watch": "vitest --project unit",
+    "test:e2e": "vitest run --project e2e",
+    "docs": "typedoc",
+    "prepublishOnly": "pnpm run typecheck && pnpm run test && pnpm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "@types/ws": "^8.18.2",
+    "ajv": "^8.17.1",
+    "json-schema-to-typescript": "^16.0.0",
+    "tsup": "^8.5.1",
+    "typedoc": "^0.28.20",
+    "typescript": "^5.9.3",
+    "vitest": "^5.0.3",
+    "ws": "^8.22.0"
+  }
+}

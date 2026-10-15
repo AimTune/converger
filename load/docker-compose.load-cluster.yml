@@ -1,0 +1,50 @@
+# Three-node topology for the load harness, layered after
+# docker-compose.cluster.yml (which adds app2 and the gossip strategy) and
+# load/docker-compose.load.yml by load/run.sh when LOAD_NODES=3.
+x-cluster-env: &cluster_env
+  CLUSTER_STRATEGY: gossip
+  RELEASE_COOKIE: ${RELEASE_COOKIE}
+  CLUSTER_GOSSIP_SECRET: ${CLUSTER_GOSSIP_SECRET}
+  WEBHOOK_ALLOWED_TARGETS: mock
+  OTEL_EXPORTER_OTLP_ENDPOINT: ""
+  POOL_SIZE: ${LOAD_POOL_SIZE:-20}
+  BACKGROUND_POOL_SIZE: ${LOAD_BACKGROUND_POOL_SIZE:-10}
+  METRICS_TOKEN: ${METRICS_TOKEN}
+  OBAN_LIFELINE_RESCUE_AFTER_SECONDS: ${LOAD_LIFELINE_RESCUE_AFTER_SECONDS:-30}
+  OBAN_LIFELINE_INTERVAL_SECONDS: ${LOAD_LIFELINE_INTERVAL_SECONDS:-10}
+
+x-load-node: &load_node
+  image: ${LOAD_IMAGE:-converger-load:local}
+  ulimits:
+    nofile: { soft: 1048576, hard: 1048576 }
+  volumes:
+    - ./load:/load:ro
+  cpus: ${LOAD_APP_CPUS:-0}
+  mem_limit: ${LOAD_APP_MEMORY:-0}
+
+services:
+  app:
+    environment:
+      <<: *cluster_env
+
+  app2:
+    <<: *load_node
+    ports: !override
+      - "127.0.0.1:${LOAD_APP2_PORT:-14101}:4000"
+    environment:
+      <<: *cluster_env
+
+  app3:
+    <<: *load_node
+    extends:
+      file: docker-compose.yml
+      service: app
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    ports: !override
+      - "127.0.0.1:${LOAD_APP3_PORT:-14102}:4000"
+    environment:
+      <<: *cluster_env

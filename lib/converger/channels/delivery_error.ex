@@ -41,6 +41,28 @@ defmodule Converger.Channels.DeliveryError do
   @doc "A permanent failure that must not be retried."
   def permanent(reason), do: %__MODULE__{reason: reason, retryable?: false}
 
+  @doc """
+  Classify any delivery failure reason (the default
+  `c:Converger.Channels.Adapter.normalize_error/1`):
+
+    * a `DeliveryError` is returned as is;
+    * a plain map with `:reason` (and optionally `:retryable?`,
+      `:retry_after_ms`, `:status`) becomes a `DeliveryError`;
+    * any other term is a retryable failure with that reason.
+  """
+  def normalize(%__MODULE__{} = error), do: error
+
+  def normalize(%{reason: reason} = map) when not is_struct(map) do
+    %__MODULE__{
+      reason: reason,
+      status: Map.get(map, :status),
+      retry_after_ms: Map.get(map, :retry_after_ms),
+      retryable?: Map.get(map, :retryable?, true) != false
+    }
+  end
+
+  def normalize(reason), do: %__MODULE__{reason: reason}
+
   @doc "Human-readable message for `last_error`."
   def message(%__MODULE__{reason: reason}) when is_binary(reason), do: reason
   def message(%__MODULE__{reason: reason}), do: inspect(reason)

@@ -133,6 +133,186 @@ defmodule Converger.Activities do
 
   def get_activity!(id), do: Repo.get!(Activity, id)
 
+  @doc "An activity by id, or nil."
+  def get_activity(id), do: Repo.get(Activity, id)
+
+  @doc "The activity of `conversation_id` with `seq`, or nil."
+  def get_activity_by_seq(conversation_id, seq) when is_integer(seq) do
+    Repo.one(from(a in Activity, where: a.conversation_id == ^conversation_id and a.seq == ^seq))
+  end
+
+  def get_activity_by_seq(_conversation_id, _seq), do: nil
+
+  @doc """
+  Whether the mekik `interrupt` `interrupt_id` of a conversation is still open:
+  no `interrupt_resolved` with the same id was stored after its latest
+  `interrupt` (#64). mekik names a pause by its node (`approve:interrupt#0`),
+  so a later run of the same graph reuses the id of a resolved interrupt.
+  """
+  def interrupt_open?(conversation_id, interrupt_id) when is_binary(interrupt_id) do
+    latest =
+      from(a in Activity,
+        where:
+          a.conversation_id == ^conversation_id and a.message_type == "interrupt" and
+            fragment("?->>?", a.payload, "id") == ^interrupt_id,
+        select: max(a.seq)
+      )
+      |> Repo.one()
+
+    not resolved_after?(conversation_id, interrupt_id, latest || 0)
+  end
+
+  @doc """
+  Whether the stored `interrupt` activity is still open: no
+  `interrupt_resolved` with its id was stored after it. An older interrupt
+  whose id a later run reused is closed by that id's first resolution.
+  """
+  def interrupt_open?(%Activity{
+        message_type: "interrupt",
+        conversation_id: conversation_id,
+        seq: seq,
+        payload: %{"id" => interrupt_id}
+      })
+      when is_binary(interrupt_id),
+      do: not resolved_after?(conversation_id, interrupt_id, seq || 0)
+
+  def interrupt_open?(_activity), do: false
+
+  defp resolved_after?(conversation_id, interrupt_id, seq) do
+    from(a in Activity,
+      where:
+        a.conversation_id == ^conversation_id and a.message_type == "interrupt_resolved" and
+          fragment("?->>?", a.payload, "id") == ^interrupt_id and a.seq > ^seq
+    )
+    |> Repo.exists?()
+  end
+
+  @doc """
+  The open mekik `interrupt`s of a conversation as mekik/1 `PendingView`s
+  (`%{"id" => id, "data" => data}`), oldest first: interrupts with no
+  `interrupt_resolved` of the same id stored after them. An id interrupted
+  again is listed once, with its latest data. Re-announced in
+  `welcome.data.pending` so a reconnecting client renders them again even
+  when its watermark is past them (mekik/1 section 3.2).
+  """
+  def open_interrupts(conversation_id) do
+    from(a in Activity,
+      as: :interrupt,
+      where:
+        a.conversation_id == ^conversation_id and a.message_type == "interrupt" and
+          is_nil(a.deleted_at),
+      where:
+        not exists(
+          from(r in Activity,
+            where:
+              r.conversation_id == parent_as(:interrupt).conversation_id and
+                r.message_type == "interrupt_resolved" and
+                r.seq > parent_as(:interrupt).seq and
+                fragment("?->>'id'", r.payload) ==
+                  fragment("?->>'id'", parent_as(:interrupt).payload)
+          )
+        ),
+      order_by: a.seq,
+      select: a.payload
+    )
+    |> Repo.all()
+    |> Enum.filter(&(is_binary(&1["id"]) and is_map(&1["data"])))
+    |> Enum.reverse()
+    |> Enum.uniq_by(& &1["id"])
+    |> Enum.reverse()
+    |> Enum.map(&Map.take(&1, ["id", "data"]))
+  end
+
+  @doc """
+  The latest `message` activity of each conversation in `conversation_ids`,
+  as `%{conversation_id => %{text, seq, inserted_at, deleted_at}}`
+  (conversations without a message are absent). One query: a lateral join
+  that reads one row per conversation from the `(conversation_id, seq)`
+  index, for conversation list previews (ADR-0065).
+  """
+  def last_messages([]), do: %{}
+
+  def last_messages(conversation_ids) when is_list(conversation_ids) do
+    latest =
+      from(a in Activity,
+        where: a.conversation_id == parent_as(:conversation).id and a.type == "message",
+        order_by: [desc: a.seq],
+        limit: 1,
+        select: %{text: a.text, seq: a.seq, inserted_at: a.inserted_at, deleted_at: a.deleted_at}
+      )
+
+    from(c in Conversation,
+      as: :conversation,
+      where: c.id in ^conversation_ids,
+      inner_lateral_join: a in subquery(latest),
+      on: true,
+      select: {c.id, a}
+    )
+    |> Repo.all()
+    |> Map.new()
+  end
+
+  @doc """
+  The activity `id` of conversation `conversation_id`, or nil (also for an id
+  that is not a UUID).
+  """
+  def get_conversation_activity(conversation_id, id) do
+    case Ecto.UUID.cast(id) do
+      {:ok, id} ->
+        Repo.one(
+          from(a in Activity, where: a.id == ^id and a.conversation_id == ^conversation_id)
+        )
+
+      :error ->
+        nil
+    end
+  end
+
+  @doc """
+  The most recent typed messages of `message_types` in a conversation,
+  newest first: at most `limit`, not older than `since`, not sent by
+  `exclude_sender`. Used to match numeric replies (#68,
+  docs/protocol/messages.md section 6).
+  """
+  def recent_typed_messages(conversation_id, message_types, since, exclude_sender, limit \\ 20) do
+    query =
+      from(a in Activity,
+        where:
+          a.conversation_id == ^conversation_id and a.type == "message" and
+            a.message_type in ^message_types and a.inserted_at >= ^since and
+            is_nil(a.deleted_at),
+        order_by: [desc: a.seq],
+        limit: ^limit
+      )
+
+    query =
+      if is_binary(exclude_sender),
+        do: where(query, [a], a.sender != ^exclude_sender),
+        else: query
+
+    Repo.all(query)
+  end
+
+  @doc """
+  The payloads of the `genui` chunks of stream `stream_id` in a conversation,
+  oldest first (at most 1000, from the last day).
+  """
+  def genui_stream_payloads(conversation_id, stream_id) do
+    since = DateTime.add(DateTime.utc_now(), -1, :day)
+
+    Repo.all(
+      from(a in Activity,
+        where:
+          a.conversation_id == ^conversation_id and a.message_type == "genui" and
+            a.inserted_at >= ^since and
+            fragment("?->>'streamId' = ?", a.payload, ^stream_id),
+        order_by: [asc: a.seq],
+        limit: 1000,
+        select: a.payload
+      )
+    )
+  end
+
   @doc """
   The activity with `idempotency_key` in any conversation of `channel_id`, or
   nil. Inbound webhooks use it to recognise a re-delivered provider message
@@ -150,6 +330,39 @@ defmodule Converger.Activities do
       limit: 1
     )
     |> Repo.one()
+  end
+
+  @doc """
+  The activity of `conversation_id` stored with `idempotency_key`, or nil.
+  Lets a sender tell a retransmitted send apart from a new one (the
+  WebSocket `ack` reports `duplicate: true`).
+  """
+  def get_activity_by_idempotency_key(_conversation_id, nil), do: nil
+
+  def get_activity_by_idempotency_key(conversation_id, idempotency_key) do
+    Repo.get_by(Activity, conversation_id: conversation_id, idempotency_key: idempotency_key)
+  end
+
+  @doc """
+  The idempotency key (for inbound provider messages: the provider message
+  id, e.g. a WhatsApp `wamid`) of the latest activity in the conversation
+  sent by `sender`, optionally only among activities with `seq <= max_seq`.
+  Nil when there is none.
+  """
+  def latest_idempotency_key(conversation_id, sender, max_seq \\ nil) do
+    query =
+      from(a in Activity,
+        where:
+          a.conversation_id == ^conversation_id and a.sender == ^sender and
+            not is_nil(a.idempotency_key),
+        order_by: [desc: a.seq],
+        limit: 1,
+        select: a.idempotency_key
+      )
+
+    query = if max_seq, do: where(query, [a], a.seq <= ^max_seq), else: query
+
+    Repo.one(query)
   end
 
   @doc """
@@ -182,11 +395,23 @@ defmodule Converger.Activities do
   lock, so it is consistent with a concurrent close: an activity is either
   committed before the close or rejected.
 
+  ## References (`reply_to_id`)
+
+  An activity with a `reply_to_id` refers to another activity, which must
+  belong to the same conversation. For `messageReaction`, `messageUpdate` and
+  `messageDelete` the reference is required and must be a `message`;
+  `messageUpdate` and `messageDelete` must come from the original's sender
+  and cannot target a deleted message. Accepting one stamps `edited_at` or
+  `deleted_at` on the original in the same transaction; the original's
+  content is not rewritten (clients apply the change).
+
   ## Options
 
     * `:allow_closed` - accept the activity even when the conversation is
       closed. Reserved for server-generated lifecycle events (the
       `conversationUpdate` emitted when a conversation is closed).
+    * `:internal` - also accept server-only types such as `deliveryReceipt`
+      (`Activity.internal_types/0`). Never set for client input.
   """
   def create_activity(attrs \\ %{}, opts \\ []) do
     # 1. Optimistic fetch to avoid transaction poisoning
@@ -195,41 +420,80 @@ defmodule Converger.Activities do
         {:ok, activity}
 
       nil ->
-        # 2. Persist the activity and enqueue its deliveries in one transaction
-        #    (transactional outbox): either both commit or neither does.
+        # 2. Persist the activity, enqueue its deliveries and publish its
+        #    `activity.created` platform event in one transaction (transactional
+        #    outbox): all of them commit or none does. A node that dies right
+        #    after the commit loses nothing (#66).
         result =
           Repo.transaction(fn ->
             with {:ok, activity} <- insert_with_seq(attrs, opts),
                  :ok <- enqueue_deliveries(activity) do
-              activity
+              {activity, publish_created(activity)}
             else
               {:error, reason} -> Repo.rollback(reason)
             end
           end)
 
         case result do
-          {:ok, activity} ->
+          {:ok, {activity, event}} ->
+            Converger.Backbone.after_commit(event)
+
             :telemetry.execute([:converger, :activities, :create], %{count: 1}, %{
               tenant_id: activity.tenant_id
             })
+
+            count_unknown_message_type(activity)
 
             # 3. Non-durable work (PubSub broadcast etc.) AFTER successful commit
             Converger.Pipeline.after_commit(activity)
             {:ok, activity}
 
+          # Lost an idempotency race to an activity in another monthly partition
+          # (see insert_with_seq/2): return the winner, like the unique-index path.
+          {:error, {:duplicate, %Activity{} = existing}} ->
+            {:ok, existing}
+
           {:error, reason} when reason in [:delivery_enqueue_failed, :conversation_closed] ->
             {:error, reason}
 
           {:error, changeset} ->
-            if has_idempotency_error?(changeset) do
-              case fetch_existing_activity(attrs) do
-                %Activity{} = activity -> {:ok, activity}
-                nil -> {:error, changeset}
-              end
-            else
-              {:error, changeset}
-            end
+            recover_idempotency_race(changeset, attrs)
         end
+    end
+  end
+
+  # Open renderer-named message types are stored without validating `data`
+  # (docs/protocol/messages.md, rule 5); count them so drift shows up.
+  defp count_unknown_message_type(%Activity{message_type: type} = activity)
+       when is_binary(type) do
+    unless Converger.Activities.MessagePayload.known?(type) do
+      :telemetry.execute([:converger, :activities, :unknown_type], %{count: 1}, %{
+        tenant_id: activity.tenant_id,
+        message_type: type
+      })
+    end
+
+    :ok
+  end
+
+  defp count_unknown_message_type(_activity), do: :ok
+
+  # The `activity.created` platform event, in the create transaction.
+  defp publish_created(activity) do
+    Converger.Webhooks.emit_in_transaction(
+      activity.tenant_id,
+      "activity.created",
+      Converger.Activities.Serializer.canonical(activity)
+    )
+  end
+
+  # The unique index rejected a concurrent duplicate: return the winner.
+  defp recover_idempotency_race(changeset, attrs) do
+    with true <- has_idempotency_error?(changeset),
+         %Activity{} = activity <- fetch_existing_activity(attrs) do
+      {:ok, activity}
+    else
+      _ -> {:error, changeset}
     end
   end
 
@@ -241,14 +505,27 @@ defmodule Converger.Activities do
   # either commits first and rejects this insert, or waits for it) and bumps
   # `updated_at`, which the expiration worker treats as "last activity".
   defp insert_with_seq(attrs, opts) do
-    changeset = Activity.changeset(%Activity{}, attrs)
+    changeset = Activity.changeset(%Activity{}, attrs, internal: Keyword.get(opts, :internal))
 
     with {:ok, _} <- Ecto.Changeset.apply_action(changeset, :insert) do
       conversation_id = Ecto.Changeset.get_field(changeset, :conversation_id)
 
       case next_seq(conversation_id, Keyword.get(opts, :allow_closed, false)) do
+        # The reference is checked after next_seq, under the conversation row
+        # lock, so two concurrent deletes of one message are serialised.
         {:ok, seq} ->
-          changeset |> Ecto.Changeset.put_change(:seq, seq) |> Repo.insert()
+          case existing_under_lock(changeset) do
+            nil ->
+              with {:ok, target} <- check_reference(changeset),
+                   {:ok, activity} <-
+                     changeset |> Ecto.Changeset.put_change(:seq, seq) |> Repo.insert() do
+                stamp_target(activity, target)
+                {:ok, activity}
+              end
+
+            %Activity{} = existing ->
+              {:error, {:duplicate, existing}}
+          end
 
         {:error, :conversation_closed} ->
           {:error, :conversation_closed}
@@ -260,6 +537,118 @@ defmodule Converger.Activities do
       end
     end
   end
+
+  # `activities` is partitioned by month and the unique index on
+  # (conversation_id, idempotency_key) exists per partition only (ADR-0034),
+  # so it cannot see a duplicate that was committed in the previous month's
+  # partition. This lookup closes that gap: it runs after next_seq/2 took the
+  # conversation row lock, which every insert into the conversation takes
+  # first, so a concurrent insert with the same key has either committed (and
+  # is visible here, READ COMMITTED) or is waiting for us. It searches every
+  # partition; the per-partition unique index still catches the common
+  # same-month race at the database level.
+  defp existing_under_lock(changeset) do
+    case Ecto.Changeset.get_field(changeset, :idempotency_key) do
+      nil ->
+        nil
+
+      key ->
+        Repo.get_by(Activity,
+          conversation_id: Ecto.Changeset.get_field(changeset, :conversation_id),
+          idempotency_key: key
+        )
+    end
+  end
+
+  # Returns {:ok, nil | target_activity} or {:error, changeset}.
+  defp check_reference(changeset) do
+    case Ecto.Changeset.get_field(changeset, :reply_to_id) do
+      nil ->
+        {:ok, nil}
+
+      reply_to_id ->
+        conversation_id = Ecto.Changeset.get_field(changeset, :conversation_id)
+        type = Ecto.Changeset.get_field(changeset, :type)
+        sender = Ecto.Changeset.get_field(changeset, :sender)
+
+        target =
+          Repo.one(
+            from(a in Activity,
+              where: a.id == ^reply_to_id and a.conversation_id == ^conversation_id
+            )
+          )
+
+        case reference_error(type, sender, target) do
+          nil ->
+            {:ok, target}
+
+          message ->
+            changeset
+            |> Ecto.Changeset.add_error(:reply_to_id, message)
+            |> Ecto.Changeset.apply_action(:insert)
+        end
+    end
+  end
+
+  defp reference_error(_type, _sender, nil), do: "does not exist in this conversation"
+
+  defp reference_error(type, sender, %Activity{} = target) do
+    cond do
+      type not in Activity.reference_types() -> nil
+      target.type != "message" -> "must reference a message"
+      type == "messageReaction" -> nil
+      target.sender != sender -> "can only #{verb(type)} the sender's own messages"
+      not is_nil(target.deleted_at) -> "references a deleted message"
+      true -> nil
+    end
+  end
+
+  defp verb("messageUpdate"), do: "edit"
+  defp verb("messageDelete"), do: "delete"
+
+  defp stamp_target(%Activity{type: type} = activity, %Activity{} = target)
+       when type in ["messageUpdate", "messageDelete"] do
+    field = if type == "messageUpdate", do: :edited_at, else: :deleted_at
+
+    # `activities` is partitioned by inserted_at (ADR-0034): naming the
+    # original's inserted_at prunes the update to its partition.
+    Repo.update_all(
+      from(a in Activity, where: a.id == ^target.id and a.inserted_at == ^target.inserted_at),
+      set: [{field, activity.inserted_at}, {:updated_at, activity.inserted_at}]
+    )
+
+    :ok
+  end
+
+  defp stamp_target(_activity, _target), do: :ok
+
+  @doc """
+  The activity a provider message id refers to on `channel_id`, or nil: an
+  inbound message whose idempotency key is that id, else an outbound activity
+  whose delivery to the channel got that provider id. Adapters use it to turn
+  a provider reply / reaction reference (a WhatsApp `context.id` or
+  `reaction.message_id`) into a `reply_to_id`.
+  """
+  def get_activity_by_provider_message_id(_channel_id, nil), do: nil
+
+  def get_activity_by_provider_message_id(channel_id, provider_message_id)
+      when is_binary(provider_message_id) do
+    case get_activity_by_channel_idempotency_key(channel_id, provider_message_id) do
+      %Activity{} = activity ->
+        activity
+
+      nil ->
+        case Converger.Deliveries.get_delivery_by_provider_message_id(
+               channel_id,
+               provider_message_id
+             ) do
+          %{activity_id: activity_id} -> Repo.get(Activity, activity_id)
+          nil -> nil
+        end
+    end
+  end
+
+  def get_activity_by_provider_message_id(_channel_id, _id), do: nil
 
   defp next_seq(conversation_id, allow_closed?) do
     query =
@@ -322,8 +711,22 @@ defmodule Converger.Activities do
     |> Repo.update()
   end
 
+  @doc """
+  Deletes an activity and its deliveries. The partitioned tables have no
+  foreign keys (ADR-0034), so the deliveries are removed here rather than by
+  `ON DELETE CASCADE`.
+  """
   def delete_activity(%Activity{} = activity) do
-    Repo.delete(activity)
+    Repo.transaction(fn ->
+      Repo.delete_all(
+        from(d in Converger.Deliveries.Delivery, where: d.activity_id == ^activity.id)
+      )
+
+      case Repo.delete(activity) do
+        {:ok, deleted} -> deleted
+        {:error, changeset} -> Repo.rollback(changeset)
+      end
+    end)
   end
 
   def change_activity(%Activity{} = activity, attrs \\ %{}) do

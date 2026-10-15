@@ -1,20 +1,54 @@
 defmodule ConvergerWeb.Portal.UserLive do
+  @moduledoc """
+  Portal Users page: the current tenant's team members, with a name/email
+  search, role and status filters, sort and keyset "Load more". Only owners
+  and admins manage users; every event re-checks the tenant scope.
+  """
   use ConvergerWeb, :live_view
 
   alias Converger.Accounts
-  alias Converger.Accounts.TenantUser
+  alias Converger.Accounts.{TenantUser, TOTP}
+
+  @filter_keys ~w(q role status sort)
 
   def mount(_params, _session, socket) do
-    tenant_id = socket.assigns.current_tenant.id
     can_manage = socket.assigns.tenant_role in ~w(owner admin)
 
     {:ok,
-     assign(socket,
-       tenant_users: Accounts.list_tenant_users(tenant_id),
+     socket
+     |> stream_configure(:tenant_users, dom_id: &"portal-user-#{&1.id}")
+     |> assign(
        page_title: "Users",
+       min_password_length: Converger.Accounts.PasswordPolicy.min_length(),
        form: to_form(Accounts.change_tenant_user(%TenantUser{})),
-       can_manage: can_manage
+       can_manage: can_manage,
+       filters: default_filters(),
+       next_cursor: nil,
+       has_more: false,
+       loaded_count: 0
      )}
+  end
+
+  defp default_filters, do: %{"q" => "", "role" => "", "status" => "", "sort" => "desc"}
+
+  def handle_params(params, _url, socket) do
+    filters = Map.merge(default_filters(), Map.take(params, @filter_keys))
+    {:noreply, socket |> assign(filters: filters) |> load_page(reset: true)}
+  end
+
+  def handle_event("filter", %{"filters" => filters}, socket) do
+    query =
+      filters
+      |> Map.take(@filter_keys)
+      |> Enum.reject(fn {k, v} -> v == "" or {k, v} == {"sort", "desc"} end)
+
+    {:noreply, push_patch(socket, to: ~p"/portal/users?#{query}")}
+  end
+
+  def handle_event("load_more", _params, socket) do
+    if socket.assigns.has_more,
+      do: {:noreply, load_page(socket, reset: false)},
+      else: {:noreply, socket}
   end
 
   def handle_event("save", %{"tenant_user" => params}, socket) do
@@ -27,10 +61,8 @@ defmodule ConvergerWeb.Portal.UserLive do
           {:noreply,
            socket
            |> put_flash(:info, "User created")
-           |> assign(
-             tenant_users: Accounts.list_tenant_users(tenant_id),
-             form: to_form(Accounts.change_tenant_user(%TenantUser{}))
-           )}
+           |> assign(form: to_form(Accounts.change_tenant_user(%TenantUser{})))
+           |> load_page(reset: true)}
 
         {:error, changeset} ->
           {:noreply, assign(socket, form: to_form(changeset))}
@@ -73,15 +105,40 @@ defmodule ConvergerWeb.Portal.UserLive do
     end
   end
 
+  # Lost authenticator: an owner/admin turns a team member's 2FA off
+  # (audit-logged).
+  def handle_event("reset_2fa", %{"id" => id}, socket) do
+    user = Accounts.get_tenant_user!(id)
+
+    cond do
+      not socket.assigns.can_manage ->
+        {:noreply, put_flash(socket, :error, "You don't have permission to do this.")}
+
+      user.tenant_id != socket.assigns.current_tenant.id ->
+        {:noreply, put_flash(socket, :error, "Unauthorized")}
+
+      true ->
+        case TOTP.reset(user, build_actor(socket)) do
+          {:ok, updated} ->
+            {:noreply,
+             socket
+             |> stream_insert(:tenant_users, updated)
+             |> put_flash(:info, "Two-factor authentication reset for #{user.email}")}
+
+          {:error, _} ->
+            {:noreply, put_flash(socket, :error, "Failed to reset two-factor authentication")}
+        end
+    end
+  end
+
   defp toggle_user_status(socket, user) do
     new_status = if user.status == "active", do: "inactive", else: "active"
 
     case Accounts.update_tenant_user(user, %{status: new_status}, build_actor(socket)) do
-      {:ok, _} ->
+      {:ok, updated} ->
         {:noreply,
-         assign(socket,
-           tenant_users: Accounts.list_tenant_users(socket.assigns.current_tenant.id)
-         )
+         socket
+         |> stream_insert(:tenant_users, updated)
          |> put_flash(:info, "Status updated")}
 
       {:error, _} ->
@@ -93,15 +150,49 @@ defmodule ConvergerWeb.Portal.UserLive do
     case Accounts.delete_tenant_user(user, build_actor(socket)) do
       {:ok, _} ->
         {:noreply,
-         assign(socket,
-           tenant_users: Accounts.list_tenant_users(socket.assigns.current_tenant.id)
-         )
+         socket
+         |> stream_delete(:tenant_users, user)
+         |> assign(loaded_count: max(socket.assigns.loaded_count - 1, 0))
          |> put_flash(:info, "User deleted")}
 
       {:error, _} ->
         {:noreply, put_flash(socket, :error, "Failed to delete user")}
     end
   end
+
+  # Keyset page of the current tenant's users; the tenant scope comes from
+  # the session, never from the URL.
+  defp load_page(socket, reset: reset) do
+    cursor = if reset, do: nil, else: socket.assigns.next_cursor
+    filters = socket.assigns.filters
+
+    scoped =
+      filters
+      |> Map.take(~w(q role status))
+      |> Map.put("tenant_id", socket.assigns.current_tenant.id)
+
+    page =
+      case Accounts.paginate_tenant_users(scoped,
+             cursor: cursor,
+             direction: sort_direction(filters)
+           ) do
+        {:ok, page} -> page
+        {:error, :invalid_cursor} -> %Converger.Pagination.Page{}
+      end
+
+    loaded = if reset, do: 0, else: socket.assigns.loaded_count
+
+    socket
+    |> stream(:tenant_users, page.entries, reset: reset)
+    |> assign(
+      next_cursor: page.next_cursor,
+      has_more: page.has_more,
+      loaded_count: loaded + length(page.entries)
+    )
+  end
+
+  defp sort_direction(%{"sort" => "asc"}), do: :asc
+  defp sort_direction(_), do: :desc
 
   defp build_actor(socket) do
     case socket.assigns[:current_tenant_user] do
@@ -112,86 +203,161 @@ defmodule ConvergerWeb.Portal.UserLive do
 
   def render(assigns) do
     ~H"""
-    <h1>Users</h1>
+    <Layouts.app flash={@flash} nav={@nav}>
+      <.header>
+        Users
+        <:subtitle>Team members who can sign in to this tenant's portal.</:subtitle>
+      </.header>
 
-    <div :if={@can_manage} class="card">
-      <h3>Add User</h3>
-      <.form for={@form} phx-submit="save">
-        <div style="display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap;">
-          <div>
-            <label style="display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.85em; color: #555;">Name</label>
-            <input type="text" name="tenant_user[name]" placeholder="Full Name" required
-              style="padding: 8px; border: 1px solid #ddd; border-radius: 4px;" />
+      <.panel :if={@can_manage} title="Add User">
+        <.form for={@form} id="portal-user-form" phx-submit="save">
+          <div class="grid gap-x-4 sm:grid-cols-2 lg:grid-cols-4">
+            <.input
+              id="tenant_user_name"
+              name="tenant_user[name]"
+              value=""
+              label="Name"
+              placeholder="Full Name"
+              required
+            />
+            <.input
+              id="tenant_user_email"
+              type="email"
+              name="tenant_user[email]"
+              value=""
+              label="Email"
+              placeholder="user@example.com"
+              required
+            />
+            <.input
+              id="tenant_user_password"
+              type="password"
+              name="tenant_user[password]"
+              value=""
+              label="Password"
+              placeholder={"Min #{@min_password_length} characters"}
+              autocomplete="new-password"
+              required
+              minlength={@min_password_length}
+            />
+            <.input
+              id="tenant_user_role"
+              type="select"
+              name="tenant_user[role]"
+              value="member"
+              label="Role"
+              options={~w(member viewer admin)}
+            />
           </div>
-          <div>
-            <label style="display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.85em; color: #555;">Email</label>
-            <input type="email" name="tenant_user[email]" placeholder="user@example.com" required
-              style="padding: 8px; border: 1px solid #ddd; border-radius: 4px;" />
-          </div>
-          <div>
-            <label style="display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.85em; color: #555;">Password</label>
-            <input type="password" name="tenant_user[password]" placeholder="Min 8 characters" required minlength="8"
-              style="padding: 8px; border: 1px solid #ddd; border-radius: 4px;" />
-          </div>
-          <div>
-            <label style="display: block; font-weight: 600; margin-bottom: 4px; font-size: 0.85em; color: #555;">Role</label>
-            <select name="tenant_user[role]" style="padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
-              <option value="member">member</option>
-              <option value="viewer">viewer</option>
-              <option value="admin">admin</option>
-            </select>
-          </div>
-          <button type="submit">Add User</button>
-        </div>
-      </.form>
-    </div>
+          <.button type="submit" variant="primary">Add User</.button>
+        </.form>
+      </.panel>
 
-    <div :if={!@can_manage} class="card" style="background: #fff3e0; color: #e65100;">
-      Only owner and admin users can manage team members.
-    </div>
+      <div :if={!@can_manage} role="alert" class="alert alert-warning">
+        <.icon name="hero-lock-closed" class="size-5" />
+        <span>Only owner and admin users can manage team members.</span>
+      </div>
 
-    <div class="card">
-      <table>
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>Email</th>
-            <th>Role</th>
-            <th>Status</th>
-            <th>Joined</th>
-            <th :if={@can_manage}>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr :for={user <- @tenant_users}>
-            <td><%= user.name %></td>
-            <td><%= user.email %></td>
-            <td>
-              <span class={"badge badge-#{user.role}"}><%= user.role %></span>
-            </td>
-            <td>
-              <span class={"badge badge-#{user.status}"}><%= user.status %></span>
-            </td>
-            <td><small><%= Calendar.strftime(user.inserted_at, "%Y-%m-%d %H:%M") %></small></td>
-            <td :if={@can_manage}>
-              <button phx-click="toggle_status" phx-value-id={user.id} class="badge">
-                <%= if user.status == "active", do: "Disable", else: "Enable" %>
-              </button>
-              <button :if={user.id != @current_tenant_user.id}
-                phx-click="delete" phx-value-id={user.id}
-                phx-confirm="Are you sure you want to remove this user?"
-                class="badge badge-inactive">
+      <.panel>
+        <form id="portal-user-filter" phx-change="filter" phx-submit="filter">
+          <div class="grid gap-x-4 sm:grid-cols-2 lg:grid-cols-4">
+            <.input
+              type="search"
+              id="portal-user-filter-q"
+              name="filters[q]"
+              value={@filters["q"]}
+              label="Search"
+              placeholder="Name or email"
+              phx-debounce="300"
+            />
+            <.input
+              type="select"
+              id="portal-user-filter-role"
+              name="filters[role]"
+              value={@filters["role"]}
+              label="Role"
+              options={[{"All", ""} | ~w(owner admin member viewer)]}
+            />
+            <.input
+              type="select"
+              id="portal-user-filter-status"
+              name="filters[status]"
+              value={@filters["status"]}
+              label="Status"
+              options={[{"All", ""} | ~w(active inactive)]}
+            />
+            <.input
+              type="select"
+              id="portal-user-filter-sort"
+              name="filters[sort]"
+              value={@filters["sort"]}
+              label="Sort"
+              options={[{"Newest first", "desc"}, {"Oldest first", "asc"}]}
+            />
+          </div>
+        </form>
+
+        <div class="overflow-x-auto">
+          <.table id="portal-users" rows={@streams.tenant_users}>
+            <:col :let={{_id, user}} label="Name"><span class="font-medium">{user.name}</span></:col>
+            <:col :let={{_id, user}} label="Email">{user.email}</:col>
+            <:col :let={{_id, user}} label="Role"><.badge value={user.role} /></:col>
+            <:col :let={{_id, user}} label="Status"><.badge value={user.status} /></:col>
+            <:col :let={{_id, user}} label="2FA">
+              <.badge value={if TOTP.enabled?(user), do: "enabled", else: "disabled"}>
+                {if TOTP.enabled?(user), do: "on", else: "off"}
+              </.badge>
+            </:col>
+            <:col :let={{_id, user}} label="Joined">
+              <span class="text-xs text-base-content/70">
+                {Calendar.strftime(user.inserted_at, "%Y-%m-%d %H:%M")}
+              </span>
+            </:col>
+            <:action :let={{_id, user}} :if={@can_manage}>
+              <.button phx-click="toggle_status" phx-value-id={user.id} size="xs" variant="neutral">
+                {if user.status == "active", do: "Disable", else: "Enable"}
+              </.button>
+              <.button
+                :if={TOTP.enabled?(user) && user.id != @current_tenant_user.id}
+                phx-click="reset_2fa"
+                phx-value-id={user.id}
+                data-confirm="Turn off two-factor authentication for this user?"
+                size="xs"
+                variant="neutral"
+              >
+                Reset 2FA
+              </.button>
+              <.button
+                :if={user.id != @current_tenant_user.id}
+                phx-click="delete"
+                phx-value-id={user.id}
+                data-confirm="Are you sure you want to remove this user?"
+                size="xs"
+                variant="error"
+              >
                 Delete
-              </button>
-              <span :if={user.id == @current_tenant_user.id} style="color: #999; font-size: 0.85em;">(you)</span>
-            </td>
-          </tr>
-          <tr :if={@tenant_users == []}>
-            <td colspan="6" style="text-align: center; color: #999;">No users found.</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
+              </.button>
+              <span :if={user.id == @current_tenant_user.id} class="text-xs text-base-content/60">
+                (you)
+              </span>
+            </:action>
+          </.table>
+        </div>
+        <.empty_state :if={@loaded_count == 0}>No users found.</.empty_state>
+        <div class="flex items-center justify-between gap-2">
+          <span class="text-sm text-base-content/60">Showing {@loaded_count} users</span>
+          <.button
+            :if={@has_more}
+            id="load-more-portal-users"
+            phx-click="load_more"
+            size="sm"
+            variant="neutral"
+          >
+            Load more
+          </.button>
+        </div>
+      </.panel>
+    </Layouts.app>
     """
   end
 end

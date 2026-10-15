@@ -22,6 +22,7 @@ Table `participants`:
 | `external_id` | text | Required, at most 255 characters. The provider's identifier, for example `905551112233`. Unique together with `channel_id`. |
 | `display_name` | text, nullable | At most 255 characters, for example the WhatsApp profile name. |
 | `metadata` | map | Default `{}`. |
+| `opted_out_at` | utc_datetime_usec, nullable | Set while the participant has opted out (an SMS `STOP`), cleared when they opt back in. Never cast. See [Opt-out](#opt-out). |
 | `inserted_at`, `updated_at` | utc_datetime_usec | |
 
 `conversations.participant_id` references a participant (`ON DELETE SET NULL`), indexed together with `status`. A participant can have many conversations over time, but at most one is reused at a time: the most recent `active` one.
@@ -84,8 +85,16 @@ Before resolution, the controller looks up the message's `idempotency_key` acros
 
 Outbound adapters find the recipient with `Participants.recipient_for(activity, channel_id)`. It returns the `external_id` of the conversation's participant **when that participant belongs to the target channel** (for example, the WhatsApp number to reply to), and `nil` otherwise. The WhatsApp adapters first look at the activity's `metadata["recipient_phone"]` or `metadata["to"]`, then fall back to the participant. With no recipient at all, the delivery fails permanently: it is dead-lettered without retries.
 
-The pipeline never delivers an inbound message back to its author. When the activity's `sender` equals the conversation participant's `external_id`, the participant's own channel is removed from the delivery targets. Routing rule targets still receive it. See [routing rules](routing-rules.md).
+The pipeline never delivers an inbound message back to its author. When the activity's `sender` equals the conversation participant's `external_id`, the participant's own channel is removed from the delivery targets. So is any target channel on which the sender is a participant (an email reply resolved into another channel's conversation records its sender as a participant of the email channel, see [Email](../channels/email.md#reply-resolution)). Other routing rule targets still receive it. See [routing rules](routing-rules.md).
+
+## Opt-out
+
+A participant can opt out of a channel. The SMS adapters set `opted_out_at` when an inbound message is an opt-out keyword (`STOP`, `UNSUBSCRIBE`...) and clear it on an opt-in keyword (`START`...), see [SMS](../channels/sms.md#opt-out-stop--start). The parsed message carries `"opt_out": "stop"` or `"start"`, and `Converger.Inbound` calls `Participants.set_opted_out/3` before it creates the activity, so a re-delivered webhook never loses the opt-out. The keyword itself is stored as an `event` activity.
+
+While `opted_out_at` is set, `Pipeline.deliver/2` fails every delivery to that participant on that channel: it checks the conversation participant on the target channel and any explicit `metadata.to` / `metadata.recipient_phone` (`Participants.opted_out_recipient/2`). The delivery is marked `failed` with `recipient <external_id> opted out`, without calling the adapter, counting against the circuit breaker or retrying. The flag is per channel: the same number on another channel is another participant.
+
+The flag is returned with the conversation (`participant.opted_out_at`). Migration [`20261012100000_add_opted_out_at_to_participants`](https://github.com/AimTune/converger/blob/main/priv/repo/migrations/20261012100000_add_opted_out_at_to_participants.exs) added the column.
 
 ## Querying by participant
 
-`GET /api/v1/conversations?external_id=905551112233` (tenant API key) returns conversations whose participant on the conversation's channel has this external id. Conversation responses include the preloaded participant as `{"id", "external_id", "display_name"}`.
+`GET /api/v1/conversations?external_id=905551112233` (tenant API key) returns conversations whose participant on the conversation's channel has this external id. Conversation responses include the preloaded participant as `{"id", "external_id", "display_name", "opted_out_at"}`.

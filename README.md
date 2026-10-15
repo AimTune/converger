@@ -23,9 +23,10 @@ The site is built with Docusaurus from [`website/`](website/) and uses [`docs/`]
 - **Multi-tenant by Design**: Full data isolation and tenant-scoped authentication via API Keys.
 - **Real-time Engine**: Powered by Phoenix Channels for instant, bidirectional messaging.
 - **Channels and routing**: Pluggable channel adapters with `inbound`, `outbound` or `duplex` modes, and routing rules that fan activities out to other channels.
+- **Measured Performance**: a [k6 load harness](docs/benchmarks/index.md) drives the release over REST and WebSocket on 1 and 3 nodes every night, publishes p95 latency, connections and memory, and fails on any lost acknowledged message.
 - **Observability Stack**: Built-in support for **OpenTelemetry**, Prometheus, Grafana, Jaeger, and Loki.
 - **Reliability & Safety**:
-    - **Idempotency**: `x-idempotency-key` header (REST) and `idempotency_key` field on the legacy WebSocket `new_activity` push, so clients can retry after a lost reply without duplicates.
+    - **Idempotency**: `x-idempotency-key` header (REST) and `clientId` on the WebSocket `postActivity` push, so clients can retry after a lost reply without duplicates.
     - **Crash-tested**: a [chaos test](docs/chaos.md) kills the node under REST + WebSocket load and checks that no acknowledged message is lost.
     - **Transaction Safety**: Atomic persistence before real-time broadcast.
     - **Rate Limiting**: Tenant and IP-level throttling.
@@ -46,10 +47,24 @@ The site is built with Docusaurus from [`website/`](website/) and uses [`docs/`]
 
 ## 🏎️ Performance
 
-There are no published throughput numbers yet. Earlier figures in this README came from an in-process test and
-were removed because they did not reflect a real deployment. A load testing harness with published baselines is
-planned in [#34](https://github.com/AimTune/converger/issues/34). Durability under failure is tested today by the
-[chaos test](docs/chaos.md).
+Numbers come from the [k6 load harness](docs/benchmarks/index.md) against the production release, and every run
+records the hardware it ran on. Latest published run:
+[2026-10-12, 1 and 3 nodes, before #35](docs/benchmarks/2026-10-12-612ec15.md). This was a developer machine with
+12 vCPUs shared by the nodes, Postgres and the load generator.
+
+| Scenario | 1 node | 3 nodes |
+| --- | --- | --- |
+| REST → WebSocket, 1 000 sockets, ~94 msgs/s: p50 / p95 | 80 / 433 ms | 502 / 1 149 ms |
+| Inbound webhook burst (500/s offered): accepted | 96/s | 75/s |
+| Idle WebSocket connections held / memory each | 10 000 / ~149 KiB | 10 000 / ~128 KiB |
+| Reconnect storm (all 1 000 sockets at once): reconnect p95 | 1.8 s | 6.9 s |
+| Node ready again after SIGKILL | 20 s | 29 s |
+| **Lost acknowledged messages** (every scenario, including restarts and kills) | **0** | **0** |
+
+The 250 ms p95 target is not met yet. In that run the database pool saturated under bursts and requests failed with 500.
+Since [#35](https://github.com/AimTune/converger/issues/35) they get 503 with `Retry-After`; the after-#35 numbers are not published yet. A nightly CI job runs the same scenarios and
+fails on any lost message or a p95 regression of more than 15 %. For the write path alone, run
+`mix converger.loadtest`.
 
 ---
 
@@ -107,6 +122,20 @@ Every list endpoint and admin table is bounded. Page sizes are set in `config :c
 - Conversations are paged newest first with keyset pagination on `(inserted_at, id)`. To get the next page, pass back `next_cursor`. A malformed `cursor` or `watermark` on the tenant API returns `400`. On the Converger API, an invalid watermark starts from the beginning, as it did before.
 - **Behaviour change:** before this change, both activity endpoints returned the whole history when no watermark was given. They now return one page. Clients that need everything must follow `has_more`.
 - **WebSocket replay on join** is capped at `ws_replay_limit` (100) activities. The Converger channel's replayed `activitySet` frame now carries `has_more`. When it is `true`, fetch the rest over REST from that frame's `watermark` and de-duplicate by activity id against live frames. On the legacy `conversation:*` channel, a `replay_truncated` event (`{has_more, last_activity_id}`) follows a truncated replay. Rejoin with that `last_activity_id` to continue.
+
+---
+
+## 🔌 Client WebSocket
+
+Clients connect to `/socket/converger` with a Converger token, join `converger:conversation:<id>`, receive
+`activitySet` frames and send with `postActivity` (see the [WebSocket guide](docs/websocket.md)).
+
+- **Deprecated:** the legacy socket `/socket` (`conversation:<id>`, `new_activity`), `POST /api/v1/tokens` and
+  channel tokens in `x-channel-token`. They keep working until they are removed (no earlier than two minor
+  releases and 6 months later), and every use logs a `Deprecated ... used` warning. See
+  [migrating from the legacy API](docs/api/migrating-from-legacy.md).
+- **Security fix:** `x-channel-token` now accepts only channel tokens. A conversation token or Converger token sent
+  there used to act as the whole tenant and is now refused with `401`; use `x-api-key` server side.
 
 ---
 

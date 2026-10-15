@@ -1,0 +1,56 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "converger-agent"
+dynamic = ["version"]
+description = "Agent SDK for Converger: serve every conversation of a channel over one Protocol v1 socket (turns, streaming, tool traces, GenUI, interrupts), with a LangChain / LangGraph adapter."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [{ name = "AimTune" }]
+keywords = ["converger", "agent", "chatbot", "websocket", "langchain", "langgraph"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Framework :: AsyncIO",
+  "Typing :: Typed",
+]
+dependencies = [
+  "websockets>=13,<16",
+]
+
+[project.optional-dependencies]
+# converger_agent.langchain: serve() for LangChain runnables and LangGraph
+# graphs, bridge_langserve() for runnables behind a LangServe /stream_events.
+langchain = [
+  "langchain-core>=0.3",
+  "langgraph>=0.3",
+  "httpx>=0.25,<1",
+]
+test = [
+  "pytest>=8",
+  "pytest-asyncio>=0.23",
+  "jsonschema>=4.18",
+  "referencing>=0.30",
+]
+
+[project.urls]
+Homepage = "https://converger.aimtune.dev/sdk/agent-python"
+Source = "https://github.com/AimTune/converger/tree/main/packages/agent-python"
+Issues = "https://github.com/AimTune/converger/issues"
+
+[tool.hatch.version]
+path = "src/converger_agent/_version.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/converger_agent"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+markers = [
+  "integration: needs a running Converger server (CONVERGER_AGENT_INTEGRATION=1)",
+  "langchain: needs the [langchain] extra",
+]

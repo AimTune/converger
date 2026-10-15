@@ -1,15 +1,19 @@
 defmodule ConvergerWeb.Admin.ConversationLive do
   use ConvergerWeb, :live_view
 
-  alias Converger.Repo
+  import ConvergerWeb.ConversationComponents
+  import ConvergerWeb.MessageComponents, only: [message_body: 1]
 
   alias Converger.Activities
   alias Converger.Channels
-  alias Converger.Deliveries
+  alias Converger.Conversations
+  alias Converger.Repo
   alias Converger.Tenants
+  alias ConvergerWeb.MessageComponents
 
   @filter_keys ~w(tenant_id channel_id status q sort per_page)
   @per_page_options [25, 50, 100]
+  @manager_roles ~w(super_admin admin)
 
   def mount(_params, _session, socket) do
     {:ok,
@@ -18,6 +22,8 @@ defmodule ConvergerWeb.Admin.ConversationLive do
        channels: Channels.list_channels(),
        filters: default_filters(),
        per_page_options: @per_page_options,
+       can_manage: socket.assigns[:admin_role] in @manager_roles,
+       subscribed_id: nil,
        page_title: "Conversations"
      )}
   end
@@ -41,33 +47,50 @@ defmodule ConvergerWeb.Admin.ConversationLive do
     filters = Map.merge(default_filters(), Map.take(params, @filter_keys))
 
     socket
-    |> assign(filters: filters, next_cursor: nil, loaded_count: 0)
+    |> assign(filters: filters, next_cursor: nil, loaded_count: 0, page_title: "Conversations")
     |> load_conversations(reset: true)
   end
 
   defp apply_action(socket, :show, %{"id" => id}) do
-    conversation =
-      Converger.Conversations.get_conversation!(id)
-      |> Repo.preload([:tenant, :channel])
+    conversation = id |> Conversations.get_conversation!() |> preload_conversation()
 
-    # Subscribe to real-time status updates
-    if connected?(socket) do
+    # Live tail: new activities and delivery status updates.
+    socket
+    |> subscribe(conversation.id)
+    |> assign(conversation: conversation, page_title: "Conversation")
+    |> load_transcript()
+  end
+
+  defp preload_conversation(conversation) do
+    Repo.preload(conversation, [:tenant, :channel, :participant], force: true)
+  end
+
+  defp subscribe(socket, id) do
+    old = socket.assigns.subscribed_id
+
+    if connected?(socket) and old != id do
+      if old, do: ConvergerWeb.Endpoint.unsubscribe("conversation:#{old}")
       ConvergerWeb.Endpoint.subscribe("conversation:#{id}")
+      assign(socket, subscribed_id: id)
+    else
+      socket
     end
+  end
 
-    # Open on the most recent page; older activities load on demand.
-    {activities, has_older} = Activities.page_recent_activities(id)
+  # Open on the most recent page; older activities load on demand.
+  defp load_transcript(socket) do
+    {activities, has_older} = Activities.page_recent_activities(socket.assigns.conversation.id)
 
     socket
     |> assign(
-      conversation: conversation,
-      delivery_map: %{},
+      delivery_map: delivery_map(activities),
       has_older: has_older,
       oldest_seq: activities |> List.first() |> seq_or(nil),
       newest_seq: activities |> List.last() |> seq_or(nil),
-      activity_count: length(activities)
+      activity_count: length(activities),
+      interrupts:
+        MessageComponents.track_interrupts(MessageComponents.interrupt_state(), activities)
     )
-    |> assign_deliveries(activities)
     |> stream(:activities, activities, reset: true)
   end
 
@@ -81,12 +104,12 @@ defmodule ConvergerWeb.Admin.ConversationLive do
     cursor = if reset, do: nil, else: socket.assigns.next_cursor
 
     page =
-      case Converger.Conversations.paginate_conversations(
+      case Conversations.paginate_conversations(
              Map.take(filters, ~w(tenant_id channel_id status q)),
              cursor: cursor,
              limit: per_page(filters),
              direction: sort_direction(filters),
-             preload: [:tenant, :channel]
+             preload: [:tenant, :channel, :participant]
            ) do
         {:ok, page} -> page
         {:error, :invalid_cursor} -> %Converger.Pagination.Page{}
@@ -113,25 +136,6 @@ defmodule ConvergerWeb.Admin.ConversationLive do
   defp sort_direction(%{"sort" => "asc"}), do: :asc
   defp sort_direction(_), do: :desc
 
-  defp assign_deliveries(socket, activities) do
-    activity_ids = Enum.map(activities, & &1.id)
-    deliveries = Deliveries.list_deliveries_for_activities(activity_ids)
-
-    delivery_map =
-      Enum.group_by(deliveries, & &1.activity_id)
-      |> Map.new(fn {activity_id, dels} ->
-        # Pick the most advanced delivery status for display
-        best =
-          Enum.max_by(dels, &Converger.Deliveries.Delivery.status_rank(&1.status), fn ->
-            hd(dels)
-          end)
-
-        {activity_id, best}
-      end)
-
-    assign(socket, delivery_map: Map.merge(socket.assigns.delivery_map, delivery_map))
-  end
-
   def handle_event("filter", %{"filters" => filters}, socket) do
     params = Map.take(filters, @filter_keys)
     {:noreply, push_patch(socket, to: ~p"/admin/conversations?#{params}")}
@@ -153,12 +157,12 @@ defmodule ConvergerWeb.Admin.ConversationLive do
         Activities.page_recent_activities(conversation.id, before_seq: oldest_seq)
 
       socket =
-        socket
-        |> assign_deliveries(activities)
-        |> assign(
+        assign(socket,
+          delivery_map: Map.merge(socket.assigns.delivery_map, delivery_map(activities)),
           has_older: has_older,
           oldest_seq: activities |> List.first() |> seq_or(oldest_seq),
-          activity_count: socket.assigns.activity_count + length(activities)
+          activity_count: socket.assigns.activity_count + length(activities),
+          interrupts: MessageComponents.track_interrupts(socket.assigns.interrupts, activities)
         )
 
       # Prepend: inserting newest-first at index 0 keeps ascending order.
@@ -173,19 +177,58 @@ defmodule ConvergerWeb.Admin.ConversationLive do
     end
   end
 
-  def handle_info(
-        %{topic: "conversation:" <> _, event: "delivery_status", payload: payload},
-        socket
-      ) do
-    delivery_map =
-      Map.put(socket.assigns.delivery_map, payload.activity_id, %{
-        status: payload.status,
-        sent_at: payload.sent_at,
-        delivered_at: payload.delivered_at,
-        read_at: payload.read_at
-      })
+  def handle_event(action, _params, %{assigns: %{live_action: :show}} = socket)
+      when action in ["close", "reopen"] do
+    if socket.assigns.can_manage do
+      change_status(socket, action)
+    else
+      {:noreply, put_flash(socket, :error, "You don't have permission to do this.")}
+    end
+  end
 
-    socket = assign(socket, delivery_map: delivery_map)
+  defp change_status(socket, action) do
+    conversation = socket.assigns.conversation
+    opts = [actor: build_actor(socket)]
+
+    result =
+      case action do
+        "close" -> Conversations.close_conversation(conversation, opts)
+        "reopen" -> Conversations.reopen_conversation(conversation, opts)
+      end
+
+    case result do
+      {:ok, updated} ->
+        {:noreply,
+         socket
+         |> assign(conversation: preload_conversation(updated))
+         |> load_transcript()
+         |> put_flash(:info, "Conversation #{updated.status}")}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Could not update conversation")}
+    end
+  end
+
+  defp build_actor(socket) do
+    case socket.assigns[:current_admin_user] do
+      %{email: email} -> %{type: "admin", id: email}
+      _ -> %{type: "admin", id: "unknown"}
+    end
+  end
+
+  def handle_info(
+        %{topic: "conversation:" <> id, event: "new_activity", payload: payload},
+        %{assigns: %{live_action: :show, conversation: %{id: id}}} = socket
+      ) do
+    {:noreply, tail_activity(socket, struct(Activities.Activity, payload))}
+  end
+
+  def handle_info(
+        %{topic: "conversation:" <> id, event: "delivery_status", payload: payload},
+        %{assigns: %{live_action: :show, conversation: %{id: id}}} = socket
+      ) do
+    socket =
+      assign(socket, delivery_map: put_delivery_status(socket.assigns.delivery_map, payload))
 
     # Stream rows only re-render when re-inserted; refresh the row if it is
     # within the loaded window.
@@ -194,11 +237,45 @@ defmodule ConvergerWeb.Admin.ConversationLive do
 
   def handle_info(%{topic: "conversation:" <> _}, socket), do: {:noreply, socket}
 
-  defp refresh_activity_row(%{assigns: %{live_action: :show}} = socket, activity_id) do
+  # Append a live activity. Deduplicated on `seq`: after a close/reopen the
+  # lifecycle event is both reloaded and broadcast.
+  defp tail_activity(socket, activity) do
+    newest = socket.assigns.newest_seq
+    new? = is_nil(newest) or activity.seq > newest
+
+    socket =
+      socket
+      |> assign(
+        delivery_map: Map.merge(socket.assigns.delivery_map, delivery_map([activity])),
+        newest_seq: if(new?, do: activity.seq, else: newest),
+        oldest_seq: socket.assigns.oldest_seq || activity.seq,
+        activity_count: socket.assigns.activity_count + if(new?, do: 1, else: 0),
+        interrupts: MessageComponents.track_interrupts(socket.assigns.interrupts, [activity])
+      )
+      |> stream_insert(:activities, activity)
+      |> rerender_resolved_interrupt(activity)
+
+    # A close/reopen made elsewhere (API, expiry): refresh the status.
+    if Conversations.lifecycle_event?(activity) do
+      assign(socket, conversation: preload_conversation(socket.assigns.conversation))
+    else
+      socket
+    end
+  end
+
+  # An interrupt resolved live: re-insert its row so it shows as resolved.
+  defp rerender_resolved_interrupt(socket, activity) do
+    case MessageComponents.resolved_interrupt_row(socket.assigns.interrupts, activity) do
+      nil -> socket
+      interrupt -> stream_insert(socket, :activities, interrupt)
+    end
+  end
+
+  defp refresh_activity_row(socket, activity_id) do
     %{conversation: conversation, oldest_seq: oldest, newest_seq: newest} = socket.assigns
 
     with true <- is_integer(oldest) and is_integer(newest),
-         %Activities.Activity{} = activity <- Converger.Repo.get(Activities.Activity, activity_id),
+         %Activities.Activity{} = activity <- Repo.get(Activities.Activity, activity_id),
          true <- activity.conversation_id == conversation.id,
          true <- activity.seq >= oldest and activity.seq <= newest do
       stream_insert(socket, :activities, activity)
@@ -206,8 +283,6 @@ defmodule ConvergerWeb.Admin.ConversationLive do
       _ -> socket
     end
   end
-
-  defp refresh_activity_row(socket, _activity_id), do: socket
 
   def render(assigns) do
     case assigns.live_action do
@@ -222,53 +297,51 @@ defmodule ConvergerWeb.Admin.ConversationLive do
 
   defp render_index(assigns) do
     ~H"""
-    <h1>Conversations</h1>
+    <Layouts.app flash={@flash} nav={@nav}>
+      <.header>
+        Conversations
+        <:subtitle>Conversations across all tenants and channels.</:subtitle>
+      </.header>
 
-    <div class="card" style="margin-bottom: 20px;">
-      <form phx-change="filter" id="filter-form">
-        <div style="display: flex; gap: 15px; align-items: flex-end;">
-          <div class="input-group" style="margin-bottom: 0;">
-            <label>Tenant</label>
-            <select name="filters[tenant_id]">
-              <option value="">All Tenants</option>
-              <option :for={t <- @tenants} value={t.id} selected={@filters["tenant_id"] == t.id}>
-                <%= t.name %>
-              </option>
-            </select>
-          </div>
-
-          <div class="input-group" style="margin-bottom: 0;">
-            <label>Channel</label>
-            <select name="filters[channel_id]">
-              <option value="">All Channels</option>
-              <option :for={c <- @channels} value={c.id} selected={@filters["channel_id"] == c.id}>
-                <%= c.name %> (<%= c.type %> <%= mode_arrow(c.mode) %>) - <%= c.tenant.name %>
-              </option>
-            </select>
-          </div>
-
-          <div class="input-group" style="margin-bottom: 0;">
-            <label>Status</label>
-            <select name="filters[status]">
-              <option value="">All Statuses</option>
-              <option value="active" selected={@filters["status"] == "active"}>Active</option>
-              <option value="closed" selected={@filters["status"] == "closed"}>Closed</option>
-            </select>
-          </div>
-
-          <div style="margin-bottom: 0;">
+      <.panel title="Filters">
+        <form phx-change="filter" id="filter-form">
+          <div class="grid items-end gap-x-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
             <.input
-              type="text"
+              type="search"
               id="filters_q"
               name="filters[q]"
               value={@filters["q"]}
-              label="Conversation ID"
-              placeholder="Exact UUID"
-              phx-debounce="400"
+              label="Search"
+              placeholder="Conversation ID or participant"
+              phx-debounce="300"
             />
-          </div>
-
-          <div style="margin-bottom: 0;">
+            <.input
+              type="select"
+              id="filters_tenant_id"
+              name="filters[tenant_id]"
+              value={@filters["tenant_id"]}
+              label="Tenant"
+              prompt="All Tenants"
+              options={Enum.map(@tenants, &{&1.name, &1.id})}
+            />
+            <.input
+              type="select"
+              id="filters_channel_id"
+              name="filters[channel_id]"
+              value={@filters["channel_id"]}
+              label="Channel"
+              prompt="All Channels"
+              options={Enum.map(@channels, &{channel_option_label(&1), &1.id})}
+            />
+            <.input
+              type="select"
+              id="filters_status"
+              name="filters[status]"
+              value={@filters["status"]}
+              label="Status"
+              prompt="All Statuses"
+              options={[{"Active", "active"}, {"Closed", "closed"}]}
+            />
             <.input
               type="select"
               id="filters_sort"
@@ -277,9 +350,6 @@ defmodule ConvergerWeb.Admin.ConversationLive do
               label="Sort"
               options={[{"Newest first", "desc"}, {"Oldest first", "asc"}]}
             />
-          </div>
-
-          <div style="margin-bottom: 0;">
             <.input
               type="select"
               id="filters_per_page"
@@ -288,147 +358,142 @@ defmodule ConvergerWeb.Admin.ConversationLive do
               label="Page size"
               options={Enum.map(@per_page_options, &{to_string(&1), to_string(&1)})}
             />
+            <div class="mb-2">
+              <.button href={~p"/admin/conversations"} variant="ghost">
+                <.icon name="hero-x-mark" /> Reset
+              </.button>
+            </div>
           </div>
+        </form>
+      </.panel>
 
-          <a href={~p"/admin/conversations"} class="button button-outline" style="margin-bottom: 2px;">Reset</a>
+      <.panel>
+        <div class="overflow-x-auto">
+          <.table id="conversations" rows={@streams.conversations}>
+            <:col :let={{_id, c}} label="ID">
+              <span class="font-mono text-xs break-all">{c.id}</span>
+            </:col>
+            <:col :let={{_id, c}} label="Participant">
+              <.participant_cell participant={c.participant} />
+            </:col>
+            <:col :let={{_id, c}} label="Tenant">{c.tenant.name}</:col>
+            <:col :let={{_id, c}} label="Channel">
+              <span class="inline-flex items-center gap-1">
+                {c.channel.name}
+                <.badge value={c.channel.mode} title={c.channel.mode}>
+                  {mode_arrow(c.channel.mode)}
+                </.badge>
+              </span>
+            </:col>
+            <:col :let={{_id, c}} label="Status"><.badge value={c.status} /></:col>
+            <:col :let={{_id, c}} label="Created">
+              <span class="text-xs whitespace-nowrap">{c.inserted_at}</span>
+            </:col>
+            <:action :let={{_id, c}}>
+              <.button patch={~p"/admin/conversations/#{c.id}"} size="xs" variant="neutral">
+                View Events
+              </.button>
+            </:action>
+          </.table>
         </div>
-      </form>
-    </div>
-
-    <div class="card">
-      <table>
-        <thead>
-          <tr>
-            <th>ID</th>
-            <th>Tenant</th>
-            <th>Channel</th>
-            <th>Status</th>
-            <th>Created</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody id="conversations" phx-update="stream">
-          <tr :for={{dom_id, c} <- @streams.conversations} id={dom_id}>
-            <td><small><%= c.id %></small></td>
-            <td><%= c.tenant.name %></td>
-            <td>
-              <%= c.channel.name %>
-              <span class={"badge badge-#{c.channel.mode}"} style="margin-left: 4px; font-size: 0.75em;">
-                <%= mode_arrow(c.channel.mode) %>
-              </span>
-            </td>
-            <td>
-              <span class={"badge badge-#{c.status}"}>
-                <%= c.status %>
-              </span>
-            </td>
-            <td><%= c.inserted_at %></td>
-            <td>
-              <.link patch={~p"/admin/conversations/#{c.id}"} class="button button-clear">View Events</.link>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-      <p :if={@loaded_count == 0} style="text-align: center; color: #999;">No conversations found</p>
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;">
-        <small style="color: #666;">Showing <%= @loaded_count %> conversations</small>
-        <button :if={@has_more} id="load-more-conversations" phx-click="load_more" class="button button-outline">
-          Load more
-        </button>
-      </div>
-    </div>
+        <.empty_state :if={@loaded_count == 0}>No conversations found</.empty_state>
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <span class="text-sm text-base-content/60">Showing {@loaded_count} conversations</span>
+          <.button
+            :if={@has_more}
+            id="load-more-conversations"
+            phx-click="load_more"
+            size="sm"
+            variant="neutral"
+          >
+            Load more
+          </.button>
+        </div>
+      </.panel>
+    </Layouts.app>
     """
+  end
+
+  defp channel_option_label(c) do
+    "#{c.name} (#{c.type} #{mode_arrow(c.mode)}) - #{c.tenant.name}"
   end
 
   defp render_show(assigns) do
     ~H"""
-    <div style="margin-bottom: 20px;">
-      <.link patch={~p"/admin/conversations"} class="button button-outline">&larr; Back to List</.link>
-    </div>
+    <Layouts.app flash={@flash} nav={@nav}>
+      <.header>
+        Conversation Details
+        <:subtitle><span class="font-mono text-xs break-all">{@conversation.id}</span></:subtitle>
+        <:actions>
+          <.button patch={~p"/admin/conversations"} size="sm" variant="ghost">
+            <.icon name="hero-arrow-left" /> Back to List
+          </.button>
+        </:actions>
+      </.header>
 
-    <h1>Conversation Details</h1>
+      <.panel>
+        <dl class="grid gap-4 sm:grid-cols-2">
+          <div>
+            <dt class="text-sm text-base-content/60">ID</dt>
+            <dd><code class="font-mono text-xs break-all">{@conversation.id}</code></dd>
+          </div>
+          <div>
+            <dt class="text-sm text-base-content/60">Channel</dt>
+            <dd class="flex flex-wrap items-center gap-1">
+              {@conversation.channel.name} ({@conversation.channel.type})
+              <.badge value={@conversation.channel.mode} title={@conversation.channel.mode}>
+                {mode_arrow(@conversation.channel.mode)}
+              </.badge>
+            </dd>
+          </div>
+          <div>
+            <dt class="text-sm text-base-content/60">Tenant</dt>
+            <dd>{@conversation.tenant.name}</dd>
+          </div>
+          <div>
+            <dt class="text-sm text-base-content/60">Status</dt>
+            <dd id="conversation-status"><.badge value={@conversation.status} /></dd>
+          </div>
+        </dl>
+        <.status_actions :if={@can_manage} conversation={@conversation} />
+      </.panel>
 
-    <div class="card" style="margin-bottom: 20px;">
-      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
-        <div>
-          <label>ID</label>
-          <p><code><%= @conversation.id %></code></p>
-          <label>Tenant</label>
-          <p><%= @conversation.tenant.name %></p>
+      <.participant_panel conversation={@conversation} />
+
+      <.panel title="Events (Activities)">
+        <:actions><.live_indicator connected={@subscribed_id != nil} /></:actions>
+        <div :if={@has_older} class="text-center">
+          <.button id="load-older-activities" phx-click="load_older" size="sm" variant="neutral">
+            <.icon name="hero-arrow-up" /> Load earlier activities
+          </.button>
         </div>
-        <div>
-          <label>Channel</label>
-          <p>
-            <%= @conversation.channel.name %> (<%= @conversation.channel.type %>)
-            <span class={"badge badge-#{@conversation.channel.mode}"}><%= mode_arrow(@conversation.channel.mode) %></span>
-          </p>
-          <label>Status</label>
-          <p>
-            <span class={"badge badge-#{@conversation.status}"}>
-              <%= @conversation.status %>
-            </span>
-          </p>
+        <div class="overflow-x-auto">
+          <table class="table table-sm table-zebra">
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Sender</th>
+                <th>Message</th>
+                <th>Delivery</th>
+              </tr>
+            </thead>
+            <tbody id="activities" phx-update="stream">
+              <tr :for={{dom_id, a} <- @streams.activities} id={dom_id}>
+                <td class="text-xs whitespace-nowrap">{a.inserted_at}</td>
+                <td class="font-semibold">{a.sender}</td>
+                <td class="break-words">
+                  <.message_body activity={a} resolved_interrupts={@interrupts.resolved} />
+                </td>
+                <td>
+                  <.delivery_badge id={"delivery-#{a.id}"} delivery={Map.get(@delivery_map, a.id)} />
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
-      </div>
-    </div>
-
-    <h2>Events (Activities)</h2>
-    <div class="card">
-      <div :if={@has_older} style="text-align: center; margin-bottom: 10px;">
-        <button id="load-older-activities" phx-click="load_older" class="button button-outline">
-          &uarr; Load earlier activities
-        </button>
-      </div>
-      <table>
-        <thead>
-          <tr>
-            <th>Time</th>
-            <th>Sender</th>
-            <th>Message</th>
-            <th>Delivery</th>
-          </tr>
-        </thead>
-        <tbody id="activities" phx-update="stream">
-          <tr :for={{dom_id, a} <- @streams.activities} id={dom_id}>
-            <td style="white-space: nowrap;"><small><%= a.inserted_at %></small></td>
-            <td><strong><%= a.sender %></strong></td>
-            <td><%= a.text %></td>
-            <td><%= delivery_badge(Map.get(@delivery_map, a.id)) %></td>
-          </tr>
-        </tbody>
-      </table>
-      <p :if={@activity_count == 0} style="text-align: center; color: #999;">No activities found</p>
-    </div>
+        <.empty_state :if={@activity_count == 0}>No activities found</.empty_state>
+      </.panel>
+    </Layouts.app>
     """
   end
-
-  defp delivery_badge(nil), do: ""
-
-  defp delivery_badge(%{status: "pending"}) do
-    assigns = %{}
-    ~H|<span class="badge" title="Pending">...</span>|
-  end
-
-  defp delivery_badge(%{status: "sent"}) do
-    assigns = %{}
-    ~H|<span class="badge badge-outbound" title="Sent">&#10003;</span>|
-  end
-
-  defp delivery_badge(%{status: "delivered"}) do
-    assigns = %{}
-    ~H|<span class="badge badge-active" title="Delivered">&#10003;&#10003;</span>|
-  end
-
-  defp delivery_badge(%{status: "read"}) do
-    assigns = %{}
-
-    ~H|<span class="badge badge-active" title="Read" style="color: #2196F3;">&#10003;&#10003;</span>|
-  end
-
-  defp delivery_badge(%{status: "failed"}) do
-    assigns = %{}
-    ~H|<span class="badge badge-inactive" title="Failed">&#10007;</span>|
-  end
-
-  defp delivery_badge(_), do: ""
 end

@@ -8,21 +8,22 @@ defmodule Converger.Channels.Adapters.Echo do
   never produces a second reply.
   """
 
-  @behaviour Converger.Channels.Adapter
+  use Converger.Channels.Adapter, type: "echo"
 
+  # Outbound only, so its only supported mode is `outbound`. Echoes chat
+  # messages only; reactions, edits and deletes reach it downgraded to text
+  # (or skipped), see Converger.Activities.Downgrade.
   @impl true
-  def supported_modes, do: ~w(outbound)
-
-  @impl true
-  def validate_config(_config), do: :ok
+  def capabilities, do: [:outbound, activity_types: ~w(message)]
 
   @impl true
   def deliver_activity(_channel, %{metadata: %{"echo_of" => _}}), do: :ok
 
-  def deliver_activity(_channel, activity) do
+  def deliver_activity(channel, activity) do
     result =
       Converger.Activities.create_activity(%{
         "tenant_id" => activity.tenant_id,
+        "source_channel_id" => channel.id,
         "conversation_id" => activity.conversation_id,
         "text" => activity.text,
         "sender" => "bot",

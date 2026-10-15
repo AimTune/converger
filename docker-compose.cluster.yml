@@ -1,0 +1,31 @@
+# Two clustered Converger nodes on one machine (libcluster Gossip strategy
+# over the compose network), for trying out and testing clustering:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.cluster.yml up -d --build
+#
+# Node A is published on http://localhost:4000, node B on
+# http://localhost:4001. Requires RELEASE_COOKIE and CLUSTER_GOSSIP_SECRET in
+# .env (see .env.example). See docs/operations/clustering.md.
+x-cluster-env: &cluster_env
+  CLUSTER_STRATEGY: gossip
+  RELEASE_COOKIE: ${RELEASE_COOKIE:?RELEASE_COOKIE is not set. Add it to .env (openssl rand -base64 48)}
+  CLUSTER_GOSSIP_SECRET: ${CLUSTER_GOSSIP_SECRET:?CLUSTER_GOSSIP_SECRET is not set. Add it to .env (openssl rand -hex 32)}
+
+services:
+  app:
+    environment:
+      <<: *cluster_env
+
+  app2:
+    extends:
+      file: docker-compose.yml
+      service: app
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    ports: !override
+      - "4001:4000"
+    environment:
+      <<: *cluster_env

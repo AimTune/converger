@@ -1,6 +1,9 @@
 defmodule ConvergerWeb.SocketsTest do
   use ConvergerWeb.ChannelCase, async: false
 
+  # The legacy socket logs a deprecation warning per connection.
+  @moduletag :capture_log
+
   alias Converger.Auth.{ConvergerToken, Token}
   alias ConvergerWeb.{ConvergerChannel, ConvergerSocket, ConversationChannel, Sockets, UserSocket}
 

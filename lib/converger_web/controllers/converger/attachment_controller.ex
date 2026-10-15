@@ -2,21 +2,46 @@ defmodule ConvergerWeb.ConvergerAPI.AttachmentController do
   @moduledoc """
   `GET /api/v1/converger/attachments/:id`
 
-  Authenticated (converger token) and tenant scoped: an attachment of
-  another tenant, or of another conversation when the token is bound to a
-  conversation, is reported as 404. Local files are streamed; cloud
+  Authenticated (converger token): an attachment of another tenant, of a
+  conversation on another channel, or of another conversation when the
+  token is bound to one, is reported as 404. Local files are streamed; cloud
   backends redirect (302) to a short-lived signed storage or CDN URL.
   """
   use ConvergerWeb, :controller
+  use OpenApiSpex.ControllerSpecs
 
-  alias Converger.Uploads
+  # Token permissions (ADR-0059).
+  plug ConvergerWeb.Plugs.RequirePermission, "read"
+
+  import ConvergerWeb.ApiSchemas
+
+  alias Converger.{Conversations, Uploads}
   alias Converger.Uploads.Attachment
+  alias ConvergerWeb.APIError
+  alias ConvergerWeb.Helpers.Authorization
 
-  defp not_found(conn) do
-    conn
-    |> put_status(:not_found)
-    |> json(%{errors: %{detail: "Not Found"}})
-  end
+  tags(["Client: Attachments"])
+  security([%{"convergerToken" => []}])
+
+  operation(:show,
+    summary: "Download an attachment",
+    description:
+      "Local files are streamed; cloud backends answer 302 to a short-lived signed URL. Other tenants', channels' and conversations' attachments are 404.",
+    operation_id: "downloadAttachment",
+    parameters: [id: path_id("Attachment id")],
+    responses:
+      with_errors(
+        %{
+          200 =>
+            {"The file", "application/octet-stream",
+             %OpenApiSpex.Schema{type: :string, format: :binary}},
+          302 => "Redirect to a signed storage URL"
+        },
+        [401, 403, 404, 502]
+      )
+  )
+
+  defp not_found(conn), do: APIError.send_error(conn, "not_found")
 
   def show(conn, %{"id" => id}) do
     claims = conn.assigns.converger_claims
@@ -29,11 +54,22 @@ defmodule ConvergerWeb.ConvergerAPI.AttachmentController do
     end
   end
 
-  defp authorize_conversation(%{"conversation_id" => conv_id}, %Attachment{conversation_id: id})
-       when is_binary(conv_id) and is_binary(id) and conv_id != id,
-       do: :not_found
+  # The attachment's conversation must be visible to the token: bound to it
+  # (conversation tokens) and on the token's channel (every token).
+  # Attachments without a conversation are never served through this API.
+  defp authorize_conversation(claims, %Attachment{conversation_id: conversation_id})
+       when is_binary(conversation_id) do
+    with :ok <- Authorization.authorize_conversation(claims, conversation_id),
+         %Conversations.Conversation{} = conversation <-
+           Conversations.get_conversation(conversation_id, claims["tenant_id"]),
+         :ok <- Authorization.authorize_channel(claims, conversation) do
+      :ok
+    else
+      _ -> :not_found
+    end
+  end
 
-  defp authorize_conversation(_claims, _attachment), do: :ok
+  defp authorize_conversation(_claims, _attachment), do: :not_found
 
   defp send_attachment(conn, _attachment, {:redirect, url}) do
     conn
@@ -62,9 +98,7 @@ defmodule ConvergerWeb.ConvergerAPI.AttachmentController do
   defp send_attachment(conn, _attachment, {:error, :not_found}), do: not_found(conn)
 
   defp send_attachment(conn, _attachment, {:error, _reason}) do
-    conn
-    |> put_status(:bad_gateway)
-    |> json(%{error: "Attachment storage unavailable"})
+    APIError.send_error(conn, "upstream_unavailable", "Attachment storage unavailable")
   end
 
   # The content type was sniffed and allow-listed at upload time

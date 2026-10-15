@@ -1,0 +1,43 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "converger"
+dynamic = ["version"]
+description = "Server-side Python SDK for Converger: REST client (sync and async), Protocol v1 WebSocket client with resume, and webhook signature verification."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [{ name = "AimTune" }]
+keywords = ["converger", "chat", "webhooks", "websocket", "sdk"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Framework :: AsyncIO",
+  "Typing :: Typed",
+]
+dependencies = [
+  "httpx>=0.25,<1",
+  "pydantic>=2.5,<3",
+  "websockets>=13,<16",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8", "pytest-asyncio>=0.23"]
+codegen = ["datamodel-code-generator>=0.25"]
+
+[project.urls]
+Homepage = "https://converger.aimtune.dev/sdk/python"
+Source = "https://github.com/AimTune/converger/tree/main/packages/client-python"
+Issues = "https://github.com/AimTune/converger/issues"
+
+[tool.hatch.version]
+path = "src/converger/_version.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/converger"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+markers = ["integration: needs a running Converger server (CONVERGER_INTEGRATION=1)"]

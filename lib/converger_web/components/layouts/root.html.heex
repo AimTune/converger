@@ -4,50 +4,47 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="csrf-token" content={get_csrf_token()} />
-    <.live_title suffix=" · Converger Admin">
-      <%= assigns[:page_title] || "Converger" %>
-    </.live_title>
-    <script src="https://cdn.jsdelivr.net/npm/phoenix@1.8.15/priv/static/phoenix.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/phoenix_live_view@1.2.12/priv/static/phoenix_live_view.min.js"></script>
-    <script>
-      // Initialize LiveSocket
-      let liveSocket = new window.LiveView.LiveSocket("/live", window.Phoenix.Socket, {
-        params: {_csrf_token: document.querySelector("meta[name='csrf-token']").getAttribute("content")}
-      })
-      liveSocket.connect()
-      window.liveSocket = liveSocket
+    <.live_title default="Converger" suffix={assigns[:page_title] && title_suffix(assigns[:nav])} phx-no-format>{assigns[:page_title]}</.live_title>
+    <link phx-track-static rel="stylesheet" href={~p"/assets/css/app.css"} />
+    <script defer phx-track-static type="text/javascript" src={~p"/assets/js/app.js"}>
     </script>
-    <style>
-      /* Minimal CSS for Admin Panel since we have no assets pipeline */
-      body { font-family: system-ui, sans-serif; padding: 20px; background: #f0f2f5; }
-      header { background: #fff; padding: 15px; margin-bottom: 20px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-      nav a { margin-right: 15px; text-decoration: none; color: #333; font-weight: bold; }
-      nav a:hover { color: #0069d9; }
-      .card { background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 20px; }
-      table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-      th, td { text-align: left; padding: 10px; border-bottom: 1px solid #eee; }
-      th { background-color: #f8f9fa; }
-      .badge { padding: 4px 8px; border-radius: 4px; font-size: 0.8em; }
-      .badge-active { background: #d4edda; color: #155724; }
-      .badge-inactive { background: #f8d7da; color: #721c24; }
-      .badge-inbound { background: #e3f2fd; color: #1565c0; }
-      .badge-outbound { background: #fce4ec; color: #c62828; }
-      .badge-duplex { background: #e8f5e9; color: #2e7d32; }
-      button { cursor: pointer; padding: 5px 10px; background: #007bff; color: white; border: none; border-radius: 4px; }
-      button:hover { background: #0056b3; }
-    </style>
+    <script>
+      (() => {
+        const systemTheme = () => matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+
+        const setTheme = (theme) => {
+          if (theme === "system") {
+            localStorage.removeItem("phx:theme");
+            document.documentElement.setAttribute("data-theme", systemTheme());
+            document.documentElement.setAttribute("data-theme-source", "system");
+          } else {
+            localStorage.setItem("phx:theme", theme);
+            document.documentElement.setAttribute("data-theme", theme);
+            document.documentElement.setAttribute("data-theme-source", "user");
+          }
+        };
+        if (!document.documentElement.hasAttribute("data-theme")) {
+          setTheme(localStorage.getItem("phx:theme") || "system");
+        }
+        window.addEventListener("storage", (e) => e.key === "phx:theme" && setTheme(e.newValue || "system"));
+        // LiveView pages dispatch phx:set-theme; plain pages (login) have no LiveSocket.
+        window.addEventListener("phx:set-theme", (e) => setTheme(e.target.dataset.phxTheme));
+        document.addEventListener("DOMContentLoaded", () => {
+          if (document.querySelector("[data-phx-session]")) return;
+          document.querySelectorAll("button[data-phx-theme]").forEach((el) => {
+            el.addEventListener("click", () => setTheme(el.dataset.phxTheme));
+          });
+        });
+
+        matchMedia("(prefers-color-scheme: dark)").addEventListener("change", (e) => {
+          if (document.documentElement.getAttribute("data-theme-source") === "system") {
+            document.documentElement.setAttribute("data-theme", systemTheme());
+          }
+        });
+      })();
+    </script>
   </head>
-  <body>
-    <header>
-      <nav>
-        <a href={~p"/admin"}>Dashboard</a>
-        <a href={~p"/admin/tenants"}>Tenants</a>
-        <a href={~p"/admin/channels"}>Channels</a>
-        <a href={~p"/admin/conversations"}>Conversations</a>
-        <a href={~p"/admin/routing_rules"}>Routing Rules</a>
-        <a href={~p"/admin/audit_logs"}>Audit Logs</a>
-      </nav>
-    </header>
-    <%= @inner_content %>
+  <body class="bg-base-200/40">
+    {@inner_content}
   </body>
 </html>

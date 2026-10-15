@@ -4,6 +4,10 @@ defmodule ConvergerWeb.Endpoint do
   # The session will be stored in the cookie and signed,
   # this means its contents can be read but not tampered with.
   # Set :encryption_salt if you would also like to encrypt it.
+  # Admin / portal logins are server-side sessions (ADR-0058): the cookie
+  # only carries the session token. Its max_age (the absolute session
+  # lifetime, SESSION_MAX_AGE_SECONDS) is added at runtime, see
+  # session_options/0.
   @session_options [
     store: :cookie,
     key: "_converger_key",
@@ -11,22 +15,49 @@ defmodule ConvergerWeb.Endpoint do
     same_site: "Lax"
   ]
 
-  socket "/socket", ConvergerWeb.UserSocket,
-    websocket: true,
-    longpoll: false
+  # Client sockets. Frames above the hard cap close the socket with 1009;
+  # refused connections (draining) get 503. Per-socket limits are enforced by
+  # ConvergerWeb.SocketGuard; on shutdown sockets are drained in batches
+  # (ConvergerWeb.Drain). See docs/operations/websocket-limits.md.
+  @client_websocket [
+    timeout: 60_000,
+    max_frame_size: Application.compile_env(:converger, :websocket_max_frame_size, 1_048_576),
+    error_handler: {ConvergerWeb.SocketGuard, :handle_error, []}
+  ]
 
+  # Deprecated (#23): the pre-v1 legacy socket. Use /socket/converger, the
+  # single WebSocket entry point. See ConvergerWeb.Deprecation.
+  socket "/socket", ConvergerWeb.UserSocket,
+    websocket: @client_websocket,
+    longpoll: false,
+    drainer: {ConvergerWeb.Drain, :drainer_config, []}
+
+  # Long-polling is the last-resort fallback for networks that block
+  # WebSockets (the `phoenix` JS client falls back to it automatically). The
+  # native v1 endpoint (/socket/converger/v1) and the SSE stream are routed
+  # in ConvergerWeb.Router.
   socket "/socket/converger", ConvergerWeb.ConvergerSocket,
-    websocket: true,
-    longpoll: false
+    websocket: @client_websocket,
+    longpoll: true,
+    drainer: {ConvergerWeb.Drain, :drainer_config, []}
 
   socket "/live", Phoenix.LiveView.Socket,
-    websocket: [connect_info: [:peer_data, session: @session_options]],
-    longpoll: [connect_info: [session: @session_options]]
+    websocket: [connect_info: [:peer_data, session: {__MODULE__, :session_options, []}]],
+    longpoll: [connect_info: [session: {__MODULE__, :session_options, []}]]
+
+  # GET /health/live and /health/ready for load balancers and Kubernetes.
+  # First, so probes are not redirected to HTTPS or logged per request.
+  plug ConvergerWeb.Plugs.Health
 
   # Must run before anything that reads conn.remote_ip (AdminAuth, RateLimit)
   # and before ForceSSL, which only trusts X-Forwarded-Proto from the proxies
   # this plug accepted.
   plug ConvergerWeb.Plugs.TrustedProxies
+
+  # GET /metrics (Prometheus), behind METRICS_TOKEN / METRICS_ALLOWED_IPS.
+  # After TrustedProxies (the IP allowlist needs the real client IP) and
+  # before ForceSSL, so in-cluster scrapes over plain HTTP work.
+  plug ConvergerWeb.Plugs.Metrics
 
   # HTTP -> HTTPS redirect + HSTS, configured at runtime (FORCE_SSL, HSTS_*).
   # Runs before Plug.Static so assets are covered too. WebSocket upgrades are
@@ -69,8 +100,24 @@ defmodule ConvergerWeb.Endpoint do
 
   plug Plug.MethodOverride
   plug Plug.Head
-  plug Plug.Session, @session_options
-  plug ConvergerWeb.Router
+  plug :session
+  # The router, with requests that fail because the database is unavailable
+  # answered 503 + Retry-After instead of 500 (issue #35).
+  plug ConvergerWeb.Plugs.DbUnavailable, ConvergerWeb.Router
+
+  @doc """
+  Cookie session options, with `max_age` set to the absolute session
+  lifetime (`Converger.Accounts.Sessions.max_age_seconds/0`), read at
+  runtime so `SESSION_MAX_AGE_SECONDS` works on releases.
+  """
+  @spec session_options() :: keyword()
+  def session_options do
+    Keyword.put(@session_options, :max_age, Converger.Accounts.Sessions.max_age_seconds())
+  end
+
+  defp session(conn, _opts) do
+    Plug.Session.call(conn, Plug.Session.init(session_options()))
+  end
 
   @doc """
   Returns the allowed CORS origins, read from the `:cors_origins` application

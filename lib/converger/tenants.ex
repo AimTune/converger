@@ -17,7 +17,62 @@ defmodule Converger.Tenants do
     |> Converger.Pagination.bounded_all()
   end
 
+  @doc """
+  Keyset-paginated tenants (`Converger.Pagination.keyset/2`), the admin
+  Tenants page.
+
+  Filters (string or atom keys, blank values ignored):
+
+    * `"q"` - case-insensitive "contains" match on the name, or the exact
+      tenant id when the term is a UUID
+    * `"status"` - `active` / `inactive`
+
+  Options: `:limit`, `:cursor`, `:direction` (`:desc` newest first, default,
+  or `:asc`). Returns `{:ok, %Converger.Pagination.Page{}}` or
+  `{:error, :invalid_cursor}`.
+  """
+  def paginate_tenants(filters \\ %{}, opts \\ []) do
+    Tenant
+    |> filter_tenants(filters)
+    |> Converger.Pagination.keyset(opts)
+  end
+
+  defp filter_tenants(query, filters) do
+    query
+    |> search_tenants(filter_value(filters, :q))
+    |> filter_tenant_status(filter_value(filters, :status))
+  end
+
+  defp search_tenants(query, nil), do: query
+
+  defp search_tenants(query, term) do
+    pattern = Converger.Pagination.contains(term)
+
+    case Ecto.UUID.cast(String.trim(term)) do
+      {:ok, id} -> where(query, [t], t.id == ^id or ilike(t.name, ^pattern))
+      :error -> where(query, [t], ilike(t.name, ^pattern))
+    end
+  end
+
+  defp filter_tenant_status(query, nil), do: query
+  defp filter_tenant_status(query, status), do: where(query, [t], t.status == ^status)
+
+  defp filter_value(filters, key) do
+    case Map.get(filters, Atom.to_string(key), Map.get(filters, key)) do
+      value when is_binary(value) -> if String.trim(value) == "", do: nil, else: value
+      _ -> nil
+    end
+  end
+
   def get_tenant!(id), do: Repo.get!(Tenant, id)
+
+  @doc "Returns the tenant with `id`, or `nil` (also for a malformed id)."
+  def get_tenant(id) do
+    case Ecto.UUID.cast(id) do
+      {:ok, uuid} -> Repo.get(Tenant, uuid)
+      :error -> nil
+    end
+  end
 
   @default_rotation_grace_period 24 * 60 * 60
 
@@ -89,6 +144,10 @@ defmodule Converger.Tenants do
   end
 
   def create_tenant(attrs \\ %{}, actor \\ nil) do
+    attrs |> do_create_tenant(actor) |> sync_alert_subscription()
+  end
+
+  defp do_create_tenant(attrs, actor) do
     changeset = Tenant.changeset(%Tenant{}, attrs)
 
     if actor do
@@ -114,7 +173,23 @@ defmodule Converger.Tenants do
     end
   end
 
+  @doc """
+  Updates a tenant. Setting, changing or clearing `alert_webhook_url` keeps
+  its managed platform webhook subscription in sync
+  (`Converger.Webhooks.sync_alert_subscription/1`).
+  """
   def update_tenant(%Tenant{} = tenant, attrs, actor \\ nil) do
+    tenant |> do_update_tenant(attrs, actor) |> sync_alert_subscription()
+  end
+
+  defp sync_alert_subscription({:ok, tenant} = result) do
+    Converger.Webhooks.sync_alert_subscription(tenant)
+    result
+  end
+
+  defp sync_alert_subscription(error), do: error
+
+  defp do_update_tenant(tenant, attrs, actor) do
     changeset = Tenant.changeset(tenant, attrs)
 
     if actor do
@@ -140,28 +215,40 @@ defmodule Converger.Tenants do
     end
   end
 
+  @doc """
+  Deletes a tenant. Its channels, conversations and other configuration go
+  with the row (`ON DELETE CASCADE`); its activities and deliveries live in
+  partitioned tables without foreign keys and are removed in batches by
+  `Converger.Workers.PurgeWorker`, enqueued in the same transaction
+  (ADR-0034), so the delete never holds locks for the duration of a
+  full-table cascade.
+  """
   def delete_tenant(%Tenant{} = tenant, actor \\ nil) do
-    if actor do
-      Multi.new()
-      |> Multi.insert(:audit_log, fn _ ->
-        AuditLogs.build_audit_log_entry(%{
-          actor_type: actor.type,
-          actor_id: actor.id,
-          action: "delete",
-          resource_type: "tenant",
-          resource_id: tenant.id,
-          changes: Changes.for_delete(tenant)
-        })
-      end)
-      |> Multi.delete(:tenant, tenant)
-      |> Repo.transaction()
-      |> case do
-        {:ok, %{tenant: tenant}} -> {:ok, tenant}
-        {:error, :tenant, changeset, _} -> {:error, changeset}
-      end
-    else
-      Repo.delete(tenant)
+    Multi.new()
+    |> maybe_audit_delete(tenant, actor)
+    |> Multi.delete(:tenant, tenant)
+    |> Oban.insert(:purge, Converger.Workers.PurgeWorker.new(%{tenant_id: tenant.id}))
+    |> Repo.transaction()
+    |> case do
+      {:ok, %{tenant: tenant}} -> {:ok, tenant}
+      {:error, :tenant, changeset, _} -> {:error, changeset}
+      {:error, _step, reason, _} -> {:error, reason}
     end
+  end
+
+  defp maybe_audit_delete(multi, _tenant, nil), do: multi
+
+  defp maybe_audit_delete(multi, tenant, actor) do
+    Multi.insert(multi, :audit_log, fn _ ->
+      AuditLogs.build_audit_log_entry(%{
+        actor_type: actor.type,
+        actor_id: actor.id,
+        action: "delete",
+        resource_type: "tenant",
+        resource_id: tenant.id,
+        changes: Changes.for_delete(tenant)
+      })
+    end)
   end
 
   @doc """
@@ -199,6 +286,44 @@ defmodule Converger.Tenants do
       {:ok, updated}
     end
   end
+
+  @doc """
+  Updates a tenant's fields and, when `attrs` has `"limits"`, replaces its
+  rate-limit overrides (the management API, ADR-0061). The limits are
+  validated before anything is written, so an invalid request changes
+  nothing.
+  """
+  def update_tenant_and_limits(%Tenant{} = tenant, attrs, actor) when is_map(attrs) do
+    {limits, attrs} = Map.pop(attrs, "limits")
+
+    with :ok <- validate_limits(limits, tenant),
+         {:ok, tenant} <- maybe_update_tenant(tenant, attrs, actor) do
+      if is_nil(limits), do: {:ok, tenant}, else: update_tenant_limits(tenant, limits, actor)
+    end
+  end
+
+  @doc """
+  Checks rate-limit overrides without writing them: `:ok` (also for `nil`)
+  or `{:error, changeset}`.
+  """
+  def validate_limits(limits, tenant \\ %Tenant{})
+
+  def validate_limits(nil, _tenant), do: :ok
+
+  def validate_limits(limits, tenant) when is_map(limits) do
+    case Tenant.limits_changeset(tenant, limits) do
+      %Ecto.Changeset{valid?: true} -> :ok
+      changeset -> {:error, changeset}
+    end
+  end
+
+  def validate_limits(_limits, tenant) do
+    {:error,
+     tenant |> Ecto.Changeset.change() |> Ecto.Changeset.add_error(:limits, "must be an object")}
+  end
+
+  defp maybe_update_tenant(tenant, attrs, _actor) when map_size(attrs) == 0, do: {:ok, tenant}
+  defp maybe_update_tenant(tenant, attrs, actor), do: update_tenant(tenant, attrs, actor)
 
   def change_tenant(%Tenant{} = tenant, attrs \\ %{}) do
     Tenant.changeset(tenant, attrs)

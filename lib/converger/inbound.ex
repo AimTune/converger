@@ -1,0 +1,307 @@
+defmodule Converger.Inbound do
+  @moduledoc """
+  Receiving a message from a channel.
+
+  Every message a channel brings in takes this path, whatever its transport:
+  inbound webhooks (`ConvergerWeb.InboundController`, after the adapter has
+  parsed the provider payload) and frames sent by the clients of a
+  `websocket` channel (`ConvergerWeb.ConvergerChannel`). The message becomes
+  an activity through `Converger.Activities.create_client_activity/2`, so the
+  pipeline (middleware of the target channels, routing rules, deliveries and
+  retries) applies to it the same way for every channel type.
+  """
+
+  require Logger
+
+  alias Converger.{Activities, Conversations, Deliveries, Participants}
+  alias Converger.Channels.Channel
+  alias Converger.Inbound.{Answers, Media}
+
+  @type message :: map()
+  @type result ::
+          {:created, Activities.Activity.t()}
+          | {:duplicate, Activities.Activity.t()}
+          | {:rejected, Ecto.Changeset.t()}
+          | {:error, term()}
+
+  @doc "Whether the channel accepts messages (mode `inbound` or `duplex`)."
+  def accepts_inbound?(%Channel{mode: mode}), do: mode in ["inbound", "duplex"]
+
+  @doc """
+  Turn one message received on `channel` into an activity.
+
+  `message` has the activity client fields (`"type"`, `"text"`,
+  `"attachments"`, `"metadata"`), the `"sender"` and optionally an
+  `"idempotency_key"` (a stable provider or client message id; a message with
+  a known key never creates a second activity) and a `"participant"`
+  (`%{"external_id" => ...}`) used to find the conversation.
+
+  Threaded channels add `"thread_refs"` (provider message ids) and
+  `"thread_activity_ids"` (activity ids) of the messages the message replies
+  to; the active conversation of the first one that went through this
+  channel is used before the participant's.
+
+  Adapters that rendered a typed message's actions natively add `"answer"`
+  (`%{"ref", "source", "label"}`, see `Converger.Channels.RichContent.put_answer/4`)
+  when the provider reply names an answer key; that answer and numeric
+  replies are normalised by `Converger.Inbound.Answers` (#68).
+
+  SMS channels add `"opt_out"` (`"stop"` or `"start"`) to an opt-out keyword:
+  the participant is marked opted out or opted in again
+  (`Converger.Participants.set_opted_out/3`) before the activity is created.
+
+  ## Options
+
+    * `:conversation_id` - the conversation to write into (tenant-scoped).
+      Without it the conversation is the participant's active one on this
+      channel (or a new one), or a new participant-less conversation.
+
+  Returns `{:created, activity}`, `{:duplicate, activity}`,
+  `{:rejected, changeset}` for a message that can never be accepted, or
+  `{:error, reason}` for a request-level or transient failure
+  (`:inbound_not_supported`, `:not_found`, `:conversation_closed`, ...).
+  """
+  @spec receive_message(Channel.t(), message(), keyword()) :: result()
+  def receive_message(%Channel{} = channel, message, opts \\ []) do
+    result =
+      if accepts_inbound?(channel) do
+        do_receive(channel, message, Keyword.get(opts, :conversation_id))
+      else
+        {:error, :inbound_not_supported}
+      end
+
+    Converger.Telemetry.inbound_received(channel, outcome(result))
+    result
+  end
+
+  defp outcome({:created, _activity}), do: :created
+  defp outcome({:duplicate, _activity}), do: :duplicate
+  defp outcome({:rejected, _changeset}), do: :rejected
+  defp outcome({:error, _reason}), do: :error
+
+  defp do_receive(channel, message, conversation_id) do
+    key = message["idempotency_key"]
+
+    case existing_activity(channel, conversation_id, key) do
+      %Activities.Activity{} = existing ->
+        Logger.info("Duplicate inbound message ignored",
+          channel_id: channel.id,
+          activity_id: existing.id
+        )
+
+        {:duplicate, existing}
+
+      nil ->
+        with {:ok, conversation} <-
+               resolve_or_create_conversation(channel, conversation_id, message),
+             {:ok, message} <- apply_opt_out(channel, message) do
+          create_activity(channel, conversation, message)
+        else
+          # e.g. an external id the participant schema rejects: permanent.
+          {:error, %Ecto.Changeset{} = changeset} ->
+            Logger.warning("Rejected inbound message: invalid participant or conversation",
+              channel_id: channel.id,
+              errors: inspect(changeset.errors)
+            )
+
+            {:rejected, changeset}
+
+          {:error, _} = error ->
+            error
+        end
+    end
+  end
+
+  # A send that names its conversation (WebSocket clients, agents) is unique
+  # within that conversation (Protocol v1 section 7): the same clientId may be
+  # reused in another one. Provider webhooks name no conversation, and their
+  # message ids are unique per channel.
+  defp existing_activity(_channel, conversation_id, key) when is_binary(conversation_id),
+    do: Activities.get_activity_by_idempotency_key(conversation_id, key)
+
+  defp existing_activity(channel, _conversation_id, key),
+    do: Activities.get_activity_by_channel_idempotency_key(channel.id, key)
+
+  # SMS adapters mark a STOP / START keyword with "opt_out" ("stop" or
+  # "start", see Converger.Channels.Sms). The participant flag is set before
+  # the activity is created: if that fails, the provider re-delivers and the
+  # (idempotent) flag is set again, while a created activity would turn the
+  # re-delivery into a duplicate and lose the opt-out.
+  defp apply_opt_out(channel, message) do
+    {opt_out, message} = Map.pop(message, "opt_out")
+
+    case {opt_out, participant_attrs(message)} do
+      {value, %{"external_id" => external_id}} when value in ["stop", "start"] ->
+        case Participants.set_opted_out(channel, external_id, value == "stop") do
+          {:ok, _participant} ->
+            Logger.info("Participant opted #{if value == "stop", do: "out", else: "in"}",
+              channel_id: channel.id
+            )
+
+            {:ok, message}
+
+          {:error, _} = error ->
+            error
+        end
+
+      _ ->
+        {:ok, message}
+    end
+  end
+
+  defp create_activity(channel, conversation, message) do
+    message = resolve_reference(channel, conversation, message)
+    message = Answers.normalise(channel, conversation, message)
+    {message, stored_media} = Media.store(channel, conversation, message)
+
+    case Activities.create_client_activity(message, %{
+           tenant_id: channel.tenant_id,
+           conversation_id: conversation.id,
+           source_channel_id: channel.id,
+           sender: message["sender"],
+           idempotency_key: message["idempotency_key"]
+         }) do
+      {:ok, activity} ->
+        Media.link(stored_media, activity.id)
+
+        Logger.info("Inbound activity received",
+          channel_id: channel.id,
+          activity_id: activity.id
+        )
+
+        {:created, activity}
+
+      {:error, %Ecto.Changeset{} = changeset} ->
+        Media.discard(stored_media)
+
+        Logger.warning("Rejected inbound message",
+          channel_id: channel.id,
+          errors: inspect(changeset.errors)
+        )
+
+        {:rejected, changeset}
+
+      {:error, _} = error ->
+        Media.discard(stored_media)
+        error
+    end
+  end
+
+  # Adapters name the message a reply or reaction refers to by its provider
+  # id ("reply_to_provider_id", e.g. a WhatsApp wamid). It becomes
+  # `reply_to_id` when it resolves to a message of this conversation (an
+  # inbound one by idempotency key, or an outbound one by its delivery's
+  # provider message id). A reaction / edit / delete whose target is unknown
+  # (sent before Converger, or in another conversation) is kept as an
+  # `event` with its metadata, never dropped. Without a provider id nothing
+  # is rewritten (a client sending messageDelete without reply_to_id gets 422); a plain reply simply has no
+  # `reply_to_id` (the provider id stays in its metadata).
+  defp resolve_reference(channel, conversation, message) do
+    {provider_id, message} = Map.pop(message, "reply_to_provider_id")
+
+    target =
+      provider_id &&
+        Activities.get_activity_by_provider_message_id(channel.id, provider_id)
+
+    reference_type? = message["type"] in Activities.Activity.reference_types()
+    explicit_reference? = not is_nil(message["reply_to_id"])
+
+    case target do
+      %Activities.Activity{conversation_id: conversation_id, type: target_type, id: id}
+      when conversation_id == conversation.id and
+             (target_type == "message" or not reference_type?) ->
+        Map.put(message, "reply_to_id", id)
+
+      _ when reference_type? and is_binary(provider_id) and not explicit_reference? ->
+        Map.put(message, "type", "event")
+
+      _ ->
+        message
+    end
+  end
+
+  # Conversation for an inbound message, in order of precedence:
+  #   1. an explicit conversation id (tenant-scoped);
+  #   2. the active conversation of the message it replies to (see
+  #      `thread_conversation/2`);
+  #   3. the participant's active conversation on this channel, or a new one
+  #      for the participant (see Converger.Participants);
+  #   4. a new, participant-less conversation (adapters without an external id).
+  defp resolve_or_create_conversation(channel, conversation_id, message) do
+    cond do
+      conversation_id ->
+        case Conversations.get_conversation(conversation_id, channel.tenant_id) do
+          %Conversations.Conversation{} = conv -> {:ok, conv}
+          nil -> {:error, :not_found}
+        end
+
+      conversation = thread_conversation(channel, message) ->
+        # The sender becomes a participant of this channel even though the
+        # conversation belongs to another one, so the pipeline never sends
+        # their message back to them here.
+        if attrs = participant_attrs(message), do: Participants.upsert_participant(channel, attrs)
+        {:ok, conversation}
+
+      participant = participant_attrs(message) ->
+        Participants.resolve_conversation(channel, participant)
+
+      true ->
+        Conversations.create_conversation(%{
+          "tenant_id" => channel.tenant_id,
+          "channel_id" => channel.id,
+          "metadata" => %{"source" => "inbound_webhook"}
+        })
+    end
+  end
+
+  # Threaded channels (email) name the messages a message replies to:
+  #
+  #   * "thread_refs" - provider message ids, most recent first: an inbound
+  #     message of this channel (idempotency key) or an outbound one (its
+  #     delivery's provider message id on this channel);
+  #   * "thread_activity_ids" - ids of activities delivered on this channel
+  #     (decoded from the Message-ID Converger gave them).
+  #
+  # The first one found whose conversation is active wins, whatever channel
+  # the conversation started on: a reply lands where the conversation lives.
+  # Only messages that went through this channel count, so a forged header
+  # cannot reach a conversation the sender was never part of.
+  defp thread_conversation(channel, message) do
+    refs = string_list(message["thread_refs"])
+    activity_ids = string_list(message["thread_activity_ids"])
+
+    conversation_ids =
+      Stream.concat(
+        Stream.map(refs, fn ref ->
+          case Activities.get_activity_by_provider_message_id(channel.id, ref) do
+            %Activities.Activity{conversation_id: id} -> id
+            nil -> nil
+          end
+        end),
+        Stream.map(activity_ids, &Deliveries.delivered_conversation_id(channel.id, &1))
+      )
+
+    Enum.find_value(conversation_ids, fn
+      nil ->
+        nil
+
+      id ->
+        case Conversations.get_conversation(id, channel.tenant_id) do
+          %Conversations.Conversation{status: status} = conversation ->
+            if status == Conversations.open_status(), do: conversation
+
+          nil ->
+            nil
+        end
+    end)
+  end
+
+  defp string_list(list) when is_list(list), do: Enum.filter(list, &(is_binary(&1) and &1 != ""))
+  defp string_list(_), do: []
+
+  defp participant_attrs(%{"participant" => %{"external_id" => external_id} = participant})
+       when is_binary(external_id) and external_id != "",
+       do: participant
+
+  defp participant_attrs(_message), do: nil
+end

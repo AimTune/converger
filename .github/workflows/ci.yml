@@ -51,6 +51,18 @@ jobs:
         # --force so cached _build artifacts cannot hide warnings.
         run: mix compile --warnings-as-errors --force
 
+      # priv/static/openapi.json is generated from the controllers
+      # (ConvergerWeb.ApiSpec, ADR-0050) and committed; SDKs build from it.
+      - name: OpenAPI spec is up to date
+        run: mix openapi.spec.json --check
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      - name: OpenAPI spec is valid (OpenAPI 3.1)
+        run: npx --yes @redocly/cli@2.56.1 lint --skip-rule info-license priv/static/openapi.json
+
       - name: Credo
         run: mix credo --strict
 
@@ -145,8 +157,16 @@ jobs:
       - run: mix deps.get
       - run: mix compile --warnings-as-errors
 
+      # test/protocol/chativa_compat_test.exs runs chativa's connector code in
+      # Node (TypeScript type stripping, Node >= 22.18); see the chativa job.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+
       - name: Run tests with coverage
         # --warnings-as-errors also fails the run on warnings in test files.
+        env:
+          CHATIVA_COMPAT: required
         run: |
           mix ecto.create --quiet
           mix ecto.migrate --quiet
@@ -192,6 +212,57 @@ jobs:
           files: cover/lcov.info
           token: ${{ env.CODECOV_TOKEN }}
           fail_ci_if_error: false
+
+  # chativa is the reference WebSocket client (#65, ADR-0065): its unmodified
+  # @chativa/connector-mekik and parseChatFrame (vendored in
+  # test/protocol/fixtures/chativa) run against a real server. A protocol
+  # change that breaks chativa fails this job. CHATIVA_COMPAT=required turns
+  # a missing Node into a failure instead of a skip.
+  # `--only chativa` runs every test tagged :chativa: chativa_compat_test.exs
+  # (stored transcripts) and chativa_live_bot_test.exs (a live mekik bot
+  # behind Converger, Mode A and Mode B, #63/#65).
+  chativa:
+    name: chativa reference client compatibility
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          otp-version: ${{ env.OTP_VERSION }}
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            deps
+            _build
+          key: mix-${{ runner.os }}-${{ env.ELIXIR_VERSION }}-${{ env.OTP_VERSION }}-${{ hashFiles('mix.lock') }}
+          restore-keys: mix-${{ runner.os }}-${{ env.ELIXIR_VERSION }}-${{ env.OTP_VERSION }}-
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+
+      - run: mix deps.get
+      - run: mix compile --warnings-as-errors
+
+      - name: Run the chativa compatibility suite
+        env:
+          CHATIVA_COMPAT: required
+        run: mix test --only chativa --warnings-as-errors
 
   storage-integration:
     name: Storage integration (MinIO, Azurite)
@@ -249,3 +320,189 @@ jobs:
           MINIO_SECRET_KEY: minioadmin
           AZURITE_ENDPOINT: http://127.0.0.1:10000/devstoreaccount1
         run: mix test test/converger/uploads/storage_integration_test.exs --only minio --only azurite
+
+  brokers:
+    name: Broker channel suites (Kafka, RabbitMQ, NATS, Redis Streams, MQTT)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Optional: depends on five broker containers starting on the runner.
+    continue-on-error: true
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+
+      # Single-node KRaft broker, advertised as localhost:9092 by the image defaults.
+      kafka:
+        image: apache/kafka:3.9.1
+        ports: ["9092:9092"]
+        options: >-
+          --health-cmd "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092"
+          --health-interval 5s --health-timeout 10s --health-retries 20
+
+      rabbitmq:
+        image: rabbitmq:3.13-management
+        ports: ["5672:5672"]
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q ping"
+          --health-interval 5s --health-timeout 10s --health-retries 20
+
+      # Service containers cannot take arguments, and the nats image does not
+      # enable JetStream by default: the NATS server is started in a step below.
+
+      redis:
+        image: redis:7
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          otp-version: ${{ env.OTP_VERSION }}
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            deps
+            _build
+          key: mix-${{ runner.os }}-${{ env.ELIXIR_VERSION }}-${{ env.OTP_VERSION }}-${{ hashFiles('mix.lock') }}
+          restore-keys: mix-${{ runner.os }}-${{ env.ELIXIR_VERSION }}-${{ env.OTP_VERSION }}-
+
+      # Mosquitto needs a command (its default config only listens on
+      # localhost inside the container), which service containers cannot set.
+      - name: Start Mosquitto
+        run: docker run -d --name mosquitto -p 1883:1883 eclipse-mosquitto:2 mosquitto -c /mosquitto-no-auth.conf
+
+      - run: mix deps.get
+      - run: mix compile --warnings-as-errors
+
+      - name: Start NATS with JetStream
+        run: docker run -d --name nats -p 4222:4222 nats:2.10 -js
+
+      # test/converger/channels/{kafka,rabbitmq,nats,redis_streams,mqtt}_integration_test.exs: an
+      # external produce reaches a WebSocket client, the reply is produced,
+      # restarts resume without duplicates, poison messages are dead-lettered.
+      # test/converger/backbone/{kafka,nats,rabbitmq}_conformance_test.exs: the
+      # event backbone conformance suite (#66), zero loss across a consumer kill.
+      - name: Run the broker channel suites
+        env:
+          KAFKA_BROKERS: localhost:9092
+          RABBITMQ_URL: amqp://localhost:5672
+          NATS_URL: nats://localhost:4222
+          REDIS_URL: redis://localhost:6379
+          MQTT_HOST: localhost
+          MQTT_PORT: "1883"
+        run: mix test --only kafka --only rabbitmq --only nats --only redis_streams --only mqtt --warnings-as-errors
+
+
+  # The backbone integration suite (test/converger/backbone/integration_test.exs,
+  # issue #66): REST activities, delivery and conversation events reach the
+  # platform webhooks through the backbone exactly once, and the WebSocket
+  # fan-out keeps working, with the Native backbone and again with Kafka as
+  # the backbone (BACKBONE=kafka; a single config change). The backbone
+  # conformance suites run in the `brokers` job above.
+  backbone:
+    name: Backbone integration (${{ matrix.backbone }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        backbone: [native, kafka]
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+
+      kafka:
+        image: apache/kafka:3.9.1
+        ports: ["9092:9092"]
+        options: >-
+          --health-cmd "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092"
+          --health-interval 5s --health-timeout 10s --health-retries 20
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          otp-version: ${{ env.OTP_VERSION }}
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            deps
+            _build
+          key: mix-${{ runner.os }}-${{ env.ELIXIR_VERSION }}-${{ env.OTP_VERSION }}-${{ hashFiles('mix.lock') }}
+          restore-keys: mix-${{ runner.os }}-${{ env.ELIXIR_VERSION }}-${{ env.OTP_VERSION }}-
+
+      - run: mix deps.get
+      - run: mix compile --warnings-as-errors
+
+      - name: Run the backbone integration suite
+        env:
+          BACKBONE: ${{ matrix.backbone }}
+          BACKBONE_KAFKA_BROKERS: localhost:9092
+          BACKBONE_KAFKA_PARTITIONS: "3"
+        run: |
+          mix ecto.create --quiet
+          mix ecto.migrate --quiet
+          mix test --only backbone_integration --warnings-as-errors
+  cluster:
+    name: Two-node cluster suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          otp-version: ${{ env.OTP_VERSION }}
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            deps
+            _build
+          key: mix-${{ runner.os }}-${{ env.ELIXIR_VERSION }}-${{ env.OTP_VERSION }}-${{ hashFiles('mix.lock') }}
+          restore-keys: mix-${{ runner.os }}-${{ env.ELIXIR_VERSION }}-${{ env.OTP_VERSION }}-
+
+      - run: mix deps.get
+      - run: mix compile --warnings-as-errors
+
+      # test/cluster boots two Converger nodes with :peer (clustered by
+      # libcluster, sharing Postgres) and checks cross-node WebSocket
+      # broadcasts, shared rate limits and exactly-once delivery jobs.
+      # The peers start EPMD on their own; the test node needs no -name.
+      - name: Run the two-node cluster suite
+        run: mix test --only cluster --warnings-as-errors

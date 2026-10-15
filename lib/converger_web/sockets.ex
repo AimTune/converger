@@ -32,11 +32,15 @@ defmodule ConvergerWeb.Sockets do
 
   def user_socket_id(_claims), do: nil
 
-  # End-user id when the token names one, otherwise the conversation.
-  # Channel-level tokens without either get no id (they cannot join a
-  # conversation without one, see ConvergerChannel authorization).
+  # End-user id when the token names one, otherwise the channel for a
+  # channel-scoped token (agent console), otherwise the conversation.
+  # Channel-level tokens without any of them get no id (they cannot join, see
+  # ConvergerChannel authorization).
   defp subject(%{"user_id" => user_id}) when is_binary(user_id) and user_id != "",
     do: "user:#{user_id}"
+
+  defp subject(%{"scope" => "channel", "channel_id" => channel_id}) when is_binary(channel_id),
+    do: "channel:#{channel_id}"
 
   defp subject(%{"conversation_id" => conversation_id}) when is_binary(conversation_id),
     do: "conversation:#{conversation_id}"
@@ -50,6 +54,21 @@ defmodule ConvergerWeb.Sockets do
   def disconnect_user(tenant_id, user_id) do
     disconnect_id("converger_socket:#{tenant_id}:user:#{user_id}")
     disconnect_id("user_socket:#{tenant_id}:#{user_id}")
+    :ok
+  end
+
+  @doc """
+  Disconnect every Converger socket of the subject of a token (its end user,
+  channel console or conversation), e.g. after the token was revoked. Holders
+  of other, still valid tokens of the same subject reconnect; the revoked
+  token is refused (ADR-0059).
+  """
+  def disconnect_claims(claims) do
+    case converger_socket_id(claims) do
+      nil -> :ok
+      socket_id -> disconnect_id(socket_id)
+    end
+
     :ok
   end
 
@@ -72,17 +91,57 @@ defmodule ConvergerWeb.Sockets do
   def count(channel_id), do: channel_id |> tracked_ids() |> length()
 
   @doc """
+  Number of joined channel processes of `channel_id` that receive live
+  activities of `conversation_id`: sockets joined to that conversation and
+  sockets following the whole channel (`scope: "channel"`). Used by the
+  `websocket` adapter to tell whether a delivery reached a client.
+  """
+  def count_connections(channel_id, conversation_id) do
+    channel_id
+    |> topic()
+    |> SocketPresence.list()
+    |> Enum.flat_map(fn {_key, %{metas: metas}} -> metas end)
+    |> Enum.count(&(&1[:scope] == "channel" or &1[:conversation_id] == conversation_id))
+  end
+
+  @doc """
+  Number of channel-scoped connections (agent consoles, agent SDKs, the mekik
+  transport) following `channel_id`, on any node: the bot-channel test of
+  `ConvergerWeb.Protocol.BotRelay`.
+  """
+  def count_agents(channel_id) do
+    channel_id
+    |> topic()
+    |> SocketPresence.list()
+    |> Enum.flat_map(fn {_key, %{metas: metas}} -> metas end)
+    |> Enum.count(&(&1[:scope] == "channel"))
+  end
+
+  @doc """
   Track the calling channel process (a joined channel) under its socket id.
   The entry disappears automatically when the process exits.
   """
-  def track(%Phoenix.Socket{id: nil}, _channel_id, _meta), do: :ok
+  def track(%Phoenix.Socket{id: socket_id}, channel_id, meta),
+    do: track_id(socket_id, channel_id, meta)
 
-  def track(%Phoenix.Socket{id: socket_id}, channel_id, meta) do
+  @doc """
+  Track the calling process under `socket_id`, for connections that are not
+  Phoenix channels (the native protocol socket and the SSE stream). The
+  process must also subscribe to `socket_id` to receive forced disconnects.
+  """
+  def track_id(nil, _channel_id, _meta), do: :ok
+
+  def track_id(socket_id, channel_id, meta) do
     case SocketPresence.track(self(), topic(channel_id), socket_id, meta) do
       {:ok, _ref} -> :ok
       {:error, {:already_tracked, _, _, _}} -> :ok
       {:error, reason} -> {:error, reason}
     end
+  end
+
+  @doc "Stop tracking the calling process under `socket_id` (see `track_id/3`)."
+  def untrack_id(socket_id, channel_id) do
+    SocketPresence.untrack(self(), topic(channel_id), socket_id)
   end
 
   defp tracked_ids(channel_id) do

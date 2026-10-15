@@ -30,7 +30,8 @@ Rollback: redeploy the previous image when the migrations were expand-only; for 
 
 | Source | What it tells you |
 | --- | --- |
-| [`CHANGELOG.md`](https://github.com/AimTune/converger/blob/main/CHANGELOG.md) | Notable changes in [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format, currently all under **Unreleased**. Its last section, "Milestones before this changelog", keeps the former `VERSIONS.md` feature milestones (v1.0 MVP to v3.0 Enterprise). Those are planning milestones, not git tags or package versions, and some checkboxes lag behind the code. |
+| [`CHANGELOG.md`](https://github.com/AimTune/converger/blob/main/CHANGELOG.md) | Toolchain and dependency upgrades with notes, currently all under **Unreleased**. |
+| [`VERSIONS.md`](https://github.com/AimTune/converger/blob/main/VERSIONS.md) | Feature roadmap grouped into milestones (v1.0 MVP to v3.0 Enterprise). These are planning milestones, not git tags or package versions, and some checkboxes lag behind the code (for example channel config encryption at rest is implemented). |
 | Pull request descriptions | Each merged PR has a "Deployment notes" or "Breaking changes" section when operators must act. |
 | `mix.exs` | Application version, currently `0.1.0`. |
 
@@ -79,7 +80,8 @@ Locked versions on `main` (`mix.lock`) for the libraries operators and contribut
 | `bandit` | 1.12.5 | HTTP server. |
 | `broadway` | 1.3.0 | Optional pipeline backend. |
 | `gettext` | 1.0.2 | Backend uses `use Gettext.Backend`. |
-| `dns_cluster` | 0.3.1 | `query:` option unchanged. |
+| `libcluster` | 3.5.0 | Replaced `dns_cluster` in [#29](https://github.com/AimTune/converger/issues/29); see [Clustering](clustering.md). `DNS_CLUSTER_QUERY` still works as an alias. |
+| `telemetry_metrics_prometheus_core` | 1.2.1 | Replaced `telemetry_metrics_prometheus` (and with it `plug_cowboy`, `cowboy`, `cowlib`, `ranch`) when metrics moved to the main port. |
 | `joken` | 2.7.0 | JWT signing. |
 | `cloak` / `cloak_ecto` | 1.1.4 / 1.3.0 | Two advisories acknowledged in `mix.exs` (affected ciphers and types are not used). |
 | `opentelemetry` / `opentelemetry_exporter` | 1.7.0 / 1.10.0 | Plus `opentelemetry_phoenix` 2.0.1, `opentelemetry_ecto` 1.2.0, `opentelemetry_oban` 1.2.0, `opentelemetry_req` 1.0.0. |
@@ -154,7 +156,7 @@ See [ADR-0009](../adr/0009-inbound-signature-scheme-and-per-channel-enforcement.
 ### Closed conversations reject activities
 
 [#84](https://github.com/AimTune/converger/pull/84). Posting to a closed conversation now returns `409`
-`{"error": "conversation_closed"}` on REST, uploads and inbound webhooks, and an error reply on the WebSocket.
+`conversation_closed` on REST (in the [error envelope](../api/errors.md) since [#45](https://github.com/AimTune/converger/issues/45)), uploads and inbound webhooks, and an error reply on the WebSocket.
 Close and reopen emit a `conversationUpdate` activity. Migration `20261009170000` moves `updated_at` forward so
 the expiration job does not close active conversations after the upgrade.
 
@@ -211,3 +213,78 @@ Clients that relied on receiving the whole history in one call must page with th
 [#93](https://github.com/AimTune/converger/pull/93). Earlier builds printed `FORMATTER CRASH` for every production
 log line. If you maintain a fork with a customized `config/prod.exs`, configure LoggerJSON as the
 `:default_handler` formatter as shown in [Observability](observability.md#logging).
+
+### Partitioned activities and deliveries, retention on by default
+
+[#30](https://github.com/AimTune/converger/issues/30), migrations `20261010300000` and `20261010300100`
+(maintenance window).
+
+- `activities` and `deliveries` become monthly partitioned tables without foreign keys. Installations with more
+  than 1,000,000 activities run the online copy first (`Converger.Release.prepare_partitioning/0`) while the old
+  release is still up; `bin/migrate` then only swaps the tables. See
+  [Partitioning activities and deliveries](migrations.md#partitioning-activities-and-deliveries-20261010300100).
+- **Retention starts with this release.** Every tenant gets `retention_days = 365`: on the 1st of the next month,
+  activities and deliveries of months that ended more than a year ago are archived to the attachment storage
+  (`archive/` prefix) and removed from the database. Set a larger `retention_days` per tenant first if you need
+  more history online, and make sure the storage (`UPLOAD_STORAGE`, or `ARCHIVE_BUCKET`) is durable and backed up.
+- `channel_health_checks` older than 7 days and **`audit_logs` older than 365 days** are now deleted daily. Set
+  `AUDIT_LOG_RETENTION_DAYS=0` to keep audit logs forever.
+- Deleting a tenant, channel or conversation removes its activities and deliveries asynchronously (a
+  `PurgeWorker` job on the new `maintenance` queue). Scripts that delete tenants with raw SQL no longer remove them.
+- Old releases cannot run against the new schema; roll back by restoring the pre-upgrade backup.
+### Metrics moved to the main port
+
+[#29](https://github.com/AimTune/converger/issues/29). Prometheus metrics are served at `GET /metrics` on the main
+HTTP port, behind `METRICS_TOKEN` (bearer token) or `METRICS_ALLOWED_IPS`. The separate listener on port `9568`
+is no longer started by default, and `/metrics` answers `404` until one of the two variables is set.
+
+- **Action:** set `METRICS_TOKEN` and point the scraper at `<host>:<PORT>/metrics` with
+  `authorization: {type: Bearer, ...}` (see [Observability](observability.md#prometheus-endpoint)), or allow the
+  scraper's addresses with `METRICS_ALLOWED_IPS`. To keep the old unauthenticated listener for now, set
+  `PROMETHEUS_PORT=9568` explicitly; it serves only `/metrics` and must not be reachable from outside.
+
+### Clustering with libcluster
+
+[#29](https://github.com/AimTune/converger/issues/29). `dns_cluster` was replaced by `libcluster`, configured with
+`CLUSTER_STRATEGY` ([Clustering](clustering.md)).
+
+- `DNS_CLUSTER_QUERY` keeps working (it implies `CLUSTER_STRATEGY=dns`), but the nodes must now be named
+  `<CLUSTER_NODE_BASENAME>@<ip>` (default `converger@<ip>`), which `rel/env.sh.eex` does automatically.
+- **Action:** when clustering is enabled, set `RELEASE_COOKIE` to a shared secret on every node. The release
+  refuses to start without it.
+- Point load balancer health checks at `GET /health/ready` instead of a TCP check; entries for health paths in
+  `FORCE_SSL_EXCLUDE_PATHS` are no longer needed.
+
+### Server-side admin/portal sessions, required 2FA for `super_admin`
+
+[#52](https://github.com/AimTune/converger/issues/52), migration `20261013160000`
+([ADR-0058](../adr/0058-server-side-sessions-totp-2fa-and-password-reset-for-admin-and-portal.md)).
+
+- Admin and portal logins are server-side sessions. **Everyone is logged out once** by the upgrade (old cookies
+  carry a user id, which is no longer accepted). Sessions now end after 12 hours, or 30 minutes without activity
+  (`SESSION_MAX_AGE_SECONDS`, `SESSION_IDLE_TIMEOUT_SECONDS`).
+- **`super_admin` accounts must enable TOTP 2FA** at their next login: every admin page redirects to
+  `/admin/security` until they do. Set `ADMIN_REQUIRE_2FA_ROLES` (comma-separated roles, or empty for none) to
+  change who must. A locked-out admin's 2FA is reset with
+  `bin/converger eval 'Converger.Release.reset_admin_2fa("admin@example.com")'`.
+- New passwords need at least 12 characters (`PASSWORD_MIN_LENGTH`) and must not contain the email address.
+  Existing passwords keep working, but `ADMIN_PASSWORD` for `seed_admin` must follow the new policy.
+- Password reset by email needs a mailer: set `SMTP_HOST` (and `SMTP_*`, `MAILER_FROM`), see
+  [Accounts, sessions and email](configuration.md#accounts-sessions-and-email). Without it reset links are never
+  delivered.
+
+### Watermarks are the integer `seq`
+
+[#63](https://github.com/AimTune/converger/issues/63)
+([ADR-0068](../adr/0068-integer-seq-watermarks-on-every-surface.md),
+[Protocol v1, section 6.5](../protocol/v1.md#65-the-watermark-and-its-migration)). No migration.
+
+- `watermark` in `GET /api/v1/converger/conversations/:id/activities` and `meta.watermark` in
+  `GET /api/v1/conversations/:id/activities` are now a JSON number (the `seq` of the last activity), not an opaque
+  string. Integrations that pass the value back unchanged keep working; **typed clients that declared it as a
+  string must accept a number** (the SDKs in `packages/` accept both).
+- For one release the server still accepts the opaque forms (`seq:<n>` Base64 and legacy activity-id watermarks)
+  everywhere. Each use on a surface that emits integers is logged and counted as the deprecated
+  `opaque_watermark` surface (`[:converger, :deprecated, :use]`); watch it to find clients to update before the
+  release that drops them, which is announced one release ahead.
+- The legacy Phoenix `activitySet` frame on `/socket/converger` is unchanged (still the opaque string).

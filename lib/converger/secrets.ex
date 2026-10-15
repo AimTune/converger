@@ -8,10 +8,10 @@ defmodule Converger.Secrets do
 
   @sensitive_keys ~w(
     access_token api_key secret token password password_hash verify_token
-    app_secret authorization x-api-key x-channel-token
+    app_secret authorization x-api-key x-channel-token nkey_seed creds
   )
 
-  @sensitive_suffixes ~w(_secret _token _hash)
+  @sensitive_suffixes ~w(_secret _token _hash _password)
 
   @doc "Placeholder that replaces sensitive values."
   def redacted, do: @redacted

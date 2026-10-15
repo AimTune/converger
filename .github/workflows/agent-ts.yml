@@ -1,0 +1,184 @@
+name: agent-ts
+
+# @converger/agent (packages/agent-ts), create-converger-agent and the agent
+# examples (examples/agents/*): typecheck, unit tests against the SDK's fake
+# server, ESM/CJS build, the scaffolded template, and an e2e run against the
+# real server (mix phx.server). See docs/sdk/agent.md.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - "packages/agent-ts/**"
+      - "packages/create-converger-agent/**"
+      - "examples/agents/**"
+      - "priv/protocol/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - ".github/workflows/agent-ts.yml"
+      # The e2e test runs against the server: protocol changes must keep it green.
+      - "lib/**"
+      - "config/**"
+      - "priv/repo/migrations/**"
+      - "mix.exs"
+      - "mix.lock"
+
+concurrency:
+  group: agent-ts-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  # Keep in sync with ci.yml, the Dockerfile and .tool-versions.
+  ELIXIR_VERSION: "1.19.5"
+  OTP_VERSION: "28.5.0.5"
+
+jobs:
+  unit:
+    name: Typecheck, tests, build (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["22", "24"]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile --filter "@converger/agent..." --filter "create-converger-agent..." --filter "@converger/example-llm-tool-loop-ts..."
+
+      # src/generated/protocol.ts is committed: regenerate it from priv/protocol/v1
+      # and fail when the schemas changed without it.
+      - name: "@converger/agent: generated protocol types are up to date"
+        if: matrix.node == '22'
+        run: |
+          pnpm --filter @converger/agent run generate:types
+          git diff --exit-code -- packages/agent-ts/src/generated || {
+            echo "::error::packages/agent-ts/src/generated is stale: run 'pnpm --filter @converger/agent run generate:types' and commit the result."
+            exit 1
+          }
+
+      - name: "@converger/agent: typecheck, unit tests, build"
+        run: |
+          pnpm --filter @converger/agent typecheck
+          pnpm --filter @converger/agent test
+          pnpm --filter @converger/agent build
+
+      - name: Load the build (ESM and CJS)
+        working-directory: packages/agent-ts
+        run: |
+          node --input-type=module -e "const m = await import('./dist/index.js'); const t = await import('./dist/testing.js'); if (typeof m.createAgent !== 'function' || typeof t.FakeConvergerServer !== 'function') process.exit(1)"
+          node -e "if (typeof require('./dist/index.cjs').createAgent !== 'function') process.exit(1)"
+
+      - name: API docs (typedoc)
+        if: matrix.node == '22'
+        run: pnpm --filter @converger/agent run docs
+
+      - name: create-converger-agent
+        run: |
+          pnpm --filter create-converger-agent typecheck
+          pnpm --filter create-converger-agent test
+
+      - name: "Example: llm-tool-loop-ts (no API calls)"
+        run: |
+          pnpm --filter @converger/example-llm-tool-loop-ts typecheck
+          pnpm --filter @converger/example-llm-tool-loop-ts test
+
+      # The template as a user gets it: the packed SDK, npm install, its own test.
+      - name: Scaffolded project
+        shell: bash
+        run: |
+          version=$(node -p "require('./packages/agent-ts/package.json').version")
+          (cd packages/agent-ts && pnpm pack --pack-destination "$RUNNER_TEMP")
+          node packages/create-converger-agent/bin/create-converger-agent.mjs "$RUNNER_TEMP/my-agent" \
+            --sdk-version "file:$RUNNER_TEMP/converger-agent-${version}.tgz"
+          cd "$RUNNER_TEMP/my-agent"
+          npm install --no-audit --no-fund
+          npm run typecheck
+          npm test
+
+  e2e:
+    name: e2e against mix phx.server
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+
+    env:
+      MIX_ENV: dev
+      DB_NAME: converger_agent_e2e
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          otp-version: ${{ env.OTP_VERSION }}
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            deps
+            _build
+          key: mix-dev-${{ runner.os }}-${{ env.ELIXIR_VERSION }}-${{ env.OTP_VERSION }}-${{ hashFiles('mix.lock') }}
+          restore-keys: mix-dev-${{ runner.os }}-${{ env.ELIXIR_VERSION }}-${{ env.OTP_VERSION }}-
+
+      - run: mix deps.get
+      - run: mix compile
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile --filter "@converger/agent..."
+
+      - name: Database and fixtures
+        shell: bash
+        run: |
+          mix ecto.create --quiet
+          mix ecto.migrate --quiet
+          # A tenant, a widget channel, a bot channel and a routing rule. `mix run`
+          # starts the endpoint too, so it gets a port of its own.
+          PORT=4125 mix run packages/agent-ts/test/e2e/setup.exs | grep '^CONVERGER_' >> "$GITHUB_ENV"
+
+      - name: Start the server
+        shell: bash
+        run: |
+          PORT=4124 LOG_LEVEL=warning nohup mix phx.server > "$RUNNER_TEMP/server.log" 2>&1 &
+          for i in $(seq 1 90); do
+            if curl -sf http://127.0.0.1:4124/health/live > /dev/null; then exit 0; fi
+            sleep 2
+          done
+          cat "$RUNNER_TEMP/server.log"
+          exit 1
+
+      - name: e2e test
+        env:
+          CONVERGER_URL: http://127.0.0.1:4124
+        run: pnpm --filter @converger/agent test:e2e
+
+      - name: Server log
+        if: failure()
+        run: cat "$RUNNER_TEMP/server.log"

@@ -88,7 +88,8 @@ Start-up order:
 | Service | URL / port |
 | --- | --- |
 | Converger (API, `/admin`, `/portal`, WebSockets) | `http://localhost:4000` |
-| Prometheus metrics exporter of the app | `http://localhost:9568/metrics` |
+| Prometheus metrics of the app (needs `METRICS_TOKEN` in `.env`, sent as a bearer token) | `http://localhost:4000/metrics` |
+| Health probes | `http://localhost:4000/health/live`, `http://localhost:4000/health/ready` |
 | Prometheus | `http://localhost:9090` |
 | Grafana (user `admin`, password `GF_SECURITY_ADMIN_PASSWORD`) | `http://localhost:3000` |
 | Jaeger UI (traces) | `http://localhost:16686` |
@@ -112,13 +113,13 @@ docker compose exec \
 | Variable | Default | Behavior |
 | --- | --- | --- |
 | `ADMIN_EMAIL` | `admin@converger.local` | Email of the account. |
-| `ADMIN_PASSWORD` | generated | At least 8 characters. When unset, a random password is printed **once**. The account is then flagged `must_change_password`, and after the first login you are sent to `/admin/password` until you change it. |
+| `ADMIN_PASSWORD` | generated | At least 12 characters (`PASSWORD_MIN_LENGTH`), not containing the email. When unset, a random password is printed **once**. The account is then flagged `must_change_password`, and after the first login you are sent to `/admin/password` until you change it. A `super_admin` is then sent to `/admin/security` to set up TOTP two-factor authentication (required for the roles in `ADMIN_REQUIRE_2FA_ROLES`). |
 
 The task does nothing if an admin user already exists, and prints `Admin users already exist; nothing to seed`.
 
 ### 5. Log in
 
-Open `http://localhost:4000/admin/login` and sign in with the email and password. Failed logins are rate limited to 5 per minute per IP and per account. The admin panel has pages for tenants, channels, conversations, routing rules, admin users, tenant users and audit logs, plus the Oban dashboard at `/admin/oban`.
+Open `http://localhost:4000/admin/login` and sign in with the email and password. Failed logins are rate limited to 5 per minute per IP and per account. The admin panel has pages for tenants, channels, conversations, routing rules, admin users, tenant users and audit logs, plus the Oban dashboard at `/admin/oban`. See [Admin panel and tenant portal](admin-ui.md) for every page and the light/dark theme toggle.
 
 ## Option B: local development
 
@@ -136,7 +137,9 @@ With [asdf](https://asdf-vm.com) or [mise](https://mise.jdx.dev), run `asdf inst
 You also need:
 
 - **PostgreSQL** (17 is what compose and CI use; at least 11 is needed for the built-in `sha256()` used by a migration). The first migration creates the `uuid-ossp` and `pgcrypto` extensions, so the role needs the rights to do that (the default `postgres` superuser has them).
-- **A C compiler and `make`**, because `bcrypt_elixir` (admin and portal password hashing) is a NIF compiled from C. See the per-OS notes below.
+- **A C compiler and `make`**, because `bcrypt_elixir` (admin and portal password hashing) is a NIF compiled from C. On Windows you can skip it with `CONVERGER_PASSWORD_HASHER=pbkdf2`. See the per-OS notes below.
+
+The [dev container](contributing.md#dev-container) bundles all of this (toolchain, C tools, Postgres) for any OS.
 - **Node.js is not needed.** There is no asset pipeline. The admin and portal layouts load Phoenix and LiveView from jsDelivr.
 
 ### Per-OS notes
@@ -153,13 +156,27 @@ sudo apt-get install -y build-essential git
 xcode-select --install
 ```
 
-**Windows**: `bcrypt_elixir` builds its NIF with MSVC and `nmake`. Without them, `mix compile` stops with `** (Mix) "nmake" not found in the path.` (issue [#53](https://github.com/AimTune/converger/issues/53)).
+**Windows**: `bcrypt_elixir` builds its NIF with MSVC and `nmake`. Without them, `mix compile` stops with `** (Mix) "nmake" not found in the path.` (issue [#53](https://github.com/AimTune/converger/issues/53)). Pick one of three ways:
+
+*No C compiler (pure-Elixir hashing).* Set `CONVERGER_PASSWORD_HASHER=pbkdf2` in every shell you run `mix` from (or once, as a user environment variable):
+
+```powershell
+$env:CONVERGER_PASSWORD_HASHER = "pbkdf2"
+mix setup
+mix test
+```
+
+`mix.exs` then leaves `bcrypt_elixir` out, and admin and tenant passwords are hashed with PBKDF2-SHA512 (`pbkdf2_elixir`). Everything else is the same; the whole test suite passes in this mode. A database seeded from a bcrypt build has bcrypt hashes that this build cannot verify, so log-ins fail with a warning in the log: run `mix ecto.reset` or reset the password. Production builds (the `Dockerfile`) keep bcrypt ([ADR-0057](adr/0057-pluggable-password-hasher-and-dev-container.md)). Kafka channels do not run natively on Windows in either mode (their `crc32cer` NIF is not built, see [broker channels](channels/brokers.md)).
+
+*Dev container.* Open the repository in the [dev container](contributing.md#dev-container) (Docker Desktop with the WSL 2 backend). It has the Linux toolchain and Postgres, and nothing has to be installed on Windows besides Docker and VS Code.
+
+*MSVC.* To build bcrypt natively:
 
 1. Install [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) and select the **"Desktop development with C++"** workload (MSVC compiler and Windows SDK).
 2. Run every `mix` command from the **"x64 Native Tools Command Prompt for VS"** (or a Developer PowerShell set to x64), so that `cl.exe` and `nmake` are on `PATH`. A plain PowerShell or Git Bash window does not have them.
 3. If `bcrypt_elixir` was already compiled in the wrong shell, rebuild it there with `mix deps.compile bcrypt_elixir --force`.
 
-As an alternative, use WSL2 and follow the Linux instructions. Converger has no pure-Elixir password hashing fallback today: `bcrypt_elixir` is the only hashing dependency in `mix.exs`. A pluggable hasher and a dev container are proposed in [#53](https://github.com/AimTune/converger/issues/53).
+WSL2 with the Linux instructions also works.
 
 ### Postgres for development
 
@@ -261,7 +278,7 @@ Go to **Admin, Channels** and pick the tenant, type `echo`, mode `outbound` (the
 export CHANNEL_SECRET='...'
 ```
 
-Tenant users can sign in to the tenant portal (`/portal/login`, with tenant name, email and password) to see the tenant's channels, conversations and routing rules. They cannot create channels or tenants. An admin creates tenant users under **Admin, Tenant Users**.
+Tenant users can sign in to the tenant portal (`/portal/login`, with tenant name, email and password) to see the tenant's channels, conversations, routing rules and deliveries (including failed ones, which they can replay). They cannot create channels or tenants. An admin creates tenant users under **Admin, Tenant Users**.
 
 ### 3. Get a client token
 
@@ -326,7 +343,7 @@ curl -s -X POST "http://localhost:4000/api/v1/converger/conversations/$CONV/acti
 { "id": "0e7d4c1a-8b2f-4f6e-a1c3-7d9e2b4f6a80" }
 ```
 
-The response comes back after the activity **and** its delivery job have been committed in the same transaction. If the job could not be enqueued, nothing is committed and you get `503` with `{"error": "Activity could not be accepted, please retry"}`. Send the same request again with the same `x-idempotency-key`: it returns the same `id` and creates no second activity.
+The response comes back after the activity **and** its delivery job have been committed in the same transaction. If the job could not be enqueued, nothing is committed and you get `503` `unavailable` with the message "Activity could not be accepted, please retry" and `details.reason` `delivery_enqueue_failed`. Send the same request again with the same `x-idempotency-key`: it returns the same `id` and creates no second activity.
 
 Client-settable fields are `type`, `text`, `attachments` and `channelData` (stored as `metadata`). `from.id` becomes the activity's `sender`. The server sets everything else, including timestamps ([activities](concepts/activities.md), [ADR-0005](adr/0005-separate-client-and-system-changesets.md)).
 
@@ -363,12 +380,12 @@ curl -s "http://localhost:4000/api/v1/converger/conversations/$CONV/activities" 
       "channelData": { "echo_of": "0e7d4c1a-8b2f-4f6e-a1c3-7d9e2b4f6a80" }
     }
   ],
-  "watermark": "c2VxOjI",
+  "watermark": 2,
   "has_more": false
 }
 ```
 
-`watermark` is opaque (it encodes the `seq` of the last activity returned). Pass it back as `?watermark=c2VxOjI` to fetch only newer activities. Use `?limit=` to change the page size (default 100, at most 1000).
+`watermark` is the `seq` of the last activity returned. Pass it back as `?watermark=2` to fetch only newer activities. Use `?limit=` to change the page size (default 100, at most 1000).
 
 The same conversation is visible through the server-to-server API with the tenant API key. That API returns the canonical activity shape, including `seq`:
 
@@ -406,7 +423,7 @@ curl -s "http://localhost:4000/api/v1/conversations/$CONV/activities" -H "x-api-
       "inserted_at": "2026-10-09T10:15:02.733914Z"
     }
   ],
-  "meta": { "watermark": "c2VxOjI", "has_more": false, "limit": 100 }
+  "meta": { "watermark": 2, "has_more": false, "limit": 100 }
 }
 ```
 
@@ -419,23 +436,32 @@ Open **Admin, Conversations** and select the conversation. The transcript shows 
 To close the conversation, run `POST /api/v1/converger/conversations/$CONV/close` (bearer token) or `POST /api/v1/conversations/$CONV/close` (`x-api-key`). The server then emits a `conversationUpdate` activity, and further posts are rejected with `409`:
 
 ```json
-{ "error": "conversation_closed", "detail": "Conversation is closed" }
+{
+  "error": {
+    "code": "conversation_closed",
+    "message": "Conversation is closed",
+    "details": null,
+    "request_id": "F8n2kQx1c9ZQAAAB"
+  }
+}
 ```
 
 `.../reopen` opens it again ([conversations](concepts/conversations.md)).
 
 ### Common errors
 
-| Status | Body | Cause |
+Every error response uses the same envelope, `{"error": {"code", "message", "details", "request_id"}}`, like the `409` above. Branch on `code`; `details` holds extra data such as the per-field errors of a `422` (for example `{"text": ["should be at most 65536 byte(s)"]}`). The full list of codes is in [errors](api/errors.md).
+
+| Status | Code | Cause |
 | --- | --- | --- |
-| `401` | `{"error": {"code": "Unauthorized", "message": "Missing or malformed Authorization header"}}` | No `authorization: Bearer ...` header on a `/api/v1/converger` route. |
-| `401` | `{"error": {"code": "Unauthorized", "message": "Invalid or expired token"}}` | Expired token, a channel secret used where a token is required, or a token from another installation. |
-| `403` | `{"error": {"code": "Forbidden", "message": "Channel not found or inactive"}}` | The channel was disabled or deleted. |
-| `403` | `{"errors": {"detail": "Forbidden"}}` | A conversation-scoped token used for another conversation. |
-| `401` | `{"error": "Unauthorized: Invalid or inactive API Key"}` | Wrong `x-api-key`, or the tenant is inactive (`/api/v1` routes). |
-| `409` | `{"error": "conversation_closed", "detail": "Conversation is closed"}` | The conversation is closed or expired. |
-| `422` | `{"errors": {"text": ["should be at most 65536 byte(s)"]}}` | Validation failed (size limits, unknown `type`, ...). |
-| `429` | `{"error": "Too many requests. Please try again later."}` and a `Retry-After` header | Rate limit exceeded ([deployment](deployment.md#rate-limiting)). |
+| `401` | `unauthorized` ("Missing or malformed Authorization header") | No `authorization: Bearer ...` header on a `/api/v1/converger` route. |
+| `401` | `unauthorized` or `token_expired` | Expired token, a channel secret used where a token is required, or a token from another installation. |
+| `403` | `channel_inactive` ("Channel not found or inactive") | The channel was disabled or deleted. |
+| `403` | `forbidden` | A conversation-scoped token used for another conversation. |
+| `401` | `unauthorized` ("Invalid or inactive API Key") | Wrong `x-api-key`, or the tenant is inactive (`/api/v1` routes). |
+| `409` | `conversation_closed` | The conversation is closed or expired. |
+| `422` | `invalid_message`, field errors in `details` | Validation failed (size limits, unknown `type`, ...). |
+| `429` | `rate_limited`, with `details.retry_after_ms` and a `Retry-After` header | Rate limit exceeded ([deployment](deployment.md#rate-limiting)). |
 
 ## Next steps
 

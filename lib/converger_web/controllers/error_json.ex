@@ -1,34 +1,28 @@
 defmodule ConvergerWeb.ErrorJSON do
   @moduledoc """
-  This module is invoked by your endpoint in case of errors on JSON requests.
-
-  See config/config.exs.
+  Renders errors raised as exceptions (`render_errors` in config/config.exs:
+  unknown routes, `Ecto.NoResultsError`, `Phoenix.ActionClauseError`,
+  `Plug.Parsers` errors, crashes) in the API error envelope
+  (`ConvergerWeb.APIError`). The code is derived from the status; the
+  message is the code's generic message, so nothing about the exception
+  leaks.
   """
 
-  # If you want to customize a particular status code,
-  # you may add your own clauses, such as:
-  #
-  # def render("500.json", _assigns) do
-  #   %{errors: %{detail: "Internal Server Error"}}
-  # end
+  alias ConvergerWeb.APIError
 
-  # By default, Phoenix returns the status message from
-  # the template name. For example, "404.json" becomes
-  # "Not Found".
-  def render("error.json", %{changeset: changeset}) do
-    # When rendering errors, we can use a helper to transform them
-    %{errors: errors_on(changeset)}
+  def render(template, assigns) do
+    status = status_from_template(template)
+    code = APIError.code_for_status(status)
+
+    code
+    |> APIError.new(nil, nil, status: status)
+    |> APIError.body(APIError.request_id(assigns[:conn]))
   end
 
-  def render(template, _assigns) do
-    %{errors: %{detail: Phoenix.Controller.status_message_from_template(template)}}
-  end
-
-  defp errors_on(changeset) do
-    Ecto.Changeset.traverse_errors(changeset, fn {message, opts} ->
-      Regex.replace(~r"%{(\w+)}", message, fn _, key ->
-        opts |> Keyword.get(String.to_existing_atom(key), key) |> to_string()
-      end)
-    end)
+  defp status_from_template(template) do
+    case template |> String.split(".") |> hd() |> Integer.parse() do
+      {status, ""} -> status
+      _ -> 500
+    end
   end
 end

@@ -1,0 +1,39 @@
+# Converger on Kubernetes: a clustered Deployment (libcluster Kubernetes.DNS
+# strategy over a headless Service), readiness/liveness probes on
+# /health/ready and /health/live, HPA, PodDisruptionBudget and a one-shot
+# migration Job. See docs/operations/kubernetes.md.
+#
+# Before `kubectl apply -k deploy/k8s`, create the secret (never commit it):
+#
+#   kubectl create secret generic converger-env \
+#     --from-literal=DATABASE_URL='ecto://USER:PASS@HOST/converger' \
+#     --from-literal=SECRET_KEY_BASE="$(openssl rand -base64 64 | tr -d '\n')" \
+#     --from-literal=CLOAK_KEY="$(openssl rand -base64 32)" \
+#     --from-literal=RELEASE_COOKIE="$(openssl rand -base64 48 | tr -d '\n')" \
+#     --from-literal=METRICS_TOKEN="$(openssl rand -hex 32)"
+#
+# and adjust PHX_HOST and the other settings in configmap.yaml (or in an
+# overlay that patches it).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: converger
+      app.kubernetes.io/managed-by: kustomize
+
+resources:
+  - serviceaccount.yaml
+  - configmap.yaml
+  - service.yaml
+  - service-headless.yaml
+  - deployment.yaml
+  - hpa.yaml
+  - pdb.yaml
+  - migrate-job.yaml
+
+# Pin the image you deploy (a version tag or a digest), never `latest` in
+# production: the migration Job and the Deployment must run the same build.
+images:
+  - name: ghcr.io/aimtune/converger
+    newTag: latest

@@ -16,11 +16,23 @@ updates:
           - mix_audit
           - excoveralls
 
+  # pnpm workspace: packages/client-ts (@converger/client) and examples/typescript/*.
   - package-ecosystem: npm
-    directory: "/converger_js"
+    directory: "/"
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    groups:
+      sdk-dev-tooling:
+        dependency-type: development
+    ignore:
+      # tsup's declaration build uses the TypeScript compiler API, which TypeScript 7 (the native port) no longer
+      # ships. Stay on 5.x until tsup supports 7.
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
+      # The types track the oldest Node the SDK supports (22), not the newest release.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: github-actions
     directory: "/"

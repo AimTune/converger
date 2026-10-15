@@ -21,7 +21,7 @@ defmodule ConvergerWeb.AdminPasswordControllerTest do
   end
 
   test "admin pages are blocked until the password is changed", %{conn: conn, user: user} do
-    conn = init_test_session(conn, %{admin_user_id: user.id})
+    conn = log_in_admin(conn, user)
 
     assert {:error, {:redirect, %{to: "/admin/password"}}} =
              live(conn, ~p"/admin")
@@ -32,7 +32,7 @@ defmodule ConvergerWeb.AdminPasswordControllerTest do
   end
 
   test "changing the password lifts the restriction", %{conn: conn, user: user, password: pw} do
-    conn = init_test_session(conn, %{admin_user_id: user.id})
+    conn = log_in_admin(conn, user)
 
     conn =
       put(conn, ~p"/admin/password", %{
@@ -48,7 +48,7 @@ defmodule ConvergerWeb.AdminPasswordControllerTest do
   end
 
   test "a wrong current password is rejected", %{conn: conn, user: user} do
-    conn = init_test_session(conn, %{admin_user_id: user.id})
+    conn = log_in_admin(conn, user)
 
     conn =
       put(conn, ~p"/admin/password", %{

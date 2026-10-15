@@ -139,7 +139,8 @@ defmodule Converger.ConversationLifecycleTest do
             from(l in Converger.AuditLogs.AuditLog, where: l.tenant_id == ^tenant.id)
           )
 
-          Repo.delete_all(from(t in Converger.Tenants.Tenant, where: t.id == ^tenant.id))
+          # Activities are purged by the PurgeWorker job delete_tenant enqueues.
+          {:ok, _} = Converger.Tenants.delete_tenant(tenant)
         end)
       end)
 

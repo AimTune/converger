@@ -1,0 +1,54 @@
+name: Release Python agent SDK
+
+# Publishes packages/agent-python (converger-agent) to PyPI. Manual only:
+# run it from the Actions tab on a commit whose src/converger_agent/_version.py
+# holds the version to release. Uses PyPI trusted publishing (OIDC): register
+# this repository, this workflow file and the "pypi" environment as a trusted
+# publisher of the "converger-agent" project on PyPI. No API token is stored.
+# With "publish" unchecked it only builds and tests (a dry run).
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish to PyPI (unchecked: build and test only)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/agent-python
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - run: pip install -e '.[test,langchain]' build
+      - run: python -m pytest
+      - run: python -m build
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: packages/agent-python/dist/
+
+  publish:
+    name: Publish to PyPI
+    if: ${{ inputs.publish }}
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1

@@ -14,7 +14,7 @@ defmodule Converger.Pipeline.Broadway do
           producer: :memory
         ]
 
-      # Kafka producer (production - requires {:broadway_kafka, "~> 0.4"}):
+      # Kafka producer:
       config :converger, :pipeline,
         backend: Converger.Pipeline.Broadway,
         broadway: [
@@ -26,7 +26,7 @@ defmodule Converger.Pipeline.Broadway do
           ]
         ]
 
-      # RabbitMQ producer (requires {:broadway_rabbitmq, "~> 0.8"}):
+      # RabbitMQ producer:
       config :converger, :pipeline,
         backend: Converger.Pipeline.Broadway,
         broadway: [
@@ -48,13 +48,15 @@ defmodule Converger.Pipeline.Broadway do
           ]
         ]
 
-  ## Optional Dependencies
+  ## Pipeline transport, not an integration point
 
-  Kafka and RabbitMQ require additional packages:
-  - Kafka:    `{:broadway_kafka, "~> 0.4"}`
-  - RabbitMQ: `{:broadway_rabbitmq, "~> 0.8"}`
-
-  These are NOT included by default. Add them to your mix.exs when needed.
+  Kafka and RabbitMQ here are the transport of the delivery pipeline: an
+  internal queue of `activity_id` / `channel_id` pointers. To exchange
+  conversations with other systems over a broker, use a broker channel
+  (`kafka`, `rabbitmq` channel types, `Converger.Channels.Broker`). Their
+  client libraries (`broadway_kafka`, `brod`, `broadway_rabbitmq`, `amqp`)
+  ship with Converger; the Kafka push module expects the `:brod` client
+  named by `client_id` to be started by the application.
 
   ## Durability
 
@@ -106,7 +108,7 @@ defmodule Converger.Pipeline.Broadway do
   def after_commit(activity) do
     Converger.Pipeline.broadcast(activity)
 
-    channels = Converger.Pipeline.resolve_delivery_channels(activity)
+    channels = Converger.Pipeline.delivery_channels(activity)
 
     Enum.each(channels, fn channel ->
       message = %{

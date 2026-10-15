@@ -43,7 +43,7 @@ Conventions used in the tables below:
 | --- | --- | --- | --- |
 | `PHX_SERVER` | unset | yes, for releases | When set to **any** value (even `false`), starts the HTTP endpoint. `bin/server` sets `PHX_SERVER=true`. Read in every environment. |
 | `PHX_HOST` | `example.com` | effectively yes | Public host name. URLs are generated as `https://PHX_HOST:443`, `ForceSSL` redirects to it, and the default WebSocket origin check accepts only this host. Prod only. |
-| `PORT` | `4000` | no | HTTP listen port. Prod binds all interfaces (`::`); dev binds `127.0.0.1`. Read in prod and dev. |
+| `PORT` | `4000` | no | HTTP listen port. Prod binds all interfaces (`::`); dev binds `127.0.0.1`. Read in prod and dev. The port speaks HTTP/1.1 only (REST, SSE, WebSocket): HTTP/2 is disabled in `config/config.exs`. gRPC has its own port ([gRPC transport](#grpc-transport)). |
 | `CHECK_ORIGIN` | host of `PHX_HOST` | no | Comma-separated origins allowed to open browser WebSockets (LiveView, `/socket`, `/socket/converger`), Phoenix syntax such as `//*.example.com`. Set but empty raises at boot. Prod only. |
 | `CORS_ORIGINS` | `http://127.0.0.1:5500,http://localhost:5500` | no | Comma-separated CORS origins (`*` for any). Read per request by `ConvergerWeb.Endpoint.cors_origins/0`. All environments. |
 
@@ -66,7 +66,17 @@ All prod only. Boolean values accept `true`, `1`, `yes`, `on` (case-insensitive)
 | Variable | Default | Environment | Meaning |
 | --- | --- | --- | --- |
 | `DATABASE_URL` | none | prod | See [Required in production](#required-in-production). |
-| `POOL_SIZE` | `10` | prod | Ecto pool size per node. Dev uses 20, test `2 x schedulers`. |
+| `POOL_SIZE` | `10` | prod | Interactive pool size per node (HTTP, WebSocket, LiveView). Dev uses 20, test `2 x schedulers`. See [Database pools and pressure](database.md). |
+| `DB_QUEUE_TARGET_MS` | `50` | prod | Interactive pool `queue_target`: a checkout queued longer than this for a whole `DB_QUEUE_INTERVAL_MS` is dropped and the request answered `503`. |
+| `DB_QUEUE_INTERVAL_MS` | `1000` | prod | Interactive pool `queue_interval`. |
+| `DB_TIMEOUT_MS` | `15000` | prod | Interactive query timeout. |
+| `BACKGROUND_POOL_SIZE` | `10` | prod | Background pool size per node, used by Oban jobs. `0` shares the interactive pool (one pool, as before #35). Dev uses 10, test shares. |
+| `BACKGROUND_DB_QUEUE_TARGET_MS` | `500` | prod | Background pool `queue_target`. |
+| `BACKGROUND_DB_QUEUE_INTERVAL_MS` | `5000` | prod | Background pool `queue_interval`. |
+| `BACKGROUND_DB_TIMEOUT_MS` | `60000` | prod | Background query timeout. |
+| `DB_RETRY_AFTER_MS` | `1000` | all | Base of the `Retry-After` / `retryAfterMs` hint when the database is unavailable; jittered up to twice the value. |
+| `READY_DB_QUEUE_MS` | `200` | all | `/health/ready` reports `degraded` (503) while the interactive pool's average wait is at least this long. `0` disables. |
+| `DB_QUEUE_WINDOW_MS` | `5000` | all | Window of that average. |
 | `ECTO_IPV6` | unset | prod | `true` or `1` connects over IPv6 (`socket_options: [:inet6]`). |
 | `DB_USERNAME` | `postgres` | dev, test | Postgres user. |
 | `DB_PASSWORD` | `postgres` | dev, test | Postgres password. |
@@ -81,12 +91,51 @@ All prod only. Boolean values accept `true`, `1`, `yes`, `on` (case-insensitive)
 | `CLOAK_KEY` | none | prod (required) | Current encryption key. |
 | `CLOAK_RETIRED_KEYS` | empty | prod | Comma-separated base64 keys that are still accepted for decryption during a rotation. Run `bin/converger eval "Converger.Release.reencrypt_secrets()"` after rotating, then remove them. |
 
+## Client tokens
+
+Converger client tokens (JWT): signing keys, refresh rotation and revocation. See
+[Client tokens](../security/client-tokens.md) and [ADR-0059](../adr/0059-client-token-keys-revocation-rotation-and-permissions.md).
+
+| Variable | Default | Environment | Meaning |
+| --- | --- | --- | --- |
+| `TOKEN_SIGNING_KEYS` | unset: `SECRET_KEY_BASE` under the kid `default` | all | Comma-separated `kid:secret` pairs, the signing key first; every listed key verifies. Secrets must be at least 32 bytes and kids unique, or the node refuses to boot. Rotate by prepending a new key and removing the old one after 30 minutes. |
+| `TOKEN_ROTATION_GRACE_SECONDS` | `30` | all | How long a refreshed token stays valid. Refreshing it again after that revokes its family (reuse detection). |
+| `TOKEN_ACCEPT_UNKEYED` | `true` | all | Accept Converger tokens without a `kid` header (issued before #52, signed with `SECRET_KEY_BASE`). Set to `false` 30 minutes after upgrading. |
+
+## Password hashing
+
+| Variable | Default | Read at | Meaning |
+| --- | --- | --- | --- |
+| `CONVERGER_PASSWORD_HASHER` | `bcrypt` | compile time (`mix.exs`, `config/config.exs`) | `bcrypt` (`bcrypt_elixir`, a C NIF) or `pbkdf2` (`pbkdf2_elixir`, pure Elixir). `pbkdf2` leaves `bcrypt_elixir` out of the build, for development machines without a C compiler. Existing hashes are verified by their own prefix; bcrypt hashes cannot be verified in a `pbkdf2` build. Release images use the default. See [ADR-0057](../adr/0057-pluggable-password-hasher-and-dev-container.md). |
+
 ## Network trust and admin access
 
 | Variable | Default | Environment | Meaning |
 | --- | --- | --- | --- |
 | `TRUSTED_PROXIES` | empty (forwarding headers ignored) | all | Comma-separated IPs/CIDRs whose `X-Forwarded-For` / `X-Forwarded-Proto` are honoured. See [../security.md](../security.md). |
-| `ADMIN_IP_WHITELIST` | `127.0.0.1,::1` | all | Comma-separated IPs/CIDRs allowed to reach `/admin`. |
+| `ADMIN_IP_WHITELIST` | `127.0.0.1,::1` | all | Comma-separated IPs/CIDRs allowed to reach `/admin` and the admin API `/api/v1/admin`. |
+| `ADMIN_API_TOKEN` | unset (admin API off) | all | Bearer token of the platform [admin API](../api/management-api.md#admin-api) (`/api/v1/admin`): at least 32 characters (`openssl rand -base64 48`); shorter values stop the boot. Unset, the admin API answers `401`. |
+
+## Accounts, sessions and email
+
+Admin panel and tenant portal logins, 2FA and password reset
+([Security model](../security/overview.md#sessions),
+[ADR-0058](../adr/0058-server-side-sessions-totp-2fa-and-password-reset-for-admin-and-portal.md)).
+
+| Variable | Default | Environment | Meaning |
+| --- | --- | --- | --- |
+| `SESSION_MAX_AGE_SECONDS` | `43200` (12 h) | all | Absolute lifetime of an admin/portal session from login, whatever the activity. Also the session cookie's `max_age`. |
+| `SESSION_IDLE_TIMEOUT_SECONDS` | `1800` (30 min) | all | A session without requests for this long ends. |
+| `PASSWORD_MIN_LENGTH` | `12` | all | Minimum password length for admins and tenant users, applied when a password is set (existing passwords keep working). The maximum is fixed at 72 bytes (bcrypt). |
+| `ADMIN_REQUIRE_2FA_ROLES` | `super_admin` | all | Comma-separated admin roles (`super_admin`, `admin`, `viewer`) that must enable TOTP 2FA before using the admin panel. Empty (`""`) requires it for nobody. |
+| `MAILER_FROM` | `Converger <noreply@converger.local>` | all | Sender of account emails (password reset): `addr@example.com` or `Name <addr@example.com>`. |
+| `SMTP_HOST` | unset | all | When set, `Converger.Mailer` sends through this SMTP relay. Without it production sends no email, so password reset links never arrive. |
+| `SMTP_PORT` | `587` | all | SMTP port. |
+| `SMTP_USERNAME` / `SMTP_PASSWORD` | unset | all | SMTP credentials; authentication is used when `SMTP_USERNAME` is set. |
+| `SMTP_SSL` | `false` | all | `true` or `1` for implicit TLS (usually port 465). Otherwise STARTTLS is required. |
+
+Reset links are built from the endpoint URL (`PHX_HOST`, see [HTTP server and endpoint](#http-server-and-endpoint)),
+so it must be the address users open.
 
 ## Outbound webhooks (SSRF guard)
 
@@ -95,7 +144,110 @@ All prod only. Boolean values accept `true`, `1`, `yes`, `on` (case-insensitive)
 | `WEBHOOK_ALLOWED_TARGETS` | empty (dev: `localhost,127.0.0.0/8,::1` from `dev.exs`) | all | Comma-separated host names (`*.svc.local` matches subdomains) or IP/CIDR ranges that webhooks may target although they are private. Replaces the dev default when set. |
 | `WEBHOOK_ALLOW_PRIVATE_TARGETS` | unset | all | Exactly `true` or `1` disables the SSRF guard entirely. Development only. |
 
-See [Outbound webhooks](../webhooks.md#ssrf-protection).
+See [Outbound webhooks](../webhooks.md#ssrf-protection). The same guard, and these two variables, apply to
+[platform event webhook](../platform-webhooks.md) subscriptions and to the broker
+hosts of [broker channels](../channels/brokers.md#security) (`kafka` brokers, the `rabbitmq` and `redis_streams` URL hosts, the `nats` servers, the `mqtt` host): allow a
+private broker with `WEBHOOK_ALLOWED_TARGETS`.
+
+## Platform event webhooks
+
+```elixir
+config :converger, :platform_webhooks,
+  enabled: true,              # false stops webhook deliveries (events still reach the backbone)
+  connect_timeout: 5_000,     # ms
+  receive_timeout: 10_000,    # ms
+  max_response_bytes: 65_536
+```
+
+Retries use the shared `:retry_policy`; the event log is pruned after `WEBHOOK_EVENT_RETENTION_DAYS`. See
+[Platform event webhooks](../platform-webhooks.md#configuration).
+
+## Broker channels
+
+Consumers of the `kafka`, `rabbitmq`, `nats`, `redis_streams` and `mqtt` channel types, and the Gateway connections of
+`discord` channels with `gateway: true` ([Broker channels](../channels/brokers.md#consumers-in-a-cluster),
+[Discord Gateway mode](../channels/discord.md#gateway-mode)).
+
+| Variable | Default | Environment | Meaning |
+| --- | --- | --- | --- |
+| `BROKER_CONSUMERS` | `true` (test: `false`) | all | `false` / `0` keeps broker consumers off this node (no consumer manager); the other nodes of the cluster run them. Producing (deliveries to broker channels) is not affected. |
+| `BROKER_RECONCILE_INTERVAL_MS` | `30000` | all | How often every node reconciles the running consumers with the channels (restarts consumers that gave up, picks up the consumers of a node that left). Channel changes are applied at once regardless. |
+
+The other keys of `config :converger, :broker_channels` (application config only):
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `consumers` | `true` | Set by `BROKER_CONSUMERS`. |
+| `reconcile_interval_ms` | `30000` | Set by `BROKER_RECONCILE_INTERVAL_MS`. |
+| `inbound_max_attempts` | `8` | Attempts for a consumed message that fails transiently before it is dead-lettered. |
+| `inbound_backoff_ms`, `inbound_max_backoff_ms` | `500`, `30000` | Backoff between those attempts (doubling, capped). |
+| `dead_letter_max_backoff_ms` | `30000` | Cap of the backoff between attempts to write a message to the dead-letter topic or queue (retried until it succeeds). |
+| `publisher_idle_ms` | `900000` | A node's producer connection to a broker channel is closed after this long without deliveries. |
+
+## Event backbone
+
+Where platform events are published and consumed ([Event backbone](../architecture/event-backbone.md),
+[ADR-0070](../adr/0070-pluggable-event-backbone.md)). How to choose one and migrate without downtime:
+[Deployment](../deployment.md#choosing-an-event-backbone). All variables apply in every environment; unset or empty
+ones keep the `config.exs` defaults.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `BACKBONE` | `native` | The backbone: `native`, `kafka`, `nats` or `rabbitmq`. Any other value fails the boot. |
+| `BACKBONE_MIRROR` | unset | Comma-separated backbones that also receive every event (dual publish while migrating). |
+| `BACKBONE_CONSUMERS` | `true` | `false` / `0`: this node declares the subscriptions but runs no broker consumer. Publishing is not affected. |
+| `BACKBONE_TOPIC_PREFIX` | `converger` | Kafka topics and NATS subjects `<prefix>.activities`, `.deliveries`, `.events`; NATS streams `<PREFIX>_ACTIVITIES` ...; the RabbitMQ exchange. |
+| `BACKBONE_KAFKA_BROKERS` | `localhost:9092` | Bootstrap brokers, `host:port,host:port`. |
+| `BACKBONE_KAFKA_SASL_MECHANISM` | unset | `plain`, `scram_sha_256` or `scram_sha_512`, with `BACKBONE_KAFKA_SASL_USERNAME` / `_PASSWORD`. |
+| `BACKBONE_KAFKA_TLS` | `false` | Connect with TLS (verifying the broker certificate against the OS trust store). |
+| `BACKBONE_KAFKA_PARTITIONS` | `12` | Partitions of topics created at boot. More partitions, more consumer parallelism. |
+| `BACKBONE_KAFKA_REPLICATION_FACTOR` | `1` | Replication factor of topics created at boot; use 3 on a production cluster. |
+| `BACKBONE_KAFKA_START_OFFSET` | `earliest` | Where a new consumer group starts: `earliest` or `latest`. |
+| `BACKBONE_NATS_SERVERS` | `nats://localhost:4222` | Servers, `nats://host:port` or `tls://host:port`, comma-separated. |
+| `BACKBONE_NATS_USERNAME` / `_PASSWORD` / `_TOKEN` | unset | NATS credentials. |
+| `BACKBONE_NATS_TLS` | `false` | Connect with TLS. |
+| `BACKBONE_NATS_REPLICAS` | `1` | Replicas of streams created at boot. |
+| `BACKBONE_RABBITMQ_URL` | `amqp://localhost:5672` | `amqp://` or `amqps://` URL (host, port, virtual host). |
+| `BACKBONE_RABBITMQ_USERNAME` / `_PASSWORD` | unset | RabbitMQ credentials. |
+
+Broker hosts come from the operator, so the webhook SSRF guard does not apply to them.
+
+Application config:
+
+```elixir
+config :converger, :backbone, Converger.Backbone.Native   # .Kafka | .Nats | .RabbitMQ
+
+config :converger, Converger.Backbone,
+  topic_prefix: "converger",
+  mirror: [],                 # e.g. [Converger.Backbone.Kafka] while migrating
+  consumers: true,
+  subscriptions: [],          # extra subscriptions: [{name, topics, handler, opts}]
+  inline_attempts: 3,         # a failing handler on a broker consumer, then parked in Oban
+  inline_backoff_ms: 200,
+  down_ms: 5_000              # after a failed publish, park at once for this long
+
+config :converger, Converger.Backbone.Kafka,
+  brokers: "localhost:9092", sasl_mechanism: nil, sasl_username: nil, sasl_password: nil,
+  tls: false, tls_verify: true, tls_ca_cert: nil,
+  create_topics: true, partitions: 12, replication_factor: 1,
+  start_offset: "earliest", produce_timeout_ms: 10_000,
+  producer_concurrency: 2,    # consumer group members per node and subscription
+  fetch_config: [max_wait_time: 10],   # BroadwayKafka fetch options (ms an empty partition is waited for)
+  receive_interval: 100,      # ms before a drained producer polls again
+  group_config: []            # BroadwayKafka group options; default session_timeout_seconds: 10, heartbeat_rate_seconds: 2
+
+config :converger, Converger.Backbone.Nats,
+  servers: "nats://localhost:4222", username: nil, password: nil, token: nil, creds: nil, nkey_seed: nil,
+  tls: false, tls_verify: true, tls_ca_cert: nil,
+  replicas: 1, max_age_seconds: 604_800, duplicate_window_seconds: 120,
+  ack_wait_seconds: 30, batch_size: 10, publish_timeout_ms: 10_000
+
+config :converger, Converger.Backbone.RabbitMQ,
+  url: "amqp://localhost:5672", username: nil, password: nil, tls_verify: true, tls_ca_cert: nil,
+  prefetch_count: 20, publish_timeout_ms: 10_000
+```
+
+Idempotency receipts are pruned after `BACKBONE_RECEIPT_RETENTION_DAYS` (7, `backbone_receipt_days` of `config :converger, Converger.Retention`).
 
 ## Pagination
 
@@ -115,21 +267,81 @@ All environments. Values are integers; unset or empty variables keep the `config
 
 | Variable | Default | Environment | Meaning |
 | --- | --- | --- | --- |
-| `RATE_LIMIT_BACKEND` | `cluster` when `DNS_CLUSTER_QUERY` is non-empty, otherwise `local` | all except test | `local` or `cluster`; any other value raises at boot. |
+| `RATE_LIMIT_BACKEND` | `cluster` when `CLUSTER_STRATEGY` (or `DNS_CLUSTER_QUERY`) enables clustering, otherwise `local` | all except test | `local` or `cluster`; any other value raises at boot. |
 | `RATE_LIMIT_SYNC_INTERVAL_MS` | `100` | all | How often the `cluster` backend broadcasts counter deltas. |
 
 Limits themselves are not environment variables; see [Rate limiting](rate-limiting.md#tuning).
 
-## Clustering and metrics
+## WebSocket limits and draining
+
+All environments. Integers; unset or empty variables keep the `config :converger, :websocket` default. See
+[WebSocket limits and draining](websocket-limits.md#configuration) for what each one does.
+
+| Variable | Config key | Default |
+| --- | --- | --- |
+| `WS_MAX_FRAME_BYTES` | `max_frame_bytes` | `131072` |
+| `WS_MAX_MESSAGES_PER_WINDOW` | `max_messages` | `20` |
+| `WS_RATE_WINDOW_MS` | `rate_window_ms` | `1000` |
+| `WS_MAX_JOINS` | `max_joins` | `50` |
+| `WS_MAX_IN_FLIGHT` | `max_in_flight` | `32` |
+| `WS_EPHEMERAL_DROP_QUEUE_LEN` | `ephemeral_drop_queue_len` | `100` |
+| `WS_SLOW_CONSUMER_QUEUE_LEN` | `slow_consumer_queue_len` | `1000` |
+| `WS_RECONNECT_BASE_MS` | `reconnect_base_ms` | `1000` |
+| `WS_RECONNECT_JITTER_MS` | `reconnect_jitter_ms` | `5000` |
+| `WS_DRAIN_DELAY_MS` | `drain_delay_ms` | `5000` (`0` in test) |
+| `WS_DRAIN_BATCH_SIZE` | `drain_batch_size` | `500` |
+| `WS_DRAIN_BATCH_INTERVAL_MS` | `drain_batch_interval_ms` | `1000` |
+| `WS_DRAIN_SHUTDOWN_MS` | `drain_shutdown_ms` | `30000` |
+
+The hard frame cap, `config :converger, :websocket_max_frame_size` (`1_048_576`), is compile time.
+
+## gRPC transport
+
+All environments. Protocol v1 over a gRPC bidirectional stream ([Protocol v1 over gRPC](../protocol/grpc.md),
+`config :converger, ConvergerWeb.GRPC`). The WebSocket limits above apply to its streams too.
+
+| Variable | Config key | Default | Description |
+| --- | --- | --- | --- |
+| `GRPC_ENABLED` | `enabled` | `false` | `true` or `1` starts the gRPC server. |
+| `GRPC_PORT` | `port` | `50051` | Listening port (all interfaces, IPv4 and IPv6). |
+| `GRPC_TLS_CERTFILE` | `certfile` | unset | PEM certificate path. With `GRPC_TLS_KEYFILE` the server speaks TLS; otherwise plaintext HTTP/2 (h2c). |
+| `GRPC_TLS_KEYFILE` | `keyfile` | unset | PEM private key path. |
+
+## Clustering
+
+Read in every environment except test (see [Clustering](clustering.md)). The Erlang distribution itself (node name,
+cookie) is configured by `rel/env.sh.eex` when the release starts.
 
 | Variable | Default | Environment | Meaning |
 | --- | --- | --- | --- |
-| `DNS_CLUSTER_QUERY` | unset (clustering off) | prod | DNS name `DNSCluster` queries to find and connect other nodes. Also switches the default rate-limit backend to `cluster` (read in every environment for that purpose). |
-| `PROMETHEUS_PORT` | `9568` (not started in test) | all | Port of the `TelemetryMetricsPrometheus` listener. Setting it in test forces the listener on. See [Observability](observability.md#prometheus-endpoint). |
+| `CLUSTER_STRATEGY` | `none` (`dns` when `DNS_CLUSTER_QUERY` is set) | all except test | How nodes find each other: `none`, `kubernetes_dns`, `dns`, `gossip` or `epmd`. Any other value raises at boot. Anything but `none` also switches the default rate-limit backend to `cluster`. |
+| `CLUSTER_NODE_BASENAME` | `converger` | all except test | Name part of every node (`<basename>@<ip>`). Used by `rel/env.sh.eex` for `RELEASE_NODE` and by the `kubernetes_dns` / `dns` strategies to build node names. |
+| `CLUSTER_SERVICE` | none | `kubernetes_dns` | Headless Service name, e.g. `converger-headless` or `converger-headless.<namespace>.svc.cluster.local`. Required; missing raises at boot. |
+| `CLUSTER_DNS_QUERY` | `DNS_CLUSTER_QUERY` | `dns` | DNS name whose A/AAAA records are the node IPs (e.g. `myapp.internal` on Fly.io). Required. |
+| `CLUSTER_POLL_INTERVAL_MS` | `5000` | `kubernetes_dns`, `dns` | How often DNS is polled for new or removed nodes. |
+| `CLUSTER_GOSSIP_SECRET` | unset | `gossip` | Encrypts and authenticates the gossip packets. Set it; without it any host on the network can announce nodes (connecting still needs the cookie). |
+| `CLUSTER_GOSSIP_PORT`, `CLUSTER_GOSSIP_IF_ADDR`, `CLUSTER_GOSSIP_MULTICAST_ADDR`, `CLUSTER_GOSSIP_MULTICAST_IF` | libcluster defaults (`45892`, `0.0.0.0`, `233.252.1.32`) | `gossip` | UDP multicast settings. |
+| `CLUSTER_GOSSIP_BROADCAST_ONLY` | `false` | `gossip` | `true`/`1`: use broadcast instead of multicast (set `CLUSTER_GOSSIP_MULTICAST_ADDR` to the broadcast address). |
+| `CLUSTER_HOSTS` | empty | `epmd` | Comma-separated node names to connect to (`a@host1,b@host2`). Empty: every node registered in the local EPMD. |
+| `DNS_CLUSTER_QUERY` | unset | all except test | Deprecated alias from the former `dns_cluster` dependency: implies `CLUSTER_STRATEGY=dns` with this query. |
+| `RELEASE_COOKIE` | none when clustering | releases | Shared secret of the Erlang distribution. **Required** when `CLUSTER_STRATEGY` is not `none`: `bin/converger start` refuses to boot without it (the cookie generated at build time is baked into the image). |
+| `RELEASE_DISTRIBUTION` | `name` when clustering, else `sname` | releases | Standard Mix release variable; long names are needed for `name@ip`. |
+| `RELEASE_NODE` | `<CLUSTER_NODE_BASENAME>@<IP>` when clustering | releases | Standard Mix release variable. The IP is `POD_IP`, then `FLY_PRIVATE_IP`, then `hostname -i`. An IPv6 address switches the distribution to `inet6_tcp`. |
+| `POD_IP`, `FLY_PRIVATE_IP` | unset | releases | Node address used for `RELEASE_NODE` (Kubernetes downward API, Fly.io). |
+| `CLUSTER_DIST_PORT` | unset (random port) | releases | Fixed Erlang distribution port of the server, for firewalls and NetworkPolicies. Applied by `rel/env.sh.eex` to `start`/`daemon` only, so `bin/converger rpc` and `remote` can still run in the same pod. The Helm chart sets `9100`. |
 
-Node naming and the distribution cookie use the standard Mix release variables (`RELEASE_COOKIE`,
-`RELEASE_NODE`, `RELEASE_DISTRIBUTION`); Converger does not read them itself and ships no `rel/env.sh.eex`.
-Clustering strategies and their documentation are Planned ([#29](https://github.com/AimTune/converger/issues/29)).
+## Metrics and health
+
+| Variable | Default | Environment | Meaning |
+| --- | --- | --- | --- |
+| `METRICS_TOKEN` | unset | all | Bearer token for `GET /metrics` on the main port (`Authorization: Bearer <token>`). See [Observability](observability.md#prometheus-endpoint). |
+| `METRICS_ALLOWED_IPS` | unset (dev: loopback and private ranges) | all | Comma-separated IPs/CIDRs allowed to read `/metrics` without a token (client IP after `TRUSTED_PROXIES`). With neither variable set, `/metrics` answers `404`. |
+| `PROMETHEUS_PORT` | unset | all | Starts the old separate, **unauthenticated** metrics listener on this port (`/metrics`). Only for scrapers that cannot send a token; never expose it publicly. |
+| `METRICS_TENANT_LABEL` | `false` | all | `true` (or `1`) adds a `tenant_id` label to the delivery, pipeline-lag and inbound series. One series per tenant and channel type: leave it off with many tenants. See [Observability](observability.md#delivery-and-pipeline-metrics). |
+| `METRICS_POLL_INTERVAL_MS` | `15000` | all | How often every node reads the database-backed gauges (Oban queue depth, dead letters, open circuit breakers). |
+
+`GET /health/live` and `GET /health/ready` need no configuration. How long a stopping node keeps serving after
+readiness turns `draining` is `WS_DRAIN_DELAY_MS` (see [WebSocket limits and draining](#websocket-limits-and-draining)).
 
 ## OpenTelemetry tracing
 
@@ -178,6 +390,26 @@ Applied only when `UPLOAD_STORAGE` is set, and never in test. Otherwise the `con
 | `GOOGLE_CDN_KEY_NAME`, `GOOGLE_CDN_KEY` | none | yes for `google_cdn` | Signed URL key name and key. |
 | `CDN_SIGN_ORIGIN` | unset | no | `plain` CDN only: `true`, `1` or `yes` appends the backend's signed query string (for example an Azure SAS) to the CDN URL. |
 
+## Data retention and archive
+
+See [Data retention, partitions and archive](retention.md) (issue [#30](https://github.com/AimTune/converger/issues/30)). The
+`ARCHIVE_BUCKET` / `ARCHIVE_CONTAINER` / `ARCHIVE_DIR` overrides are read together with `UPLOAD_STORAGE` (only when it is
+set); without them the archive uses the attachment storage.
+
+| Variable | Default | Required | Meaning |
+| --- | --- | --- | --- |
+| `RETENTION_MIN_DAYS` | `30` | no | Platform minimum for `tenants.retention_days`; months that ended less than this many days ago are never archived. |
+| `HEALTH_CHECK_RETENTION_DAYS` | `7` | no | Delete `channel_health_checks` older than this (daily); `0` disables. |
+| `AUDIT_LOG_RETENTION_DAYS` | `365` | no | Delete `audit_logs` older than this (daily); `0` disables. |
+| `WEBHOOK_EVENT_RETENTION_DAYS` | `7` | no | Delete platform webhook `webhook_events` older than this (daily); `0` disables. |
+| `PARTITION_MONTHS_AHEAD` | `3` | no | Monthly partitions of `activities` / `deliveries` kept in place ahead of the current month. |
+| `ARCHIVE_BUCKET` | unset (attachment bucket) | no | S3, MinIO, R2 or GCS bucket for the archive, with the `UPLOAD_STORAGE` credentials. |
+| `ARCHIVE_CONTAINER` | unset (attachment container) | no | Azure container for the archive. |
+| `ARCHIVE_DIR` | unset (attachment directory) | no | Directory for the archive with `UPLOAD_STORAGE=local`. |
+| `ARCHIVE_PREFIX` | `archive` | no | First segment of archive object keys. |
+| `ARCHIVE_PART_ROWS` | `50000` | no | Rows per archive object. |
+| `PARTITION_MAX_INLINE_ROWS` | `1000000` | no | Read by the partitioning migration (`bin/migrate`): above this many activities it refuses to copy inline and asks for the online `Converger.Release.prepare_partitioning/0` first. See [Migrations](migrations.md#partitioning-activities-and-deliveries-20261010300100). |
+
 ## Release scripts and seeding
 
 | Variable | Default | Read by | Meaning |
@@ -185,6 +417,9 @@ Applied only when `UPLOAD_STORAGE` is set, and never in test. Otherwise the `con
 | `CREATE_DB` | `false` | `rel/overlays/bin/migrate` | Exactly `true` runs `Converger.Release.create_db/0` before migrating. |
 | `ADMIN_EMAIL` | `admin@converger.local` | `Converger.Release.seed_admin/0`, `priv/repo/seeds.exs` | Email of the first `super_admin`. |
 | `ADMIN_PASSWORD` | generated | same | Password of that account. When unset, a random one is printed once and `must_change_password` is set. |
+
+`Converger.Release.reset_admin_2fa/1` turns off 2FA of a locked-out admin by email:
+`bin/converger eval 'Converger.Release.reset_admin_2fa("admin@example.com")'`.
 
 ## Docker compose only
 
@@ -195,9 +430,10 @@ These are read by `docker-compose.yml` (from `.env`, see `.env.example`), not by
 | `POSTGRES_PASSWORD` | yes | Password of the compose Postgres; also embedded in the app's `DATABASE_URL`. Use URL-safe characters. |
 | `SECRET_KEY_BASE`, `CLOAK_KEY` | yes | Passed through to the `migrate` and `app` services. |
 | `GF_SECURITY_ADMIN_PASSWORD` | yes | Grafana admin password. |
-| `PHX_HOST`, `FORCE_SSL`, `TRUSTED_PROXIES` | no | Passed through; compose defaults `PHX_HOST=localhost`, `FORCE_SSL=false`. |
+| `PHX_HOST`, `FORCE_SSL`, `TRUSTED_PROXIES`, `METRICS_TOKEN`, `METRICS_ALLOWED_IPS` | no | Passed through; compose defaults `PHX_HOST=localhost`, `FORCE_SSL=false`. |
+| `RELEASE_COOKIE`, `CLUSTER_GOSSIP_SECRET` | with `docker-compose.cluster.yml` | Cookie and gossip secret of the two-node compose cluster. |
 
-Compose also sets `PORT=4000`, `PROMETHEUS_PORT=9568`, `OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318`,
+Compose also sets `PORT=4000`, `OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318`,
 `CREATE_DB=true` for `migrate` and `PHX_SERVER=true` for `app`.
 
 ## Test-only variables
@@ -207,6 +443,11 @@ Compose also sets `PORT=4000`, `PROMETHEUS_PORT=9568`, `OTEL_EXPORTER_OTLP_ENDPO
 | `MINIO_ENDPOINT`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY` | `test/converger/uploads/storage_integration_test.exs` (`--only minio`) | MinIO server for the S3 integration tests. |
 | `AZURITE_ENDPOINT` | same file (`--only azurite`) | Azurite blob endpoint, e.g. `http://127.0.0.1:10000/devstoreaccount1`. |
 | `CHECK_ORIGIN` | `test/converger_web/check_origin_config_test.exs` | Exercises the runtime parsing. |
+| `KAFKA_BROKERS` | `test/converger/channels/kafka_integration_test.exs` (`--only kafka`) | Kafka bootstrap brokers, default `localhost:9092`. See [running the broker tests](../channels/brokers.md#running-the-broker-tests). |
+| `RABBITMQ_URL`, `RABBITMQ_USERNAME`, `RABBITMQ_PASSWORD` | `test/converger/channels/rabbitmq_integration_test.exs` (`--only rabbitmq`) | RabbitMQ broker, default `amqp://localhost:5672` with `guest` / `guest`. |
+| `NATS_URL` | `test/converger/channels/nats_integration_test.exs` (`--only nats`) | NATS server with JetStream, default `nats://localhost:4222`. |
+| `REDIS_URL` | `test/converger/channels/redis_streams_integration_test.exs` (`--only redis_streams`) | Redis server, default `redis://localhost:6379`. |
+| `MQTT_HOST`, `MQTT_PORT` | `test/converger/channels/mqtt_integration_test.exs` (`--only mqtt`) | MQTT broker without authentication, default `localhost` / `1883`. See [running the MQTT tests](../channels/mqtt.md#running-the-mqtt-tests). |
 
 ## Application configuration (config/*.exs)
 
@@ -224,16 +465,23 @@ config :converger, Oban,
     {Oban.Plugins.Cron,
      crontab: [
        {"0 * * * *", Converger.Workers.ConversationExpirationWorker},
-       {"*/5 * * * *", Converger.Workers.ChannelHealthWorker}
+       {"*/5 * * * *", Converger.Workers.ChannelHealthWorker},
+       {"15 0 * * *", Converger.Workers.PartitionMaintenanceWorker},
+       {"30 1 * * *", Converger.Workers.PruneWorker},
+       {"0 2 1 * *", Converger.Workers.RetentionWorker},
+       {"*/10 * * * *", Converger.Workers.SessionPruneWorker}
      ]}
   ],
-  queues: [default: 10, deliveries: 20]
+  queues: [default: 10, deliveries_high: 10, deliveries: 20, deliveries_bulk: 5, maintenance: 1, webhooks: 10, backbone: 10]
 ```
 
 | Setting | Value | Notes |
 | --- | --- | --- |
 | Queue `default` | 10 concurrent jobs per node | Conversation expiration (hourly) and channel health checks (every 5 minutes). |
-| Queue `deliveries` | 20 concurrent jobs per node | `Converger.Workers.ActivityDeliveryWorker` (unique per activity and channel). |
+| Queue `maintenance` | 1 concurrent job per node | Data lifecycle: partitions (daily 00:15 UTC), pruning (daily 01:30 UTC), retention (monthly, 1st at 02:00 UTC), expired admin/portal sessions and password reset tokens (every 10 minutes, `SessionPruneWorker`) and the `PurgeWorker` jobs enqueued by tenant, channel and conversation deletes. See [Data retention](retention.md). |
+| Queues `deliveries_high`, `deliveries`, `deliveries_bulk` | 10 / 20 / 5 concurrent jobs per node | `Converger.Workers.ActivityDeliveryWorker` (unique per activity and channel), one queue per tenant tier (`tenants.tier`: `high`, `default`, `bulk`); see [flow control](../delivery.md#tenant-tiers-fair-queueing). |
+| Queue `webhooks` | 10 concurrent jobs per node | `Converger.Workers.WebhookEventWorker`: [platform event webhooks](../platform-webhooks.md). |
+| Queue `backbone` | 10 concurrent jobs per node | `Converger.Workers.BackboneEventWorker` (Native backbone subscriptions, and broker events whose handler failed) and `Converger.Workers.BackbonePublishWorker` (events parked while a broker was unreachable); see [Event backbone](../architecture/event-backbone.md). |
 | `Pruner` | completed/discarded jobs older than 24 h | Keeps `oban_jobs` small. |
 | `Lifeline` | rescues jobs stuck in `executing` after 30 min | Recovers deliveries from a crashed node. |
 | Test | `testing: :inline` | Jobs run synchronously in tests. |
@@ -250,7 +498,7 @@ config :converger, pipeline: [backend: Converger.Pipeline.Oban]
 | Backend | Use |
 | --- | --- |
 | `Converger.Pipeline.Oban` | Default. Deliveries are Oban jobs inserted in the activity transaction (durable). See [ADR-0001](../adr/0001-transactional-outbox-with-oban.md). |
-| `Converger.Pipeline.Broadway` | Throughput backend with `broadway: [producer: :memory, :kafka, :rabbitmq or :custom, ...]`. Not durable; the `:memory` producer refuses to start in prod unless `allow_memory_producer_in_prod: true`. Kafka/RabbitMQ need optional deps. See [ADR-0002](../adr/0002-broadway-for-throughput-oban-for-retries.md). |
+| `Converger.Pipeline.Broadway` | Throughput backend with `broadway: [producer: :memory, :kafka, :rabbitmq or :custom, ...]`. Not durable; the `:memory` producer refuses to start in prod unless `allow_memory_producer_in_prod: true`. See [ADR-0002](../adr/0002-broadway-for-throughput-oban-for-retries.md). This is the internal *pipeline transport*; to exchange conversations with other systems over Kafka or RabbitMQ use a [broker channel](../channels/brokers.md#pipeline-transport-or-broker-channel) instead. |
 | `Converger.Pipeline.Inline` | Synchronous; used by `config/test.exs`. |
 
 Retry defaults for external deliveries come from `config :converger, :retry_policy` (keys `max_attempts` 5,
@@ -286,6 +534,54 @@ config :converger, Converger.RateLimit,
 (`{limit, window_ms}`). `clean_period_ms` (default 60000) controls how often expired ETS counters are removed.
 See [Rate limiting](rate-limiting.md).
 
+### Retention, partitions and archive
+
+```elixir
+config :converger, Converger.Partitions,
+  months_ahead: 3,            # PARTITION_MONTHS_AHEAD
+  detach_concurrently: true,  # false in test (the SQL sandbox is one transaction)
+  lock_timeout_ms: 5_000      # for creating, attaching and dropping partitions
+
+config :converger, Converger.Retention,
+  min_retention_days: 30,     # RETENTION_MIN_DAYS
+  health_check_days: 7,       # HEALTH_CHECK_RETENTION_DAYS, 0 or nil disables
+  audit_log_days: 365,        # AUDIT_LOG_RETENTION_DAYS, 0 or nil disables
+  webhook_event_days: 7,      # WEBHOOK_EVENT_RETENTION_DAYS, 0 or nil disables
+  backbone_receipt_days: 7,   # BACKBONE_RECEIPT_RETENTION_DAYS, 0 or nil disables
+  prune_batch_size: 10_000
+
+config :converger, Converger.Archive,
+  storage: nil,               # nil: the attachment storage (Converger.Uploads)
+  storage_opts: [],
+  prefix: "archive",          # ARCHIVE_PREFIX
+  part_rows: 50_000           # ARCHIVE_PART_ROWS
+```
+
+Per-tenant retention is the `tenants.retention_days` column (default 365). See
+[Data retention, partitions and archive](retention.md).
+
+### Protocol v1 transports
+
+```elixir
+config :converger, ConvergerWeb.Protocol,
+  heartbeat_interval_ms: 30_000,
+  idle_timeout_ms: 60_000,
+  replay_max: 10_000
+```
+
+Settings of the native WebSocket (`/socket/converger/v1`), the gRPC stream ([Protocol v1 over gRPC](../protocol/grpc.md))
+and the Server-Sent Events stream, announced to
+clients in `welcome.data.limits` ([Protocol v1](../protocol/v1.md), section 11). `heartbeat_interval_ms`: outbound
+silence before a `heartbeat` frame (also the SSE heartbeat period). `idle_timeout_ms`: inbound silence before the
+socket is closed with 4408. `replay_max`: frames replayed per handshake, `sync`
+or SSE connection before `replayTruncated`. The replay batch size is `ws_replay_limit` under
+[Pagination](#pagination). Keep the heartbeat below any proxy idle timeout in front of Converger. Frame size,
+message rate, slow-consumer and draining limits are the shared client WebSocket limits (`config :converger,
+:websocket`, `WS_*` variables), see [WebSocket limits and draining](websocket-limits.md).
+
+Tokens passed as `?token=` (sockets, SSE) are filtered from request logs by
+`config :phoenix, :filter_parameters, ["password", "token", "secret"]`.
+
 ### Repo and migrations
 
 ```elixir
@@ -303,20 +599,47 @@ PgBouncer transaction pooling). See [Migrations and maintenance windows](migrati
 | --- | --- | --- |
 | `:cors_origins` | `["http://127.0.0.1:5500", "http://localhost:5500"]` | See `CORS_ORIGINS`. |
 | `:admin_ip_whitelist` | `["127.0.0.1", "::1"]` | See `ADMIN_IP_WHITELIST`. |
+| `:admin_api_token` | `nil` | See `ADMIN_API_TOKEN`. |
 | `:trusted_proxies` | `[]` | See `TRUSTED_PROXIES`. |
+| `:sessions` | `max_age_seconds: 43_200`, `idle_timeout_seconds: 1_800` | See `SESSION_MAX_AGE_SECONDS`, `SESSION_IDLE_TIMEOUT_SECONDS`. |
+| `:password_min_length` | `12` | See `PASSWORD_MIN_LENGTH`. |
+| `:require_2fa_roles` | `["super_admin"]`; `[]` in test | See `ADMIN_REQUIRE_2FA_ROLES`. |
+| `:mailer_from` | `{"Converger", "noreply@converger.local"}` | See `MAILER_FROM`. |
 | `:inbound_signature_tolerance_seconds` | `300` | Allowed clock skew for `x-converger-signature` timestamps. |
+| `:password_hasher` | `Bcrypt`; `Pbkdf2` with `CONVERGER_PASSWORD_HASHER=pbkdf2` | `Comeonin` module that hashes new admin and tenant user passwords. See [Password hashing](#password-hashing). |
 | `:pagination` | see [Pagination](#pagination) | Page size defaults and caps. |
-| `:prometheus_port` | `9568`; `false` in test | `false` disables the metrics listener. |
+| `:dead_letters` | `bulk_retry_limit: 10_000`, `export_limit: 10_000` | Max deliveries replayed by one bulk retry call, and max rows in one Deliveries CSV export. See [Replaying dead letters](../delivery.md#replaying-dead-letters). |
+| `:circuit_breaker` | `failure_threshold: 5`, `cooldown_ms: 30_000`, `park_seconds: 600`, `replay_dead_letters_on_close: false`, `replay_window_ms: 3_600_000` | Per-channel delivery circuit breaker and opt-in dead-letter replay on close. See [Circuit breaker](../delivery.md#circuit-breaker). |
+| `:adapters` | `[]` | Channel adapter modules registered after the built-in ones (`echo`, `webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram`, `email`, `sms_twilio`, `sms_vonage`, `messenger`, `instagram`, `viber`, `discord`, `teams`, `http_pull`, `kafka`, `rabbitmq`, `mqtt`). One with a built-in type replaces it. Checked at boot. See [Writing an adapter](../channels/writing-an-adapter.md#2-register-the-type). |
+| `:channel_health` | `probe_idle_channels: true`; `false` in test | Call the adapter's `health_probe/1` for channels without deliveries in the health window. See [Health probes](../channels/overview.md#health-probes). |
+| `Converger.Channels.MediaDownload` | `timeout_ms: 10_000` | Receive timeout of each inbound media download (WhatsApp images, voice notes, documents). See [inbound media download](../channels/whatsapp.md#inbound-media-download). |
+| `Converger.Channels.Templates` | `ttl_ms: 300_000` | How long a channel's provider templates are cached per node. See [channel message templates](../api/tenant-api.md#channel-message-templates). |
+| `:metrics` | `tenant_label: false`, `poll_interval_ms: 15_000` (`false` in test); dev adds `allowed_ips` with loopback and private ranges | `token:` and `allowed_ips:` for `GET /metrics` (see `METRICS_TOKEN`); `tenant_label:` and `poll_interval_ms:` (see `METRICS_TENANT_LABEL`, `METRICS_POLL_INTERVAL_MS`; `poll_interval_ms: false` turns the database-backed gauges off). |
+| `:prometheus_port` | unset | Port of the optional unauthenticated metrics listener (`PROMETHEUS_PORT`). |
+| `Converger.Health` | `db_timeout_ms: 1000` | Readiness database timeout. |
+| `Converger.Repo.Pools` | `background: false`; dev `[pool_size: 10]`; prod from `BACKGROUND_*` | The background pool (keyword list of repo options) or `false` for one shared pool. See [Database pools and pressure](database.md). |
+| `Converger.Repo.Pressure` | `retry_after_ms: 1000`, `queue_window_ms: 5000`, `degraded_queue_ms: 200` | See `DB_RETRY_AFTER_MS`, `DB_QUEUE_WINDOW_MS`, `READY_DB_QUEUE_MS`. |
 | `:force_ssl` | unset outside prod | Keyword list of `Plug.SSL` options, built from the TLS variables in prod; `false` disables. |
+| `:platform_webhooks` | see above | `enabled`, `connect_timeout`, `receive_timeout`, `max_response_bytes` of [platform event webhooks](../platform-webhooks.md). |
 | `:webhook` | `[]` | `allowed_targets`, `allow_private_targets`, `resolver` (SSRF guard), and installation defaults for `connect_timeout` (5000 ms), `receive_timeout` (10000 ms), `max_response_bytes` (1 MiB). |
-| `:webhook_req_options`, `:whatsapp_req_options` | `[]` | Extra `Req` options merged into adapter requests (tests use them for `Req.Test` plugs). |
+| `:channel_signals_async` | `true`; `false` in test | Forward typing indicators and read receipts to external channels (`Converger.Channels.Signals`) in a task under `Converger.TaskSupervisor`. `false` runs them inline in the WebSocket channel process. |
+| `:webhook_req_options`, `:platform_webhook_req_options`, `:whatsapp_req_options`, `:slack_req_options`, `:telegram_req_options`, `:email_req_options`, `:sms_req_options`, `:messenger_req_options`, `:instagram_req_options`, `:viber_req_options`, `:discord_req_options`, `:teams_req_options` | `[]` | Extra `Req` options merged into adapter (and platform webhook) requests (tests use them for `Req.Test` plugs). `:email_req_options` applies to the SNS certificate and subscription requests of `email` channels. |
+| `:email_swoosh_adapter` | `nil` | A Swoosh adapter module used instead of the provider adapter of every `email` channel. The test config sets `Swoosh.Adapters.Test`. See [Email](../channels/email.md). |
 | `Converger.Channels.Adapters.WhatsappMeta`, `graph_api_version:` | `"v26.0"` | Default Graph API version when the channel config has none. |
+| `Converger.Channels.Adapters.Telegram`, `api_base_url:` | `"https://api.telegram.org"` | Bot API base URL for every `telegram` channel, for a self-hosted Bot API server. Not a channel setting: the URL receives the bot token. |
+| `Converger.Channels.Adapters.Messenger` / `.Instagram`, `graph_api_version:` | `"v26.0"` | Default Graph API version of `messenger` / `instagram` channels without one in their config. |
+| `Converger.Channels.Adapters.Viber`, `api_base_url:` | `"https://chatapi.viber.com/pa"` | Viber Bot API base URL for every `viber` channel. Not a channel setting: the URL receives the token. |
+| `Converger.Channels.Adapters.Discord`, `api_base_url:` | `"https://discord.com/api/v10"` | Discord API base URL for every `discord` channel. Not a channel setting: the URL receives the bot token. |
+| `Converger.Channels.Adapters.Discord`, `gateway_url:`, `fatal_retry_ms:` | unset (the `url` of `GET /gateway/bot`), `300000` | Gateway URL of every `discord` channel in [Gateway mode](../channels/discord.md#gateway-mode) (tests point it at a fake Gateway; the URL receives the bot token), and the wait before reconnecting after a close code no retry fixes (4004, 4010 to 4014). |
+| `Converger.Channels.Adapters.Teams`, `openid_metadata_url:`, `issuers:`, `login_base_url:`, `service_url_hosts:`, `key_refresh_cooldown_ms:` | Bot Framework public cloud | Bot Framework token validation, the OAuth token endpoint and the hosts replies may be posted to; see [Microsoft Teams](../channels/teams.md#configuration). |
 | `:activity_limits` | `max_text_bytes: 65_536`, `max_attachments: 10`, `max_attachment_bytes: 4_096`, `max_metadata_bytes: 16_384` | Activity size limits (attachment and metadata sizes measured as JSON). |
 | `:conversation_inactivity_hours` | `24` | Open conversations idle longer than this are closed by the hourly expiration job. |
 | `:inbound_conversation_idle_timeout_seconds` | unset (no idle timeout) | Global default for starting a new conversation for an inbound participant after inactivity; channels override it with `conversation_idle_timeout_seconds` in their config. |
 | `:api_key_rotation_grace_period` | `86400` (seconds) | How long the previous tenant API key keeps working after a rotation. |
+| `:token_signing_keys`, `:token_rotation_grace_seconds`, `:token_accept_unkeyed` | `[]`, `30`, `true` | See `TOKEN_SIGNING_KEYS`, `TOKEN_ROTATION_GRACE_SECONDS`, `TOKEN_ACCEPT_UNKEYED`. |
+| `Converger.Auth.RevocationCache` | `sync_interval_ms: 60_000` (`nil` in test) | How often each node re-reads recently revoked tokens from `revoked_tokens`, in case a PubSub broadcast was missed. See [Client tokens](../security/client-tokens.md#how-a-revocation-reaches-every-node). |
 | `:extra_middleware` | `%{}` | Map of middleware type string to module, merged into the built-in middleware registry. |
-| `:dns_cluster_query` | from `DNS_CLUSTER_QUERY` | Prod only. |
+| `Converger.Cluster` | `strategy: :none` | `strategy:` and libcluster `options:` built from the `CLUSTER_*` variables; see [Clustering](clustering.md). |
 | `:dev_routes` | `true` in dev | Compile-time. Mounts the Swoosh mailbox preview at `/dev/mailbox`. |
 | `:env` | `config_env()` | Used for environment-specific guards (for example the Broadway memory producer). |
 
@@ -328,5 +651,7 @@ above. See [Observability](observability.md#logging).
 
 ### Mailer
 
-`Converger.Mailer` uses `Swoosh.Adapters.Local` (dev mailbox) and `Swoosh.Adapters.Test` in test. Production sets
-the Req API client but configures no delivery adapter; no feature sends email yet.
+`Converger.Mailer` sends the account emails (password reset). It uses `Swoosh.Adapters.Local` (dev mailbox at
+`/dev/mailbox`) and `Swoosh.Adapters.Test` in test. Production sets the Req API client; with `SMTP_HOST` set it
+uses `Swoosh.Adapters.SMTP` ([Accounts, sessions and email](#accounts-sessions-and-email)), otherwise no email is
+delivered.

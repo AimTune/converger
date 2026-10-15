@@ -9,8 +9,9 @@ ARG RUNNER_IMAGE="docker.io/debian:${DEBIAN_VERSION}"
 # --- Build Stage ---
 FROM ${BUILDER_IMAGE} AS builder
 
+# cmake builds the CRC32C NIF of the Kafka client (crc32cer, a brod dependency).
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends build-essential git \
+  && apt-get install -y --no-install-recommends build-essential cmake git \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -29,8 +30,14 @@ RUN mix deps.compile
 
 COPY priv priv
 COPY lib lib
+COPY assets assets
 
 RUN mix compile
+
+# Admin/portal CSS and JS (ADR-0060): the standalone tailwind and esbuild
+# binaries are downloaded here, minify into priv/static/assets and phx.digest
+# writes the cache manifest. Nothing is loaded from a CDN at runtime.
+RUN mix assets.deploy
 
 COPY config/runtime.exs config/
 # bin/server and bin/migrate overlays (see docs/deployment.md).

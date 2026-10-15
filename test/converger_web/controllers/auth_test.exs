@@ -22,7 +22,9 @@ defmodule ConvergerWeb.AuthenticationTest do
     } do
       # GET /api/v1/conversations/:id is protected by TenantAuth
       conn = get(conn, ~p"/api/v1/conversations/#{conversation.id}")
-      assert json_response(conn, 401)["error"] == "Unauthorized: Missing authentication headers"
+
+      assert assert_api_error(conn, 401, "unauthorized")["message"] ==
+               "Missing authentication headers"
     end
 
     test "returns 401 if invalid api key on protected route", %{
@@ -31,7 +33,9 @@ defmodule ConvergerWeb.AuthenticationTest do
     } do
       conn = conn |> put_req_header("x-api-key", "invalid")
       conn = get(conn, ~p"/api/v1/conversations/#{conversation.id}")
-      assert json_response(conn, 401)["error"] == "Unauthorized: Invalid or inactive API Key"
+
+      assert assert_api_error(conn, 401, "unauthorized")["message"] ==
+               "Invalid or inactive API Key"
     end
   end
 
@@ -61,7 +65,9 @@ defmodule ConvergerWeb.AuthenticationTest do
       }
 
       conn = post(conn, ~p"/api/v1/tokens", params)
-      assert json_response(conn, 400)["error"] == "Missing x-channel-token header"
+
+      assert assert_api_error(conn, 400, "bad_request")["message"] ==
+               "Missing x-channel-token header"
     end
 
     test "returns forbidden if channel token does not match conversation", %{
@@ -82,7 +88,61 @@ defmodule ConvergerWeb.AuthenticationTest do
       }
 
       conn = post(conn, ~p"/api/v1/tokens", params)
-      assert json_response(conn, 403)["errors"]["detail"] == "Forbidden"
+      assert_api_error(conn, 403, "forbidden")
+    end
+  end
+
+  # All tokens share one signer; only the channel token may act as the tenant.
+  describe "end-user tokens as x-channel-token" do
+    setup %{tenant: tenant, channel: channel, conversation: conversation} do
+      {:ok, conversation_token, _} = Token.generate_token(conversation, tenant, "user-1")
+
+      {:ok, converger_token, _} =
+        Converger.Auth.ConvergerToken.generate_conversation_token(channel, conversation.id,
+          user_id: "user-1"
+        )
+
+      %{end_user_tokens: [conversation_token, converger_token]}
+    end
+
+    test "are rejected by tenant-authenticated routes", %{
+      conn: conn,
+      conversation: conversation,
+      end_user_tokens: tokens
+    } do
+      for token <- tokens do
+        conn = put_req_header(conn, "x-channel-token", token)
+
+        assert assert_api_error(get(conn, ~p"/api/v1/routing_rules"), 401, "unauthorized")[
+                 "message"
+               ] ==
+                 "Invalid token"
+
+        assert json_response(get(conn, ~p"/api/v1/conversations/#{conversation.id}"), 401)
+      end
+    end
+
+    test "cannot mint conversation tokens or create conversations", %{
+      conn: conn,
+      tenant: tenant,
+      channel: channel,
+      end_user_tokens: tokens
+    } do
+      other_conversation = conversation_fixture(tenant, channel)
+
+      for token <- tokens do
+        conn = put_req_header(conn, "x-channel-token", token)
+
+        assert json_response(
+                 post(conn, ~p"/api/v1/tokens", %{
+                   "conversation_id" => other_conversation.id,
+                   "user_id" => "someone-else"
+                 }),
+                 401
+               )
+
+        assert json_response(post(conn, ~p"/api/v1/conversations", %{}), 401)
+      end
     end
   end
 end

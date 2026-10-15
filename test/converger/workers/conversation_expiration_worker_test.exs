@@ -97,15 +97,40 @@ defmodule Converger.Workers.ConversationExpirationWorkerTest do
     assert Repo.get(Conversation, c.id).status == "closed"
   end
 
-  test "expiration query uses the (status, updated_at) index" do
-    # The test table is tiny, so forbid sequential scans to see whether the
-    # planner *can* serve the query from an index.
+  test "expiration query uses the (status, updated_at) index", %{tenant: tenant, channel: channel} do
+    # On a near-empty table every index on `status` costs the same and the
+    # planner picked one at random (sometimes the participant index, with
+    # `updated_at` as a filter). With many recently active conversations and
+    # fresh statistics, `updated_at` is selective and only the
+    # (status, updated_at) index serves the whole condition.
+    now = DateTime.utc_now()
+
+    rows =
+      for i <- 1..500 do
+        %{
+          id: Ecto.UUID.generate(),
+          tenant_id: tenant.id,
+          channel_id: channel.id,
+          origin_channel_id: channel.id,
+          status: "active",
+          metadata: %{},
+          last_seq: 0,
+          inserted_at: now,
+          updated_at: if(i <= 5, do: DateTime.add(now, -30, :day), else: now)
+        }
+      end
+
+    Repo.insert_all(Conversation, rows)
+    Repo.query!("ANALYZE conversations")
+
+    # Sequential scans are cheap on the test table; forbid them to see whether
+    # the planner *can* serve the query from an index.
     Repo.query!("SET LOCAL enable_seqscan = off")
 
     plan =
-      Repo.explain(:all, Conversations.inactive_conversations_query(DateTime.utc_now()))
+      Repo.explain(:all, Conversations.inactive_conversations_query(DateTime.add(now, -1, :day)))
 
-    assert plan =~ "conversations_status_updated_at_index"
+    assert plan =~ "conversations_status_updated_at_index", plan
   end
 
   test "max_attempts is 3" do

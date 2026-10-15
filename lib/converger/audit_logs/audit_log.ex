@@ -17,9 +17,20 @@ defmodule Converger.AuditLogs.AuditLog do
     timestamps(type: :utc_datetime_usec, updated_at: false)
   end
 
-  @valid_actor_types ~w(admin tenant_api tenant_user system)
-  @valid_actions ~w(create update delete toggle_status toggle_enabled rotate_api_key)
-  @valid_resource_types ~w(tenant channel routing_rule admin_user tenant_user)
+  @valid_actor_types ~w(admin admin_api tenant_api tenant_user system)
+  @valid_actions ~w(
+    create update delete toggle_status toggle_enabled rotate_api_key retry
+    pause_deliveries resume_deliveries register_webhook redeliver
+    enable_2fa disable_2fa reset_2fa reset_password revoke_sessions close reopen
+    revoke rotate_secret send_test_message
+  )
+  @valid_resource_types ~w(
+    tenant channel routing_rule admin_user tenant_user delivery webhook_subscription webhook_event
+    conversation api_key
+  )
+
+  def valid_actions, do: @valid_actions
+  def valid_resource_types, do: @valid_resource_types
 
   def changeset(audit_log, attrs) do
     audit_log

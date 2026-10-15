@@ -1,0 +1,13 @@
+{
+  "name": "@converger/example-node-bot",
+  "private": true,
+  "version": "0.0.0",
+  "description": "A Node participant built on @converger/client that answers every message from someone else.",
+  "type": "module",
+  "scripts": {
+    "start": "node bot.mjs"
+  },
+  "dependencies": {
+    "@converger/client": "workspace:*"
+  }
+}

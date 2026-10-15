@@ -17,14 +17,17 @@ Table `channels`:
 | `id` | uuid | | Primary key. |
 | `tenant_id` | uuid | | Owner. `(tenant_id, name)` is unique. |
 | `name` | text | | Required. |
-| `type` | string | `"webhook"` | Adapter: `echo`, `webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip`. |
+| `type` | string | `"webhook"` | Adapter: `echo`, `webhook`, `websocket`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram`, `email`, `sms_twilio`, `sms_vonage`, `messenger`, `instagram`, `viber`, `discord`, `teams`, `http_pull`, `kafka`, `rabbitmq`, `nats`, `redis_streams`, `mqtt`. |
 | `mode` | text | `"duplex"` | `inbound`, `outbound` or `duplex`. Must be supported by the type. |
-| `secret` | encrypted binary | generated | Encrypted at rest. Generated (32 random bytes, Base64) when not given. |
+| `secret` | encrypted binary | generated | Encrypted at rest. Generated (32 random bytes, Base64) when not given. **Rotate secret** in the admin panel or portal (`Channels.rotate_secret/2`) replaces it; the old secret stops working at once. |
 | `secret_hash` | binary | | SHA-256 of `secret`, unique, used for lookups. |
 | `config` | encrypted map | `{}` | Adapter configuration, including provider credentials. Encrypted at rest. |
 | `transformations` | jsonb array | `[]` | [Middleware](middleware.md) chain applied before delivery to this channel. |
 | `require_signature` | boolean | `true` | Reject unsigned inbound webhooks. |
 | `retry_policy` | map | `{}` | Per-channel delivery retry overrides. |
+| `rate_limit` | string | `nil` | Outbound rate limit (`"80/s"`, `"1000/m"`, `"5000/h"`); `nil` uses the adapter default (WhatsApp Meta: `80/s`). See [flow control](../delivery.md#rate-limits). |
+| `circuit_state` | string | `"closed"` | Delivery circuit breaker: `closed`, `open`, `half_open` or `paused`. Managed by `Converger.Channels.Circuit`, never set through the changeset. |
+| `circuit_changed_at`, `consecutive_failures` | datetime, integer | `nil`, `0` | Breaker bookkeeping. |
 | `status` | text | `"active"` | The admin panel and portal toggle between `active` and `inactive`. |
 | `inserted_at`, `updated_at` | utc_datetime_usec | | |
 
@@ -32,23 +35,33 @@ All fields go through `Channel.changeset/2`, which validates the type, the mode 
 
 ## Types and adapters
 
-Each type maps to a module implementing the `Converger.Channels.Adapter` behaviour: `deliver_activity/2`, `parse_inbound/2`, `validate_config/1`, `supported_modes/0`, and optionally `parse_status_update/2`, `verify_inbound_signature/3` and `retry_policy/0`.
+Each type maps to a module implementing the `Converger.Channels.Adapter` behaviour: `deliver_activity/2`, `parse_inbound/2`, `validate_config/1`, `supported_modes/0`, and optionally `parse_status_update/2`, `verify_inbound_signature/3`, `retry_policy/0` and `capabilities/0` (default `[:inbound, :outbound]`; the pipeline delivers only to types with `:outbound`).
 
 | Type | Modes | Required config | Delivery | Page |
 | --- | --- | --- | --- | --- |
 | `webhook` | `inbound`, `outbound`, `duplex` | `url`. Optional: `method` (`POST`, `PUT`, `PATCH`), `headers`, `connect_timeout`, `receive_timeout`, `max_response_bytes` | HTTP request with the canonical activity, signed with `x-converger-signature` | [Webhooks](../webhooks.md) |
-| `websocket` | `outbound` | none | Not through an adapter: clients get the PubSub broadcast. A duplex adapter is Planned ([#22](https://github.com/AimTune/converger/issues/22)). | [WebSocket channel](../channels/websocket.md) |
+| `websocket` | `inbound`, `outbound`, `duplex` | none. Optional: `require_ack` (`true`/`false`, default `false`) | Broadcast to the channel's connected sockets; the delivery stays `pending` while no client is connected (or until a client acks, with `require_ack`). Clients send messages over the socket ([ADR-0033](../adr/0033-websocket-channel-adapter-delivery.md)). | [WebSocket channel](../channels/websocket.md) |
 | `whatsapp_meta` | `inbound`, `outbound`, `duplex` | `phone_number_id`, `access_token`, `verify_token`, plus `app_secret` when `require_signature` is true | WhatsApp Cloud API (Graph) | [WhatsApp](../channels/whatsapp.md) |
 | `whatsapp_infobip` | `inbound`, `outbound`, `duplex` | `base_url`, `api_key`, `sender` | Infobip WhatsApp API | [WhatsApp](../channels/whatsapp.md) |
+| `slack` | `inbound`, `outbound`, `duplex` | `bot_token`, `signing_secret`. Optional: `channel`, `app_id`, `conversation_scope` (`thread`, `channel`, `user`), `download_files` | Slack Web API (`chat.postMessage`, `chat.update`, `chat.delete`, file uploads); Events API inbound | [Slack](../channels/slack.md) |
+| `telegram` | `inbound`, `outbound`, `duplex` | `bot_token`, plus `secret_token` when `require_signature` is true. Optional: `parse_mode`, `allowed_updates` | Telegram Bot API (`sendMessage`, `sendPhoto`, `sendDocument`) | [Telegram](../channels/telegram.md) |
+| `email` | `inbound`, `outbound`, `duplex` | `provider` (`smtp`, `ses`, `sendgrid`, `mailgun`, `postmark`), `from`, the provider credentials, plus `ses_topic_arn` or `mailgun_signing_secret` for those inbound providers | Email through Swoosh, threaded with `Message-ID` / `In-Reply-To` | [Email](../channels/email.md) |
+| `sms_twilio` | `inbound`, `outbound`, `duplex` | `account_sid`, `auth_token`, and `from` or `messaging_service_sid`. Optional: `webhook_base_url`, `default_country_code`, `max_segments` | Twilio Programmable Messaging (SMS, MMS), status callbacks | [SMS](../channels/sms.md) |
+| `sms_vonage` | `inbound`, `outbound`, `duplex` | `from`, and `api_key` + `api_secret` or `application_id` + `private_key`, plus `signature_secret` when `require_signature` is true. Optional: `default_country_code`, `max_segments` | Vonage Messages API (SMS), status webhooks | [SMS](../channels/sms.md) |
+| `kafka` | `inbound`, `outbound`, `duplex` | `brokers`, plus `topic_in` (inbound, duplex) and `topic_out` (outbound, duplex). Optional: `group_id`, `start_offset`, `dlq_topic`, `concurrency`, SASL (`sasl_mechanism`, `sasl_username`, `sasl_password`), TLS (`tls`, `tls_verify`, `tls_ca_cert`) | Produces the activity envelope to `topic_out` keyed by conversation; consumes `topic_in` ([broker channel](../channels/brokers.md)) | [Kafka](../channels/kafka.md) |
+| `rabbitmq` | `inbound`, `outbound`, `duplex` | `url`, plus `queue` (inbound, duplex) and `routing_key` (outbound, duplex). Optional: `username`, `password`, `exchange`, `dlq_queue`, `declare`, `prefetch_count`, `concurrency`, `tls_verify`, `tls_ca_cert` | Publishes the activity envelope with publisher confirms; consumes `queue` ([broker channel](../channels/brokers.md)) | [RabbitMQ](../channels/rabbitmq.md) |
+| `nats` | `inbound`, `outbound`, `duplex` | `servers`, plus `stream` and `subject_in` (inbound, duplex) and `subject_out` (outbound, duplex). Optional: `durable_name`, `dlq_subject`, `declare`, `deliver_policy`, `batch_size`, `ack_wait_seconds`, `concurrency`, auth (`username` / `password`, `token`, `nkey_seed` or `creds`), `tls`, `tls_verify`, `tls_ca_cert` | JetStream publish of the activity envelope; pulls from a durable consumer ([broker channel](../channels/brokers.md)) | [NATS JetStream](../channels/nats.md) |
+| `redis_streams` | `inbound`, `outbound`, `duplex` | `url`, plus `stream_in` (inbound, duplex) and `stream_out` (outbound, duplex). Optional: `username`, `password`, `group`, `dlq_stream`, `maxlen`, `start_id`, `batch_size`, `concurrency`, `tls_verify`, `tls_ca_cert` | `XADD` of the activity envelope; reads `stream_in` with a consumer group ([broker channel](../channels/brokers.md)) | [Redis Streams](../channels/redis-streams.md) |
+| `mqtt` | `inbound`, `outbound`, `duplex` | `host`, plus `topic_in` (inbound, duplex) and `topic_out` (outbound, duplex). Optional: `port`, `tls`, `tls_verify`, `tls_ca_cert`, `username`, `password`, `client_id`, `topic_dlq`, `qos`, `keepalive`, `derive_idempotency_key` | Publishes the activity envelope with QoS 1 to the conversation's topic; subscribes to `topic_in` in a persistent session ([broker channel](../channels/brokers.md)) | [MQTT](../channels/mqtt.md) |
 | `echo` | `outbound` | none | Writes a reply activity from `"bot"` into the same conversation (testing) | [Echo](../channels/echo.md) |
 
-See the [channels overview](../channels/overview.md) for provider setup, and [writing an adapter](../channels/writing-an-adapter.md) to add a type. Adapter behaviour v2 (capabilities, config schemas) is Planned ([#36](https://github.com/AimTune/converger/issues/36)).
+See the [channels overview](../channels/overview.md) for provider setup, and [writing an adapter](../channels/writing-an-adapter.md) to add a type. Each type is one adapter module: the type list, the config validation above and the admin form all come from the adapters' `capabilities/0` and `config_schema/0` ([ADR-0038](../adr/0038-adapter-behaviour-v2-and-config-driven-registry.md)).
 
 One config key is read for every inbound-capable type: `conversation_idle_timeout_seconds` (positive integer). It starts a new conversation for a participant whose active conversation has been idle longer than this ([participants](participants.md)).
 
 ## Modes
 
-The mode is the channel's direction. It was introduced by migration [`20260227160000_add_mode_to_channels`](https://github.com/AimTune/converger/blob/main/priv/repo/migrations/20260227160000_add_mode_to_channels.exs), which defaulted existing channels to `duplex` and set `echo` and `websocket` channels to `outbound`.
+The mode is the channel's direction. It was introduced by migration [`20260227160000_add_mode_to_channels`](https://github.com/AimTune/converger/blob/main/priv/repo/migrations/20260227160000_add_mode_to_channels.exs), which defaulted existing channels to `duplex` and set `echo` and `websocket` channels to `outbound`. Migration [`20261010200000_make_websocket_channels_duplex`](https://github.com/AimTune/converger/blob/main/priv/repo/migrations/20261010200000_make_websocket_channels_duplex.exs) later moved existing `websocket` channels from `outbound` to `duplex`, when the type gained inbound support ([#22](https://github.com/AimTune/converger/issues/22)).
 
 | Mode | Accepts inbound webhooks | Receives deliveries | Can be a routing rule source | Can be a routing rule target |
 | --- | --- | --- | --- | --- |
@@ -58,7 +71,7 @@ The mode is the channel's direction. It was introduced by migration [`2026022716
 
 Concretely:
 
-- `POST /api/v1/channels/:id/inbound` with messages on an `outbound` channel returns `400 {"error": "Channel does not accept inbound messages"}`. If the same request also carried status updates, they are applied, and the messages are dropped with a warning.
+- `POST /api/v1/channels/:id/inbound` with messages on an `outbound` channel returns `400` `inbound_not_supported` ([errors](../api/errors.md)). If the same request also carried status updates, they are applied, and the messages are dropped with a warning. A `new_activity` sent over the client API socket of an `outbound` channel is answered with the error `inbound_not_supported`.
 - The pipeline delivers only to channels whose mode is `outbound` or `duplex`, both for the conversation's own channel and for routing targets.
 - `RoutingRules` rejects an `outbound` source ("source channel is outbound-only and cannot receive inbound messages") and `inbound` targets.
 - `Channel.changeset/2` rejects a mode the adapter does not support, for example `echo channels only support modes: outbound`.
@@ -73,7 +86,7 @@ Every channel has a secret, shown **once** when the channel is created in the ad
 
 ## Config and encryption at rest
 
-`config` is a map with string keys, validated by the adapter's `validate_config/1`. Both `secret` and `config` are `Cloak.Ecto` encrypted fields. Migration [`20261008100000_encrypt_channel_secrets`](https://github.com/AimTune/converger/blob/main/priv/repo/migrations/20261008100000_encrypt_channel_secrets.exs) encrypted existing rows in place and dropped the plaintext columns (issue [#12](https://github.com/AimTune/converger/issues/12)). In the admin UI and the audit logs, sensitive keys (`access_token`, `api_key`, `secret`, `token`, `password`, `verify_token`, `app_secret`, `authorization`, and keys ending in `_secret`, `_token` or `_hash`) are masked or redacted.
+`config` is a map with string keys, validated by the adapter's `validate_config/1`. Both `secret` and `config` are `Cloak.Ecto` encrypted fields. Migration [`20261008100000_encrypt_channel_secrets`](https://github.com/AimTune/converger/blob/main/priv/repo/migrations/20261008100000_encrypt_channel_secrets.exs) encrypted existing rows in place and dropped the plaintext columns (issue [#12](https://github.com/AimTune/converger/issues/12)). In the admin UI and the audit logs, sensitive keys (`access_token`, `api_key`, `secret`, `token`, `password`, `verify_token`, `app_secret`, `authorization`, and keys ending in `_secret`, `_token`, `_hash` or `_password`) are masked or redacted.
 
 After rotating `CLOAK_KEY`, move the old key to `CLOAK_RETIRED_KEYS` and run `bin/converger eval "Converger.Release.reencrypt_secrets()"`. See [ADR-0012](../adr/0012-secrets-at-rest-and-audit-redaction.md) and [security](../security.md).
 
@@ -101,7 +114,7 @@ The chain is validated on save (unknown types and bad options are rejected). It 
 | No signature | `401` | accepted, deprecation warning logged |
 | Invalid signature | `401` | `401` |
 
-New channels default to `true`. Migration [`20261008120000_add_require_signature_to_channels`](https://github.com/AimTune/converger/blob/main/priv/repo/migrations/20261008120000_add_require_signature_to_channels.exs) backfilled existing channels with `false`, so old integrations kept working. `whatsapp_meta` verifies Meta's `X-Hub-Signature-256` with `config["app_secret"]`, and cannot require signatures without it. Timestamped signatures must be within `config :converger, :inbound_signature_tolerance_seconds` (default 300) of the server clock. Toggle the flag in the channel table ("Signature: required/optional"). Details: [webhooks](../webhooks.md).
+New channels default to `true`. Migration [`20261008120000_add_require_signature_to_channels`](https://github.com/AimTune/converger/blob/main/priv/repo/migrations/20261008120000_add_require_signature_to_channels.exs) backfilled existing channels with `false`, so old integrations kept working. `whatsapp_meta` verifies Meta's `X-Hub-Signature-256` with `config["app_secret"]`, and cannot require signatures without it. `slack` verifies `X-Slack-Signature` with `config["signing_secret"]`. `sms_twilio` verifies `X-Twilio-Signature` with `config["auth_token"]`, and `sms_vonage` the signed-webhook JWT with `config["signature_secret"]`. Timestamped signatures must be within `config :converger, :inbound_signature_tolerance_seconds` (default 300) of the server clock. Toggle the flag in the channel table ("Signature: required/optional"). Details: [webhooks](../webhooks.md).
 
 ## Retry policy
 
@@ -126,8 +139,8 @@ Values must be positive integers (or a valid `backoff` name), and unknown keys a
 A channel is `active` or `inactive`. When a channel stops being active:
 
 - its connected client sockets are disconnected (`ConvergerWeb.Sockets.disconnect_channel/1`), and cannot reconnect or rejoin while it stays inactive;
-- inbound webhooks get `400 {"error": "Channel is inactive"}`;
-- client-API requests with its tokens get `403 {"error": {"code": "Forbidden", "message": "Channel not found or inactive"}}`, and `tokens/generate` with its secret fails;
+- inbound webhooks get `400` `channel_inactive`;
+- client-API requests with its tokens get `403` `channel_inactive` ("Channel not found or inactive", [error envelope](../api/errors.md)), and `tokens/generate` with its secret fails;
 - new conversations cannot be created on it through `POST /api/v1/conversations`;
 - it is skipped as a routing rule target.
 
@@ -135,7 +148,7 @@ Deleting a channel also disconnects its sockets, and cascades to its conversatio
 
 ## Health checks
 
-`Converger.Workers.ChannelHealthWorker` runs every 5 minutes (Oban cron). For each **active** channel of type `webhook`, `whatsapp_meta` or `whatsapp_infobip`, it computes the delivery failure rate over the last 60 minutes and stores a row in `channel_health_checks`:
+`Converger.Workers.ChannelHealthWorker` runs every 5 minutes (Oban cron). For each **active** channel of type `webhook`, `whatsapp_meta`, `whatsapp_infobip`, `slack`, `telegram`, `email`, `sms_twilio`, `sms_vonage`, `kafka`, `rabbitmq`, `nats`, `redis_streams` or `mqtt` (every type with the `:external_delivery` capability), it computes the delivery failure rate over the last 60 minutes and stores a row in `channel_health_checks`:
 
 | Status | Failure rate (failed / total deliveries in window) |
 | --- | --- |
@@ -144,4 +157,4 @@ Deleting a channel also disconnects its sockets, and cascades to its conversatio
 | `unhealthy` | 50% or more |
 | `unknown` | no deliveries in the window |
 
-When the status differs from the previous check, the worker logs the change, broadcasts `health_changed` on the `channel_health` PubSub topic (the admin channel list shows a health dot), and POSTs to the tenant's [alert webhook](tenants.md#alert-webhook). Checks older than 7 days are pruned on every run. Per-channel circuit breakers are Planned ([#31](https://github.com/AimTune/converger/issues/31)).
+When the status differs from the previous check, the worker logs the change, broadcasts `health_changed` on the `channel_health` PubSub topic (the admin channel list shows a health dot), and POSTs to the tenant's [alert webhook](tenants.md#alert-webhook). Checks older than 7 days are pruned on every run. A channel turning `unhealthy` opens its delivery circuit breaker (see [Delivery: circuit breaker](../delivery.md#circuit-breaker)).

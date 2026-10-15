@@ -179,6 +179,49 @@ storage skip server-side MIME sniffing, so a public HTTP flow for direct
 uploads (reserve, upload, then finalize and verify) is not part of the API
 yet.
 
+## Channel media
+
+Files do not only come from client uploads. Inbound media of WhatsApp channels (images, voice notes, documents) is
+downloaded and stored through the same `create_attachment/3` checks (size limit, sniffed type, tenant allowlist), with
+the conversation set, and linked to the inbound activity; a file the checks reject stays a provider stub with
+`channelData.downloadError` ([WhatsApp: inbound media download](channels/whatsapp.md#inbound-media-download)). Allow
+`audio/ogg` (WhatsApp voice notes) in a tenant's `allowed_upload_types` if you restrict it.
+
+Outbound, an activity attachment that points to an upload is read from storage by the WhatsApp Cloud API adapter and
+uploaded to Meta. Infobip fetches media by URL, so it gets the signed storage or CDN URL that `download/1` returns; with
+`LocalStorage` there is none and such deliveries fail permanently, so use a cloud backend or a CDN for Infobip media.
+
+## Retention archive
+
+The same storage backends hold the archive of expired activities and deliveries
+([Data retention](operations/retention.md), issue
+[#30](https://github.com/AimTune/converger/issues/30)). Objects are
+gzip-compressed JSON Lines, at most 50,000 rows each:
+
+```
+archive/<tenant_id>/<YYYY-MM>/activities-00001.jsonl.gz
+archive/<tenant_id>/<YYYY-MM>/deliveries-00001.jsonl.gz
+```
+
+By default they go to the attachment bucket under the `archive/` prefix. To use
+a separate bucket with the same credentials set `ARCHIVE_BUCKET` (S3, MinIO,
+R2, GCS), `ARCHIVE_CONTAINER` (Azure) or `ARCHIVE_DIR` (local disk);
+`ARCHIVE_PREFIX` changes the prefix. In `config/*.exs`:
+
+```elixir
+config :converger, Converger.Archive,
+  storage: Converger.Uploads.S3Storage,   # nil: the attachment storage
+  storage_opts: [bucket: "converger-archive", region: "eu-central-1", ...],
+  prefix: "archive",
+  part_rows: 50_000
+```
+
+The archive needs `PutObject` and `GetObject` (every part is downloaded again
+and its SHA-256 compared before anything is dropped); Converger never deletes
+archive objects. Turn on versioning or object lock on that bucket and keep
+delete rights away from the application's credentials where your provider
+allows it.
+
 ## Testing
 
 - Unit tests cover each signer against known vectors: the published AWS SigV4

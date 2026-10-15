@@ -27,7 +27,7 @@ alternatives that were rejected (Redis, Postgres counters) are in
 | Backend | Behaviour | When |
 | --- | --- | --- |
 | `local` | Counters per node. Exact on one node; behind a load balancer with N nodes a client can get up to N times the limit. | Default without clustering |
-| `cluster` | Counters per node plus replication: every `sync_interval_ms` (default 100 ms) each node broadcasts its new increments, and receivers add them to their own counters. | Default when `DNS_CLUSTER_QUERY` is set |
+| `cluster` | Counters per node plus replication: every `sync_interval_ms` (default 100 ms) each node broadcasts its new increments, and receivers add them to their own counters. | Default when clustering is enabled (`CLUSTER_STRATEGY`, see [Clustering](clustering.md)) |
 
 ```mermaid
 sequenceDiagram
@@ -53,6 +53,9 @@ Properties of the `cluster` backend:
 - **In memory.** A restarted or newly joined node starts with empty counters for the current window and catches up
   with the next syncs.
 - **Netsplit.** Nodes that are not connected fall back to per-node limits.
+- **Verified on real nodes.** The two-node suite (`mix test --only cluster`, see
+  [Clustering](clustering.md#the-two-node-test-suite)) checks that a budget used up over HTTP on one node is
+  enforced by the other.
 
 Pending deltas are subtracted rather than deleted after each flush, so increments that arrive during a flush are
 kept for the next one.
@@ -66,8 +69,10 @@ kept for the next one.
 | `inbound` | 500 per 1 s | channel | `inbound:channel:<channel_id>` | `POST /api/v1/channels/:channel_id/inbound`, `POST /api/v1/channels/:channel_id/status` | yes |
 | `token_generate` | 10 per 60 s | channel | `token_generate:channel:<channel_id>` | `POST /api/v1/converger/tokens/generate`, `POST /api/v1/converger/tokens/refresh` | yes |
 | `token_create` | 10 per 60 s | client IP | `token_create:ip:<ip>` | `POST /api/v1/tokens` (legacy) | no |
-| `login_ip` | 5 failures per 60 s | client IP | `login_ip:<ip>` | `POST /admin/login`, `POST /portal/login` | no |
-| `login_account` | 5 failures per 60 s | account | `login_account:admin:<email>` or `login_account:tenant:<tenant name>:<email>` (trimmed, lowercased) | `POST /admin/login`, `POST /portal/login` | no |
+| `login_ip` | 5 failures per 60 s | client IP | `login_ip:<ip>` | `POST /admin/login`, `POST /portal/login`, wrong 2FA codes on `POST /admin/login/totp`, `POST /portal/login/totp` | no |
+| `login_account` | 5 failures per 60 s | account | `login_account:admin:<email>` or `login_account:tenant:<tenant name>:<email>` (trimmed, lowercased), `login_account:admin-2fa:<user id>` or `login_account:tenant-2fa:<user id>` for 2FA codes | `POST /admin/login`, `POST /portal/login`, `POST /admin/login/totp`, `POST /portal/login/totp` | no |
+| `password_reset_ip` | 5 per 60 s | client IP | `password_reset_ip:ip:<ip>` | `POST /admin/password/reset`, `POST /portal/password/reset` (429 when exceeded) | no |
+| `password_reset_account` | 3 per hour | account | `password_reset_account:admin::<email>` or `password_reset_account:tenant:<tenant name>:<email>` (lowercased) | same; over the limit no email is sent, but the answer is unchanged (no account enumeration) | no |
 
 How the identity is found (`ConvergerWeb.Plugs.RateLimit`):
 
@@ -151,7 +156,14 @@ HTTP/1.1 429 Too Many Requests
 retry-after: 1
 content-type: application/json
 
-{"error": "Too many requests. Please try again later."}
+{
+  "error": {
+    "code": "rate_limited",
+    "message": "Too many requests. Please try again later.",
+    "details": {"retry_after_ms": 1000},
+    "request_id": "F8n2kQx1c9ZQAAAB"
+  }
+}
 ```
 
 `retry-after` is the remaining time of the current window in whole seconds, rounded up, at least 1. No
@@ -165,7 +177,7 @@ Every rejection (including login lockouts) emits `[:converger, :rate_limit, :exc
 
 | Setting | Where | Default | Notes |
 | --- | --- | --- | --- |
-| Backend | `RATE_LIMIT_BACKEND` (`local` / `cluster`) | `cluster` if `DNS_CLUSTER_QUERY` is set, else `local` | Invalid values raise at boot. Ignored in test. |
+| Backend | `RATE_LIMIT_BACKEND` (`local` / `cluster`) | `cluster` if `CLUSTER_STRATEGY` is not `none`, else `local` | Invalid values raise at boot. Ignored in test. |
 | Sync interval | `RATE_LIMIT_SYNC_INTERVAL_MS` | `100` | Lower values reduce overshoot at the cost of more PubSub messages. |
 | Installation-wide limits | `config :converger, Converger.RateLimit, limits: %{...}` | `%{}` | Atom bucket keys, `{limit, window_ms}` values. |
 | Override cache TTL | `override_cache_ttl_ms` in the same config | `30_000` | Upper bound for stale overrides if an invalidation is missed. |

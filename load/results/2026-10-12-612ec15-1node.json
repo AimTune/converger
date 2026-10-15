@@ -1,0 +1,435 @@
+{
+  "run": {
+    "commit": "612ec15a4a6d",
+    "date": "2026-10-12T00:46:37Z",
+    "nodes": 1,
+    "backbone": "native",
+    "profile": "full",
+    "scenarios": "e2e webhook_burst idle reconnect_storm rolling_restart node_kill"
+  },
+  "hardware": {
+    "host": "DESKTOP-Q8TVMOL",
+    "runner": "local",
+    "runner_os": "MINGW64_NT-10.0-26200",
+    "docker_cpus": 12,
+    "docker_memory_bytes": 33062858752,
+    "docker_version": "29.2.1",
+    "kernel": "6.6.87.2-microsoft-standard-WSL2",
+    "app_cpus_limit": "unlimited",
+    "app_memory_limit": "unlimited",
+    "pool_size": 20,
+    "postgres_version": "17.10",
+    "database_size_bytes": 83244723
+  },
+  "mock": {
+    "latencyMs": 20,
+    "jitterMs": 10,
+    "errorRate": 0
+  },
+  "scenarios": {
+    "e2e": {
+      "params": {
+        "conversations": 100,
+        "subscribers_per_conversation": 10,
+        "sockets": 1000,
+        "rate_per_conversation": 1,
+        "duration_s": 60
+      },
+      "duration_s": 72.2,
+      "targets_missed": [
+        "e2e_latency_ms: p(95)<250"
+      ],
+      "resources": {
+        "nodes": {
+          "app": {
+            "cpu_avg_pct": 251.3,
+            "cpu_max_pct": 435.2,
+            "rss_max_mib": 678
+          },
+          "db": {
+            "cpu_avg_pct": 139.4,
+            "cpu_max_pct": 270.3,
+            "rss_max_mib": 199.4
+          }
+        },
+        "oban_depth_max": 112,
+        "db_pool_wait_max_ms": 3.91
+      },
+      "e2e_latency_ms": {
+        "p50": 80,
+        "p95": 433,
+        "p99": 548,
+        "max": 3950
+      },
+      "rest_latency_ms": {
+        "p50": 79.8,
+        "p95": 431.6,
+        "p99": 533,
+        "max": 3949
+      },
+      "messages_acked": 5623,
+      "msgs_per_s": 93.7,
+      "frames_per_s": 937.2,
+      "ws_connections": 1000,
+      "lost_acked_messages": 0,
+      "seq_duplicates": 0,
+      "never_acked": 0,
+      "unverified_subscribers": 0
+    },
+    "webhook_burst": {
+      "params": {
+        "rate": 500,
+        "duration_s": 30,
+        "participants": 200,
+        "targets": 3
+      },
+      "duration_s": 34.9,
+      "targets_missed": [
+        "inbound_rejected: count<1",
+        "dropped_iterations: count<1",
+        "http_req_duration{name:POST /inbound}: p(95)<500"
+      ],
+      "resources": {
+        "nodes": {
+          "app": {
+            "cpu_avg_pct": 263.5,
+            "cpu_max_pct": 430.7,
+            "rss_max_mib": 500.4
+          },
+          "db": {
+            "cpu_avg_pct": 208,
+            "cpu_max_pct": 422.8,
+            "rss_max_mib": 234.7
+          }
+        },
+        "oban_depth_max": 10235,
+        "db_pool_wait_max_ms": 476.33
+      },
+      "inbound_accepted": 2878,
+      "inbound_rejected": 7556,
+      "inbound_per_s": 95.9,
+      "inbound_latency_ms": {
+        "p50": 601.9,
+        "p95": 3213.2,
+        "p99": 3768.8,
+        "max": 4231.7
+      },
+      "stored": 2878,
+      "deliveries_expected": 8634,
+      "deliveries_delivered": 8634,
+      "delivery_latency_ms": {
+        "p50": 42454,
+        "p95": 56310,
+        "p99": 89236,
+        "max": 89993
+      },
+      "drain_after_burst_s": 54.3,
+      "deliveries_per_s": 84.5,
+      "lost_acked_messages": 0
+    },
+    "idle": {
+      "params": {
+        "sockets": 10000,
+        "sockets_per_vu": 200,
+        "connect_rate": 100,
+        "ramp_s": 100,
+        "hold_s": 60
+      },
+      "duration_s": 176.2,
+      "targets_missed": [],
+      "resources": {
+        "nodes": {
+          "app": {
+            "cpu_avg_pct": 67.4,
+            "cpu_max_pct": 282.7,
+            "rss_max_mib": 1883.1
+          },
+          "db": {
+            "cpu_avg_pct": 13.9,
+            "cpu_max_pct": 95.8,
+            "rss_max_mib": 236.4
+          }
+        },
+        "oban_depth_max": 0,
+        "db_pool_wait_max_ms": 0.52
+      },
+      "sockets": 10000,
+      "ws_connections": 10000,
+      "ws_connect_ms": {
+        "p50": 124,
+        "p95": 265,
+        "p99": 313,
+        "max": 2569
+      },
+      "unexpected_closes": 0,
+      "rss_growth_mib": 1455.3,
+      "kib_per_socket": 149
+    },
+    "reconnect_storm": {
+      "params": {
+        "mode": "storm",
+        "conversations": 100,
+        "subscribers_per_conversation": 10,
+        "sockets": 1000,
+        "rate_per_conversation": 1,
+        "duration_s": 60,
+        "storm_at_s": 15,
+        "storm_every_s": 15
+      },
+      "duration_s": 73.9,
+      "targets_missed": [],
+      "resources": {
+        "nodes": {
+          "app": {
+            "cpu_avg_pct": 322.7,
+            "cpu_max_pct": 562.6,
+            "rss_max_mib": 1559.6
+          },
+          "db": {
+            "cpu_avg_pct": 152,
+            "cpu_max_pct": 266.1,
+            "rss_max_mib": 250.4
+          }
+        },
+        "oban_depth_max": 222,
+        "db_pool_wait_max_ms": 266.03
+      },
+      "e2e_latency_ms": {
+        "p50": 192,
+        "p95": 1085,
+        "p99": 1512.8,
+        "max": 2908
+      },
+      "ws_reconnect_ms": {
+        "p50": 537.5,
+        "p95": 1834,
+        "p99": 1954,
+        "max": 1998
+      },
+      "reconnects": 3000,
+      "messages_acked": 5380,
+      "send_retries": 219,
+      "lost_acked_messages": 0,
+      "seq_duplicates": 0,
+      "never_acked": 0,
+      "unverified_subscribers": 0
+    },
+    "rolling_restart": {
+      "params": {
+        "mode": "restart",
+        "conversations": 100,
+        "subscribers_per_conversation": 10,
+        "sockets": 1000,
+        "rate_per_conversation": 1,
+        "duration_s": 70,
+        "storm_at_s": null,
+        "storm_every_s": null
+      },
+      "duration_s": 91.2,
+      "targets_missed": [],
+      "resources": {
+        "nodes": {
+          "app": {
+            "cpu_avg_pct": 279.1,
+            "cpu_max_pct": 497.8,
+            "rss_max_mib": 1540.1
+          },
+          "db": {
+            "cpu_avg_pct": 147.4,
+            "cpu_max_pct": 250.5,
+            "rss_max_mib": 274.3
+          }
+        },
+        "oban_depth_max": 231,
+        "db_pool_wait_max_ms": 78.77
+      },
+      "e2e_latency_ms": {
+        "p50": 100,
+        "p95": 747,
+        "p99": 2847,
+        "max": 5694
+      },
+      "ws_reconnect_ms": {
+        "p50": 8098,
+        "p95": 10114.2,
+        "p99": 11125.4,
+        "max": 17216
+      },
+      "reconnects": 1000,
+      "messages_acked": 5987,
+      "send_retries": 665,
+      "node_recovery_s": {
+        "app": 26.5
+      },
+      "recovery_max_s": 26.5,
+      "lost_acked_messages": 0,
+      "seq_duplicates": 0,
+      "never_acked": 0,
+      "unverified_subscribers": 0
+    },
+    "node_kill": {
+      "params": {
+        "mode": "restart",
+        "conversations": 100,
+        "subscribers_per_conversation": 10,
+        "sockets": 1000,
+        "rate_per_conversation": 1,
+        "duration_s": 70,
+        "storm_at_s": null,
+        "storm_every_s": null
+      },
+      "duration_s": 85.5,
+      "targets_missed": [],
+      "resources": {
+        "nodes": {
+          "app": {
+            "cpu_avg_pct": 211.7,
+            "cpu_max_pct": 437.7,
+            "rss_max_mib": 1305.6
+          },
+          "db": {
+            "cpu_avg_pct": 103.6,
+            "cpu_max_pct": 249.3,
+            "rss_max_mib": 257.9
+          }
+        },
+        "oban_depth_max": 198,
+        "db_pool_wait_max_ms": 373.4
+      },
+      "e2e_latency_ms": {
+        "p50": 196,
+        "p95": 1193,
+        "p99": 4770,
+        "max": 4825
+      },
+      "ws_reconnect_ms": {
+        "p50": 11871,
+        "p95": 12766,
+        "p99": 14205.1,
+        "max": 14717
+      },
+      "reconnects": 1000,
+      "messages_acked": 5331,
+      "send_retries": 391,
+      "node_recovery_s": {
+        "app": 20.3
+      },
+      "recovery_max_s": 20.3,
+      "lost_acked_messages": 0,
+      "seq_duplicates": 0,
+      "never_acked": 0,
+      "unverified_subscribers": 0
+    }
+  },
+  "checks": [
+    {
+      "name": "e2e: k6 ran and correctness thresholds passed",
+      "ok": true,
+      "detail": "k6 exit 99",
+      "warning": false
+    },
+    {
+      "name": "e2e: performance targets",
+      "ok": false,
+      "detail": "missed: e2e_latency_ms: p(95)<250",
+      "warning": true
+    },
+    {
+      "name": "e2e: messages sent and received live",
+      "ok": true,
+      "detail": "5623 acked, 56230 latency samples",
+      "warning": false
+    },
+    {
+      "name": "webhook_burst: k6 ran and correctness thresholds passed",
+      "ok": true,
+      "detail": "k6 exit 99",
+      "warning": false
+    },
+    {
+      "name": "webhook_burst: performance targets",
+      "ok": false,
+      "detail": "missed: inbound_rejected: count<1, dropped_iterations: count<1, http_req_duration{name:POST /inbound}: p(95)<500",
+      "warning": true
+    },
+    {
+      "name": "webhook_burst: every accepted message stored and delivered to every target",
+      "ok": true,
+      "detail": "accepted 2878, stored 2878, delivered 8634/8634",
+      "warning": false
+    },
+    {
+      "name": "idle: k6 ran and correctness thresholds passed",
+      "ok": true,
+      "detail": "k6 exit 0",
+      "warning": false
+    },
+    {
+      "name": "reconnect_storm: k6 ran and correctness thresholds passed",
+      "ok": true,
+      "detail": "k6 exit 0",
+      "warning": false
+    },
+    {
+      "name": "reconnect_storm: messages sent and received live",
+      "ok": true,
+      "detail": "5380 acked, 52711 latency samples",
+      "warning": false
+    },
+    {
+      "name": "rolling_restart: k6 ran and correctness thresholds passed",
+      "ok": true,
+      "detail": "k6 exit 0",
+      "warning": false
+    },
+    {
+      "name": "rolling_restart: messages sent and received live",
+      "ok": true,
+      "detail": "5987 acked, 55852 latency samples",
+      "warning": false
+    },
+    {
+      "name": "node_kill: k6 ran and correctness thresholds passed",
+      "ok": true,
+      "detail": "k6 exit 0",
+      "warning": false
+    },
+    {
+      "name": "node_kill: messages sent and received live",
+      "ok": true,
+      "detail": "5331 acked, 52016 latency samples",
+      "warning": false
+    },
+    {
+      "name": "e2e: zero lost acked messages",
+      "ok": true,
+      "detail": "lost 0, never acked 0",
+      "warning": false
+    },
+    {
+      "name": "reconnect_storm: zero lost acked messages",
+      "ok": true,
+      "detail": "lost 0, never acked 0",
+      "warning": false
+    },
+    {
+      "name": "rolling_restart: zero lost acked messages",
+      "ok": true,
+      "detail": "lost 0, never acked 0",
+      "warning": false
+    },
+    {
+      "name": "node_kill: zero lost acked messages",
+      "ok": true,
+      "detail": "lost 0, never acked 0",
+      "warning": false
+    },
+    {
+      "name": "fan-out channel: every activity delivered to the outbound webhook",
+      "ok": true,
+      "detail": "23820/23820 delivered, 0 jobs still open",
+      "warning": false
+    }
+  ],
+  "ok": true
+}

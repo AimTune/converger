@@ -21,9 +21,11 @@ Table `tenants`:
 | `previous_api_key_hash` | binary | Digest of the key replaced by the last rotation. |
 | `previous_api_key_expires_at` | utc_datetime_usec | Until when the previous key is still accepted. |
 | `status` | text | Defaults to `"active"`. Only active tenants authenticate. The admin panel toggles between `active` and `inactive`. |
-| `alert_webhook_url` | string | Optional `http`/`https` URL for channel health alerts. |
+| `alert_webhook_url` | string | Optional `http`/`https` URL for channel health alerts, kept as a managed [platform event webhook](../platform-webhooks.md) subscription. |
 | `limits` | map, default `{}` | Per-tenant rate-limit overrides (see below). |
+| `tier` | text, default `"default"` | Delivery queue tier: `high`, `default` or `bulk` (see [tenant tiers](../delivery.md#tenant-tiers-fair-queueing)). Set by an admin on the Tenants page. |
 | `allowed_upload_types` | text array | Optional MIME allowlist for uploads. `NULL` or empty means the global default ([storage](../storage.md)). |
+| `retention_days` | integer, default `365` | Days activities and deliveries are kept before they are archived to object storage and removed. At least `RETENTION_MIN_DAYS` (default 30). Set in the admin tenant form. See [Data retention](../operations/retention.md). |
 | `inserted_at`, `updated_at` | utc_datetime_usec | |
 
 `api_key` also exists as a **virtual**, redacted field. It holds the plaintext key only on the struct returned right after creation or rotation, so it can be shown once. It is never persisted.
@@ -38,9 +40,9 @@ The migration [`20261008100001_hash_tenant_api_keys`](https://github.com/AimTune
 
 ### Authentication
 
-Server-to-server routes under `/api/v1` (conversations, activities, routing rules) authenticate with the `x-api-key` header through `ConvergerWeb.Plugs.TenantAuth`. The presented key is hashed and looked up by `api_key_hash`, or by `previous_api_key_hash` while `previous_api_key_expires_at` is in the future. The tenant must have `status: "active"`. Otherwise the response is `401` with `{"error": "Unauthorized: Invalid or inactive API Key"}`.
+Server-to-server routes under `/api/v1` (conversations, activities, routing rules) authenticate with the `x-api-key` header through `ConvergerWeb.Plugs.TenantAuth`. The presented key is hashed and looked up among the scoped keys (`api_keys.key_hash`, active and not expired), then by `api_key_hash`, or by `previous_api_key_hash` while `previous_api_key_expires_at` is in the future. The tenant must have `status: "active"`. Otherwise the response is `401` `unauthorized` with the message "Invalid or inactive API Key" ([errors](../api/errors.md)).
 
-The same plug also accepts a channel token in `x-channel-token`, and then resolves the tenant from the token's `tenant_id` claim. Listing conversations (`GET /api/v1/conversations`) requires the API key specifically, because it exposes other end users' conversations. See the [tenant API](../api/tenant-api.md).
+The same plug also accepts a channel token in `x-channel-token`, and then resolves the tenant from the token's `tenant_id` claim. Only channel tokens are accepted there: end-user tokens (legacy conversation tokens and Converger API tokens) are refused with `401` `Unauthorized: Invalid token`. `x-channel-token` is deprecated; `x-api-key` is not (see [migrating from the legacy surfaces](../api/migrating-from-legacy.md)). Listing conversations (`GET /api/v1/conversations`) requires the API key specifically, because it exposes other end users' conversations. See the [tenant API](../api/tenant-api.md).
 
 ### Rotation
 
@@ -56,13 +58,25 @@ The same plug also accepts a channel token in `x-channel-token`, and then resolv
 
 Only one previous key is kept. A second rotation inside the grace period invalidates the first key immediately.
 
+The key above is the tenant's **primary key**: it has every scope. It can also be rotated with
+`POST /api/v1/admin/tenants/:id/rotate_api_key`.
+
+### Scoped keys
+
+A tenant can also have any number of **scoped keys** in `api_keys`, with a name, a subset of the scopes `read`,
+`write` and `manage`, and an optional expiry. They are issued and revoked with `/api/v1/manage/api_keys` (by a key
+with `manage`) or `/api/v1/admin/tenants/:id/api_keys`, and are deleted with the tenant. Revoking or expiring one
+does not affect the primary key, and rotating the primary key does not affect them. See the
+[management API](../api/management-api.md#api-keys-and-scopes) and
+[ADR-0061](../adr/0061-scoped-api-keys-and-the-management-api.md).
+
 ## Status
 
 Tenants are created `active`. An inactive tenant:
 
 - fails `x-api-key` authentication on `/api/v1`;
 - fails `x-channel-token` authentication (`"Unauthorized: Tenant is not active"`);
-- cannot obtain conversation tokens from the legacy `POST /api/v1/tokens` (`403`).
+- cannot obtain conversation tokens from the legacy, deprecated `POST /api/v1/tokens` (`403`).
 
 The client API (`/api/v1/converger`) and its sockets check the **channel**'s status. Deactivating a channel disconnects its sockets ([channels](channels.md#status)). Deleting a tenant cascades to all its data.
 
@@ -114,11 +128,32 @@ When `alert_webhook_url` is set, the channel health worker (`Converger.Workers.C
 }
 ```
 
-The request is fire-and-forget (a `Task`, 10 s receive timeout). It is not retried, and only the outcome is logged. Durable, signed platform event webhooks are Planned ([#49](https://github.com/AimTune/converger/issues/49)).
+The same URL also receives `channel.circuit_opened` and `channel.circuit_closed` events when a channel's delivery circuit breaker changes state (see [Delivery: circuit breaker](../delivery.md#circuit-breaker)).
+
+The URL is kept as a [platform event webhook](../platform-webhooks.md) subscription (`managed_by: "alert_webhook_url"`) on `channel.health_changed`, `channel.circuit_opened` and `channel.circuit_closed`, created, updated and removed with the tenant field ([#49](https://github.com/AimTune/converger/issues/49)). It keeps the JSON above, but requests are now signed (`x-converger-signature`), retried under the shared retry policy and visible in the event log; see [the legacy alert_webhook_url](../platform-webhooks.md#the-legacy-alert_webhook_url). New integrations should create their own subscriptions instead.
+
+## Data retention
+
+Each tenant's activities and deliveries are kept for `retention_days`. Once the whole month they belong to is older
+than that, the monthly retention job archives them to object storage (`archive/<tenant_id>/<YYYY-MM>/`, gzip JSON
+Lines, verified by checksum) and removes them from the database. Archived months can be re-imported with
+`mix converger.archive.import --tenant <id> --month YYYY-MM`. Details:
+[Data retention, partitions and archive](../operations/retention.md).
+
+## Deleting a tenant
+
+`Converger.Tenants.delete_tenant/2` (the **Delete** button on **Admin, Tenants**) deletes the tenant row; its
+channels, conversations, participants, routing rules, attachments rows and tenant users go with it
+(`ON DELETE CASCADE`), and audit log entries keep a `NULL` tenant. Activities and deliveries live in partitioned
+tables without foreign keys ([ADR-0034](../adr/0034-monthly-partitioning-and-per-tenant-retention.md)): in the same
+transaction a `Converger.Workers.PurgeWorker` job is enqueued that deletes them in batches of 5,000 rows, so a
+large tenant no longer means one statement holding locks for hours. Until the job has finished the rows still exist
+but are unreachable (no tenant, no API key). Deleting a channel or a conversation works the same way. Deleting
+rows with raw SQL bypasses the purge; retention archives such orphans eventually.
 
 ## Admin users and tenant users
 
-Converger has two kinds of human accounts, both with bcrypt-hashed passwords (minimum 8 characters) and status `active`/`inactive`:
+Converger has two kinds of human accounts, both with bcrypt-hashed passwords ([password policy](../security/overview.md#password-policy): at least 12 characters by default), optional TOTP two-factor authentication, server-side sessions, password reset by email, and status `active`/`inactive`:
 
 | | Admin users (`admin_users`) | Tenant users (`tenant_users`) |
 | --- | --- | --- |
@@ -126,14 +161,16 @@ Converger has two kinds of human accounts, both with bcrypt-hashed passwords (mi
 | UI | Admin panel, `/admin` | Tenant portal, `/portal` |
 | Network | IP allowlist `ADMIN_IP_WHITELIST` (default `127.0.0.1,::1`), proxy-aware through `TRUSTED_PROXIES` | No IP allowlist |
 | Login | `/admin/login` with email and password | `/portal/login` with **tenant name**, email and password |
+| Security settings | `/admin/security`: 2FA, sessions, "Log out everywhere" (2FA required for the roles in `ADMIN_REQUIRE_2FA_ROLES`, default `super_admin`) | `/portal/security`: 2FA, sessions, own password, "Log out everywhere" |
+| Forgotten password | `/admin/password/reset` (email) | `/portal/password/reset` (tenant name and email) |
 | Roles | `super_admin`, `admin`, `viewer` | `owner`, `admin`, `member`, `viewer` |
 | Created by | `Converger.Release.seed_admin/0` or `priv/repo/seeds.exs` (first `super_admin`), then **Admin, Users** | **Admin, Tenant Users**, or portal users with role `owner`/`admin` |
 
 Role effects in the current UI:
 
-- Admin: only a `super_admin` manages admin users. A `viewer` cannot change tenant users and has read-only access to the Oban dashboard (`/admin/oban`). `super_admin` and `admin` have full access.
-- Portal: `owner`, `admin` and `member` can toggle channel status and edit routing rules. `owner` and `admin` manage the tenant's users. `viewer` is read-only. Portal users cannot create channels or rotate API keys.
+- Admin: only a `super_admin` manages admin users. A `viewer` is read-only everywhere: it browses tenants, channels, routing rules, conversations and users but cannot change them, has read-only access to the Oban dashboard (`/admin/oban`), and can browse and export the Deliveries page but not replay dead letters. `super_admin` and `admin` have full access. See [Admin panel and tenant portal](../admin-ui.md#permissions).
+- Portal: `owner` and `admin` can pause/resume channel deliveries, send test messages and rotate channel secrets. `owner`, `admin` and `member` can toggle channel status, edit routing rules, close and reopen conversations, and replay the tenant's dead letters on the Deliveries page (`/portal/deliveries`). `owner` and `admin` manage the tenant's users. `viewer` is read-only. Portal users cannot create channels or rotate API keys.
 
-The first admin created without `ADMIN_PASSWORD` gets a generated password and `must_change_password: true`. It is redirected to `/admin/password` until the password is changed. Login attempts are throttled per IP and per account (5 failures per minute each). See [Getting started](../getting-started.md#4-create-the-first-admin-account) and [security](../security.md).
+The first admin created without `ADMIN_PASSWORD` gets a generated password and `must_change_password: true`. It is redirected to `/admin/password` until the password is changed. Login attempts are throttled per IP and per account (5 failures per minute each). A `super_admin` can reset another admin's 2FA and sign them out on **Admin, Users**; portal `owner`/`admin` users can reset a team member's 2FA on **Users**. See [Security model](../security/overview.md#two-factor-authentication-totp). See [Getting started](../getting-started.md#4-create-the-first-admin-account) and [security](../security.md).
 
-Create, update, delete, status-toggle and key-rotation operations made through the admin panel (and routing rule changes made through the tenant API) write an audit log entry. Sensitive values are redacted ([ADR-0012](../adr/0012-secrets-at-rest-and-audit-redaction.md)).
+Create, update, delete, status-toggle and key-rotation operations made through the admin panel (and routing rule changes made through the tenant API), and every dead-letter replay (admin panel, portal or tenant API), write an audit log entry. Sensitive values are redacted ([ADR-0012](../adr/0012-secrets-at-rest-and-audit-redaction.md)).

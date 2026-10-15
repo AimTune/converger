@@ -1,6 +1,9 @@
 # The directory Mix will write compiled artifacts to.
 /_build/
 
+# Build root of the CONVERGER_PASSWORD_HASHER=pbkdf2 mode (docs/contributing.md).
+/_build_pbkdf2/
+
 # If you run "mix test --cover", coverage assets end up here.
 /cover/
 
@@ -31,8 +34,20 @@ converger-*.tar
 /.env.*
 !/.env.example
 
+# Admin/portal assets built by tailwind and esbuild (`mix assets.build`), and
+# the digests of `mix assets.deploy`.
+/priv/static/assets/
+/priv/static/cache_manifest.json
+
 # Local attachment storage (LocalStorage backend).
 /priv/uploads/
 
 # Dialyzer PLTs (cached in CI).
 /priv/plts/
+
+# Node workspace (packages/, examples/typescript/).
+node_modules/
+/packages/*/dist/
+/packages/*/docs-api/
+/packages/*/coverage/
+/examples/typescript/*/dist/
