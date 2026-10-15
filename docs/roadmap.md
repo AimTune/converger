@@ -16,9 +16,9 @@ Converger connects communication channels to each other. Every channel is inboun
 | 2 | [#58 v3.0 WebSocket-first & Converger Protocol v1](https://github.com/AimTune/converger/issues/58) | Duplex WS adapter, acks, receipts, spec, one socket stack | All tasks closed; the epic is open for its exit criteria |
 | 3 | [#59 v3.1 Scale & Reliability](https://github.com/AimTune/converger/issues/59) | Clustering, partitioning, breakers, DLQ, SLO telemetry | All tasks closed; the epic is open for its exit criteria |
 | 4 | [#60 v3.2 Channel Expansion](https://github.com/AimTune/converger/issues/60) | Adapter v2, conditional routing, new channels | Done |
-| 5 | [#61 v3.3 Developer Experience](https://github.com/AimTune/converger/issues/61) | OpenAPI, SDKs, docs, management API, UI | Open: #48, then the SDK release (#187, #188) |
+| 5 | [#61 v3.3 Developer Experience](https://github.com/AimTune/converger/issues/61) | OpenAPI, SDKs, docs, management API, UI | Open: the SDK release (#187, #188) |
 
-Phases 1 and 4 are done, and every task of phases 2 and 3 is closed. What remains is #48 and, last of all, the first release of the SDK packages (#187) and publishing them from CI (#188).
+Phases 1 and 4 are done, and every task of phases 2 and 3 is closed. What remains is, last of all, the first release of the SDK packages (#187) and publishing them from CI (#188).
 
 ## Done: v2.5 Production Hardening (#57)
 
@@ -137,7 +137,7 @@ Make Converger adoptable by someone who has never read its source: a license, a 
 
 | Issue | Title | State |
 | --- | --- | --- |
-| [#48](https://github.com/AimTune/converger/issues/48) | Documentation site and OSS hygiene: guides, adapter authoring, deployment, LICENSE, CONTRIBUTING, SECURITY, templates, CHANGELOG | Open (this site, [ADR-0025](adr/0025-docusaurus-site-and-docs-with-every-change.md)) |
+| [#48](https://github.com/AimTune/converger/issues/48) | Documentation site and OSS hygiene: guides, adapter authoring, deployment, LICENSE, CONTRIBUTING, SECURITY, templates, CHANGELOG | Done ([this site](intro.md), [ADR-0025](adr/0025-docusaurus-site-and-docs-with-every-change.md), [ADR-0073](adr/0073-mit-license-and-community-health-files.md)) |
 | [#45](https://github.com/AimTune/converger/issues/45) | OpenAPI 3.1 specification, Swagger UI, consistent error envelope and API versioning policy | Done ([OpenAPI](api/openapi.md), [ADR-0050](adr/0050-openapi-spec-error-envelope-and-api-versioning.md)) |
 | [#46](https://github.com/AimTune/converger/issues/46) | TypeScript SDK (`@converger/client`) implementing Protocol v1 with reconnect, watermark resume, outbox and token refresh | Done ([TypeScript SDK](sdk/typescript.md), [ADR-0051](adr/0051-typescript-sdk-transport-abstraction-and-outbox.md)) |
 | [#47](https://github.com/AimTune/converger/issues/47) | Server-side SDKs: Python and Go (REST + WebSocket), Elixir client library, signature verification helpers | Done ([Server-side SDKs](sdk/server-sdks.md), [ADR-0052](adr/0052-server-side-sdks-in-the-monorepo-with-a-shared-conformance-suite.md)) |
@@ -146,7 +146,7 @@ Make Converger adoptable by someone who has never read its source: a license, a 
 | [#49](https://github.com/AimTune/converger/issues/49) | Platform event webhooks: tenant-level subscriptions for activity, delivery, conversation and channel events (signed, retried) | Done ([Platform event webhooks](platform-webhooks.md), [ADR-0053](adr/0053-platform-event-webhooks.md)) |
 | [#50](https://github.com/AimTune/converger/issues/50) | Admin panel and tenant portal modernization: Tailwind/daisyUI, pagination and search, channel test-send, key rotation, deliveries view, live tail | Done ([Admin panel and tenant portal](admin-ui.md), [ADR-0060](adr/0060-tailwind-daisyui-admin-ui-without-node.md)) |
 | [#53](https://github.com/AimTune/converger/issues/53) | Windows developer setup: `bcrypt_elixir` requires MSVC `nmake`; document or offer a pure-Elixir hashing option | Done ([Getting started](getting-started.md#per-os-notes), [dev container](contributing.md#dev-container), [ADR-0057](adr/0057-pluggable-password-hasher-and-dev-container.md)) |
-| [#187](https://github.com/AimTune/converger/issues/187) | First release of the SDK packages to npm and PyPI (manual, last on the roadmap) | Open (after #48's licence) |
+| [#187](https://github.com/AimTune/converger/issues/187) | First release of the SDK packages to npm and PyPI (manual, last on the roadmap) | Open |
 | [#188](https://github.com/AimTune/converger/issues/188) | Publish SDK releases from CI: npm token/OIDC and PyPI trusted publisher | Open (after #187) |
 
 Exit criteria: a new integrator provisions a tenant and a channel through the API, embeds the TypeScript SDK and exchanges messages using only the docs; the docs site is published from CI; the GitHub community profile is complete.
