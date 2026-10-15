@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0 (unreleased)
+## 0.1.0 (2026-10-15)
 
 - `use ConvergerAgent` behaviour (`handle_turn/2`, optional `handle_error/1`) and the functional
   `ConvergerAgent.start_link(handler: fn turn, reply -> ... end)` form, on one channel-scoped Protocol v1 WebSocket
