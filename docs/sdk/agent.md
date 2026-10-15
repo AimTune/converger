@@ -20,8 +20,8 @@ WebSocket that multiplexes every conversation of the agent's channel. The design
 The Python, Go, .NET and Elixir agent SDKs of [#67](https://github.com/AimTune/converger/issues/67) expose the same
 names (in each language's casing) and the same wire mapping.
 
-> **Status:** `@converger/agent` is implemented and tested in CI ([#67](https://github.com/AimTune/converger/issues/67));
-> not yet published to npm. Use it from this repository (`pnpm --filter @converger/agent build`) until then.
+> **Status:** `@converger/agent` and `create-converger-agent` are published on npm from 0.1.0
+> ([#67](https://github.com/AimTune/converger/issues/67), [Releasing the SDKs](releasing.md)).
 
 ## Setup
 

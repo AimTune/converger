@@ -18,8 +18,8 @@ Which client to use:
 | a Node service, a React Native app, a custom UI | **`@converger/client`** (this page) |
 
 > **Status:** implemented in [#46](https://github.com/AimTune/converger/issues/46). The package is built and tested in
-> CI. It is published to npm by the `client-ts-publish` workflow when a `client-ts-v*` tag is pushed; no version has
-> been published yet.
+> CI and published on [npm](https://www.npmjs.com/package/@converger/client) from 0.1.0. New versions are published
+> by the `client-ts-publish` workflow when a `client-ts-v*` tag is pushed ([Releasing the SDKs](releasing.md)).
 
 ## Install
 
@@ -193,7 +193,7 @@ public names in `src/rest/types.ts` stay the same. API reference: `pnpm --filter
   transports.
 - CI: the `client-ts` workflow (`.github/workflows/client-ts.yml`) runs typecheck, unit tests, the build, typedoc and
   the e2e test against PostgreSQL. `client-ts-publish.yml` publishes to npm with provenance when a `client-ts-v*` tag
-  is pushed. It needs the `NPM_TOKEN` secret.
+  is pushed, with npm trusted publishing: no token is stored.
 
 ## Examples
 

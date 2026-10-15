@@ -6,7 +6,7 @@ sidebar_position: 9
 
 # Agent SDK for Elixir
 
-**Implemented (#67)**, not yet published. `packages/agent-elixir` is the `converger_agent` package (Mint and
+**Implemented (#67)**, published on [Hex](https://hex.pm/packages/converger_agent) from 0.1.0. `packages/agent-elixir` is the `converger_agent` package (Mint and
 Mint.WebSocket, Jason). It has the same model and wire behaviour as the [Go agent SDK](agent-go.md): one
 channel-scoped Protocol v1 connection
 ([section 10](../protocol/v1.md#10-channel-scoped-sockets-implemented-64-on-the-native-endpoint)) serves every
@@ -15,7 +15,6 @@ conversation routed to the agent's `websocket` channel.
 ## Install
 
 ```elixir
-# Not yet on Hex; use a path or git dependency until then.
 {:converger_agent, "~> 0.1"}
 ```
 

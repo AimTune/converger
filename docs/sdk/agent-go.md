@@ -6,7 +6,7 @@ sidebar_position: 7
 
 # Agent SDK for Go
 
-**Implemented (#67)**, not yet published. `packages/agent-go` (module
+**Implemented (#67)**, released from v0.1.0 ([pkg.go.dev](https://pkg.go.dev/github.com/AimTune/converger/packages/agent-go)). `packages/agent-go` (module
 `github.com/AimTune/converger/packages/agent-go`, package `agent`) is the Go agent SDK: a bot backend answers
 the conversations of a Converger channel over one channel-scoped Protocol v1 connection
 ([Protocol v1, sections 9 and 10](../protocol/v1.md#10-channel-scoped-sockets-implemented-64-on-the-native-endpoint)).
@@ -22,7 +22,7 @@ The .NET and Elixir SDKs have the same model and wire behaviour: [.NET](agent-do
 go get github.com/AimTune/converger/packages/agent-go
 ```
 
-Go 1.22+, one dependency (`github.com/coder/websocket`). Releases will be tags `packages/agent-go/vX.Y.Z`.
+Go 1.22+, one dependency (`github.com/coder/websocket`). Releases are tags `packages/agent-go/vX.Y.Z` ([Releasing the SDKs](releasing.md)).
 
 ## Token
 

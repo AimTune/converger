@@ -113,14 +113,15 @@ against a Postgres service.
 | SDK | Tag | Workflow | Publishes to |
 | --- | --- | --- | --- |
 | Python | `client-python/vX.Y.Z` | `sdk-python-release.yml` | PyPI, with trusted publishing (OIDC, `pypi` environment); no token is stored |
-| Go | `packages/client-go/vX.Y.Z` | `sdk-go-release.yml` | Nothing to upload: the tag is the release. The workflow tests the commit, warms `proxy.golang.org` and creates a GitHub release |
+| Go | `packages/client-go/vX.Y.Z` (and `packages/agent-go/vX.Y.Z` for the agent SDK) | `sdk-go-release.yml` | Nothing to upload: the tag is the release. The workflow tests the commit, warms `proxy.golang.org` and creates a GitHub release |
 | Elixir | `client-elixir/vX.Y.Z` | `sdk-elixir-release.yml` | Hex, with the `HEX_API_KEY` secret (`hex` environment) |
+| Elixir agent | `agent-elixir/vX.Y.Z` | `agent-elixir-release.yml` | Hex (`converger_agent`), with the same `HEX_API_KEY` secret (`hex` environment) |
 | Python agent | none: run manually (`workflow_dispatch`, `publish` checked) | `agent-sdk-python-release.yml` | PyPI (`converger-agent`), trusted publishing as above. Unchecked, it only builds and tests |
 | .NET agent | none: run manually (`workflow_dispatch`, `dry_run` unchecked) | `agent-dotnet-publish.yml` | nuget.org (`Converger.Agent`), with nuget.org trusted publishing (OIDC, `NuGet/login`, the `NUGET_USER` variable); no key is stored. With `dry_run` it only builds, tests and packs |
 
 Each release workflow first checks that the tag matches the version in the package (`_version.py`, `Version` in
-`client.go`, `@version` in `mix.exs`). Before the first Hex release a license must be chosen and added to the
-`package` of `packages/client-elixir/mix.exs` (Hex refuses packages without one); PyPI and Go do not require it.
+`client.go`, `@version` in `mix.exs`). Every package is MIT licensed and carries the license file. The one-time registry setup and the whole release flow are
+on [Releasing the SDKs](releasing.md).
 
 ## Generated types
 

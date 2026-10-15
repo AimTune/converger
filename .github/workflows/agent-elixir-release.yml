@@ -1,0 +1,47 @@
+name: Release Elixir agent SDK
+
+# Publishes packages/agent-elixir (converger_agent) to Hex when a tag
+# agent-elixir/vX.Y.Z is pushed. Hex has no trusted publishing, so this needs
+# the HEX_API_KEY secret (a Hex key with the api:write permission) in the "hex"
+# environment, the same key as the client's workflow (sdk-elixir-release.yml).
+
+on:
+  push:
+    tags: ["agent-elixir/v*"]
+
+permissions:
+  contents: read
+
+env:
+  # Keep in sync with ci.yml.
+  ELIXIR_VERSION: "1.19.5"
+  OTP_VERSION: "28.5.0.5"
+
+jobs:
+  publish:
+    name: Test and publish to Hex
+    runs-on: ubuntu-latest
+    environment: hex
+    defaults:
+      run:
+        working-directory: packages/agent-elixir
+    steps:
+      - uses: actions/checkout@v7
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          otp-version: ${{ env.OTP_VERSION }}
+      - name: Tag matches the package version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version=$(sed -n 's/^  @version "\(.*\)"/\1/p' mix.exs)
+          test "agent-elixir/v${version}" = "$TAG" || { echo "tag $TAG does not match version $version"; exit 1; }
+      - run: mix deps.get
+      - run: mix test --warnings-as-errors
+        env:
+          MIX_ENV: test
+      - name: Publish
+        env:
+          HEX_API_KEY: ${{ secrets.HEX_API_KEY }}
+        run: mix hex.publish --yes

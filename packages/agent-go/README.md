@@ -10,8 +10,8 @@ participant and per-turn meta; the handler replies with text, rich messages, too
 go get github.com/AimTune/converger/packages/agent-go
 ```
 
-Go 1.22+, one dependency (`github.com/coder/websocket`). Not published yet; releases will be tags
-`packages/agent-go/vX.Y.Z`. Full documentation: [converger.aimtune.dev/sdk/agent-go](https://converger.aimtune.dev/sdk/agent-go).
+Go 1.22+, one dependency (`github.com/coder/websocket`). Releases are tags `packages/agent-go/vX.Y.Z`
+(from v0.1.0). Full documentation: [converger.aimtune.dev/sdk/agent-go](https://converger.aimtune.dev/sdk/agent-go).
 
 ## Quick start
 

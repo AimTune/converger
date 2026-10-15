@@ -1,8 +1,10 @@
 name: client-ts publish
 
 # Publishes @converger/client to npm when a tag client-ts-vX.Y.Z is pushed.
-# The tag must match packages/client-ts/package.json "version". Needs the
-# NPM_TOKEN repository secret; the package is published with provenance.
+# The tag must match packages/client-ts/package.json "version". Publishes with
+# npm trusted publishing (OIDC): no token is stored. The package has a trusted
+# publisher on npmjs.com for AimTune/converger, this workflow file and the "npm"
+# environment; provenance is attached automatically.
 
 on:
   push:
@@ -18,7 +20,7 @@ jobs:
     environment: npm
     permissions:
       contents: read
-      id-token: write # npm provenance
+      id-token: write # npm trusted publishing and provenance
     steps:
       - uses: actions/checkout@v7
 
@@ -28,7 +30,9 @@ jobs:
         with:
           node-version: "22"
           cache: pnpm
-          registry-url: https://registry.npmjs.org
+
+      # npm trusted publishing (OIDC) needs npm 11.5.1 or newer; Node 22 ships 10.
+      - run: npm install -g npm@^11.5.1
 
       - run: pnpm install --frozen-lockfile --filter @converger/client...
 
@@ -46,8 +50,7 @@ jobs:
       - run: pnpm --filter @converger/client test
       - run: pnpm --filter @converger/client build
 
+      # npm publish, not pnpm publish: the npm CLI does the OIDC exchange.
       - name: Publish
-        run: pnpm --filter @converger/client publish --no-git-checks --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          NPM_CONFIG_PROVENANCE: "true"
+        working-directory: packages/client-ts
+        run: npm publish --access public

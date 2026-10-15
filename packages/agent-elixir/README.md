@@ -7,7 +7,6 @@ reconnects and per-conversation watermarks.
 
 ```elixir
 def deps do
-  # Not yet published on Hex; use a path or git dependency until then.
   [{:converger_agent, "~> 0.1"}]
 end
 ```
