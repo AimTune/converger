@@ -70,8 +70,17 @@ jobs:
         shell: bash
         env:
           DRY_RUN: ${{ inputs.dry_run }}
+        # A version already on npm is skipped, so a run that failed halfway
+        # (e.g. one package without its trusted publisher yet) can be re-run.
         run: |
           flags=(--access public)
           if [ "${DRY_RUN}" = "true" ]; then flags+=(--dry-run); fi
-          (cd packages/agent-ts && npm publish "${flags[@]}")
-          (cd packages/create-converger-agent && npm publish "${flags[@]}")
+          for dir in packages/agent-ts packages/create-converger-agent; do
+            name=$(node -p "require('./${dir}/package.json').name")
+            version=$(node -p "require('./${dir}/package.json').version")
+            if npm view "${name}@${version}" version >/dev/null 2>&1; then
+              echo "${name}@${version} is already on npm, skipping"
+              continue
+            fi
+            (cd "${dir}" && npm publish "${flags[@]}")
+          done

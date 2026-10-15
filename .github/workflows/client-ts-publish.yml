@@ -51,6 +51,13 @@ jobs:
       - run: pnpm --filter @converger/client build
 
       # npm publish, not pnpm publish: the npm CLI does the OIDC exchange.
+      # A version already on npm is skipped, so the job can be re-run.
       - name: Publish
         working-directory: packages/client-ts
-        run: npm publish --access public
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if npm view "@converger/client@${version}" version >/dev/null 2>&1; then
+            echo "@converger/client@${version} is already on npm, skipping"
+            exit 0
+          fi
+          npm publish --access public
