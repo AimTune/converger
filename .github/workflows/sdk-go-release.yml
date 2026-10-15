@@ -52,6 +52,9 @@ jobs:
         working-directory: ${{ steps.module.outputs.dir }}
         run: go vet ./... && go test -race -count=1 ./...
 
+      # The proxy's first fetch of a new tag clones the whole monorepo and can
+      # time out ("fetch timed out", 404) while it keeps fetching in the
+      # background, so retry for a few minutes before giving up.
       - name: Warm the module proxy
         env:
           DIR: ${{ steps.module.outputs.dir }}
@@ -59,7 +62,15 @@ jobs:
         run: |
           cd "$(mktemp -d)"
           go mod init warm
-          GOPROXY=https://proxy.golang.org go list -m "github.com/AimTune/converger/${DIR}@${TAG_VERSION}"
+          for attempt in 1 2 3 4 5 6; do
+            if GOPROXY=https://proxy.golang.org go list -m "github.com/AimTune/converger/${DIR}@${TAG_VERSION}"; then
+              exit 0
+            fi
+            echo "proxy has no ${TAG_VERSION} yet (attempt ${attempt}), retrying in 30 s"
+            sleep 30
+          done
+          echo "::error::proxy.golang.org did not serve ${DIR}@${TAG_VERSION}"
+          exit 1
 
       - name: GitHub release
         env:
