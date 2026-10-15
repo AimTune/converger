@@ -130,6 +130,16 @@ against their SHA-256, and inserts with `ON CONFLICT DO NOTHING`, so an import c
 rows are subject to retention again on the next run: raise the tenant's `retention_days` first if they should stay,
 or import into a separate database.
 
+### Checking it at scale
+
+`test/load/partition_100m/run.sh` seeds about 100M rows into its own Postgres. While writers keep inserting, it
+runs this retention path for the oldest month against MinIO. It measures detach, export and verify, drop, the
+writers' p99 and the WAL, then reads the archive back and re-imports a tenant to compare row counts. How to run it,
+the disk it needs and a smoke-run result are in
+[Benchmarks](../benchmarks/index.md#partition-archive-and-drop-at-100m-rows). At 100M rows the writers were not blocked, detach took
+205 ms and drop 14 ms, and archiving the 16.7M-row month took 530 s
+([2026-10-15 run](../benchmarks/2026-10-15-partition-100m.md), [#192](https://github.com/AimTune/converger/issues/192)).
+
 ## Pruning other tables
 
 `Converger.Workers.PruneWorker` runs daily at 01:30 UTC and deletes, 10,000 rows per statement:

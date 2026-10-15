@@ -13,6 +13,13 @@ and 30M rows per table, the steps are checked for how they scale, and the 100M f
 those two runs, not measured**. The 100M run did not fit this machine's time and disk budget (about 78 GB of
 partitions alone, see below).
 
+:::note Measured at 100M rows
+A 100M-row dataset (60M `activities` + 40M `deliveries`, 16.7M rows in the archived month) was later measured
+with `test/load/partition_100m/run.sh` ([#192](https://github.com/AimTune/converger/issues/192)): detach 205 ms,
+drop 14 ms, writers not blocked, and the month archived and verified in 530 s. See [2026-10-15, partitions at 100M rows](2026-10-15-partition-100m.md).
+The extrapolation below is per table (100M rows in each table), which is larger than that run.
+:::
+
 The design being measured is [ADR-0034](../adr/0034-monthly-partitioning-and-per-tenant-retention.md). Its own
 measurements (200k and 1M rows, detach and drop only, no archive) are in that ADR.
 

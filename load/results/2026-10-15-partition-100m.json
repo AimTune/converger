@@ -1,0 +1,332 @@
+{
+  "archive": {
+    "rows": 16666667,
+    "parts": 336,
+    "part_rows": 50000,
+    "by_table": {
+      "activities": {
+        "bytes": 954168590,
+        "rows": 10000000,
+        "parts": 200
+      },
+      "deliveries": {
+        "bytes": 597877395,
+        "rows": 6666667,
+        "parts": 136
+      }
+    },
+    "objects_bytes": 1552045985,
+    "all_verified": true,
+    "uploaded_parts_seen": 336
+  },
+  "seed": {
+    "activities": 60000000,
+    "deliveries": 40000000,
+    "reused": false,
+    "rows_per_second": 106729,
+    "seconds": 937.0,
+    "seed_jobs": 4,
+    "wal_bytes": 58438809496
+  },
+  "projection": {
+    "database_bytes": 58608954638,
+    "bytes_per_row": 586.1,
+    "archive_bytes_per_row": 93.1,
+    "target_rows": 100000000,
+    "oldest_month_rows": 16664371,
+    "archive_bytes": 1551832205,
+    "disk_bytes_needed": 92808787232,
+    "seed_seconds": 937,
+    "archive_and_verify_seconds": 530,
+    "note": "Linear extrapolation from this run; index builds and I/O do not scale linearly once data exceeds RAM"
+  },
+  "postgres": {
+    "checkpoint_timeout": "15min",
+    "effective_cache_size": "6GB",
+    "full_page_writes": "on",
+    "maintenance_work_mem": "1GB",
+    "max_wal_size": "16GB",
+    "server_version": "17.11",
+    "shared_buffers": "2GB",
+    "synchronous_commit": "on",
+    "wal_compression": "off",
+    "wal_level": "replica",
+    "work_mem": "64MB"
+  },
+  "operation": {
+    "wal_bytes": 335337608,
+    "total_ms": 529880,
+    "detach_start_ms": 30203,
+    "detach_end_ms": 30410,
+    "drop_start_ms": 425687,
+    "drop_end_ms": 559624,
+    "detach_ms": 205.2,
+    "drop_ms": 14.1,
+    "archive_ms_by_table": {
+      "activities": 395277,
+      "deliveries": 133923
+    },
+    "detach_statements": [
+      {
+        "query": "ALTER TABLE activities DETACH PARTITION activities_p2023_07 CONCURRENTLY",
+        "ms": 87.2
+      },
+      {
+        "query": "ALTER TABLE deliveries DETACH PARTITION deliveries_p2023_07 CONCURRENTLY",
+        "ms": 118.0
+      }
+    ],
+    "drop_statements": [
+      {
+        "query": "DROP TABLE activities_p2023_07",
+        "ms": 8.7
+      },
+      {
+        "query": "DROP TABLE deliveries_p2023_07",
+        "ms": 5.4
+      }
+    ],
+    "archive_and_verify_ms": 529661
+  },
+  "settings": {
+    "rows": 100000000,
+    "part_rows": 50000,
+    "months": 6,
+    "activity_share": 0.6,
+    "tenants": 8,
+    "conversations_per_tenant": 2000,
+    "seed_batch": 1000000,
+    "seed_jobs": 4,
+    "writers": 8,
+    "writer_rate": 25,
+    "baseline_s": 30,
+    "after_s": 15,
+    "reimport_tenants": 1,
+    "minio_endpoint": "http://127.0.0.1:19000"
+  },
+  "writers": {
+    "detach": {
+      "count": 71,
+      "errors": 0,
+      "p50_ms": 58.27,
+      "p99_ms": 185.75,
+      "max_ms": 185.75
+    },
+    "after": {
+      "count": 2921,
+      "errors": 0,
+      "p50_ms": 22.63,
+      "p99_ms": 32.77,
+      "max_ms": 43.72
+    },
+    "drop": {
+      "count": 24381,
+      "errors": 0,
+      "p50_ms": 28.16,
+      "p99_ms": 128.51,
+      "max_ms": 174.18
+    },
+    "errors": 0,
+    "during": {
+      "count": 97019,
+      "errors": 0,
+      "p50_ms": 27.95,
+      "p99_ms": 123.9,
+      "max_ms": 308.84
+    },
+    "baseline": {
+      "count": 4854,
+      "errors": 0,
+      "p50_ms": 36.97,
+      "p99_ms": 144.18,
+      "max_ms": 187.7
+    }
+  },
+  "sizes": {
+    "rows": 100013776,
+    "total_bytes": 58617028608,
+    "by_month": [
+      {
+        "month": "2023-07",
+        "activities": {
+          "total_bytes": 5739896832,
+          "heap_bytes": 3617177600,
+          "index_bytes": 2121687040,
+          "rows_estimate": 9988214
+        },
+        "deliveries": {
+          "total_bytes": 4020584448,
+          "heap_bytes": 1237909504,
+          "index_bytes": 2782298112,
+          "rows_estimate": 6666417
+        }
+      },
+      {
+        "month": "2023-08",
+        "activities": {
+          "total_bytes": 5750710272,
+          "heap_bytes": 3627991040,
+          "index_bytes": 2121687040,
+          "rows_estimate": 9989346
+        },
+        "deliveries": {
+          "total_bytes": 4020600832,
+          "heap_bytes": 1237909504,
+          "index_bytes": 2782314496,
+          "rows_estimate": 6666689
+        }
+      },
+      {
+        "month": "2023-09",
+        "activities": {
+          "total_bytes": 5750710272,
+          "heap_bytes": 3627991040,
+          "index_bytes": 2121687040,
+          "rows_estimate": 10007474
+        },
+        "deliveries": {
+          "total_bytes": 4020600832,
+          "heap_bytes": 1237909504,
+          "index_bytes": 2782314496,
+          "rows_estimate": 6666905
+        }
+      },
+      {
+        "month": "2023-10",
+        "activities": {
+          "total_bytes": 5750710272,
+          "heap_bytes": 3627991040,
+          "index_bytes": 2121687040,
+          "rows_estimate": 10011253
+        },
+        "deliveries": {
+          "total_bytes": 4020600832,
+          "heap_bytes": 1237909504,
+          "index_bytes": 2782314496,
+          "rows_estimate": 6667228
+        }
+      },
+      {
+        "month": "2023-11",
+        "activities": {
+          "total_bytes": 5750710272,
+          "heap_bytes": 3627991040,
+          "index_bytes": 2121687040,
+          "rows_estimate": 10011711
+        },
+        "deliveries": {
+          "total_bytes": 4020600832,
+          "heap_bytes": 1237909504,
+          "index_bytes": 2782314496,
+          "rows_estimate": 6666150
+        }
+      },
+      {
+        "month": "2023-12",
+        "activities": {
+          "total_bytes": 5750702080,
+          "heap_bytes": 3627982848,
+          "index_bytes": 2121687040,
+          "rows_estimate": 10006330
+        },
+        "deliveries": {
+          "total_bytes": 4020600832,
+          "heap_bytes": 1237909504,
+          "index_bytes": 2782314496,
+          "rows_estimate": 6666059
+        }
+      }
+    ],
+    "by_table": {
+      "activities": {
+        "total_bytes": 34493440000,
+        "heap_bytes": 21757124608,
+        "index_bytes": 12730122240
+      },
+      "deliveries": {
+        "total_bytes": 24123588608,
+        "heap_bytes": 7427457024,
+        "index_bytes": 16693870592
+      }
+    },
+    "database_bytes": 58644240051
+  },
+  "readback": {
+    "seconds": 10.4,
+    "bytes": 1552045985,
+    "rows": 16666667,
+    "objects": 336,
+    "counts_match": true,
+    "checksums_ok": true,
+    "mismatches": []
+  },
+  "reimport": {
+    "tenants": [
+      {
+        "seconds": 210.5,
+        "stats": {
+          "activities": {
+            "rows": 1250000,
+            "inserted": 1250000,
+            "parts": 25
+          },
+          "deliveries": {
+            "rows": 833334,
+            "inserted": 833334,
+            "parts": 17
+          }
+        },
+        "tenant_id": "12b7c223-2efd-4caf-b9e9-47f8250bd84c",
+        "counts_match": true,
+        "rows_per_second": 9896,
+        "in_database": {
+          "activities": 1250000,
+          "deliveries": 833334
+        }
+      }
+    ]
+  },
+  "issue": 192,
+  "generated_at": "2026-10-15T03:09:33Z",
+  "hardware": {
+    "disk_avail_bytes": 998879444992,
+    "disk_need_estimate_bytes": 94615843021,
+    "disk_total_bytes": 1081101176832,
+    "docker_cpus": 12,
+    "docker_memory_bytes": 33062854656,
+    "docker_os": "Docker Desktop",
+    "docker_version": "29.8.2",
+    "host_cpu": "AMD Ryzen 5 7600X 6-Core Processor             ",
+    "host_memory_bytes": 67517771776,
+    "host_os": "MINGW64_NT-10.0-26200 3.6.5-22c95533.x86_64 x86_64",
+    "kernel": "6.6.87.2-microsoft-standard-WSL2"
+  },
+  "oldest_month": {
+    "bytes": {
+      "month": "2023-07",
+      "activities": {
+        "total_bytes": 5739896832,
+        "heap_bytes": 3617177600,
+        "index_bytes": 2121687040,
+        "rows_estimate": 9988214
+      },
+      "deliveries": {
+        "total_bytes": 4020584448,
+        "heap_bytes": 1237909504,
+        "index_bytes": 2782298112,
+        "rows_estimate": 6666417
+      }
+    },
+    "rows": 16666667,
+    "month": "2023-07",
+    "dropped_rows": {
+      "activities": 10000000,
+      "deliveries": 6666667
+    },
+    "rows_by_table": {
+      "activities": 10000000,
+      "deliveries": 6666667
+    },
+    "still_exists": false
+  }
+}

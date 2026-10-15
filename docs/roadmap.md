@@ -112,7 +112,7 @@ Run Converger as a cluster that meets the PRD targets (10M messages per day, 1k+
 | [#66](https://github.com/AimTune/converger/issues/66) | Pluggable event backbone: Elixir-native (PubSub + Oban) by default, Kafka/NATS/RabbitMQ selectable, with a published benchmark matrix | Done, see [Event backbone](architecture/event-backbone.md) and [Backbone matrix](benchmarks/backbone-matrix.md) |
 | [#34](https://github.com/AimTune/converger/issues/34) | Load testing harness (k6 WebSocket + REST scenarios) with nightly CI run and published baselines | Done (Kafka column with #66; full re-run after #35), see [Benchmarks](benchmarks/index.md) |
 | [#191](https://github.com/AimTune/converger/issues/191) | Measure dead-channel isolation: one dead channel must not degrade other tenants | Open (exit criterion) |
-| [#192](https://github.com/AimTune/converger/issues/192) | Verify partition archive and drop on a 100M-row dataset | Open (exit criterion) |
+| [#192](https://github.com/AimTune/converger/issues/192) | Verify partition archive and drop on a 100M-row dataset | Done ([2026-10-15 run](benchmarks/2026-10-15-partition-100m.md)) |
 
 Exit criteria: a nightly load test publishes p95 latency and connection counts with enforced thresholds; one dead channel does not degrade other tenants; partition drop and archive are verified on a 100M-row dataset.
 
@@ -120,7 +120,7 @@ Exit criteria: a nightly load test publishes p95 latency and connection counts w
 | --- | --- |
 | Nightly load test with p95 and connection counts, thresholds enforced | See [Benchmarks](benchmarks/index.md) (nightly `Load` workflow) |
 | One dead channel does not degrade other tenants | **Measured, not met for tenants on the same tier**: the breaker parks the backlog, but the shared queue is blocked for about 35 s first (p95 12.3 s against 0.6 s). Met in steady state and close with separate tiers (p95 217 ms against 73 ms). See [Dead-channel isolation](benchmarks/dead-channel-isolation.md) for the cause and the proposed fix. |
-| Partition drop and archive verified on 100M rows | **Scaled evidence**: measured and verified at 10M and 30M rows per table (detach constant, archive linear, every row archived and checksummed before the drop, writers never blocked); 100M **extrapolated, not measured** (about 57 min). See [Partition retention at scale](benchmarks/partition-retention-scaling.md). |
+| Partition drop and archive verified on 100M rows | **Met**: measured on a 100M-row dataset ([2026-10-15 run](benchmarks/2026-10-15-partition-100m.md), [#192](https://github.com/AimTune/converger/issues/192)): detach 205 ms, drop 14 ms, writers not blocked, the 16.7M-row month archived and verified in 530 s. The 10M and 30M runs per table and the per-table 100M extrapolation are in [Partition retention at scale](benchmarks/partition-retention-scaling.md). |
 
 ## Done: v3.2 Channel Expansion (#60)
 
