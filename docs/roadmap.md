@@ -13,12 +13,12 @@ Converger connects communication channels to each other. Every channel is inboun
 | Phase | Epic | Focus | Status |
 | --- | --- | --- | --- |
 | 1 | [#57 v2.5 Production Hardening](https://github.com/AimTune/converger/issues/57) | No data loss, security baseline, CI | Done |
-| 2 | [#58 v3.0 WebSocket-first & Converger Protocol v1](https://github.com/AimTune/converger/issues/58) | Duplex WS adapter, acks, receipts, spec, one socket stack | All tasks closed; the epic is open for its exit criteria |
-| 3 | [#59 v3.1 Scale & Reliability](https://github.com/AimTune/converger/issues/59) | Clustering, partitioning, breakers, DLQ, SLO telemetry | All tasks closed; the epic is open for its exit criteria |
+| 2 | [#58 v3.0 WebSocket-first & Converger Protocol v1](https://github.com/AimTune/converger/issues/58) | Duplex WS adapter, acks, receipts, spec, one socket stack | Done; the 10k-socket rolling-restart measurement is [#190](https://github.com/AimTune/converger/issues/190) |
+| 3 | [#59 v3.1 Scale & Reliability](https://github.com/AimTune/converger/issues/59) | Clustering, partitioning, breakers, DLQ, SLO telemetry | Done; two measurements remain: [#191](https://github.com/AimTune/converger/issues/191) and [#192](https://github.com/AimTune/converger/issues/192) |
 | 4 | [#60 v3.2 Channel Expansion](https://github.com/AimTune/converger/issues/60) | Adapter v2, conditional routing, new channels | Done |
 | 5 | [#61 v3.3 Developer Experience](https://github.com/AimTune/converger/issues/61) | OpenAPI, SDKs, docs, management API, UI | Open: the SDK release (#187, #188) |
 
-Phases 1 and 4 are done, and every task of phases 2 and 3 is closed. What remains is, last of all, the first release of the SDK packages (#187) and publishing them from CI (#188).
+Phases 1 to 4 are done. What remains is three measurements that need a quiet or larger machine (#190, #191, #192) and, last of all, the first release of the SDK packages (#187) and publishing them from CI (#188).
 
 ## Done: v2.5 Production Hardening (#57)
 
@@ -74,7 +74,7 @@ The hardening epic is closed. The goal was that no message can be lost, no tenan
 
 The exit criterion was a chaos test: killing a node under load loses no acknowledged message across REST and WebSocket. See [Chaos testing](chaos.md).
 
-## v3.0 WebSocket-first & Converger Protocol v1 (#58)
+## Done: v3.0 WebSocket-first & Converger Protocol v1 (#58)
 
 WebSocket becomes the primary channel, with a documented wire protocol that any language can implement. A WebSocket channel can be the source or target of routing rules, delivers with acks, resumes exactly from a watermark, and exposes receipts, typing and presence. The two existing socket stacks collapse into one. The design principles: persist first, then push; client ids plus acks give at-least-once send with exactly-once persistence; the protocol comes before the SDKs; and everything is bounded.
 
@@ -93,10 +93,11 @@ WebSocket becomes the primary channel, with a documented wire protocol that any 
 | [#64](https://github.com/AimTune/converger/issues/64) | mekik integration: agent-side multiplexed socket, `mekik` channel adapter, and seq authority between Converger and mekik | Done ([mekik channel](channels/mekik.md), [ADR-0063](adr/0063-channel-scoped-agent-sockets-and-the-bot-relay.md), [ADR-0066](adr/0066-mekik-channel-adapter-mode-a.md)) |
 | [#65](https://github.com/AimTune/converger/issues/65) | Chativa as the reference WebSocket client: verify `connector-mekik` against Converger, add hub extras (delivery status, upload, history, multi-conversation) | Done (Converger side, [ADR-0065](adr/0065-chativa-as-reference-client-and-history-cursor.md); the client side is open in [chativa#86](https://github.com/AimTune/chativa/issues/86)) |
 | [#67](https://github.com/AimTune/converger/issues/67) | Agent SDK and bot-side adapters: channel-scoped agent sockets, `@converger/agent` SDKs in several languages, first-party LangServe/LangChain and mekik adapters | Done ([Agent SDKs](sdk/agent.md), [ADR-0067](adr/0067-agent-sdk-api-and-wire-mapping.md), [ADR-0069](adr/0069-agent-group-eligibility-and-takeover.md)); the first npm and PyPI release is [#187](https://github.com/AimTune/converger/issues/187) |
+| [#190](https://github.com/AimTune/converger/issues/190) | Measure a rolling restart with 10 000 WebSocket connections (zero acked loss) | Open (exit criterion; measured so far with 1 000 sockets) |
 
 Suggested order: #63 and #68 feed the spec, then #21, then #22 with #23, #24, #25, #27, #28, and finally #26. Exit criteria: a WhatsApp to WebSocket agent console bridge works end to end with receipts; a Python client written only from the spec passes the conformance suite; a rolling restart under 10k connections loses no acknowledged message.
 
-## v3.1 Scale & Reliability (#59)
+## Done: v3.1 Scale & Reliability (#59)
 
 Run Converger as a cluster that meets the PRD targets (10M messages per day, 1k+ concurrent sockets per node, p95 below 250 ms end to end), and keep it healthy when a provider or the database misbehaves.
 
@@ -110,6 +111,8 @@ Run Converger as a cluster that meets the PRD targets (10M messages per day, 1k+
 | [#35](https://github.com/AimTune/converger/issues/35) | Graceful degradation under database pressure: pool sizing, timeouts, bulkheads, readiness flip | Done ([ADR-0044](adr/0044-bulkheaded-pools-and-graceful-degradation-under-database-pressure.md)) |
 | [#66](https://github.com/AimTune/converger/issues/66) | Pluggable event backbone: Elixir-native (PubSub + Oban) by default, Kafka/NATS/RabbitMQ selectable, with a published benchmark matrix | Done, see [Event backbone](architecture/event-backbone.md) and [Backbone matrix](benchmarks/backbone-matrix.md) |
 | [#34](https://github.com/AimTune/converger/issues/34) | Load testing harness (k6 WebSocket + REST scenarios) with nightly CI run and published baselines | Done (Kafka column with #66; full re-run after #35), see [Benchmarks](benchmarks/index.md) |
+| [#191](https://github.com/AimTune/converger/issues/191) | Measure dead-channel isolation: one dead channel must not degrade other tenants | Open (exit criterion) |
+| [#192](https://github.com/AimTune/converger/issues/192) | Verify partition archive and drop on a 100M-row dataset | Open (exit criterion) |
 
 Exit criteria: a nightly load test publishes p95 latency and connection counts with enforced thresholds; one dead channel does not degrade other tenants; partition drop and archive are verified on a 100M-row dataset.
 
