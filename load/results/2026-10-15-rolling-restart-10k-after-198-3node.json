@@ -1,0 +1,155 @@
+{
+  "run": {
+    "commit": "145c362be2eb",
+    "date": "2026-10-15T14:07:04Z",
+    "nodes": 3,
+    "backbone": "native",
+    "profile": "full",
+    "scenarios": "rolling_restart"
+  },
+  "hardware": {
+    "host": "DESKTOP-Q8TVMOL",
+    "runner": "local",
+    "runner_os": "MINGW64_NT-10.0-26200",
+    "docker_cpus": 12,
+    "docker_memory_bytes": 33062858752,
+    "docker_version": "29.8.2",
+    "kernel": "6.6.87.2-microsoft-standard-WSL2",
+    "app_cpus_limit": "unlimited",
+    "app_memory_limit": "unlimited",
+    "pool_size": 20,
+    "background_pool_size": 10,
+    "postgres_version": "17.11",
+    "database_size_bytes": 194311859
+  },
+  "mock": {
+    "latencyMs": 20,
+    "jitterMs": 10,
+    "errorRate": 0
+  },
+  "scenarios": {
+    "rolling_restart": {
+      "params": {
+        "mode": "restart",
+        "conversations": 1000,
+        "subscribers_per_conversation": 10,
+        "sockets": 10000,
+        "connect_rate": 100,
+        "rate_per_conversation": 0.1,
+        "duration_s": 280,
+        "storm_at_s": null,
+        "storm_every_s": null
+      },
+      "duration_s": 399.8,
+      "targets_missed": [],
+      "resources": {
+        "nodes": {
+          "app": {
+            "cpu_avg_pct": 172.3,
+            "cpu_max_pct": 344.5,
+            "rss_max_mib": 3501.1
+          },
+          "app2": {
+            "cpu_avg_pct": 154.7,
+            "cpu_max_pct": 306.7,
+            "rss_max_mib": 2947.1
+          },
+          "app3": {
+            "cpu_avg_pct": 147.4,
+            "cpu_max_pct": 360.6,
+            "rss_max_mib": 3757.1
+          },
+          "db": {
+            "cpu_avg_pct": 125.6,
+            "cpu_max_pct": 253.7,
+            "rss_max_mib": 776.9
+          }
+        },
+        "oban_depth_max": 2948,
+        "db_pool_wait_max_ms": 86.75,
+        "db_background_pool_wait_max_ms": 111.44
+      },
+      "e2e_latency_ms": {
+        "p50": 254,
+        "p95": 545,
+        "p99": 904,
+        "max": 3605
+      },
+      "ws_reconnect_ms": {
+        "p50": 880,
+        "p95": 6020.1,
+        "p99": 6787.6,
+        "max": 7446
+      },
+      "reconnects": 15819,
+      "messages_acked": 28001,
+      "send_retries": 679,
+      "node_recovery_s": {
+        "app": 20.6,
+        "app2": 26.2,
+        "app3": 31.2
+      },
+      "recovery_max_s": 31.2,
+      "lost_acked_messages": 0,
+      "gaps_resynced": 0,
+      "replay_unavailable": 0,
+      "seq_duplicates": 0,
+      "never_acked": 0,
+      "unverified_subscribers": 0
+    },
+    "backbone": {
+      "params": {
+        "backbone": "native",
+        "subscriber": "platform webhook (activity.created)"
+      },
+      "backbone": "native",
+      "events_expected": 28001,
+      "events_observed": 28001,
+      "webhook_event_rows": 28001,
+      "duplicate_events": 0,
+      "http_redeliveries": 0,
+      "parked_jobs": 28001,
+      "publish_to_subscriber_ms": {
+        "p50": 14907,
+        "p95": 29415,
+        "p99": 29615,
+        "max": 29802
+      },
+      "caught_up_after_drain_s": 0.6,
+      "lost_acked_messages": 0
+    }
+  },
+  "checks": [
+    {
+      "name": "rolling_restart: k6 ran and correctness thresholds passed",
+      "ok": true,
+      "detail": "k6 exit 0",
+      "warning": false
+    },
+    {
+      "name": "rolling_restart: messages sent and received live",
+      "ok": true,
+      "detail": "28001 acked, 276753 latency samples",
+      "warning": false
+    },
+    {
+      "name": "backbone (native): every activity observed by the subscriber exactly once",
+      "ok": true,
+      "detail": "28001/28001 observed, 28001 webhook events (0 duplicates), 0 HTTP redeliveries",
+      "warning": false
+    },
+    {
+      "name": "rolling_restart: zero lost acked messages",
+      "ok": true,
+      "detail": "lost 0, never acked 0",
+      "warning": false
+    },
+    {
+      "name": "fan-out channel: every activity delivered to the outbound webhook",
+      "ok": true,
+      "detail": "28001/28001 delivered, 0 jobs still open",
+      "warning": false
+    }
+  ],
+  "ok": true
+}

@@ -92,8 +92,8 @@ iterator over REST pages), `conversation.upload(file, {activity})`, `conversatio
 - On every close except `4400` (unsupported protocol), `4403` (channel inactive, forced disconnect) and `1008`
   (conversation not found), the client reconnects with jittered exponential backoff. The delay is
   `min(maxDelayMs, initialDelayMs * factor^(attempt-1))` with 50 % "equal jitter", by default 1 s, 2 s, 4 s and so on
-  up to 30 s. A `retryAfterMs` from the close reason (`1012` draining, `4503` slow consumer) or from an `error` frame is a
-  floor. After `4401` the client asks the `tokenProvider` for a new token (`reason: "rejected"`) before reconnecting; it
+  up to 10 s (30 s before [#198](https://github.com/AimTune/converger/issues/198)). A `retryAfterMs` from the close
+  reason (`1012` draining, `4503` slow consumer) or from an `error` frame is a floor. After `4401` the client asks the `tokenProvider` for a new token (`reason: "rejected"`) before reconnecting; it
   gives up after three rejections in a row. `reconnect: false` turns reconnects off, and `maxAttempts` bounds them.
 - The **watermark** is the highest seq up to which the client has seen every persistent frame. Own turns count through
   their `ack`. The reconnect `hello` carries the conversation id, the watermark and the user id the server assigned in

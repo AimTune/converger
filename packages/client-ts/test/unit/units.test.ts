@@ -35,6 +35,13 @@ describe("backoff", () => {
     expect(backoffDelay(10, policy, 5_000, () => 1)).toBe(30_000);
   });
 
+  it("caps the default policy at 10 s, unless the server asks for longer", () => {
+    const defaults = resolveReconnect(undefined);
+    expect(defaults.maxDelayMs).toBe(10_000);
+    expect(backoffDelay(20, defaults, undefined, () => 1)).toBe(10_000);
+    expect(backoffDelay(20, defaults, 12_000, () => 1)).toBe(12_000);
+  });
+
   it("can be disabled", () => {
     expect(resolveReconnect(false).enabled).toBe(false);
   });

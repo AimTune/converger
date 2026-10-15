@@ -102,6 +102,28 @@ Before a channel is drained it finishes the message it is handling, so a send th
 stored. A send that the drain cuts off is not acknowledged, and the client re-sends it with the same idempotency
 key to another node. That is why a rolling restart loses no acknowledged message.
 
+### Reconnect bursts
+
+A drained node's clients all reconnect to the other nodes within a few seconds. On the native v1 endpoint (WebSocket
+and gRPC), the database work of every `hello` and `sync` goes through a per-node admission queue
+([`ConvergerWeb.Protocol.Admission`](https://github.com/AimTune/converger/blob/main/lib/converger_web/protocol/admission.ex),
+[ADR-0077](../adr/0077-admission-queue-for-reconnect-bursts.md)). At most `handshake_concurrency` handshakes read the
+database at once, by default half of the interactive pool (`POOL_SIZE`). Each reads through a single pool checkout:
+the channel, the conversation and its head, the open interrupts, and the replay. A client whose watermark is already
+the head skips the replay. Further handshakes wait in arrival order, so a burst becomes a short queue instead of a
+saturated pool, and the rest of the pool stays free for REST and live delivery.
+
+A handshake that waits longer than `handshake_queue_ms` (10 s), or that arrives while `handshake_queue_max` (10 000)
+are already waiting, gets the same answer as when the database is unavailable
+([Database pressure](database.md)): `error` `unavailable` with `retryAfterMs`, then close **1013**. A `sync` gets
+`replay_unavailable` with `details.watermark`. Watch `converger_protocol_admission_wait_ms` (by `result`, `ok` or
+`overloaded`). If handshakes queue for seconds while the database has spare capacity, raise
+`WS_HANDSHAKE_CONCURRENCY` (and `POOL_SIZE` with it).
+
+Clients should treat `retryAfterMs` (in the 1012 close reason and in `unavailable`) as the minimum delay, and cap
+their exponential backoff at about 10 s. The TypeScript SDK does both. A larger cap stretches the time to
+reconnect after a client has failed a few times while a node restarted.
+
 ### Sizing the termination grace period
 
 The orchestrator must wait for the whole sequence before it kills the process. In Kubernetes, set
@@ -138,6 +160,9 @@ variable (integers; unset or empty keeps the default).
 | `WS_DRAIN_BATCH_SIZE` | `drain_batch_size` | `500` | Sockets closed per drain batch. |
 | `WS_DRAIN_BATCH_INTERVAL_MS` | `drain_batch_interval_ms` | `1000` | Pause between drain batches. |
 | `WS_DRAIN_SHUTDOWN_MS` | `drain_shutdown_ms` | `30000` | Upper bound for the drain. |
+| `WS_HANDSHAKE_CONCURRENCY` | `handshake_concurrency` | `0` | Native v1 handshakes and `sync` replays reading the database at once per node; `0` is half the interactive pool, at least 1 ([reconnect bursts](#reconnect-bursts)). |
+| `WS_HANDSHAKE_QUEUE_MS` | `handshake_queue_ms` | `10000` | Longest wait for a slot before `unavailable` (close 1013) or `replay_unavailable`. |
+| `WS_HANDSHAKE_QUEUE_MAX` | `handshake_queue_max` | `10000` | Handshakes allowed to wait at once; beyond it they are answered at once. |
 
 The hard frame cap is `config :converger, :websocket_max_frame_size` (default `1_048_576`). The socket mounts read it
 at compile time, so changing it needs a rebuild. Bandit's `log_protocol_errors` is turned off for WebSockets
@@ -150,6 +175,13 @@ error; the guard logs it at `info` and counts it as `frame_too_large` instead.
 limit, the 1012 drain close and the 503 refusal. The cluster-scale check is the load harness's `rolling_restart` scenario with 10 000 sockets
 ([Benchmarks](../benchmarks/index.md), [#190](https://github.com/AimTune/converger/issues/190)). On a 3-node cluster it lost
 no acknowledged message, but reconnects took p95 93.6 s instead of the 30 s this design aims for, because the
-surviving nodes' database pools saturate on handshakes and replays
-([2026-10-15 run](../benchmarks/2026-10-15-a8dd704-rolling-restart-10k.md), tracked in
-[#198](https://github.com/AimTune/converger/issues/198)).
+surviving nodes' database pools saturated on handshakes and replays
+([2026-10-15 run](../benchmarks/2026-10-15-a8dd704-rolling-restart-10k.md)). With the
+[admission queue](#reconnect-bursts) ([#198](https://github.com/AimTune/converger/issues/198)) the same run reconnects
+with p95 6.0 s and max 7.4 s, still with no acknowledged message lost
+([after #198](../benchmarks/2026-10-15-rolling-restart-10k-after-198.md)). Re-run the same command to check a cluster:
+
+```bash
+LOAD_NODES=3 LOAD_SCENARIOS=rolling_restart LOAD_CONVERSATIONS=1000 LOAD_SUBSCRIBERS=10 LOAD_RATE=0.1 \
+  LOAD_RESTART_CONNECT_RATE=100 LOAD_RESTART_DELAY_S=130 LOAD_WARMUP_S=0 load/run.sh
+```

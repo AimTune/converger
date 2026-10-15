@@ -58,6 +58,22 @@ const sentAt = (text) => {
   return m ? Number(m[1]) : null;
 };
 
+// Upper bound of the reconnect backoff (before the server's retryAfterMs).
+const BACKOFF_MAX_MS = 5_000;
+
+// The `retryAfterMs` of a close reason (`{"reason": ..., "retryAfterMs": N}`,
+// sent with 1012 drain and 4503 slow-consumer closes), if the event has one.
+function retryAfterFromClose(event) {
+  try {
+    const reason = event && event.reason;
+    if (typeof reason !== "string" || reason[0] !== "{") return undefined;
+    const ms = JSON.parse(reason).retryAfterMs;
+    return typeof ms === "number" ? ms : undefined;
+  } catch (_e) {
+    return undefined;
+  }
+}
+
 // A Protocol v1 subscriber that resumes from its last seq on every reconnect.
 //
 //   const sub = new Subscriber({urls, start, token, label});
@@ -66,7 +82,9 @@ const sentAt = (text) => {
 //   await sub.finish(); // pings for headSeq, records loss, closes
 //
 // `urls` are the nodes' socket URLs; a connection that fails or drops
-// reconnects to the next one, as a client behind a load balancer would.
+// reconnects to one of the other nodes at random, as a load balancer would
+// spread it over the nodes still serving (#198: always taking the next node
+// piled every socket of a drained node onto one survivor).
 export class Subscriber {
   constructor({ urls, start = 0, token, label, measureLatency = true, pingEveryMs = 25_000 }) {
     this.urls = urls.map((u) => `${u}?token=${encodeURIComponent(token)}`);
@@ -85,6 +103,7 @@ export class Subscriber {
     this.everConnected = false;
     this.startedAt = null;
     this.failures = 0; // consecutive failed connects, for the backoff
+    this.retryAfterMs = 0; // the server's reconnect hint for the current connection
     this.maxSeen = 0; // highest seq received
     this.ahead = new Set(); // seqs received beyond a hole
     // The server delivers each seq once per connection (from `hello`) unless the
@@ -106,6 +125,7 @@ export class Subscriber {
     const ws = new WebSocket(this.urls[this.node]);
     this.ws = ws;
     this.welcomed = false;
+    this.retryAfterMs = 0;
 
     ws.onopen = () => {
       this.connSeen = new Set();
@@ -123,10 +143,13 @@ export class Subscriber {
       if (!this.welcomed) metrics.connectErrors.add(1);
       this.dropped(ws);
     };
-    ws.onclose = () => this.dropped(ws);
+    ws.onclose = (event) => {
+      this.noteRetryAfter(retryAfterFromClose(event));
+      this.dropped(ws);
+    };
   }
 
-  // The connection failed or closed without stop(): reconnect to the next
+  // The connection failed or closed without stop(): reconnect to another
   // node after a short backoff. The watermark makes it lossless.
   dropped(ws) {
     if (this.ws !== ws) return;
@@ -136,12 +159,23 @@ export class Subscriber {
     // attempts are counted as ws_connect_errors.
     if (this.welcomed) metrics.unexpectedCloses.add(1);
     if (this.closedAt === null) this.closedAt = Date.now();
-    this.node = (this.node + 1) % this.urls.length;
-    // Exponential backoff with jitter, as real clients do: retrying every few
-    // hundred ms turns an overloaded node into a reconnect storm.
-    const backoff = Math.min(10_000, 250 * 2 ** this.failures);
+    if (this.urls.length > 1) {
+      this.node = (this.node + 1 + Math.floor(Math.random() * (this.urls.length - 1))) % this.urls.length;
+    }
+    // Exponential backoff with equal jitter, as the TypeScript SDK does: retrying
+    // every few hundred ms turns an overloaded node into a reconnect storm. The
+    // server's retryAfterMs (`unavailable` before 1013; the 1012 close reason
+    // too, if k6 ever exposes it: 1.8 does not) is a floor, and the cap is low
+    // so a client that failed a few times while a node restarted does not sit
+    // out long after it is back (#198).
+    const backoff = Math.min(BACKOFF_MAX_MS, 250 * 2 ** this.failures);
     this.failures += 1;
-    setTimeout(() => this.stopped || this.connect(), backoff / 2 + Math.random() * backoff);
+    const delay = Math.max(this.retryAfterMs, backoff / 2 + (Math.random() * backoff) / 2);
+    setTimeout(() => this.stopped || this.connect(), delay);
+  }
+
+  noteRetryAfter(ms) {
+    if (typeof ms === "number" && ms > 0) this.retryAfterMs = Math.max(this.retryAfterMs, ms);
   }
 
   forceReconnect() {
@@ -187,6 +221,8 @@ export class Subscriber {
         // Under database pressure (#35) the server skips the replay or gap
         // fill and says so; the client syncs again later.
         const data = frame.data || {};
+        // Sent before a 1013 close: the handshake could not be served now.
+        if (data.code === "unavailable" && !this.welcomed) this.noteRetryAfter(data.retryAfterMs);
         if (data.code === "replay_unavailable") {
           metrics.replayUnavailable.add(1);
           this.scheduleSync(data.retryAfterMs || (data.details && data.details.retryAfterMs) || 1000);

@@ -11,7 +11,11 @@ export interface ReconnectOptions {
   enabled?: boolean;
   /** Delay before the first retry. Default 1000. */
   initialDelayMs?: number;
-  /** Upper bound of the exponential delay. Default 30000. */
+  /**
+   * Upper bound of the exponential delay. Default 10000: low enough that a client
+   * that failed a few times while a node restarted is back soon after (#198); the
+   * server slows clients down with `retryAfterMs` when it needs to.
+   */
   maxDelayMs?: number;
   /** Growth factor per attempt. Default 2. */
   factor?: number;
@@ -33,7 +37,7 @@ export function resolveReconnect(options: ReconnectOptions | false | undefined):
   return {
     enabled: o.enabled ?? true,
     initialDelayMs: o.initialDelayMs ?? 1000,
-    maxDelayMs: o.maxDelayMs ?? 30_000,
+    maxDelayMs: o.maxDelayMs ?? 10_000,
     factor: o.factor ?? 2,
     jitter: Math.min(1, Math.max(0, o.jitter ?? 0.5)),
     maxAttempts: o.maxAttempts ?? Number.POSITIVE_INFINITY,
