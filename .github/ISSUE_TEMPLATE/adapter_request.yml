@@ -1,0 +1,49 @@
+name: Channel adapter request
+description: Ask for a new channel adapter (a messaging platform or transport).
+title: "adapter: "
+labels: ["enhancement", "area:adapters"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Adapter requests are collected in [#44](https://github.com/AimTune/converger/issues/44); check it first. To build one yourself, see [Writing an adapter](https://converger.aimtune.dev/channels/writing-an-adapter).
+  - type: input
+    id: platform
+    attributes:
+      label: Platform
+      placeholder: e.g. Telegram, Discord, SMS via Twilio, MQTT
+    validations:
+      required: true
+  - type: dropdown
+    id: direction
+    attributes:
+      label: Direction
+      options:
+        - Outbound only (Converger sends)
+        - Inbound only (Converger receives)
+        - Duplex
+    validations:
+      required: true
+  - type: textarea
+    id: api
+    attributes:
+      label: Platform API
+      description: Links to the API docs, how inbound events arrive (webhook, long polling, socket), authentication and signature scheme.
+    validations:
+      required: true
+  - type: textarea
+    id: messages
+    attributes:
+      label: Message types
+      description: Text, media, buttons, templates, delivery and read receipts... which ones do you need?
+  - type: textarea
+    id: use-case
+    attributes:
+      label: Use case
+      description: What you would use the adapter for and the expected volume.
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Contribution
+      options:
+        - label: I am willing to implement this adapter.

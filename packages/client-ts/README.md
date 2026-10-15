@@ -160,5 +160,4 @@ and skips itself when `mix` is not installed. It refuses to run when something a
 
 ## License
 
-Same terms as the Converger repository (see its README). The package license has to be settled before the first
-publish (`license` in package.json is `UNLICENSED` until then).
+MIT, the same license as the Converger repository ([LICENSE](https://github.com/AimTune/converger/blob/main/LICENSE)).
