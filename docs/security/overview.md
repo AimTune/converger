@@ -453,6 +453,11 @@ The Docker workflow builds the image on every pull request and scans it with Tri
 uploaded to code scanning). Dependabot opens dependency updates. See
 [ADR-0021](../adr/0021-ci-quality-gates-and-lf-line-endings.md).
 
+Converger is also enrolled in Anthropic's free, opt-in [OSS Scanner](https://red.anthropic.com/oss-scanner/), which
+builds `.oss-scanner/Dockerfile`, analyses the image offline and emails model-generated findings (with reproducers
+and proposed patches) to the security contact. The threat model it reads is `.oss-scanner/threat_model.md`. See
+[Anthropic OSS Scanner](oss-scanner.md) and [ADR-0078](../adr/0078-anthropic-oss-scanner-enrolment.md).
+
 ## Known limitations
 
 - 2FA has no recovery codes and no WebAuthn; a locked-out admin is reset by a `super_admin` or with

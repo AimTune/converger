@@ -19,5 +19,10 @@ doc
 
 # Node workspace (not part of the release image).
 packages
+# ... except the conformance vectors, which the test suite reads
+# (test/converger/channels/webhook_signature_vectors_test.exs) and the OSS
+# Scanner image (.oss-scanner/Dockerfile) therefore needs. The release
+# Dockerfile does not COPY packages, so this costs it nothing.
+!packages/conformance
 examples
 pnpm-lock.yaml
