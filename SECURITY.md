@@ -55,3 +55,11 @@ only uses accounts and tenants you own will not be pursued.
 
 How Converger authenticates, isolates tenants, stores secrets and hardens the HTTP edge is documented in the
 [Security model](https://converger.aimtune.dev/security/overview).
+
+## Automated scanning
+
+Converger is enrolled in [Anthropic's OSS Scanner](https://red.anthropic.com/oss-scanner/), which builds the
+project from `.oss-scanner/Dockerfile`, analyses it offline and emails model-generated findings to the contact
+above. Those reports are handled like any private report under this policy; a confirmed finding is fixed on `main`
+and published as an advisory that credits the report id. Details, including the threat model the scanner reads
+(`.oss-scanner/threat_model.md`), are in [Anthropic OSS Scanner](https://converger.aimtune.dev/security/oss-scanner).
