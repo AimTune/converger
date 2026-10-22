@@ -107,7 +107,7 @@ defmodule Converger.MixProject do
        depth: 1},
       {:daisyui,
        github: "saadeghi/daisyui",
-       tag: "v5.7.47",
+       tag: "v5.7.50",
        sparse: "packages/bundle",
        app: false,
        compile: false,
