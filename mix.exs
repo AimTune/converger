@@ -133,7 +133,7 @@ defmodule Converger.MixProject do
       {:grpc, "~> 1.0.5"},
       {:protobuf, "~> 0.17.1"},
       {:gnat, "~> 1.18.1"},
-      {:redix, "~> 1.9.2"},
+      {:redix, "~> 1.10.0"},
       {:hammer, "~> 7.5"},
       {:opentelemetry, "~> 1.5"},
       {:opentelemetry_exporter, "~> 1.8"},
